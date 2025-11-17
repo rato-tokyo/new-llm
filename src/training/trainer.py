@@ -6,6 +6,7 @@ from torch.utils.data import DataLoader
 from tqdm import tqdm
 from typing import Optional
 import os
+import matplotlib.pyplot as plt
 
 from ..evaluation.metrics import compute_loss, compute_perplexity, compute_accuracy
 
@@ -166,7 +167,45 @@ class Trainer:
         print(f"Best validation loss: {best_val_loss:.4f}")
         print(f"{'='*60}\n")
 
+        # Save training curves as image
+        self.plot_and_save_training_curves()
+
         return self.train_losses, self.val_losses
+
+    def plot_and_save_training_curves(self):
+        """Plot and save training/validation curves as image"""
+        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+
+        epochs = range(1, len(self.train_losses) + 1)
+
+        # Loss curves
+        axes[0].plot(epochs, self.train_losses, label='Train Loss', linewidth=2, marker='o', markersize=3)
+        axes[0].plot(epochs, self.val_losses, label='Val Loss', linewidth=2, marker='s', markersize=3)
+        axes[0].set_xlabel('Epoch', fontsize=12)
+        axes[0].set_ylabel('Loss', fontsize=12)
+        axes[0].set_title(f'{self.model_name} - Loss Curves', fontsize=14, fontweight='bold')
+        axes[0].legend(fontsize=10)
+        axes[0].grid(True, alpha=0.3)
+
+        # Perplexity curves
+        axes[1].plot(epochs, self.train_ppls, label='Train PPL', linewidth=2, marker='o', markersize=3)
+        axes[1].plot(epochs, self.val_ppls, label='Val PPL', linewidth=2, marker='s', markersize=3)
+        axes[1].set_xlabel('Epoch', fontsize=12)
+        axes[1].set_ylabel('Perplexity', fontsize=12)
+        axes[1].set_title(f'{self.model_name} - Perplexity Curves', fontsize=14, fontweight='bold')
+        axes[1].legend(fontsize=10)
+        axes[1].grid(True, alpha=0.3)
+        axes[1].set_yscale('log')  # Log scale for perplexity
+
+        plt.tight_layout()
+
+        # Save figure
+        checkpoint_dir = "checkpoints"
+        os.makedirs(checkpoint_dir, exist_ok=True)
+        save_path = os.path.join(checkpoint_dir, f"{self.model_name}_training_curves.png")
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"\n✓ Saved training curves to {save_path}")
+        plt.close()
 
     def save_checkpoint(self, filename: str):
         """Save model checkpoint"""
