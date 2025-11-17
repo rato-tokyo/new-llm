@@ -1,4 +1,4 @@
-"""Baseline FNN-based Language Model (no attention mechanism)"""
+"""Baseline LSTM-based Language Model (no attention mechanism)"""
 
 import torch
 import torch.nn as nn
@@ -6,8 +6,9 @@ import torch.nn as nn
 
 class BaselineLLM(nn.Module):
     """
-    Simple feedforward-based language model without attention.
-    Processes each token independently through FNN layers.
+    LSTM-based language model without attention.
+    Uses LSTM hidden states to capture sequential context.
+    This provides a fairer comparison to context vector propagation.
     """
 
     def __init__(self, config):
@@ -17,26 +18,17 @@ class BaselineLLM(nn.Module):
         # Token embedding
         self.token_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
 
-        # Positional embedding (learned)
-        self.position_embedding = nn.Embedding(config.max_seq_length, config.embed_dim)
-
-        # Feedforward layers
-        layers = []
-        input_dim = config.embed_dim
-        for _ in range(config.num_layers):
-            layers.extend([
-                nn.Linear(input_dim, config.hidden_dim),
-                nn.ReLU(),
-                nn.Dropout(config.dropout),
-                nn.Linear(config.hidden_dim, config.embed_dim),
-                nn.Dropout(config.dropout),
-            ])
-            input_dim = config.embed_dim
-
-        self.fnn_layers = nn.Sequential(*layers)
+        # LSTM layers (stacked)
+        self.lstm = nn.LSTM(
+            input_size=config.embed_dim,
+            hidden_size=config.hidden_dim,
+            num_layers=config.num_layers,
+            dropout=config.dropout if config.num_layers > 1 else 0,
+            batch_first=True
+        )
 
         # Output projection to vocabulary
-        self.output_projection = nn.Linear(config.embed_dim, config.vocab_size)
+        self.output_projection = nn.Linear(config.hidden_dim, config.vocab_size)
 
         # Initialize weights
         self.apply(self._init_weights)
@@ -65,16 +57,11 @@ class BaselineLLM(nn.Module):
         # Get embeddings
         token_embeds = self.token_embedding(input_ids)  # [batch, seq, embed]
 
-        # Add positional embeddings
-        positions = torch.arange(seq_len, device=input_ids.device).unsqueeze(0)
-        pos_embeds = self.position_embedding(positions)  # [1, seq, embed]
-        x = token_embeds + pos_embeds
-
-        # Process through FNN layers (each token independently)
-        x = self.fnn_layers(x)  # [batch, seq, embed]
+        # Process through LSTM (captures sequential context in hidden states)
+        lstm_output, _ = self.lstm(token_embeds)  # [batch, seq, hidden_dim]
 
         # Project to vocabulary
-        logits = self.output_projection(x)  # [batch, seq, vocab_size]
+        logits = self.output_projection(lstm_output)  # [batch, seq, vocab_size]
 
         return logits
 
@@ -91,13 +78,27 @@ class BaselineLLM(nn.Module):
             generated: Generated sequence [batch_size, seq_len + max_new_tokens]
         """
         self.eval()
-        with torch.no_grad():
-            for _ in range(max_new_tokens):
-                # Forward pass
-                logits = self.forward(input_ids)
+        batch_size = input_ids.size(0)
 
-                # Get logits for last position
-                next_token_logits = logits[:, -1, :] / temperature
+        with torch.no_grad():
+            # Initialize LSTM hidden state
+            h = torch.zeros(self.config.num_layers, batch_size, self.config.hidden_dim, device=input_ids.device)
+            c = torch.zeros(self.config.num_layers, batch_size, self.config.hidden_dim, device=input_ids.device)
+
+            # Process initial sequence to get hidden state
+            embeds = self.token_embedding(input_ids)
+            _, (h, c) = self.lstm(embeds, (h, c))
+
+            # Generate new tokens
+            for _ in range(max_new_tokens):
+                # Get embedding of last token
+                last_token_embed = self.token_embedding(input_ids[:, -1:])
+
+                # LSTM forward with hidden state
+                lstm_out, (h, c) = self.lstm(last_token_embed, (h, c))
+
+                # Get next token prediction
+                next_token_logits = self.output_projection(lstm_out[:, -1, :]) / temperature
 
                 # Sample next token
                 probs = torch.softmax(next_token_logits, dim=-1)
@@ -105,9 +106,5 @@ class BaselineLLM(nn.Module):
 
                 # Append to sequence
                 input_ids = torch.cat([input_ids, next_token], dim=1)
-
-                # Truncate if exceeds max length
-                if input_ids.size(1) > self.config.max_seq_length:
-                    input_ids = input_ids[:, -self.config.max_seq_length:]
 
         return input_ids

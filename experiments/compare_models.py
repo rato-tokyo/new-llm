@@ -44,7 +44,7 @@ def plot_comparison(baseline_train, baseline_val, newllm_train, newllm_val):
     plt.tight_layout()
     plt.savefig('checkpoints/model_comparison.png', dpi=150)
     print("\nSaved comparison plot to checkpoints/model_comparison.png")
-    plt.show()
+    plt.close()
 
 
 def main():
