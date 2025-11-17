@@ -92,27 +92,31 @@ This will generate:
 
 ## Configuration
 
-Models can be configured in `src/utils/config.py`:
+**All configurations are centralized in `src/utils/config.py`**.
 
-**BaseConfig** (for baseline model):
-- `vocab_size`: 1000
-- `embed_dim`: 128
-- `hidden_dim`: 256
-- `num_layers`: 3
-- `batch_size`: 16
-- `learning_rate`: 0.001
-- `num_epochs`: 50
+This is the single source of truth for all model parameters. Do not hardcode values elsewhere.
+
+**BaseConfig** (for baseline LSTM model):
+- `vocab_size`: 1000 - Vocabulary size
+- `embed_dim`: 128 - Token embedding dimension
+- `hidden_dim`: 256 - LSTM hidden state dimension
+- `num_layers`: 3 - Number of stacked LSTM layers
+- `batch_size`: 16 - Batch size for training
+- `learning_rate`: 0.001 - Adam optimizer learning rate
+- `num_epochs`: 50 - Number of training epochs
+- (See `src/utils/config.py` for full documentation)
 
 **NewLLMConfig** (extends BaseConfig):
-- Additional `context_vector_dim`: 64
+- Inherits all BaseConfig parameters
+- Additional `context_vector_dim`: 64 - Context vector dimension
 
 ## Experiment Design
 
 ### Baseline Model
-- Simple FNN-based language model
-- Processes each token independently through feedforward layers
-- No attention, no context propagation
-- ~400K parameters
+- LSTM-based language model
+- Uses recurrent hidden states to capture sequential context
+- No attention mechanism
+- ~1.8M parameters
 
 ### New-LLM Model
 - Concatenates context vector to each token embedding
@@ -122,7 +126,7 @@ Models can be configured in `src/utils/config.py`:
 - **Training objective**: Only optimize token prediction loss
   - Context updates are **not** directly supervised
   - They emerge from optimizing token predictions
-- ~450K parameters
+- ~587K parameters (68% fewer than LSTM baseline)
 
 ### Research Questions
 

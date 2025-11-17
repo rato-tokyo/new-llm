@@ -18,7 +18,7 @@ def main():
     config = BaseConfig()
 
     print("="*60)
-    print("Baseline FNN-based Language Model Training")
+    print("Baseline LSTM-based Language Model Training")
     print("="*60)
     print(f"Configuration:")
     print(f"  Vocab size: {config.vocab_size}")
