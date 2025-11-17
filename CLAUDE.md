@@ -1,5 +1,109 @@
 # Claude Code Development Guidelines for New-LLM Project
 
+## New-LLM Architecture Design Principles - CRITICAL
+
+### 🎯 固定メモリ使用量の原則（Fixed Memory Usage Principle）
+
+**New-LLMの根本的設計目標**: シーケンス長に関わらず**メモリ使用量が一定**であること
+
+これはNew-LLMの存在意義であり、**絶対に守るべき原則**です。
+
+#### Transformerとの比較
+
+| アーキテクチャ | メモリ使用量 | シーケンス長の制約 |
+|--------------|-------------|------------------|
+| **Transformer** | O(n²) | Attentionが長いシーケンスで爆発 |
+| **New-LLM** | O(1) | 固定サイズ文脈ベクトルで任意長対応可能 |
+
+#### 実装で絶対に禁止すること ❌
+
+**1. 位置埋め込み（Positional Embeddings）の使用**
+
+```python
+# ❌ 絶対禁止 - max_seq_lengthに制限される
+self.position_embedding = nn.Embedding(max_seq_length, embed_dim)
+
+# 問題点:
+# - 学習時のmax_seq_length以上のシーケンスを処理できない
+# - メモリ使用量がmax_seq_lengthに依存
+# - New-LLMの設計思想（任意長対応）に反する
+```
+
+**理由**:
+- RNN/LSTMと同様、位置情報は**逐次処理の順序から暗黙的に学習**される
+- `context[t] = f(context[t-1], input[t])` の更新順序自体が位置情報を内包
+- 明示的な位置埋め込みは不要かつ有害
+
+**2. シーケンス長に依存する操作**
+
+```python
+# ❌ 禁止 - 全隠れ状態を保存
+hidden_states = []
+for t in range(seq_len):
+    hidden_states.append(hidden[t])  # メモリが線形増加
+
+# ✓ 正しい - 固定サイズの文脈ベクトルのみ保持
+context = torch.zeros(batch_size, context_dim)  # 固定サイズ
+for t in range(seq_len):
+    context = update(context, input[t])  # 上書き更新
+```
+
+#### 実装で推奨すること ✅
+
+**1. 固定サイズ文脈ベクトル**
+
+```python
+# ✓ 推奨
+self.context_dim = 512  # 固定サイズ
+context = torch.zeros(batch_size, self.context_dim)  # O(1)メモリ
+
+# どんなに長いシーケンスでもメモリ使用量は一定
+for t in range(1000000):  # 100万ステップでもOK
+    context = self.context_norm(forget_gate * context + input_gate * delta)
+```
+
+**2. 逐次処理での暗黙的位置情報**
+
+```python
+# ✓ 推奨 - RNN/LSTM型の処理
+for t in range(seq_len):  # 任意長
+    # tが増えるほど「後ろの位置」であることを自然に学習
+    fnn_input = torch.cat([token_embeds[t], context], dim=-1)
+    hidden = self.fnn_layers(fnn_input)
+    context = update_context(hidden, context)
+```
+
+**3. LayerNormによる安定化（必須）**
+
+```python
+# ✓ 必須 - 文脈ベクトルの正規化
+self.context_norm = nn.LayerNorm(self.context_dim)
+
+context = forget_g * context + input_g * context_delta
+context = self.context_norm(context)  # 毎ステップ正規化
+```
+
+#### 開発時のチェックリスト
+
+New-LLMの実装・修正時は必ず確認：
+
+- [ ] `nn.Embedding(max_seq_length, ...)` のような位置埋め込みを使っていないか？
+- [ ] `hidden_states.append(...)` のような全状態保存をしていないか？
+- [ ] メモリ使用量がシーケンス長に依存する操作をしていないか？
+- [ ] `context = self.context_norm(context)` を毎ステップ実行しているか？
+- [ ] 任意長のシーケンスを処理できる設計になっているか？
+
+#### この原則を守る理由
+
+1. **New-LLMの存在意義**: Transformerの O(n²) 問題を O(1) で解決
+2. **スケーラビリティ**: 長いシーケンス（小説、コード全体など）を処理可能
+3. **リソース効率**: メモリが限られた環境でも動作
+4. **設計の一貫性**: RNN/LSTMの良い部分を継承
+
+**違反した場合**: New-LLMがただの「重いTransformer」になり、研究的価値を失う
+
+---
+
 ## Code and File Cleanup Policy - CRITICAL
 
 **古いコード・ファイルを残すことは厳禁です (Leaving old code/files is strictly prohibited)**
@@ -167,11 +271,106 @@ git commit -m "Fix graph bug and remove old buggy version
 "
 ```
 
+## ファイル命名規則 - 完全固定方針
+
+**ファイル名は完全に固定し、常に同じ名前で上書きする**
+
+### 基本原則
+
+- ✓ **固定ファイル名**: 同じ種類のファイルは常に同じ名前を使う
+- ✗ **バージョン接尾辞禁止**: `_v1`, `_v2`, `_old`, `_new`, `_fixed` などは使わない
+- ✗ **日付接尾辞禁止**: `_20250117`, `_latest` などは使わない
+- ✓ **上書き**: 新しいバージョンは常に同じファイル名で上書き
+
+### 実装例
+
+#### グラフ・画像ファイル
+
+```bash
+# ✗ 悪い例 - バージョン管理でファイル名を変える
+checkpoints/
+  ├── new_llm_training_curves.png
+  ├── new_llm_training_curves_fixed.png      # ダメ
+  ├── new_llm_training_curves_v2.png         # ダメ
+  └── transformer_baseline_curves_fixed.png  # ダメ
+
+# ✓ 良い例 - 完全固定ファイル名で上書き
+checkpoints/
+  ├── new_llm_training_curves.png           # 常にこの名前
+  └── transformer_baseline_curves.png       # 常にこの名前
+```
+
+#### コード生成ファイル
+
+```python
+# trainer.py の plot_and_save_training_curves() メソッド
+
+# ✗ 悪い例
+save_path = f"{self.model_name}_training_curves_{timestamp}.png"
+
+# ✓ 良い例 - 常に同じファイル名
+save_path = f"checkpoints/{self.model_name}_training_curves.png"
+```
+
+### 推奨ファイル名一覧
+
+| ファイル種類 | 固定ファイル名 | 説明 |
+|-------------|---------------|------|
+| New-LLM訓練曲線 | `new_llm_training_curves.png` | 常にこの名前で上書き |
+| Transformerベースライン | `transformer_baseline_curves.png` | 常にこの名前で上書き |
+| 実験サマリー | `experiment_summary.md` | 常にこの名前で更新 |
+| チェックポイント | `best_{model_name}.pt` | モデルごとに固定名 |
+
+### 利点
+
+1. **混乱防止**: どのファイルが最新版か一目瞭然
+2. **シンプル**: ファイル名を考える必要がない
+3. **クリーン**: checkpointsディレクトリが散らからない
+4. **自動化**: スクリプトが常に同じパスを参照できる
+
+### Git履歴でのバージョン管理
+
+ファイル名を固定しても、Gitの履歴で過去バージョンを参照可能：
+
+```bash
+# 過去のバージョンを見る
+git log checkpoints/new_llm_training_curves.png
+git show HEAD~3:checkpoints/new_llm_training_curves.png
+
+# 過去バージョンを復元（必要な場合のみ）
+git checkout HEAD~5 -- checkpoints/new_llm_training_curves.png
+```
+
+### 実装時の注意
+
+```python
+# 実験スクリプトでの実装例
+def save_results():
+    # ✓ 固定ファイル名
+    GRAPH_PATH = "checkpoints/new_llm_training_curves.png"
+
+    # 上書き保存（古いファイルは自動的に置き換わる）
+    plt.savefig(GRAPH_PATH, dpi=150, bbox_inches='tight')
+    print(f"✓ Saved to {GRAPH_PATH}")
+```
+
+### 例外
+
+固定ファイル名の例外（複数保持が許される場合）:
+
+- ✓ 異なる実験の結果（例: `experiment1_results.md`, `experiment2_results.md`）
+- ✓ 異なるモデルアーキテクチャ（例: `new_llm_curves.png`, `transformer_curves.png`）
+- ✓ 異なるデータセット（例: `wikitext_results.md`, `bookcorpus_results.md`）
+
+**重要**: 同じ種類のファイルは必ず固定名で上書き
+
 ## まとめ
 
 **鉄則**:
 - ✓ 新しいバージョンを作ったら、古いバージョンは即座に削除
+- ✓ ファイル名は完全に固定し、常に上書き
 - ✗ 「念のため」残すことは禁止
+- ✗ バージョン接尾辞（_v1, _old, _fixed）は禁止
 - ✓ Gitの履歴に残っているので、必要なら復元可能
 
-**徹底的なクリーンアップがプロジェクトの品質を保ちます。**
+**徹底的なクリーンアップとファイル名の統一がプロジェクトの品質を保ちます。**

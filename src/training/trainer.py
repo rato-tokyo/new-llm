@@ -11,6 +11,38 @@ import matplotlib.pyplot as plt
 from ..evaluation.metrics import compute_loss, compute_perplexity, compute_accuracy
 
 
+class EarlyStopping:
+    """Early stopping to stop training when validation loss doesn't improve"""
+
+    def __init__(self, patience=10, min_delta=0.001):
+        """
+        Args:
+            patience: Number of epochs to wait for improvement before stopping
+            min_delta: Minimum change in validation loss to qualify as improvement
+        """
+        self.patience = patience
+        self.min_delta = min_delta
+        self.counter = 0
+        self.best_loss = None
+        self.early_stop = False
+
+    def __call__(self, val_loss):
+        """Check if training should stop"""
+        if self.best_loss is None:
+            self.best_loss = val_loss
+        elif val_loss > self.best_loss - self.min_delta:
+            # No improvement
+            self.counter += 1
+            if self.counter >= self.patience:
+                self.early_stop = True
+        else:
+            # Improvement detected
+            self.best_loss = val_loss
+            self.counter = 0
+
+        return self.early_stop
+
+
 class Trainer:
     """Generic trainer for language models"""
 
@@ -21,12 +53,14 @@ class Trainer:
         val_dataloader: DataLoader,
         config,
         model_name: str = "model",
+        experiment_name: Optional[str] = None,
     ):
         self.model = model
         self.train_dataloader = train_dataloader
         self.val_dataloader = val_dataloader
         self.config = config
         self.model_name = model_name
+        self.experiment_name = experiment_name  # For multi-experiment workflows
 
         self.device = config.device
         self.model.to(self.device)
@@ -34,7 +68,8 @@ class Trainer:
         # Optimizer
         self.optimizer = torch.optim.Adam(
             model.parameters(),
-            lr=config.learning_rate
+            lr=config.learning_rate,
+            weight_decay=config.weight_decay
         )
 
         # Training history
@@ -42,6 +77,12 @@ class Trainer:
         self.val_losses = []
         self.train_ppls = []
         self.val_ppls = []
+
+        # Current epoch counter for adaptive gradient clipping
+        self.current_epoch = 0
+
+        # Early stopping
+        self.early_stopping = EarlyStopping(patience=10, min_delta=0.001)
 
     def train_epoch(self) -> tuple[float, float]:
         """Train for one epoch"""
@@ -74,10 +115,17 @@ class Trainer:
             # Backward pass
             loss.backward()
 
-            # Gradient clipping
+            # Adaptive gradient clipping based on training stage
+            if self.current_epoch < 10:
+                clip_value = 0.5  # Early: strict clipping to prevent spikes
+            elif self.current_epoch < 30:
+                clip_value = 1.0  # Middle: standard clipping
+            else:
+                clip_value = 2.0  # Late: relaxed clipping for fine-tuning
+
             torch.nn.utils.clip_grad_norm_(
                 self.model.parameters(),
-                self.config.gradient_clip
+                clip_value
             )
 
             self.optimizer.step()
@@ -140,6 +188,7 @@ class Trainer:
         best_val_loss = float('inf')
 
         for epoch in range(num_epochs):
+            self.current_epoch = epoch
             print(f"\nEpoch {epoch + 1}/{num_epochs}")
 
             # Train
@@ -161,6 +210,12 @@ class Trainer:
                 best_val_loss = val_loss
                 self.save_checkpoint(f"best_{self.model_name}.pt")
                 print(f"✓ Saved best model (val_loss: {val_loss:.4f})")
+
+            # Early stopping check
+            if self.early_stopping(val_loss):
+                print(f"\n⚠ Early stopping triggered at epoch {epoch + 1}")
+                print(f"No improvement for {self.early_stopping.patience} epochs")
+                break
 
         print(f"\n{'='*60}")
         print(f"Training completed!")
@@ -212,7 +267,14 @@ class Trainer:
         # Save figure
         checkpoint_dir = "checkpoints"
         os.makedirs(checkpoint_dir, exist_ok=True)
-        save_path = os.path.join(checkpoint_dir, f"{self.model_name}_training_curves.png")
+
+        # Use experiment_name if provided (for multi-experiment workflows)
+        if self.experiment_name:
+            filename = f"{self.experiment_name}_training_curves.png"
+        else:
+            filename = f"{self.model_name}_training_curves.png"
+
+        save_path = os.path.join(checkpoint_dir, filename)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
         print(f"\n✓ Saved training curves to {save_path}")
         plt.close()

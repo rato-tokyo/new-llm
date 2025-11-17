@@ -28,8 +28,9 @@ class ContextVectorLLM(nn.Module):
         # Token embedding
         self.token_embedding = nn.Embedding(config.vocab_size, config.embed_dim)
 
-        # Positional embedding (learned)
-        self.position_embedding = nn.Embedding(config.max_seq_length, config.embed_dim)
+        # NOTE: No positional embedding - position information is implicitly learned
+        # through sequential context vector updates, similar to RNN/LSTM.
+        # This maintains New-LLM's core principle: fixed memory usage regardless of sequence length.
 
         # FNN input size: embed_dim + context_vector_dim
         fnn_input_dim = config.embed_dim + self.context_dim
@@ -60,6 +61,13 @@ class ContextVectorLLM(nn.Module):
         # 2. Context vector update head (outputs delta to add to context)
         self.context_update = nn.Linear(config.hidden_dim, self.context_dim)
 
+        # 3. Gated context update (LSTM-style gates)
+        self.forget_gate = nn.Linear(config.hidden_dim, self.context_dim)
+        self.input_gate = nn.Linear(config.hidden_dim, self.context_dim)
+
+        # 4. Layer normalization for context vector (CRITICAL for stability)
+        self.context_norm = nn.LayerNorm(self.context_dim)
+
         # Initialize weights
         self.apply(self._init_weights)
 
@@ -89,10 +97,8 @@ class ContextVectorLLM(nn.Module):
         # Get embeddings
         token_embeds = self.token_embedding(input_ids)  # [batch, seq, embed]
 
-        # Add positional embeddings
-        positions = torch.arange(seq_len, device=device).unsqueeze(0)
-        pos_embeds = self.position_embedding(positions)  # [1, seq, embed]
-        token_embeds = token_embeds + pos_embeds  # [batch, seq, embed]
+        # No positional embeddings - position information emerges from sequential processing
+        # This allows New-LLM to handle arbitrary sequence lengths without memory growth
 
         # Initialize context vector (zeros for first token)
         context = torch.zeros(batch_size, self.context_dim, device=device)
@@ -118,11 +124,21 @@ class ContextVectorLLM(nn.Module):
             # Get context update (delta to add)
             context_delta = self.context_update(hidden)  # [batch, context_dim]
 
+            # Gated context update (LSTM-style)
+            forget_g = torch.sigmoid(self.forget_gate(hidden))  # [batch, context_dim]
+            input_g = torch.sigmoid(self.input_gate(hidden))    # [batch, context_dim]
+
             # Store current context before update
             context_list.append(context.clone())
 
-            # Update context additively
-            context = context + context_delta  # [batch, context_dim]
+            # Update context with gates: forget old + accept new
+            context = forget_g * context + input_g * context_delta  # [batch, context_dim]
+
+            # Normalize context vector (CRITICAL: prevents unbounded growth)
+            context = self.context_norm(context)
+
+            # Clip context values to prevent extreme values
+            context = torch.clamp(context, min=-10.0, max=10.0)
 
         # Stack results
         logits = torch.stack(logits_list, dim=1)  # [batch, seq, vocab_size]
@@ -159,11 +175,8 @@ class ContextVectorLLM(nn.Module):
                 # Get token embedding
                 token_embed = self.token_embedding(last_token_id).squeeze(1)  # [batch, embed]
 
-                # Add positional embedding (use current position modulo max_seq_length)
-                pos = (input_ids.size(1) - 1) % self.config.max_seq_length
-                pos_tensor = torch.tensor([pos], device=device)
-                pos_embed = self.position_embedding(pos_tensor)  # [1, embed]
-                token_embed = token_embed + pos_embed
+                # No positional embedding - position information is implicitly maintained
+                # in the context vector through sequential updates
 
                 # Concatenate with context
                 fnn_input = torch.cat([token_embed, context], dim=-1)
@@ -176,9 +189,17 @@ class ContextVectorLLM(nn.Module):
                 probs = torch.softmax(next_token_logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
 
-                # Update context
+                # Update context with gating
                 context_delta = self.context_update(hidden)
-                context = context + context_delta
+                forget_g = torch.sigmoid(self.forget_gate(hidden))
+                input_g = torch.sigmoid(self.input_gate(hidden))
+                context = forget_g * context + input_g * context_delta
+
+                # Normalize context vector
+                context = self.context_norm(context)
+
+                # Clip context values to prevent extreme values
+                context = torch.clamp(context, min=-10.0, max=10.0)
 
                 # Append to sequence
                 input_ids = torch.cat([input_ids, next_token], dim=1)

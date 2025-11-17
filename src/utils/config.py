@@ -91,8 +91,8 @@ class NewLLMConfig:
     # ========== Model Architecture ==========
     vocab_size = 1000        # Size of vocabulary
     embed_dim = 256          # Token embedding dimension (SAME as Transformer)
-    hidden_dim = 1024        # FNN hidden dimension (EXPERIMENT 2: 512→1024, SAME as Transformer)
-    num_layers = 10          # Number of FNN layers (EXPERIMENT 2: 8→10)
+    hidden_dim = 1024        # FNN hidden dimension (EXPERIMENT 2: increased capacity + gating)
+    num_layers = 11          # Number of FNN layers (EXPERIMENT 2: 10→11, +1 layer)
     max_seq_length = 32      # Maximum sequence length
     dropout = 0.1            # Dropout rate
 
@@ -106,8 +106,9 @@ class NewLLMConfig:
     # ========== Training Hyperparameters ==========
     batch_size = 16          # Batch size
     learning_rate = 0.0001   # Learning rate (same as Transformer)
-    num_epochs = 150         # Number of epochs (EXPERIMENT 3: 50→150 for longer training)
-    gradient_clip = 1.0      # Gradient clipping
+    weight_decay = 0.0       # L2 regularization (0.0 = no weight decay)
+    num_epochs = 150         # Number of epochs (EXPERIMENT 3: long-term training)
+    gradient_clip = 1.0      # Gradient clipping (adaptive in trainer)
 
     # ========== Data ==========
     train_split = 0.8        # Train/val split

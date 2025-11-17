@@ -17,6 +17,44 @@ This project explores a novel approach to sequence modeling:
 - **Indirect learning**: Context updates emerge from optimizing token prediction only
 - **FNN-based**: Uses feedforward neural networks instead of attention layers
 
+## Core Design Principles
+
+### 🎯 Fixed Memory Usage Regardless of Sequence Length
+
+**Critical principle**: New-LLM must maintain **constant memory usage** independent of sequence length.
+
+This is the fundamental advantage over Transformers:
+- **Transformer**: Memory grows with O(n²) where n = sequence length (attention matrix)
+- **New-LLM**: Memory stays constant O(1) (fixed-size context vector)
+
+#### Implementation Rules
+
+✅ **ALLOWED**:
+- Fixed-size context vector (e.g., 512 dimensions)
+- Token embeddings (reused for each token, not stored)
+- FNN parameters (fixed regardless of sequence)
+
+❌ **PROHIBITED**:
+- **Positional embeddings** that limit max sequence length
+- Storing all hidden states (would grow with sequence length)
+- Any operation that depends on max_seq_length parameter
+
+#### Why No Positional Embeddings?
+
+```python
+# ❌ BAD: Learned positional embeddings
+self.position_embedding = nn.Embedding(max_seq_length, embed_dim)
+# Problem: Can only handle sequences up to max_seq_length
+# Problem: Memory usage tied to sequence length
+
+# ✅ GOOD: Position information from sequential processing
+for t in range(seq_len):  # Can be any length
+    context[t] = update(context[t-1], input[t])
+    # Position information emerges naturally from order
+```
+
+Like RNN/LSTM, position information is **implicitly learned** through sequential processing order, not explicit positional encodings.
+
 ### Architecture Concept
 
 ```
