@@ -310,16 +310,77 @@ The project previously compared against an LSTM baseline. Those experiments are 
 
 The current primary comparison is **Transformer vs New-LLM** to verify if context vector propagation can compete with attention mechanisms.
 
+## Dialogue Fine-tuning Experiments (NEW)
+
+**Goal**: Train New-LLM to handle simple conversations
+
+### Step 1: Pre-training on WikiText
+
+Train on real Wikipedia text to learn natural language patterns:
+
+```bash
+python scripts/train_wikitext.py
+```
+
+This will:
+- Train New-LLM on WikiText-2 dataset
+- Train TinyGPT2 baseline for comparison
+- Save checkpoints: `checkpoints/best_new_llm_wikitext.pt` and `checkpoints/best_tinygpt2_wikitext.pt`
+
+### Step 2: Fine-tuning on Dialogue Data
+
+Fine-tune the pre-trained models on DailyDialog dataset:
+
+```bash
+python scripts/finetune_dialog.py
+```
+
+This will:
+- Load pre-trained checkpoints from Step 1
+- Fine-tune on DailyDialog (13k conversations)
+- Save dialogue-tuned checkpoints
+
+### Step 3: Evaluate and Compare
+
+Evaluate both models on dialogue quality:
+
+```bash
+python scripts/evaluate_comparison.py
+```
+
+This will:
+- Calculate perplexity on test set
+- Generate sample dialogues
+- Measure inference speed
+- Compare New-LLM vs TinyGPT2
+
+### Datasets Used
+
+| Dataset | Size | Purpose | Description |
+|---------|------|---------|-------------|
+| **WikiText-2** | ~2MB | Pre-training | Wikipedia articles for natural language learning |
+| **DailyDialog** | 13k dialogues | Fine-tuning | Daily conversations (~10 turns each) |
+
+### Expected Results
+
+This experiment tests whether New-LLM can:
+- ✓ Learn from real text (not just synthetic data)
+- ✓ Handle dialogue/conversation patterns
+- ✓ Compete with GPT-2 architecture on dialogue tasks
+- ✓ Scale to larger datasets
+
 ## Future Work
 
 Promising directions based on results:
-1. Scale to larger datasets (WikiText, etc.)
-2. Experiment with larger context vector dimensions
-3. Try multiple context vectors (multi-channel context)
-4. Hybrid architectures (sparse attention + context vectors)
-5. Better regularization techniques for context stability
-6. Analyze what linguistic features the context captures
-7. Test on longer sequence lengths
+1. ✅ Scale to larger datasets (WikiText, DailyDialog) - **IN PROGRESS**
+2. Knowledge distillation from larger models (GPT-2, etc.)
+3. Experiment with larger context vector dimensions
+4. Try multiple context vectors (multi-channel context)
+5. Hybrid architectures (sparse attention + context vectors)
+6. Better regularization techniques for context stability
+7. Analyze what linguistic features the context captures
+8. Test on longer sequence lengths
+9. Instruction tuning for Q&A tasks
 
 ## License
 
