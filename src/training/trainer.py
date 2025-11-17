@@ -178,7 +178,7 @@ class Trainer:
 
         epochs = range(1, len(self.train_losses) + 1)
 
-        # Loss curves
+        # Loss curves (左側)
         axes[0].plot(epochs, self.train_losses, label='Train Loss', linewidth=2, marker='o', markersize=3)
         axes[0].plot(epochs, self.val_losses, label='Val Loss', linewidth=2, marker='s', markersize=3)
         axes[0].set_xlabel('Epoch', fontsize=12)
@@ -187,15 +187,25 @@ class Trainer:
         axes[0].legend(fontsize=10)
         axes[0].grid(True, alpha=0.3)
 
-        # Perplexity curves
+        # Perplexity curves (右側) - 線形スケール
         axes[1].plot(epochs, self.train_ppls, label='Train PPL', linewidth=2, marker='o', markersize=3)
         axes[1].plot(epochs, self.val_ppls, label='Val PPL', linewidth=2, marker='s', markersize=3)
         axes[1].set_xlabel('Epoch', fontsize=12)
         axes[1].set_ylabel('Perplexity', fontsize=12)
-        axes[1].set_title(f'{self.model_name} - Perplexity Curves', fontsize=14, fontweight='bold')
+        axes[1].set_title(f'{self.model_name} - Perplexity (Linear Scale)', fontsize=14, fontweight='bold')
         axes[1].legend(fontsize=10)
         axes[1].grid(True, alpha=0.3)
-        axes[1].set_yscale('log')  # Log scale for perplexity
+        # 対数スケールを削除 - これがバグの原因でした
+        # axes[1].set_yscale('log')  # これを削除！
+
+        # スパイクが見やすいように y軸の範囲を調整
+        if len(self.val_ppls) > 0:
+            max_ppl = max(self.val_ppls)
+            if max_ppl > 1000:  # スパイクがある場合
+                # 上位5%の外れ値を除外して範囲を設定
+                sorted_ppls = sorted(self.val_ppls)
+                percentile_95 = sorted_ppls[int(len(sorted_ppls) * 0.95)]
+                axes[1].set_ylim(0, min(percentile_95 * 1.5, max_ppl))
 
         plt.tight_layout()
 
