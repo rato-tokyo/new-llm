@@ -1,4 +1,4 @@
-"""Train new-llm with context vector propagation"""
+"""Train new-llm with context vector propagation (NO ATTENTION)"""
 
 import sys
 import os
