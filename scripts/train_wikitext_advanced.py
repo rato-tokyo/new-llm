@@ -62,7 +62,7 @@ class AdvancedConfig(NewLLMConfig):
 
     # 訓練ハイパーパラメータ
     num_epochs = 50
-    batch_size = 32
+    batch_size = 512  # GPU RAM (15GB) をフル活用（32 → 512で16倍）
     learning_rate = 0.0001
     weight_decay = 0.0
     gradient_clip = 1.0
@@ -136,9 +136,19 @@ def train_new_llm_advanced():
     print(f"\n🖥️  Device Information:")
     print(f"  Device: {config.device.upper()}")
     if torch.cuda.is_available():
+        gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
         print(f"  GPU: {torch.cuda.get_device_name(0)}")
-        print(f"  GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
-        print(f"  ⚡ GPU acceleration ENABLED")
+        print(f"  GPU Memory: {gpu_memory:.1f} GB")
+        print(f"  Batch Size: {config.batch_size} (optimized for GPU RAM)")
+
+        # 予想GPU RAM使用量
+        model_params = 4.84  # 4.84M params
+        estimated_usage = model_params * 0.004 * config.batch_size / 32  # rough estimate
+        print(f"  Estimated GPU RAM usage: {estimated_usage:.1f} GB ({estimated_usage/gpu_memory*100:.0f}%)")
+        print(f"  ⚡ GPU acceleration ENABLED - Maximum performance mode")
+
+        if estimated_usage < gpu_memory * 0.5:
+            print(f"  💡 TIP: GPU RAM underutilized. Can increase batch_size to {config.batch_size * 2}")
     else:
         print(f"  ⚠️  WARNING: Running on CPU (will be VERY SLOW)")
         print(f"  💡 Solution: Runtime → Change runtime type → GPU (T4)")

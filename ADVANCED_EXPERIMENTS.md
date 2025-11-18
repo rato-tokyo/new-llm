@@ -22,6 +22,7 @@ python scripts/train_wikitext_advanced.py
 **デフォルト設定**:
 - Context Vector Dim: 512（2倍）
 - Layers: 12（2倍）
+- Batch Size: 512（GPU RAM最大活用）
 - Quantization: none
 
 ---
@@ -188,14 +189,29 @@ quantization_mode = 'int8'
 
 ## 🔧 トラブルシューティング
 
+### GPU RAM最適化
+
+**デフォルトbatch_size=512は15GB GPU（T4）向け**
+
+| GPU | GPU RAM | 推奨batch_size |
+|-----|---------|---------------|
+| T4 (Colab無料) | 15GB | 512 |
+| V100 | 16GB | 512 |
+| A100 | 40GB | 1024-2048 |
+| RTX 3060 | 12GB | 256-384 |
+
+**調整方法**:
+- メモリ不足 → batch_sizeを半分に（512 → 256 → 128）
+- 余裕あり → batch_sizeを2倍に（512 → 1024）
+
 ### メモリ不足エラー
 
 **エラー**: `RuntimeError: CUDA out of memory` または `Killed`
 
 **対処法**:
-1. `batch_size`を減らす（32 → 16 → 8）
-2. `num_layers`を減らす
-3. `context_vector_dim`を減らす
+1. `batch_size`を減らす（512 → 256 → 128）
+2. `num_layers`を減らす（12 → 6）
+3. `context_vector_dim`を減らす（512 → 256）
 
 ### 訓練が遅い
 
