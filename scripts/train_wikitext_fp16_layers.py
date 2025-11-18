@@ -22,49 +22,46 @@ import time
 import argparse
 
 
-def create_config(num_layers_value):
-    """Create config class dynamically based on num_layers"""
+class LayerExperimentConfig(NewLLML4Config):
+    """Layer experiment configuration
 
-    class LayerExperimentConfig(NewLLML4Config):
-        """Layer experiment configuration
+    Fixed parameters:
+    - batch_size = 2048 (L4 GPU optimized)
+    - learning_rate = 0.0008 (Square Root Scaling)
+    - context_vector_dim = 256
 
-        Fixed parameters:
-        - batch_size = 2048 (L4 GPU optimized)
-        - learning_rate = 0.0008 (Square Root Scaling)
-        - context_vector_dim = 256
+    Variable parameter:
+    - num_layers (set via __init__)
+    """
+    # データ関連（WikiText-2用）
+    max_seq_length = 64
+    vocab_size = 1000
 
-        Variable parameter:
-        - num_layers (set dynamically)
-        """
-        # データ関連（WikiText-2用）
-        max_seq_length = 64
-        vocab_size = 1000
+    # モデルアーキテクチャ
+    embed_dim = 256
+    hidden_dim = 512
+    num_layers = 6  # Default, will be overridden in __init__
+    context_vector_dim = 256  # Fixed
+    dropout = 0.1
 
-        # モデルアーキテクチャ
-        embed_dim = 256
-        hidden_dim = 512
-        # num_layers will be set after class definition
-        context_vector_dim = 256  # Fixed
-        dropout = 0.1
+    # 訓練ハイパーパラメータ（NewLLML4Configから継承）
+    # batch_size = 2048     ← 固定（L4用）
+    # learning_rate = 0.0008 ← 固定（Square Root Scaling）
+    # device = "cuda"       ← 固定
+    num_epochs = 150
+    weight_decay = 0.0
+    gradient_clip = 1.0
 
-        # 訓練ハイパーパラメータ（NewLLML4Configから継承）
-        # batch_size = 2048     ← 固定（L4用）
-        # learning_rate = 0.0008 ← 固定（Square Root Scaling）
-        # device = "cuda"       ← 固定
-        num_epochs = 150
-        weight_decay = 0.0
-        gradient_clip = 1.0
+    # Early Stopping
+    patience = 30
 
-        # Early Stopping
-        patience = 30
+    # FP16設定
+    use_amp = True
 
-        # FP16設定
-        use_amp = True
-
-    # Set num_layers after class definition
-    LayerExperimentConfig.num_layers = num_layers_value
-
-    return LayerExperimentConfig
+    def __init__(self, num_layers=6):
+        """Initialize config with specified num_layers"""
+        super().__init__()
+        self.num_layers = num_layers
 
 
 class FP16Trainer(Trainer):
@@ -181,8 +178,7 @@ def main():
     print("="*80)
 
     # 設定作成
-    ConfigClass = create_config(num_layers)
-    config = ConfigClass()
+    config = LayerExperimentConfig(num_layers=num_layers)
 
     # GPU必須チェック
     if not torch.cuda.is_available():
