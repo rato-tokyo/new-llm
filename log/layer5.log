@@ -1,0 +1,100 @@
+
+Epoch 132/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8810
+  Val: Loss=3.03 PPL=20.7 Acc=38.2%
+
+Epoch 133/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8796
+  Val: Loss=3.03 PPL=20.7 Acc=38.2% ✓
+
+Epoch 134/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8785
+  Val: Loss=3.03 PPL=20.7 Acc=38.2%
+
+Epoch 135/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8764
+  Val: Loss=3.03 PPL=20.7 Acc=38.2% ✓
+  [Checkpoint saved]
+
+Epoch 136/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8741
+  Val: Loss=3.03 PPL=20.7 Acc=38.2%
+
+Epoch 137/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8731
+  Val: Loss=3.03 PPL=20.6 Acc=38.2% ✓
+
+Epoch 138/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8711
+  Val: Loss=3.03 PPL=20.6 Acc=38.2% ✓
+
+Epoch 139/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8692
+  Val: Loss=3.03 PPL=20.7 Acc=38.2%
+
+Epoch 140/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8679
+  Val: Loss=3.03 PPL=20.6 Acc=38.2%
+  [Checkpoint saved]
+
+Epoch 141/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8669
+  Val: Loss=3.03 PPL=20.6 Acc=38.2%
+
+Epoch 142/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8657
+  Val: Loss=3.03 PPL=20.6 Acc=38.2%
+
+Epoch 143/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8637
+  Val: Loss=3.02 PPL=20.6 Acc=38.2% ✓
+
+Epoch 144/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8620
+  Val: Loss=3.02 PPL=20.6 Acc=38.3% ✓
+
+Epoch 145/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8601
+  Val: Loss=3.02 PPL=20.6 Acc=38.3% ✓
+  [Checkpoint saved]
+
+Epoch 146/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8591
+  Val: Loss=3.03 PPL=20.6 Acc=38.3%
+
+Epoch 147/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8578
+  Val: Loss=3.02 PPL=20.6 Acc=38.3%
+
+Epoch 148/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8555
+  Val: Loss=3.02 PPL=20.6 Acc=38.3%
+
+Epoch 149/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8537
+  Val: Loss=3.02 PPL=20.5 Acc=38.2% ✓
+
+Epoch 150/150
+  Training... 20% 40% 60% 80% 100% | 0.6min | Loss: 2.8524
+  Val: Loss=3.02 PPL=20.5 Acc=38.3% ✓
+  [Checkpoint saved]
+
+============================================================
+Training completed! Best Val Loss: 3.0204
+============================================================
+
+✓ Final checkpoint saved: new_llm_wikitext_fp16_layers5_final.pt
+
+================================================================================
+5 Layers Training Completed!
+================================================================================
+Total training time: 1.15 hours
+Checkpoint saved: checkpoints/best_new_llm_wikitext_fp16_layers5.pt
+
+📊 最終結果:
+  Num Layers: 5
+  Best Val Loss: 3.0204
+  Best Val Perplexity: 20.50 (Epoch 150)
+  vs Baseline (6 layers): -0.10 (-0.5%) ✓ BETTER
+
+================================================================================
