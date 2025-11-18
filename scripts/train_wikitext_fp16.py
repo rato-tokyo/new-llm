@@ -55,11 +55,11 @@ class FP16Config(NewLLMConfig):
     # Early Stopping
     patience = 15
 
-    # デバイス（GPU推奨、CPUでも動作）
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    # デバイス（GPU必須 - FP16はGPU専用）
+    device = "cuda"  # GPU必須
 
     # FP16設定
-    use_amp = True  # Automatic Mixed Precision
+    use_amp = True  # Automatic Mixed Precision (GPU必須)
 
 
 class FP16Trainer(Trainer):
@@ -70,17 +70,14 @@ class FP16Trainer(Trainer):
 
     def __init__(self, *args, use_amp=True, **kwargs):
         super().__init__(*args, **kwargs)
-        self.use_amp = use_amp and torch.cuda.is_available()
 
-        if self.use_amp:
-            self.scaler = GradScaler()
-            print(f"\n✓ FP16 Mixed Precision enabled (AMP)")
-        else:
-            self.scaler = None
-            if not torch.cuda.is_available():
-                print(f"\n⚠ FP16 disabled: GPU not available (using CPU)")
-            else:
-                print(f"\n⚠ FP16 disabled: use_amp=False")
+        # GPU必須チェック
+        if not torch.cuda.is_available():
+            raise RuntimeError("GPU not available! FP16 training requires CUDA GPU.")
+
+        self.use_amp = use_amp
+        self.scaler = GradScaler()
+        print(f"\n✓ FP16 Mixed Precision enabled (AMP)")
 
     def train_epoch(self) -> tuple[float, float]:
         """FP16対応の訓練エポック"""
@@ -99,41 +96,7 @@ class FP16Trainer(Trainer):
             self.optimizer.zero_grad()
 
             # FP16 mixed precision forward/backward
-            if self.use_amp:
-                with autocast():
-                    outputs = self.model(inputs)
-                    if isinstance(outputs, tuple):
-                        logits = outputs[0]
-                    else:
-                        logits = outputs
-
-                    from src.evaluation.metrics import compute_loss
-                    loss = compute_loss(logits, targets, pad_idx=0)
-
-                # Scaled backward pass
-                self.scaler.scale(loss).backward()
-
-                # Gradient clipping (unscale first)
-                self.scaler.unscale_(self.optimizer)
-
-                # Adaptive gradient clipping
-                if self.current_epoch < 10:
-                    clip_value = 0.5
-                elif self.current_epoch < 30:
-                    clip_value = 1.0
-                else:
-                    clip_value = 2.0
-
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), clip_value
-                )
-
-                # Optimizer step with scaling
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
-
-            else:
-                # FP32 fallback (CPU or disabled AMP)
+            with autocast():
                 outputs = self.model(inputs)
                 if isinstance(outputs, tuple):
                     logits = outputs[0]
@@ -143,21 +106,27 @@ class FP16Trainer(Trainer):
                 from src.evaluation.metrics import compute_loss
                 loss = compute_loss(logits, targets, pad_idx=0)
 
-                loss.backward()
+            # Scaled backward pass
+            self.scaler.scale(loss).backward()
 
-                # Adaptive gradient clipping
-                if self.current_epoch < 10:
-                    clip_value = 0.5
-                elif self.current_epoch < 30:
-                    clip_value = 1.0
-                else:
-                    clip_value = 2.0
+            # Gradient clipping (unscale first)
+            self.scaler.unscale_(self.optimizer)
 
-                torch.nn.utils.clip_grad_norm_(
-                    self.model.parameters(), clip_value
-                )
+            # Adaptive gradient clipping
+            if self.current_epoch < 10:
+                clip_value = 0.5
+            elif self.current_epoch < 30:
+                clip_value = 1.0
+            else:
+                clip_value = 2.0
 
-                self.optimizer.step()
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), clip_value
+            )
+
+            # Optimizer step with scaling
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
 
             # Track metrics
             total_loss += loss.item() * inputs.size(0)
@@ -186,20 +155,19 @@ def main():
 
     config = FP16Config()
 
+    # GPU必須チェック
+    if not torch.cuda.is_available():
+        raise RuntimeError("❌ GPU not available! FP16 training requires CUDA GPU.")
+
     # デバイス情報表示
     print(f"\n🖥️  Device Information:")
-    print(f"  Device: {config.device.upper()}")
-
-    if torch.cuda.is_available():
-        gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-        print(f"  GPU: {torch.cuda.get_device_name(0)}")
-        print(f"  GPU Memory: {gpu_memory:.1f} GB")
-        print(f"  FP16 Mixed Precision: {'ENABLED' if config.use_amp else 'DISABLED'}")
-        print(f"  ⚡ Expected speedup: 2x faster than FP32")
-        print(f"  💾 Expected memory saving: ~50%")
-    else:
-        print(f"  ⚠️  GPU not available - FP16 disabled")
-        print(f"  Running on CPU (FP32 fallback)")
+    print(f"  Device: CUDA (GPU)")
+    gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+    print(f"  GPU: {torch.cuda.get_device_name(0)}")
+    print(f"  GPU Memory: {gpu_memory:.1f} GB")
+    print(f"  FP16 Mixed Precision: ENABLED ✓")
+    print(f"  ⚡ Expected speedup: 2x faster than FP32")
+    print(f"  💾 Expected memory saving: ~50%")
 
     print(f"\n実験設定:")
     print(f"  Model: New-LLM Baseline")
@@ -207,7 +175,7 @@ def main():
     print(f"  Num Layers: {config.num_layers}")
     print(f"  Epochs: {config.num_epochs}")
     print(f"  Batch Size: {config.batch_size}")
-    print(f"  Precision: {'FP16 (Mixed)' if config.use_amp else 'FP32'}")
+    print(f"  Precision: FP16 (Mixed)")
     print(f"\n{'='*80}\n")
 
     # データロード
