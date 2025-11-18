@@ -47,7 +47,7 @@ class FP16Config(NewLLMConfig):
 
     # 訓練ハイパーパラメータ
     num_epochs = 50
-    batch_size = 32  # CPUでも動くように32
+    batch_size = 512  # GPU最適化（L4/A100用）
     learning_rate = 0.0001
     weight_decay = 0.0
     gradient_clip = 1.0
