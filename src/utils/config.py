@@ -127,6 +127,7 @@ class NewLLMGPUConfig(NewLLMConfig):
     """
     # ========== GPU-Optimized Training ==========
     batch_size = 512         # T4 GPU (16GB) baseline
+    learning_rate = 0.0001   # T4 baseline learning rate
     device = "cuda"          # GPU device
 
     # Inherit all other settings from NewLLMConfig
@@ -139,9 +140,12 @@ class NewLLML4Config(NewLLMConfig):
 
     L4 has 1.5x more VRAM than T4, so batch_size can be 4x larger
     (measured: 512 → 5.5GB, so 2048 → ~22GB with safety margin)
+
+    Linear Scaling Rule: batch_size 4x → learning_rate 4x
     """
     # ========== L4 GPU-Optimized Training ==========
     batch_size = 2048        # L4 GPU (24GB) - 4x T4
+    learning_rate = 0.0004   # 4x T4 learning rate (Linear Scaling Rule)
     device = "cuda"          # GPU device
 
 
@@ -150,9 +154,12 @@ class NewLLMA100Config(NewLLMConfig):
     A100 GPU-optimized configuration (40GB VRAM)
 
     A100 has 2.5x more VRAM than T4, so batch_size can be ~8x larger
+
+    Linear Scaling Rule: batch_size 8x → learning_rate 8x
     """
     # ========== A100 GPU-Optimized Training ==========
     batch_size = 4096        # A100 GPU (40GB) - 8x T4
+    learning_rate = 0.0008   # 8x T4 learning rate (Linear Scaling Rule)
     device = "cuda"          # GPU device
 
 

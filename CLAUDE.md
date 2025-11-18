@@ -376,17 +376,19 @@ class MyConfig(NewLLMGPUConfig):
 
 #### 利用可能な設定クラス
 
-| クラス名 | 用途 | 主要設定 |
-|---------|------|---------|
-| `NewLLMConfig` | CPU訓練（レガシー） | batch_size=16, device="cpu" |
-| `NewLLMGPUConfig` | T4 GPU訓練 | batch_size=512, device="cuda" |
-| **`NewLLML4Config`** | **L4 GPU訓練（推奨）** | **batch_size=2048, device="cuda"** |
-| **`NewLLMA100Config`** | **A100 GPU訓練（最高性能）** | **batch_size=4096, device="cuda"** |
-| **`NewLLMAdvancedL4Config`** | **L4 + 大規模モデル** | **batch=2048, context=512, layers=12** |
-| **`NewLLMAdvancedA100Config`** | **A100 + 大規模モデル** | **batch=4096, context=512, layers=12** |
-| `TransformerConfig` | Transformerベースライン | 比較実験用 |
+| クラス名 | 用途 | batch_size | learning_rate | その他 |
+|---------|------|-----------|--------------|--------|
+| `NewLLMConfig` | CPU訓練（レガシー） | 16 | 0.0001 | device="cpu" |
+| `NewLLMGPUConfig` | T4 GPU訓練 | 512 | 0.0001 | device="cuda" |
+| **`NewLLML4Config`** | **L4 GPU訓練（推奨）** | **2048** | **0.0004** | **device="cuda"** |
+| **`NewLLMA100Config`** | **A100 GPU訓練（最高性能）** | **4096** | **0.0008** | **device="cuda"** |
+| **`NewLLMAdvancedL4Config`** | **L4 + 大規模モデル** | **2048** | **0.0004** | **context=512, layers=12** |
+| **`NewLLMAdvancedA100Config`** | **A100 + 大規模モデル** | **4096** | **0.0008** | **context=512, layers=12** |
+| `TransformerConfig` | Transformerベースライン | 16 | 0.0001 | 比較実験用 |
 
 **推奨**: Colab Proで**L4 GPU**を使う場合は`NewLLML4Config`または`NewLLMAdvancedL4Config`を継承
+
+**重要**: `batch_size`と`learning_rate`は**Linear Scaling Rule**に従って自動的に調整済み
 
 #### 実装パターン
 
@@ -401,12 +403,13 @@ class MyExperimentConfig(NewLLML4Config):
     """My experiment configuration for L4 GPU
 
     Inherits L4 optimization from NewLLML4Config:
-    - batch_size = 2048  ← L4用に最適化済み
+    - batch_size = 2048     ← L4用に最適化済み
+    - learning_rate = 0.0004 ← Linear Scaling Rule適用済み
     - device = "cuda"
     """
-    # 実験固有の設定のみ記述
+    # 実験固有の設定のみ記述（batch_size/learning_rate/deviceは継承）
     num_epochs = 100
-    learning_rate = 0.0005
+    # learning_rateは上書きしない！自動継承を使う
 
 # 3. 使用
 config = MyExperimentConfig()
@@ -440,7 +443,8 @@ class MyAdvancedConfig(NewLLMAdvancedL4Config):
 # src/utils/config.py に追加
 class NewLLMH100Config(NewLLMGPUConfig):
     """H100 GPU (80GB VRAM) 用設定"""
-    batch_size = 2048  # H100は超大容量
+    batch_size = 8192        # H100は超大容量（16x T4）
+    learning_rate = 0.0016   # Linear Scaling Rule: 16x T4
 ```
 
 #### チェックリスト
@@ -449,7 +453,8 @@ class NewLLMH100Config(NewLLMGPUConfig):
 - [ ] `src/utils.config`から設定クラスをインポートしているか？
 - [ ] 適切な設定クラス（GPU用など）を継承しているか？
 - [ ] 重複した設定値を定義していないか？
-- [ ] batch_size、device、num_layersなどは自動継承されているか？
+- [ ] **`batch_size`、`learning_rate`、`device`などは自動継承されているか？**
+- [ ] スクリプト内で`batch_size`や`learning_rate`を上書きしていないか？
 
 #### この原則の利点
 
