@@ -374,3 +374,153 @@ def save_results():
 - ✓ Gitの履歴に残っているので、必要なら復元可能
 
 **徹底的なクリーンアップとファイル名の統一がプロジェクトの品質を保ちます。**
+
+---
+
+## Google Colab コマンド実行の正しい方法 - CRITICAL
+
+### ⚠️ IndentationError を繰り返さないために
+
+**重要**: Colabノートブックのセル内でコマンドを実行する際、**絶対にインデントを入れない**
+
+### ❌ 間違った例（IndentationErrorになる）
+
+```python
+# ❌ これはエラーになる
+  %cd /content
+  !rm -rf new-llm
+  !git clone https://github.com/rato-tokyo/new-llm
+```
+
+```python
+# ❌ これもエラーになる（スペースやタブが入っている）
+%cd /content
+  !rm -rf new-llm  # ← インデントがあるとエラー
+```
+
+### ✅ 正しい例
+
+**方法1: 行頭から開始（推奨）**
+
+```python
+%cd /content
+!rm -rf new-llm
+!git clone https://github.com/rato-tokyo/new-llm
+%cd new-llm
+```
+
+**方法2: %%bash を使う**
+
+```bash
+%%bash
+cd /content
+rm -rf new-llm
+git clone https://github.com/rato-tokyo/new-llm
+cd new-llm
+pip install -r requirements.txt
+python scripts/train_wikitext_advanced.py
+```
+
+**方法3: 1行で繋げる**
+
+```python
+%cd /content && !rm -rf new-llm && !git clone https://github.com/rato-tokyo/new-llm && %cd new-llm
+```
+
+### 🎯 Colabでのコマンド実行ルール
+
+1. **`!`で始まるコマンド**: シェルコマンド実行
+   ```python
+   !pip install torch
+   !python train.py
+   !nvidia-smi
+   ```
+
+2. **`%`で始まるコマンド**: Jupyterマジックコマンド
+   ```python
+   %cd /content/new-llm
+   %pip install torch  # !pip と同じ
+   ```
+
+3. **`%%bash`**: セル全体をbashスクリプトとして実行
+   ```bash
+   %%bash
+   cd /content
+   ls -la
+   ```
+
+4. **複数コマンドを1行で**: `&&` で繋げる
+   ```python
+   !cd /content && rm -rf new-llm && git clone https://github.com/user/repo
+   ```
+
+### 🔧 Colabでの推奨ワークフロー
+
+**セル1: クローン**
+```python
+%cd /content
+!rm -rf new-llm
+!git clone https://github.com/rato-tokyo/new-llm
+%cd new-llm
+```
+
+**セル2: 確認**
+```python
+!grep "batch_size" scripts/train_wikitext_advanced.py
+```
+
+**セル3: インストール**
+```python
+!pip install -q -r requirements.txt
+```
+
+**セル4: 実行**
+```python
+!python scripts/train_wikitext_advanced.py
+```
+
+### ⚠️ よくある間違い
+
+1. **コピペ時にインデントが入る**
+   - テキストエディタからコピーするとインデントが入ることがある
+   - Colabに直接貼り付ける前に、**行頭にスペースやタブがないか確認**
+
+2. **Markdownセルとコードセルの混同**
+   - Markdownセル（説明用）とコードセル（実行用）を間違えない
+   - コマンドは必ず「コードセル」で実行
+
+3. **`!` と `%` の混同**
+   - `!command`: シェルコマンド
+   - `%command`: Jupyterマジックコマンド
+   - `%%bash`: セル全体をbash実行
+
+### 💡 トラブルシューティング
+
+**IndentationError が出たら**:
+1. セル内の全テキストをコピー
+2. テキストエディタに貼り付け
+3. 各行の先頭のスペース・タブを削除
+4. Colabに貼り直し
+
+**確実な方法**:
+```python
+# 各コマンドを別々のセルで実行する
+# セル1
+%cd /content
+
+# セル2
+!rm -rf new-llm
+
+# セル3
+!git clone https://github.com/rato-tokyo/new-llm
+
+# セル4
+%cd new-llm
+
+# セル5
+!python scripts/train_wikitext_advanced.py
+```
+
+---
+
+**鉄則: Colabのセル内では行頭にスペース・タブを入れない！**
