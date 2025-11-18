@@ -7,6 +7,7 @@ from tqdm import tqdm
 from typing import Optional
 import os
 import matplotlib.pyplot as plt
+import time
 
 from ..evaluation.metrics import compute_loss, compute_perplexity, compute_accuracy
 
@@ -89,9 +90,12 @@ class Trainer:
         self.model.train()
         total_loss = 0.0
         total_tokens = 0
+        num_batches = len(self.train_dataloader)
 
-        pbar = tqdm(self.train_dataloader, desc=f"Training {self.model_name}")
-        for batch_idx, (inputs, targets) in enumerate(pbar):
+        print(f"  Training... ", end='', flush=True)
+        start_time = time.time()
+
+        for batch_idx, (inputs, targets) in enumerate(self.train_dataloader):
             inputs = inputs.to(self.device)
             targets = targets.to(self.device)
 
@@ -134,11 +138,16 @@ class Trainer:
             total_loss += loss.item() * inputs.size(0)
             total_tokens += inputs.size(0)
 
-            # Update progress bar
-            pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+            # Compact progress display (every 20%)
+            if (batch_idx + 1) % max(1, num_batches // 5) == 0 or batch_idx == num_batches - 1:
+                progress = (batch_idx + 1) / num_batches * 100
+                print(f"{progress:.0f}%", end=' ', flush=True)
 
+        elapsed = time.time() - start_time
         avg_loss = total_loss / total_tokens
         avg_ppl = compute_perplexity(avg_loss)
+        print(f"| {elapsed/60:.1f}min | Loss: {avg_loss:.4f}")
+
         return avg_loss, avg_ppl
 
     @torch.no_grad()
@@ -201,37 +210,33 @@ class Trainer:
             self.val_losses.append(val_loss)
             self.val_ppls.append(val_ppl)
 
-            # Print metrics
-            print(f"Train Loss: {train_loss:.4f}, Train PPL: {train_ppl:.4f}")
-            print(f"Val Loss: {val_loss:.4f}, Val PPL: {val_ppl:.4f}, Val Acc: {val_acc:.4f}")
-
-            # Save best model
+            # Compact metrics display
+            best_marker = ""
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 self.save_checkpoint(f"best_{self.model_name}.pt")
-                print(f"✓ Saved best model (val_loss: {val_loss:.4f})")
+                best_marker = " ✓"
+
+            print(f"  Val: Loss={val_loss:.2f} PPL={val_ppl:.1f} Acc={val_acc*100:.1f}%{best_marker}")
 
             # Save periodic checkpoint and progress (every 5 epochs)
             if (epoch + 1) % 5 == 0:
                 self.save_checkpoint(f"{self.model_name}_epoch_{epoch + 1}.pt")
                 self.save_training_progress(epoch + 1)
                 self.plot_and_save_training_curves(suffix=f"_epoch_{epoch + 1}")
-                print(f"✓ Saved checkpoint at epoch {epoch + 1}")
+                print(f"  [Checkpoint saved]")
 
             # Always save latest progress (for resume)
             self.save_training_progress(epoch + 1)
 
             # Early stopping check
             if self.early_stopping(val_loss):
-                print(f"\n⚠ Early stopping triggered at epoch {epoch + 1}")
-                print(f"No improvement for {self.early_stopping.patience} epochs")
-                # Save final state before stopping
+                print(f"\n  [Early stopping: no improvement for {self.early_stopping.patience} epochs]")
                 self.save_training_progress(epoch + 1, final=True)
                 break
 
         print(f"\n{'='*60}")
-        print(f"Training completed!")
-        print(f"Best validation loss: {best_val_loss:.4f}")
+        print(f"Training completed! Best Val Loss: {best_val_loss:.4f}")
         print(f"{'='*60}\n")
 
         # Save training curves as image
@@ -270,8 +275,7 @@ class Trainer:
         with open(filename, 'w') as f:
             json.dump(progress, f, indent=2)
 
-        if final:
-            print(f"✓ Saved final training progress to {filename}")
+        # Silent save (no message)
 
     def plot_and_save_training_curves(self, suffix=""):
         """Plot and save training/validation curves as image"""
@@ -322,7 +326,6 @@ class Trainer:
 
         save_path = os.path.join(checkpoint_dir, filename)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')
-        print(f"\n✓ Saved training curves to {save_path}")
         plt.close()
 
     def save_checkpoint(self, filename: str):
