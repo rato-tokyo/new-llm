@@ -37,6 +37,49 @@ import time
 import argparse
 
 
+# For checkpoint compatibility - these classes must be defined even if not used
+class LayerExperimentConfig(NewLLML4Config):
+    """Layer experiment configuration (for pickle compatibility)
+
+    This class is needed to load checkpoints saved from train_wikitext_fp16_layers.py
+    """
+    max_seq_length = 64
+    vocab_size = 1000
+    embed_dim = 256
+    hidden_dim = 512
+    num_layers = 6  # Default, will be overridden
+    context_vector_dim = 256
+    dropout = 0.1
+    num_epochs = 150
+    weight_decay = 0.0
+    gradient_clip = 1.0
+    patience = 30
+    use_amp = True
+
+    def __init__(self, num_layers=6):
+        super().__init__()
+        self.num_layers = num_layers
+
+
+class FP16Config(NewLLML4Config):
+    """FP16 config (for pickle compatibility)
+
+    This class is needed to load checkpoints saved from train_wikitext_fp16.py
+    """
+    max_seq_length = 64
+    vocab_size = 1000
+    embed_dim = 256
+    hidden_dim = 512
+    num_layers = 6
+    context_vector_dim = 256
+    dropout = 0.1
+    num_epochs = 50
+    weight_decay = 0.0
+    gradient_clip = 1.0
+    patience = 15
+    use_amp = True
+
+
 class ContextExpansionConfig(NewLLML4Config):
     """Configuration for context vector expansion experiment
 
