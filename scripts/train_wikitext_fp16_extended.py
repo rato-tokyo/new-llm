@@ -14,11 +14,10 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
-import torch.amp
 from src.utils.config import NewLLML4Config
 from src.models.context_vector_llm import ContextVectorLLM
 from src.training.wikitext_dataset import load_wikitext_data
-from src.training.trainer import Trainer
+from src.training.fp16_trainer import FP16Trainer
 from torch.utils.data import DataLoader
 import time
 
@@ -86,91 +85,6 @@ class FP16ExtendedConfig(NewLLML4Config):
 
     # チェックポイント設定
     checkpoint_to_resume = "best_new_llm_wikitext_fp16.pt"
-
-
-class FP16Trainer(Trainer):
-    """FP16混合精度対応のTrainer
-
-    PyTorch AMPを使ったFP16訓練
-    """
-
-    def __init__(self, *args, use_amp=True, **kwargs):
-        super().__init__(*args, **kwargs)
-
-        # GPU必須チェック
-        if not torch.cuda.is_available():
-            raise RuntimeError("GPU not available! FP16 training requires CUDA GPU.")
-
-        self.use_amp = use_amp
-        self.scaler = torch.amp.GradScaler('cuda')
-        print(f"\n✓ FP16 Mixed Precision enabled (AMP)")
-
-    def train_epoch(self) -> tuple[float, float]:
-        """FP16対応の訓練エポック"""
-        self.model.train()
-        total_loss = 0.0
-        total_tokens = 0
-        num_batches = len(self.train_dataloader)
-
-        print(f"  Training... ", end='', flush=True)
-        start_time = time.time()
-
-        for batch_idx, (inputs, targets) in enumerate(self.train_dataloader):
-            inputs = inputs.to(self.device)
-            targets = targets.to(self.device)
-
-            self.optimizer.zero_grad()
-
-            # FP16 mixed precision forward/backward
-            with torch.amp.autocast('cuda'):
-                outputs = self.model(inputs)
-                if isinstance(outputs, tuple):
-                    logits = outputs[0]
-                else:
-                    logits = outputs
-
-                from src.evaluation.metrics import compute_loss
-                loss = compute_loss(logits, targets, pad_idx=0)
-
-            # Scaled backward pass
-            self.scaler.scale(loss).backward()
-
-            # Gradient clipping (unscale first)
-            self.scaler.unscale_(self.optimizer)
-
-            # Adaptive gradient clipping
-            if self.current_epoch < 10:
-                clip_value = 0.5
-            elif self.current_epoch < 30:
-                clip_value = 1.0
-            else:
-                clip_value = 2.0
-
-            torch.nn.utils.clip_grad_norm_(
-                self.model.parameters(), clip_value
-            )
-
-            # Optimizer step with scaling
-            self.scaler.step(self.optimizer)
-            self.scaler.update()
-
-            # Track metrics
-            total_loss += loss.item() * inputs.size(0)
-            total_tokens += inputs.size(0)
-
-            # Compact progress display
-            if (batch_idx + 1) % max(1, num_batches // 5) == 0 or batch_idx == num_batches - 1:
-                progress = (batch_idx + 1) / num_batches * 100
-                print(f"{progress:.0f}%", end=' ', flush=True)
-
-        elapsed = time.time() - start_time
-
-        from src.evaluation.metrics import compute_perplexity
-        avg_loss = total_loss / total_tokens
-        avg_ppl = compute_perplexity(avg_loss)
-        print(f"| {elapsed/60:.1f}min | Loss: {avg_loss:.4f}")
-
-        return avg_loss, avg_ppl
 
 
 def main():
