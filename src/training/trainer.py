@@ -368,7 +368,8 @@ class Trainer:
     def load_checkpoint(self, filename: str):
         """Load model checkpoint"""
         filepath = os.path.join("checkpoints", filename)
-        checkpoint = torch.load(filepath, map_location=self.device)
+        # PyTorch 2.6+ requires weights_only=False for checkpoints with config objects
+        checkpoint = torch.load(filepath, map_location=self.device, weights_only=False)
 
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
@@ -396,7 +397,8 @@ class Trainer:
         if not os.path.exists(checkpoint_path):
             raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
 
-        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        # PyTorch 2.6+ requires weights_only=False for checkpoints with config objects
+        checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
 
         # Restore model and optimizer state
         self.model.load_state_dict(checkpoint['model_state_dict'])
