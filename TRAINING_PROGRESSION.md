@@ -10,7 +10,7 @@ New-LLMの訓練における、データセットの難易度と進行ステッ�
 |-------|---------|--------|-----|-----|
 | ✅ **Level 1** | Dolly-15k | Complete | 15.6 | 46.6% |
 | 🔄 **Level 2** | **HH-RLHF** | **Ready** | Expected: 17-20 | Expected: 43-46% |
-| ⏭️ Level 3 | UltraChat | Planned | Expected: 20-25 | Expected: 40-43% |
+| 🔄 **Level 3** | **UltraChat** | **Ready** | Expected: 20-25 | Expected: 40-43% |
 | ⏭️ Level 4 | Code (CodeAlpaca) | Planned | Expected: 25-30 | Expected: 35-40% |
 | ⏭️ Level 5 | Reasoning (MATH) | Future | Expected: 30-40 | Expected: 30-35% |
 
@@ -89,7 +89,7 @@ python scripts/train_hh_rlhf.py --num_layers 4
 
 ---
 
-## Level 3: UltraChat（大規模対話）⏭️
+## Level 3: UltraChat（大規模対話）🔄 準備完了
 
 ### 特徴
 
@@ -122,10 +122,27 @@ python scripts/train_hh_rlhf.py --num_layers 4
 
 ### 訓練時間
 
-- Layer 1: 約2-3時間（L4 GPU）
-- Layer 4: 約3-4時間
+- Layer 1: 約2-3時間（L4 GPU、フルデータセット）
+- Layer 4: 約3-4時間（フルデータセット）
+- Layer 1/4: 20-40分（サブセット10万件、推奨）
 
-**これをクリアしたら**: 非常に多様な対話に対応可能
+### 実装
+
+```bash
+# Colab実行コマンド（サブセット推奨）
+python scripts/train_ultrachat.py --num_layers 4 --max_samples 100000
+
+# フルデータセット（1.5M件）
+python scripts/train_ultrachat.py --num_layers 4
+```
+
+**実装済み**:
+- ✅ `scripts/train_ultrachat.py` - 訓練スクリプト
+- ✅ `src/training/ultrachat_dataset.py` - データセットローダー
+- ✅ `tests/test_ultrachat_training.py` - テストスイート（全テスト合格）
+- ✅ `ULTRACHAT_TRAINING.md` - Colab訓練ガイド
+
+**これをクリアしたら**: 非常に多様な対話に対応可能（**対話能力の完成**）
 
 ---
 
@@ -294,30 +311,38 @@ epochs = 200  # 十分に訓練
 
 ## 🚀 次の一歩
 
-**現在の位置**: Level 1完了、Level 2準備完了
+**現在の位置**: Level 1完了、Level 2-3準備完了
 
 **推奨アクション**:
 
+**オプションA: HH-RLHF（高品質対話、85k件）**
 ```bash
-# HH-RLHF訓練開始（Layer 1）
-python scripts/train_hh_rlhf.py --num_layers 1
-
-# または Layer 4（推奨）
+# Layer 4推奨（20-30分）
 python scripts/train_hh_rlhf.py --num_layers 4
 ```
 
-**期待される訓練時間**: 20-30分（Layer 1）、30-40分（Layer 4）
+**オプションB: UltraChat（大規模多様対話、1.5M件）← 推奨**
+```bash
+# サブセット10万件（20-40分）
+python scripts/train_ultrachat.py --num_layers 4 --max_samples 100000
 
-**成功したら**: UltraChat（Level 3）に進む
+# またはフルデータセット（2-3時間）
+python scripts/train_ultrachat.py --num_layers 4
+```
+
+**推奨**: HH-RLHFをスキップして、**UltraChat**に直接進む（より実践的）
+
+**成功したら**: 対話能力完成 → Level 4（CodeAlpaca）でコード生成能力を追加
 
 ---
 
 ## 📚 参考
 
 - Dolly-15k: `experiments/dolly_dialog_experiment_2025-11-19.md`
-- HH-RLHF: `scripts/train_hh_rlhf.py`
+- HH-RLHF: `HH_RLHF_TRAINING.md`, `scripts/train_hh_rlhf.py`
+- UltraChat: `ULTRACHAT_TRAINING.md`, `scripts/train_ultrachat.py`
 - Layer Optimization: `experiments/layer_optimization_experiment_2025-11-18.md`
 
 ---
 
-**現在のステータス**: Level 2（HH-RLHF）実装完了、テスト済み、訓練準備完了 ✅
+**現在のステータス**: Level 2（HH-RLHF）& Level 3（UltraChat）実装完了、テスト済み、訓練準備完了 ✅
