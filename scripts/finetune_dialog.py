@@ -62,14 +62,7 @@ def finetune_new_llm_on_dialog(pretrained_path: str = None):
 
     # モデル作成
     print("\nCreating New-LLM model...")
-    model = ContextVectorLLM(
-        vocab_size=config.vocab_size,
-        embed_dim=config.embed_dim,
-        hidden_dim=config.hidden_dim,
-        num_layers=config.num_layers,
-        context_vector_dim=config.context_vector_dim,
-        dropout=config.dropout
-    )
+    model = ContextVectorLLM(config)
 
     # 事前学習済みモデルをロード（存在すれば）
     if pretrained_path and os.path.exists(pretrained_path):
@@ -89,11 +82,16 @@ def finetune_new_llm_on_dialog(pretrained_path: str = None):
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {num_params:,} ({num_params/1e6:.2f}M)")
 
+    # DataLoader作成
+    from torch.utils.data import DataLoader
+    train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
+
     # Trainer作成
     trainer = Trainer(
         model=model,
-        train_dataset=train_dataset,
-        val_dataset=val_dataset,
+        train_dataloader=train_dataloader,
+        val_dataloader=val_dataloader,
         config=config,
         model_name="new_llm_dialog"
     )
@@ -146,11 +144,16 @@ def finetune_tinygpt2_on_dialog(pretrained_path: str = None):
     num_params = model.get_num_parameters()
     print(f"Model parameters: {num_params:,} ({num_params/1e6:.2f}M)")
 
+    # DataLoader作成
+    from torch.utils.data import DataLoader
+    train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
+
     # Trainer作成
     trainer = Trainer(
         model=model,
-        train_dataset=train_dataset,
-        val_dataset=val_dataset,
+        train_dataloader=train_dataloader,
+        val_dataloader=val_dataloader,
         config=config,
         model_name="tinygpt2_dialog"
     )

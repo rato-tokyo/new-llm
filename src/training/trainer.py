@@ -211,10 +211,22 @@ class Trainer:
                 self.save_checkpoint(f"best_{self.model_name}.pt")
                 print(f"✓ Saved best model (val_loss: {val_loss:.4f})")
 
+            # Save periodic checkpoint and progress (every 5 epochs)
+            if (epoch + 1) % 5 == 0:
+                self.save_checkpoint(f"{self.model_name}_epoch_{epoch + 1}.pt")
+                self.save_training_progress(epoch + 1)
+                self.plot_and_save_training_curves(suffix=f"_epoch_{epoch + 1}")
+                print(f"✓ Saved checkpoint at epoch {epoch + 1}")
+
+            # Always save latest progress (for resume)
+            self.save_training_progress(epoch + 1)
+
             # Early stopping check
             if self.early_stopping(val_loss):
                 print(f"\n⚠ Early stopping triggered at epoch {epoch + 1}")
                 print(f"No improvement for {self.early_stopping.patience} epochs")
+                # Save final state before stopping
+                self.save_training_progress(epoch + 1, final=True)
                 break
 
         print(f"\n{'='*60}")
@@ -227,7 +239,41 @@ class Trainer:
 
         return self.train_losses, self.val_losses
 
-    def plot_and_save_training_curves(self):
+    def save_training_progress(self, epoch, final=False):
+        """Save training progress to JSON for later review"""
+        import json
+
+        progress = {
+            "model_name": self.model_name,
+            "current_epoch": epoch,
+            "total_epochs": self.config.num_epochs,
+            "train_losses": self.train_losses,
+            "val_losses": self.val_losses,
+            "train_ppls": self.train_ppls,
+            "val_ppls": self.val_ppls,
+            "best_val_loss": min(self.val_losses) if self.val_losses else None,
+            "best_val_ppl": min(self.val_ppls) if self.val_ppls else None,
+            "stopped_early": final and epoch < self.config.num_epochs,
+            "config": {
+                "vocab_size": self.config.vocab_size,
+                "embed_dim": self.config.embed_dim,
+                "hidden_dim": self.config.hidden_dim,
+                "num_layers": self.config.num_layers,
+                "batch_size": self.config.batch_size,
+                "learning_rate": self.config.learning_rate,
+            }
+        }
+
+        suffix = "_final" if final else ""
+        filename = f"checkpoints/{self.model_name}_progress{suffix}.json"
+        os.makedirs("checkpoints", exist_ok=True)
+        with open(filename, 'w') as f:
+            json.dump(progress, f, indent=2)
+
+        if final:
+            print(f"✓ Saved final training progress to {filename}")
+
+    def plot_and_save_training_curves(self, suffix=""):
         """Plot and save training/validation curves as image"""
         fig, axes = plt.subplots(1, 2, figsize=(14, 5))
 
@@ -270,9 +316,9 @@ class Trainer:
 
         # Use experiment_name if provided (for multi-experiment workflows)
         if self.experiment_name:
-            filename = f"{self.experiment_name}_training_curves.png"
+            filename = f"{self.experiment_name}_training_curves{suffix}.png"
         else:
-            filename = f"{self.model_name}_training_curves.png"
+            filename = f"{self.model_name}_training_curves{suffix}.png"
 
         save_path = os.path.join(checkpoint_dir, filename)
         plt.savefig(save_path, dpi=150, bbox_inches='tight')

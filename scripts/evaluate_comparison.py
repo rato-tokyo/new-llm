@@ -47,14 +47,7 @@ def load_model(model_type: str, checkpoint_path: str, config):
         モデルインスタンス
     """
     if model_type == 'new_llm':
-        model = ContextVectorLLM(
-            vocab_size=config.vocab_size,
-            embed_dim=config.embed_dim,
-            hidden_dim=config.hidden_dim,
-            num_layers=config.num_layers,
-            context_vector_dim=config.context_vector_dim,
-            dropout=config.dropout
-        )
+        model = ContextVectorLLM(config)
     elif model_type == 'tinygpt2':
         model = create_gpt2_baseline(config, tiny=True)
     else:

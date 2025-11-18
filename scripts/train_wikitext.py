@@ -25,19 +25,27 @@ from src.training.trainer import Trainer
 
 
 class WikiTextConfig(NewLLMConfig):
-    """WikiText事前学習用の設定
+    """WikiText事前学習用の設定（軽量版）
 
-    ランダム生成データ (500文) → WikiText (数千文) なので
-    より長い訓練が必要。
+    目標: 4Mパラメータ程度に削減
+    過去の実験で肥大化した設定をリセット
     """
     # データ関連
     max_seq_length = 64      # WikiTextは長いので拡張
     vocab_size = 1000        # 維持（メモリ制約）
 
+    # モデルアーキテクチャ（軽量化）
+    embed_dim = 256          # 維持
+    hidden_dim = 512         # 1024 → 512 (半分に削減)
+    num_layers = 6           # 11 → 6 (半分に削減)
+    context_vector_dim = 256 # 512 → 256 (半分に削減)
+    dropout = 0.1
+
     # 訓練ハイパーパラメータ
-    num_epochs = 100         # WikiTextは大きいので長く訓練
-    batch_size = 16
+    num_epochs = 50          # 100 → 50 (半分に削減)
+    batch_size = 32          # 16 → 32 (倍増で高速化)
     learning_rate = 0.0001
+    weight_decay = 0.0
     gradient_clip = 1.0
 
     # Early Stopping（過学習防止）
@@ -61,23 +69,21 @@ def train_new_llm_on_wikitext():
 
     # モデル作成
     print("\nCreating New-LLM model...")
-    model = ContextVectorLLM(
-        vocab_size=config.vocab_size,
-        embed_dim=config.embed_dim,
-        hidden_dim=config.hidden_dim,
-        num_layers=config.num_layers,
-        context_vector_dim=config.context_vector_dim,
-        dropout=config.dropout
-    )
+    model = ContextVectorLLM(config)
 
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {num_params:,} ({num_params/1e6:.2f}M)")
 
+    # DataLoader作成
+    from torch.utils.data import DataLoader
+    train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
+
     # Trainer作成
     trainer = Trainer(
         model=model,
-        train_dataset=train_dataset,
-        val_dataset=val_dataset,
+        train_dataloader=train_dataloader,
+        val_dataloader=val_dataloader,
         config=config,
         model_name="new_llm_wikitext"
     )
@@ -115,11 +121,16 @@ def train_tinygpt2_on_wikitext():
     num_params = model.get_num_parameters()
     print(f"Model parameters: {num_params:,} ({num_params/1e6:.2f}M)")
 
+    # DataLoader作成
+    from torch.utils.data import DataLoader
+    train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
+
     # Trainer作成
     trainer = Trainer(
         model=model,
-        train_dataset=train_dataset,
-        val_dataset=val_dataset,
+        train_dataloader=train_dataloader,
+        val_dataloader=val_dataloader,
         config=config,
         model_name="tinygpt2_wikitext"
     )
