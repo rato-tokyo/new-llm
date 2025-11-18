@@ -50,7 +50,7 @@ class FP16Config(NewLLML4Config):
     # batch_size = 2048  ← NewLLML4Configから自動継承（L4用）
     # device = "cuda"    ← NewLLML4Configから自動継承
     num_epochs = 50
-    learning_rate = 0.0001
+    learning_rate = 0.0004  # Linear Scaling Rule: batch_size 4x → LR 4x
     weight_decay = 0.0
     gradient_clip = 1.0
 

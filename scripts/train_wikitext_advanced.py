@@ -63,10 +63,10 @@ class AdvancedConfig(NewLLMAdvancedGPUConfig):
     dropout = 0.1
 
     # 訓練ハイパーパラメータ（NewLLMAdvancedGPUConfigから継承）
-    # batch_size = 512  ← NewLLMAdvancedGPUConfigから自動継承
-    # device = "cuda"   ← NewLLMAdvancedGPUConfigから自動継承
+    # batch_size = 2048  ← NewLLMAdvancedL4Configから自動継承
+    # device = "cuda"    ← NewLLMAdvancedL4Configから自動継承
     num_epochs = 50
-    learning_rate = 0.0001
+    learning_rate = 0.0004  # Linear Scaling Rule: batch_size 4x → LR 4x
     weight_decay = 0.0
     gradient_clip = 1.0
 

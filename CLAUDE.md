@@ -295,6 +295,61 @@ grep -n "CPUでも" scripts/train_*.py
 
 **この確認を怠ると、GPU性能を全く活かせません！**
 
+#### 🎓 Learning Rate Scaling Rule - CRITICAL
+
+**batch_sizeを変更したら、learning_rateも比例して変更すること**
+
+##### ❌ 発生した問題（2025-11-18）
+
+**問題**: batch_sizeを512→2048に4倍したが、learning_rateを調整しなかった
+**影響**: Epoch 29でPPL 46.7（以前の実験はEpoch 27でPPL 23.34）
+**原因**: 実効学習率が1/4になり、学習が遅くなった
+
+##### ✅ Linear Scaling Rule
+
+**基本原則**（Goyal et al., 2017）:
+```
+batch_sizeをk倍にしたら、learning_rateもk倍にする
+```
+
+**理由**:
+- batch_sizeが大きい → 1回のgradient updateで平均化されるサンプル数が多い
+- gradientのノイズが減る → より安定だが、更新ステップが小さくなる
+- **学習率を比例して増やさないと、学習が遅くなる**
+
+**例**:
+```python
+# T4 GPU設定
+batch_size = 512
+learning_rate = 0.0001
+
+# L4 GPU設定（batch_size 4倍）
+batch_size = 2048
+learning_rate = 0.0004  # 4倍に調整！
+
+# A100 GPU設定（batch_size 8倍）
+batch_size = 4096
+learning_rate = 0.0008  # 8倍に調整！
+```
+
+##### 実測結果（2025-11-18）
+
+| 設定 | batch_size | learning_rate | 実効LR | Epoch 27-29のPPL |
+|------|-----------|--------------|--------|-----------------|
+| **以前（T4/CPU）** | 512 | 0.0001 | 0.0001 | **23.34** ✓ |
+| **修正前（L4）** | 2048 | 0.0001 | 0.000025 | **46.7** ✗ |
+| **修正後（L4）** | 2048 | 0.0004 | 0.0001 | 期待: 23程度 |
+
+##### チェックリスト
+
+batch_size変更時:
+- [ ] learning_rateも比例して変更したか？
+- [ ] T4 (512) → L4 (2048): LR 4倍
+- [ ] T4 (512) → A100 (4096): LR 8倍
+- [ ] 最初のエポックでPPLが急速に減少しているか？
+
+**この原則を怠ると、学習が著しく遅くなります！**
+
 ### 📦 設定の一元管理ポリシー - CRITICAL
 
 **すべての設定値は `src/utils/config.py` で一元管理すること**
