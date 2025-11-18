@@ -21,7 +21,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
 from torch.cuda.amp import autocast, GradScaler
-from src.utils.config import NewLLMGPUConfig
+from src.utils.config import NewLLML4Config
 from src.models.context_vector_llm import ContextVectorLLM
 from src.training.wikitext_dataset import load_wikitext_data
 from src.training.trainer import Trainer
@@ -29,10 +29,10 @@ from torch.utils.data import DataLoader
 import time
 
 
-class FP16Config(NewLLMGPUConfig):
-    """FP16混合精度訓練用の設定
+class FP16Config(NewLLML4Config):
+    """FP16混合精度訓練用の設定（L4 GPU最適化）
 
-    GPU最適化設定（batch_size=512, device="cuda"）を継承
+    L4 GPU最適化設定（batch_size=2048, device="cuda"）を継承
     WikiText-2用にmax_seq_lengthなどを調整
     """
     # データ関連（WikiText-2用）
@@ -46,9 +46,9 @@ class FP16Config(NewLLMGPUConfig):
     context_vector_dim = 256
     dropout = 0.1
 
-    # 訓練ハイパーパラメータ（NewLLMGPUConfigから継承）
-    # batch_size = 512  ← NewLLMGPUConfigから自動継承
-    # device = "cuda"   ← NewLLMGPUConfigから自動継承
+    # 訓練ハイパーパラメータ（NewLLML4Configから継承）
+    # batch_size = 2048  ← NewLLML4Configから自動継承（L4用）
+    # device = "cuda"    ← NewLLML4Configから自動継承
     num_epochs = 50
     learning_rate = 0.0001
     weight_decay = 0.0

@@ -122,36 +122,75 @@ class NewLLMGPUConfig(NewLLMConfig):
     """
     GPU-optimized configuration for New-LLM (Colab/Cloud)
 
-    Optimized for:
-    - T4 GPU (16GB): batch_size=512
-    - L4 GPU (24GB): batch_size=512-1024
-    - A100 GPU (40GB): batch_size=1024-2048
-
-    Use this for all Google Colab experiments.
+    Default for T4 GPU (16GB VRAM).
+    For L4/A100, use specialized config classes below.
     """
     # ========== GPU-Optimized Training ==========
-    batch_size = 512         # GPU batch size (16x larger than CPU)
+    batch_size = 512         # T4 GPU (16GB) baseline
     device = "cuda"          # GPU device
 
     # Inherit all other settings from NewLLMConfig
     # (vocab_size, embed_dim, hidden_dim, num_layers, etc.)
 
 
-class NewLLMAdvancedGPUConfig(NewLLMGPUConfig):
+class NewLLML4Config(NewLLMConfig):
     """
-    Advanced GPU configuration with larger capacity
+    L4 GPU-optimized configuration (24GB VRAM)
+
+    L4 has 1.5x more VRAM than T4, so batch_size can be 4x larger
+    (measured: 512 → 5.5GB, so 2048 → ~22GB with safety margin)
+    """
+    # ========== L4 GPU-Optimized Training ==========
+    batch_size = 2048        # L4 GPU (24GB) - 4x T4
+    device = "cuda"          # GPU device
+
+
+class NewLLMA100Config(NewLLMConfig):
+    """
+    A100 GPU-optimized configuration (40GB VRAM)
+
+    A100 has 2.5x more VRAM than T4, so batch_size can be ~8x larger
+    """
+    # ========== A100 GPU-Optimized Training ==========
+    batch_size = 4096        # A100 GPU (40GB) - 8x T4
+    device = "cuda"          # GPU device
+
+
+class NewLLMAdvancedL4Config(NewLLML4Config):
+    """
+    Advanced L4 GPU configuration with larger model capacity
 
     For experiments with:
     - Larger context vectors (512, 1024, 2048)
     - More layers (12, 24, 48)
 
-    Inherits GPU optimization from NewLLMGPUConfig.
+    Inherits L4 optimization (batch_size=2048) from NewLLML4Config.
     """
     # ========== Scaled-up Architecture ==========
     context_vector_dim = 512  # 2x larger context (can be 1024, 2048)
     num_layers = 12           # 2x more layers
 
-    # All other settings inherited from NewLLMGPUConfig
+    # batch_size=2048, device="cuda" inherited from NewLLML4Config
+
+
+class NewLLMAdvancedA100Config(NewLLMA100Config):
+    """
+    Advanced A100 GPU configuration with larger model capacity
+    """
+    # ========== Scaled-up Architecture ==========
+    context_vector_dim = 512  # 2x larger context
+    num_layers = 12           # 2x more layers
+
+    # batch_size=4096, device="cuda" inherited from NewLLMA100Config
+
+
+# Legacy alias for backward compatibility
+class NewLLMAdvancedGPUConfig(NewLLMAdvancedL4Config):
+    """
+    Legacy alias - use NewLLMAdvancedL4Config or NewLLMAdvancedA100Config instead
+    Defaults to L4 optimization.
+    """
+    pass
 
 
 # Legacy alias for backward compatibility

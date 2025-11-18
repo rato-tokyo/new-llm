@@ -267,11 +267,21 @@ batch_size = 512  # GPU最適化（L4/A100用）
 
 #### GPU別の推奨batch_size
 
-| GPU | VRAM | 推奨batch_size | 備考 |
-|-----|------|---------------|------|
-| **T4** | 16GB | 512 | Baseline model |
-| **L4** | 24GB | 512-1024 | Advanced model |
-| **A100** | 40GB | 1024-2048 | 最大モデル |
+| GPU | VRAM | 推奨batch_size | 実測（Baseline） | 備考 |
+|-----|------|---------------|----------------|------|
+| **T4** | 16GB | 512 | ~8GB使用 | Baseline model |
+| **L4** | 24GB | **2048** | **512→5.5GB、2048→22GB** | **4x T4** |
+| **A100** | 40GB | **4096** | 推定35-38GB | **8x T4** |
+
+**重要**: この表は実測値に基づいています（2025-11-18, L4 GPU実測）
+
+**計算式**:
+```
+batch_size = 512 * (GPU_VRAM / 16GB) * utilization_factor
+- T4 (16GB): 512 * 1.0 = 512
+- L4 (24GB): 512 * 4.0 = 2048 (実測で検証済み)
+- A100 (40GB): 512 * 8.0 = 4096
+```
 
 #### スクリプトレビュー時の確認コマンド
 
@@ -313,25 +323,30 @@ class MyConfig(NewLLMGPUConfig):
 
 | クラス名 | 用途 | 主要設定 |
 |---------|------|---------|
-| `NewLLMConfig` | CPU訓練（ベースライン） | batch_size=16, device="cpu" |
-| **`NewLLMGPUConfig`** | **GPU訓練（推奨）** | **batch_size=512, device="cuda"** |
-| **`NewLLMAdvancedGPUConfig`** | **大規模モデル（GPU）** | **context=512, layers=12** |
+| `NewLLMConfig` | CPU訓練（レガシー） | batch_size=16, device="cpu" |
+| `NewLLMGPUConfig` | T4 GPU訓練 | batch_size=512, device="cuda" |
+| **`NewLLML4Config`** | **L4 GPU訓練（推奨）** | **batch_size=2048, device="cuda"** |
+| **`NewLLMA100Config`** | **A100 GPU訓練（最高性能）** | **batch_size=4096, device="cuda"** |
+| **`NewLLMAdvancedL4Config`** | **L4 + 大規模モデル** | **batch=2048, context=512, layers=12** |
+| **`NewLLMAdvancedA100Config`** | **A100 + 大規模モデル** | **batch=4096, context=512, layers=12** |
 | `TransformerConfig` | Transformerベースライン | 比較実験用 |
+
+**推奨**: Colab Proで**L4 GPU**を使う場合は`NewLLML4Config`または`NewLLMAdvancedL4Config`を継承
 
 #### 実装パターン
 
-**新しい実験スクリプトを作成する時**:
+**新しい実験スクリプトを作成する時（L4 GPU）**:
 
 ```python
-# 1. 適切な設定クラスをインポート
-from src.utils.config import NewLLMGPUConfig  # または NewLLMAdvancedGPUConfig
+# 1. L4 GPU用設定クラスをインポート
+from src.utils.config import NewLLML4Config  # L4 GPU (24GB)
 
 # 2. 継承して、実験固有の設定のみ上書き
-class MyExperimentConfig(NewLLMGPUConfig):
-    """My experiment configuration
+class MyExperimentConfig(NewLLML4Config):
+    """My experiment configuration for L4 GPU
 
-    Inherits GPU optimization from NewLLMGPUConfig:
-    - batch_size = 512
+    Inherits L4 optimization from NewLLML4Config:
+    - batch_size = 2048  ← L4用に最適化済み
     - device = "cuda"
     """
     # 実験固有の設定のみ記述
@@ -340,6 +355,23 @@ class MyExperimentConfig(NewLLMGPUConfig):
 
 # 3. 使用
 config = MyExperimentConfig()
+```
+
+**大規模モデルの場合（L4 GPU）**:
+
+```python
+from src.utils.config import NewLLMAdvancedL4Config
+
+class MyAdvancedConfig(NewLLMAdvancedL4Config):
+    """Advanced model for L4 GPU
+
+    Inherits:
+    - batch_size = 2048
+    - context_vector_dim = 512
+    - num_layers = 12
+    """
+    # 実験固有の設定のみ
+    num_epochs = 100
 ```
 
 #### 設定変更が必要な場合
