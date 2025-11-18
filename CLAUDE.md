@@ -97,6 +97,149 @@ ls -lh checkpoints/best_*.pt
 
 ---
 
+## Google Colab 実験管理ポリシー - CRITICAL
+
+### 🌐 Colab実験の推奨ワークフロー
+
+**基本原則**: `git pull`ではなく、**毎回`git clone`で最新版を取得**
+
+#### なぜ`git clone`が推奨されるのか？
+
+**❌ 悪い方法**: `git pull`
+```bash
+cd new-llm
+git pull origin main  # ❌ 問題が発生しやすい
+```
+
+**問題点**:
+- マージコンフリクトが発生する可能性
+- ローカル変更が残っている場合にエラー
+- 状態が不確実（どのコミットか不明確）
+
+**✅ 推奨方法**: `rm -rf` → `git clone`
+```bash
+rm -rf new-llm           # 古いディレクトリを完全削除
+git clone https://...    # 最新版を新規クローン
+cd new-llm
+```
+
+**利点**:
+- ✅ **確実に最新版**を取得
+- ✅ マージコンフリクト不要
+- ✅ クリーンな状態で開始
+- ✅ 状態が明確（常にmain branchの最新）
+
+#### Colabの特性
+
+**Colabはステートレス環境**:
+- セッション終了で全ファイルが消失
+- 毎回クリーンな環境から開始
+- ローカル変更を保持する必要がない
+
+→ **毎回`git clone`が最適解**
+
+### 📦 実験スクリプトの設計原則
+
+**1行コマンドで実験開始できるようにする**
+
+**悪い例** - 複数ステップが必要:
+```bash
+# ❌ 手間が多い
+!git clone https://...
+%cd new-llm
+!pip install datasets
+!sed -i 's/512/1024/' script.py
+!python script.py
+```
+
+**良い例** - 1行で完結:
+```bash
+# ✅ 1行で全自動
+!curl -s https://raw.githubusercontent.com/.../run_experiments.sh | bash
+```
+
+**スクリプト内に含めるべき処理**:
+1. `rm -rf` + `git clone`（最新版取得）
+2. 依存関係インストール
+3. 設定ファイルの自動編集
+4. バックグラウンド実行
+5. 初期ログ表示
+
+### 🔄 実験スクリプトのテンプレート
+
+```bash
+#!/bin/bash
+set -e
+
+# 1. 最新版を取得（git pullではなくclone）
+cd /content
+rm -rf project-name
+git clone https://github.com/user/project-name
+cd project-name
+
+# 2. 依存関係インストール
+pip install -q package1 package2
+
+# 3. 設定の自動調整（必要に応じて）
+sed -i 's/old_value/new_value/' config.py
+
+# 4. 実験開始（バックグラウンド）
+nohup python3 script.py > /content/log.txt 2>&1 &
+
+# 5. 初期状態表示
+sleep 5
+tail -20 /content/log.txt
+```
+
+### ⚡ Colab実験の効率化
+
+#### 並列実験の実行
+
+**GPU余裕がある場合は複数実験を同時実行**:
+
+```bash
+# 実験1
+nohup python3 experiment1.py > exp1.log 2>&1 &
+
+# 実験2（GPU余裕がある）
+nohup python3 experiment2.py > exp2.log 2>&1 &
+
+# GPU使用状況確認
+nvidia-smi
+```
+
+#### 90分制限への対処
+
+**Colab無料版は90分で切断**:
+- 各実験は30-40分以内に完了するよう設計
+- 長時間実験はチェックポイント保存機能必須
+- Google Driveマウントでチェックポイント保存
+
+### 📋 Colab実験チェックリスト
+
+実験スクリプト作成時の確認事項:
+
+- [ ] `rm -rf` + `git clone`で最新版取得
+- [ ] 1行コマンドで実行可能
+- [ ] インデントなし（コピペエラー防止）
+- [ ] バックグラウンド実行（`nohup` + `&`）
+- [ ] ログファイル出力（進捗確認用）
+- [ ] GPU確認コマンド提供
+- [ ] 90分以内に完了する設計
+
+### 🎯 ベストプラクティスまとめ
+
+**鉄則**:
+1. ✅ **`git clone`を使う**（`git pull`は使わない）
+2. ✅ **1行で実行できる**スクリプトを提供
+3. ✅ **インデント不要**な設計（コピペ対応）
+4. ✅ **バックグラウンド実行**で複数実験並列化
+5. ✅ **ログファイル**で進捗確認可能に
+
+**この方針により、Colab実験が確実・効率的になります。**
+
+---
+
 ## New-LLM Architecture Design Principles - CRITICAL
 
 ### 🎯 固定メモリ使用量の原則（Fixed Memory Usage Principle）
