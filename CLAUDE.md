@@ -1,5 +1,102 @@
 # Claude Code Development Guidelines for New-LLM Project
 
+## 実験管理ポリシー - CRITICAL
+
+### 🛑 実験終了時の必須チェックリスト
+
+**実験を停止・終了する際は、必ず以下を確認すること**
+
+#### 1. プロセスの完全停止確認
+
+```bash
+# ステップ1: 訓練プロセスの停止
+pkill -f "python.*train"
+
+# ステップ2: プロセスが停止したか確認
+ps aux | grep "python.*train" | grep -v grep
+
+# ステップ3: CPU使用率の確認
+top -l 1 | head -n 5
+```
+
+**確認項目**:
+- [ ] `ps aux`でPythonの訓練プロセスが存在しないこと
+- [ ] CPU idle（空き）が **50%以上** であること
+- [ ] Load Averageが低下していること
+
+#### 2. 実験終了時の必須手順
+
+```bash
+# 1. すべての訓練プロセスを停止
+pkill -9 -f "python.*train"
+
+# 2. 3秒待機（プロセス終了を確実に）
+sleep 3
+
+# 3. CPU使用率を確認
+top -l 1 | head -n 5
+
+# 4. 結果が正常であることを確認
+# - CPU idle > 50%
+# - Python訓練プロセス不在
+```
+
+#### 3. CPU使用率の判定基準
+
+| CPU idle | 状態 | 対処 |
+|----------|------|------|
+| **> 70%** | ✅ 正常 | 問題なし |
+| **50-70%** | ⚠️ 注意 | 他のプロセス確認 |
+| **< 50%** | ❌ 異常 | **訓練プロセスが残存** |
+
+**異常時の対処**:
+```bash
+# より強力な停止
+pkill -9 -f "python.*train"
+
+# 個別プロセスのkill
+kill -9 <PID>
+```
+
+#### 4. バックグラウンドシェルの確認
+
+Claude Codeのバックグラウンドシェルも確認：
+
+```bash
+# /bashes コマンドで確認
+# 不要なシェルは手動で停止
+```
+
+### ⚠️ 実験停止を怠った場合の問題
+
+1. **CPU資源の無駄** - 不要な訓練が継続
+2. **メモリ圧迫** - 他の作業に影響
+3. **結果の不整合** - 意図しない訓練が進行
+4. **マシンの過負荷** - システム全体のパフォーマンス低下
+
+### ✅ 実験終了の推奨ワークフロー
+
+```bash
+# 1. 訓練停止
+pkill -9 -f "python.*train"
+
+# 2. 待機
+sleep 3
+
+# 3. 確認（これが最重要！）
+top -l 1 | head -n 5
+
+# 4. 結果の保存確認
+ls -lh checkpoints/best_*.pt
+
+# 5. 実験サマリーの作成
+# experiments/ディレクトリに結果をまとめる
+```
+
+**この手順を必ず守ること！**
+
+---
+
 ## New-LLM Architecture Design Principles - CRITICAL
 
 ### 🎯 固定メモリ使用量の原則（Fixed Memory Usage Principle）
