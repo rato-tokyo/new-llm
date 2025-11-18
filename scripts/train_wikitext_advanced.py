@@ -131,6 +131,18 @@ def train_new_llm_advanced():
     print("="*80)
     print("Advanced WikiText-2 Training Experiment")
     print("="*80)
+
+    # GPU/CPU情報を明示的に表示
+    print(f"\n🖥️  Device Information:")
+    print(f"  Device: {config.device.upper()}")
+    if torch.cuda.is_available():
+        print(f"  GPU: {torch.cuda.get_device_name(0)}")
+        print(f"  GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+        print(f"  ⚡ GPU acceleration ENABLED")
+    else:
+        print(f"  ⚠️  WARNING: Running on CPU (will be VERY SLOW)")
+        print(f"  💡 Solution: Runtime → Change runtime type → GPU (T4)")
+
     print(f"\n実験設定:")
     print(f"  Context Vector Dim: {config.context_vector_dim}")
     print(f"  Number of Layers: {config.num_layers}")
