@@ -7,6 +7,15 @@ Expands context_vector_dim while preserving learned parameters.
 New dimensions are zero-initialized to maintain training stability.
 
 Usage:
+    # Pattern A: Freeze base dimensions (Transfer Learning)
+    python scripts/train_wikitext_context_expansion.py \
+        --base_checkpoint best_new_llm_wikitext_fp16_layers1.pt \
+        --base_context_dim 256 \
+        --expanded_context_dim 512 \
+        --num_layers 1 \
+        --freeze_base_dims
+
+    # Pattern B: Fine-tune all dimensions (Standard)
     python scripts/train_wikitext_context_expansion.py \
         --base_checkpoint best_new_llm_wikitext_fp16_layers1.pt \
         --base_context_dim 256 \
@@ -22,7 +31,7 @@ import torch
 from src.utils.config import NewLLML4Config
 from src.models.context_vector_llm import ContextVectorLLM
 from src.training.wikitext_dataset import load_wikitext_data
-from src.training.fp16_trainer import FP16Trainer
+from src.training.context_expansion_trainer import ContextExpansionTrainer
 from torch.utils.data import DataLoader
 import time
 import argparse
@@ -205,6 +214,8 @@ def main():
                         help='Expanded context vector dimension (e.g., 512)')
     parser.add_argument('--num_layers', type=int, required=True,
                         help='Number of layers (e.g., 1)')
+    parser.add_argument('--freeze_base_dims', action='store_true',
+                        help='Freeze base dimensions during training (only train new dimensions)')
     args = parser.parse_args()
 
     print("\n" + "="*80)
@@ -246,6 +257,14 @@ def main():
     print(f"  Expansion ratio: {args.expanded_context_dim / args.base_context_dim:.1f}x")
     print(f"  New dimensions: {args.expanded_context_dim - args.base_context_dim} (zero-initialized)")
     print(f"  Num layers: {args.num_layers}")
+    print(f"\n🎯 Training Strategy:")
+    if args.freeze_base_dims:
+        print(f"  Mode: Freeze Base (Transfer Learning)")
+        print(f"  ├─ Base dims (0:{args.base_context_dim}): FROZEN 🔒")
+        print(f"  └─ New dims ({args.base_context_dim}:{args.expanded_context_dim}): TRAINABLE ✓")
+    else:
+        print(f"  Mode: Fine-tune All (Standard)")
+        print(f"  └─ All dims (0:{args.expanded_context_dim}): TRAINABLE ✓")
 
     # Device info
     print(f"\n🖥️  Device Information:")
@@ -303,21 +322,32 @@ def main():
     num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"Model parameters: {num_params:,} ({num_params/1e6:.2f}M)")
 
-    # Create trainer
-    model_name = f"new_llm_wikitext_ctx{args.expanded_context_dim}_layers{args.num_layers}_expanded"
-    trainer = FP16Trainer(
+    # Create trainer with freeze mode
+    freeze_suffix = "_freeze" if args.freeze_base_dims else "_finetune"
+    model_name = f"new_llm_wikitext_ctx{args.expanded_context_dim}_layers{args.num_layers}_expanded{freeze_suffix}"
+
+    trainer = ContextExpansionTrainer(
         model=model,
         train_dataloader=train_dataloader,
         val_dataloader=val_dataloader,
         config=config,
         model_name=model_name,
-        use_amp=config.use_amp
+        use_amp=config.use_amp,
+        base_context_dim=args.base_context_dim,
+        freeze_base_dims=args.freeze_base_dims
     )
+
+    # Print parameter analysis
+    trainer.print_trainable_params()
 
     # Train
     print(f"\n🚀 Starting context expansion training...")
     print(f"   Biologically inspired progressive growth")
-    print(f"   Zero-initialized new dimensions will learn gradually\n")
+    if args.freeze_base_dims:
+        print(f"   🔒 Freeze Base Mode: Only new dimensions will learn")
+    else:
+        print(f"   🔓 Fine-tune Mode: All dimensions will be optimized")
+    print()
 
     start_time = time.time()
     trainer.train()
