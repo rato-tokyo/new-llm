@@ -22,11 +22,11 @@ import time
 import argparse
 
 
-def create_config(num_layers):
+def create_config(num_layers_value):
     """Create config class dynamically based on num_layers"""
 
     class LayerExperimentConfig(NewLLML4Config):
-        f"""Layer experiment configuration with {num_layers} layers
+        """Layer experiment configuration
 
         Fixed parameters:
         - batch_size = 2048 (L4 GPU optimized)
@@ -34,7 +34,7 @@ def create_config(num_layers):
         - context_vector_dim = 256
 
         Variable parameter:
-        - num_layers = {num_layers}
+        - num_layers (set dynamically)
         """
         # データ関連（WikiText-2用）
         max_seq_length = 64
@@ -43,7 +43,7 @@ def create_config(num_layers):
         # モデルアーキテクチャ
         embed_dim = 256
         hidden_dim = 512
-        num_layers = num_layers  # Variable
+        # num_layers will be set after class definition
         context_vector_dim = 256  # Fixed
         dropout = 0.1
 
@@ -60,6 +60,9 @@ def create_config(num_layers):
 
         # FP16設定
         use_amp = True
+
+    # Set num_layers after class definition
+    LayerExperimentConfig.num_layers = num_layers_value
 
     return LayerExperimentConfig
 
