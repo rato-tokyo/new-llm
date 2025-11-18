@@ -17,6 +17,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
+from torch.utils.data import DataLoader
 from src.models.context_vector_llm import ContextVectorLLM
 from src.training.fp16_trainer import FP16Trainer
 from src.training.dolly_dataset import load_dolly_data
@@ -128,6 +129,15 @@ def main():
     print(f"   Validation sequences: {len(val_dataset)}")
     print(f"   Vocabulary size: {len(tokenizer.word2idx)}")
 
+    # Create DataLoaders
+    print(f"\n📦 Creating DataLoaders...")
+    train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
+    val_dataloader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
+
+    print(f"✓ DataLoaders created")
+    print(f"   Train batches: {len(train_dataloader)}")
+    print(f"   Val batches: {len(val_dataloader)}")
+
     # Create model
     print("\n" + "="*80)
     print("Creating Model")
@@ -151,10 +161,11 @@ def main():
 
     trainer = FP16Trainer(
         model=model,
+        train_dataloader=train_dataloader,
+        val_dataloader=val_dataloader,
         config=config,
-        train_data=train_dataset,
-        val_data=val_dataset,
-        model_name=f"new_llm_dolly_layers{config.num_layers}"
+        model_name=f"new_llm_dolly_layers{config.num_layers}",
+        use_amp=config.use_amp
     )
 
     # Train
