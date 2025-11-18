@@ -350,6 +350,77 @@ batch_size変更時:
 
 **この原則を怠ると、学習が著しく遅くなります！**
 
+#### 📐 Model Size Scaling Rule - CRITICAL
+
+**モデルサイズを大きくしたら、learning_rateを小さくすること**
+
+##### ❌ 発生した問題（2025-11-18）
+
+**問題**: Advancedモデル（4.84M）でBaselineモデル（2.74M）と同じlearning_rate（0.0004）を使用
+**影響**: PPL 40.93（Baseline 30.78より33%悪化）
+**原因**: 大きなモデルには小さめのlearning_rateが必要だった
+
+##### ✅ Model Size Scaling Rule
+
+**基本原則**:
+```
+モデルサイズが大きい → learning_rateを小さくする
+```
+
+**理由**:
+- 大きなモデル → パラメータ数が多い → より繊細な調整が必要
+- 同じlearning_rateだと、大きなモデルほど不安定になりやすい
+- **Linear Scaling RuleはBATCH SIZE用であり、MODEL SIZE用ではない**
+
+**推奨スケーリング**:
+```python
+# Baseline (2.74M params)
+learning_rate = 0.0004
+
+# Advanced (4.84M params, 1.77x larger)
+learning_rate = 0.0002  # 半分に減らす（保守的）
+# または
+learning_rate = 0.0001  # 1/4に減らす（より安全）
+```
+
+**一般的な経験則**:
+```
+LR_new = LR_base / sqrt(params_new / params_base)
+
+例:
+- Baseline: 2.74M, LR=0.0004
+- Advanced: 4.84M (1.77x)
+- LR_new = 0.0004 / sqrt(1.77) = 0.0004 / 1.33 ≈ 0.0003
+```
+
+##### 実測結果（2025-11-18）
+
+| モデル | Params | learning_rate | PPL @ Epoch 50 | 評価 |
+|--------|--------|--------------|---------------|------|
+| **Baseline** | 2.74M | 0.0004 | **30.78** ✓ | 良好 |
+| **Advanced** | 4.84M | 0.0004 | **40.93** ✗ | 悪化 |
+| **Advanced（推奨）** | 4.84M | 0.0002 | 期待: 25以下 | 未実験 |
+
+##### Large Model Paradox
+
+**教訓**: より大きなモデルが必ずしも良い性能を出すとは限らない
+
+**2025-11-18の実験で発見**:
+- Advancedモデル（4.84M）はBaselineモデル（2.74M）より**33%性能が悪かった**
+- 原因: learning_rateの調整不足
+- 解決策: learning_rateを半減させる
+
+##### チェックリスト
+
+モデルサイズ変更時:
+- [ ] learning_rateを小さくしたか？
+- [ ] パラメータ数が2倍なら、LRを1/√2 ≈ 0.7倍に
+- [ ] パラメータ数が4倍なら、LRを1/2に
+- [ ] 最初の数エポックでPPLが順調に減少しているか？
+- [ ] 大きなモデルが小さなモデルより性能が良いか？（そうでなければLR調整不足）
+
+**この原則を怠ると、大きなモデルが逆に性能が悪くなります！**
+
 ### 📦 設定の一元管理ポリシー - CRITICAL
 
 **すべての設定値は `src/utils/config.py` で一元管理すること**
@@ -376,19 +447,21 @@ class MyConfig(NewLLMGPUConfig):
 
 #### 利用可能な設定クラス
 
-| クラス名 | 用途 | batch_size | learning_rate | その他 |
-|---------|------|-----------|--------------|--------|
-| `NewLLMConfig` | CPU訓練（レガシー） | 16 | 0.0001 | device="cpu" |
-| `NewLLMGPUConfig` | T4 GPU訓練 | 512 | 0.0001 | device="cuda" |
-| **`NewLLML4Config`** | **L4 GPU訓練（推奨）** | **2048** | **0.0004** | **device="cuda"** |
-| **`NewLLMA100Config`** | **A100 GPU訓練（最高性能）** | **4096** | **0.0008** | **device="cuda"** |
-| **`NewLLMAdvancedL4Config`** | **L4 + 大規模モデル** | **2048** | **0.0004** | **context=512, layers=12** |
-| **`NewLLMAdvancedA100Config`** | **A100 + 大規模モデル** | **4096** | **0.0008** | **context=512, layers=12** |
-| `TransformerConfig` | Transformerベースライン | 16 | 0.0001 | 比較実験用 |
+| クラス名 | 用途 | batch_size | learning_rate | Params | その他 |
+|---------|------|-----------|--------------|--------|--------|
+| `NewLLMConfig` | CPU訓練（レガシー） | 16 | 0.0001 | 2.74M | device="cpu" |
+| `NewLLMGPUConfig` | T4 GPU訓練 | 512 | 0.0001 | 2.74M | device="cuda" |
+| **`NewLLML4Config`** | **L4 GPU訓練（推奨）** | **2048** | **0.0004** | **2.74M** | **device="cuda"** |
+| **`NewLLMA100Config`** | **A100 GPU訓練** | **4096** | **0.0008** | **2.74M** | **device="cuda"** |
+| **`NewLLMAdvancedL4Config`** | **L4 + 大規模モデル** | **2048** | **0.0002** | **4.84M** | **context=512, layers=12** |
+| **`NewLLMAdvancedA100Config`** | **A100 + 大規模モデル** | **4096** | **0.0004** | **4.84M** | **context=512, layers=12** |
+| `TransformerConfig` | Transformerベースライン | 16 | 0.0001 | ~3M | 比較実験用 |
 
 **推奨**: Colab Proで**L4 GPU**を使う場合は`NewLLML4Config`または`NewLLMAdvancedL4Config`を継承
 
-**重要**: `batch_size`と`learning_rate`は**Linear Scaling Rule**に従って自動的に調整済み
+**重要**:
+- `batch_size`と`learning_rate`は**Linear Scaling Rule**（batch用）に従って調整済み
+- **Advanced configs**は**Model Size Scaling Rule**（model用）により`learning_rate`を半減
 
 #### 実装パターン
 

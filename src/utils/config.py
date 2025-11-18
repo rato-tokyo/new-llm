@@ -171,11 +171,16 @@ class NewLLMAdvancedL4Config(NewLLML4Config):
     - Larger context vectors (512, 1024, 2048)
     - More layers (12, 24, 48)
 
-    Inherits L4 optimization (batch_size=2048) from NewLLML4Config.
+    Model Size Scaling Rule: Larger model (4.84M vs 2.74M) → Lower learning rate
     """
     # ========== Scaled-up Architecture ==========
     context_vector_dim = 512  # 2x larger context (can be 1024, 2048)
     num_layers = 12           # 2x more layers
+
+    # ========== Learning Rate Adjustment for Model Size ==========
+    learning_rate = 0.0002    # Half of baseline (Model Size Scaling Rule)
+                              # Baseline (2.74M): 0.0004
+                              # Advanced (4.84M, 1.77x larger): 0.0002
 
     # batch_size=2048, device="cuda" inherited from NewLLML4Config
 
@@ -183,10 +188,17 @@ class NewLLMAdvancedL4Config(NewLLML4Config):
 class NewLLMAdvancedA100Config(NewLLMA100Config):
     """
     Advanced A100 GPU configuration with larger model capacity
+
+    Model Size Scaling Rule: Larger model → Lower learning rate
     """
     # ========== Scaled-up Architecture ==========
     context_vector_dim = 512  # 2x larger context
     num_layers = 12           # 2x more layers
+
+    # ========== Learning Rate Adjustment for Model Size ==========
+    learning_rate = 0.0004    # Half of baseline (Model Size Scaling Rule)
+                              # Baseline (2.74M): 0.0008
+                              # Advanced (4.84M, 1.77x larger): 0.0004
 
     # batch_size=4096, device="cuda" inherited from NewLLMA100Config
 
