@@ -91,59 +91,86 @@ class FP16ExtendedConfig(NewLLML4Config):
 class FP16Trainer(Trainer):
     """FP16混合精度対応のTrainer
 
-    torch.cuda.amp (Automatic Mixed Precision) を使用
+    PyTorch AMPを使ったFP16訓練
     """
-    def __init__(self, model, train_dataloader, val_dataloader, config, model_name="new_llm", use_amp=True):
-        super().__init__(model, train_dataloader, val_dataloader, config, model_name)
+
+    def __init__(self, *args, use_amp=True, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        # GPU必須チェック
+        if not torch.cuda.is_available():
+            raise RuntimeError("GPU not available! FP16 training requires CUDA GPU.")
+
         self.use_amp = use_amp
-        self.scaler = torch.amp.GradScaler('cuda') if use_amp else None
+        self.scaler = torch.amp.GradScaler('cuda')
+        print(f"\n✓ FP16 Mixed Precision enabled (AMP)")
 
-    def train_epoch(self):
-        """1エポックの訓練（FP16対応）"""
+    def train_epoch(self) -> tuple[float, float]:
+        """FP16対応の訓練エポック"""
         self.model.train()
-        total_loss = 0
-        num_batches = 0
+        total_loss = 0.0
+        total_tokens = 0
+        num_batches = len(self.train_dataloader)
 
-        for batch_idx, (input_ids, target_ids) in enumerate(self.train_dataloader):
-            input_ids = input_ids.to(self.device)
-            target_ids = target_ids.to(self.device)
+        print(f"  Training... ", end='', flush=True)
+        start_time = time.time()
+
+        for batch_idx, (inputs, targets) in enumerate(self.train_dataloader):
+            inputs = inputs.to(self.device)
+            targets = targets.to(self.device)
 
             self.optimizer.zero_grad()
 
-            # FP16混合精度で訓練
-            if self.use_amp:
-                with torch.amp.autocast('cuda'):
-                    logits = self.model(input_ids)
-                    loss = self.criterion(logits, target_ids)
+            # FP16 mixed precision forward/backward
+            with torch.amp.autocast('cuda'):
+                outputs = self.model(inputs)
+                if isinstance(outputs, tuple):
+                    logits = outputs[0]
+                else:
+                    logits = outputs
 
-                # Scaled backward pass
-                self.scaler.scale(loss).backward()
+                from src.evaluation.metrics import compute_loss
+                loss = compute_loss(logits, targets, pad_idx=0)
 
-                # Gradient clipping (unscale before clipping)
-                self.scaler.unscale_(self.optimizer)
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.gradient_clip)
+            # Scaled backward pass
+            self.scaler.scale(loss).backward()
 
-                # Optimizer step with scaling
-                self.scaler.step(self.optimizer)
-                self.scaler.update()
+            # Gradient clipping (unscale first)
+            self.scaler.unscale_(self.optimizer)
+
+            # Adaptive gradient clipping
+            if self.current_epoch < 10:
+                clip_value = 0.5
+            elif self.current_epoch < 30:
+                clip_value = 1.0
             else:
-                # FP32訓練（フォールバック）
-                logits = self.model(input_ids)
-                loss = self.criterion(logits, target_ids)
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self.config.gradient_clip)
-                self.optimizer.step()
+                clip_value = 2.0
 
-            total_loss += loss.item()
-            num_batches += 1
+            torch.nn.utils.clip_grad_norm_(
+                self.model.parameters(), clip_value
+            )
 
-            # プログレス表示
-            if (batch_idx + 1) % max(1, len(self.train_dataloader) // 5) == 0:
-                progress = int((batch_idx + 1) / len(self.train_dataloader) * 100)
-                print(f"{progress}% ", end="", flush=True)
+            # Optimizer step with scaling
+            self.scaler.step(self.optimizer)
+            self.scaler.update()
 
-        avg_loss = total_loss / num_batches
-        return avg_loss
+            # Track metrics
+            total_loss += loss.item() * inputs.size(0)
+            total_tokens += inputs.size(0)
+
+            # Compact progress display
+            if (batch_idx + 1) % max(1, num_batches // 5) == 0 or batch_idx == num_batches - 1:
+                progress = (batch_idx + 1) / num_batches * 100
+                print(f"{progress:.0f}%", end=' ', flush=True)
+
+        elapsed = time.time() - start_time
+
+        from src.evaluation.metrics import compute_perplexity
+        avg_loss = total_loss / total_tokens
+        avg_ppl = compute_perplexity(avg_loss)
+        print(f"| {elapsed/60:.1f}min | Loss: {avg_loss:.4f}")
+
+        return avg_loss, avg_ppl
 
 
 def main():
