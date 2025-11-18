@@ -141,11 +141,13 @@ class NewLLML4Config(NewLLMConfig):
     L4 has 1.5x more VRAM than T4, so batch_size can be 4x larger
     (measured: 512 → 5.5GB, so 2048 → ~22GB with safety margin)
 
-    Linear Scaling Rule: batch_size 4x → learning_rate 4x
+    Scaling Rule: batch_size 32→2048 (64x) → LR sqrt scaling
+    Base: batch=32, lr=0.0001
+    L4: batch=2048, lr=0.0001 * sqrt(64) = 0.0008
     """
     # ========== L4 GPU-Optimized Training ==========
-    batch_size = 2048        # L4 GPU (24GB) - 4x T4
-    learning_rate = 0.0004   # 4x T4 learning rate (Linear Scaling Rule)
+    batch_size = 2048        # L4 GPU (24GB) - 64x CPU baseline
+    learning_rate = 0.0008   # sqrt(64) = 8x CPU baseline (Square Root Scaling)
     device = "cuda"          # GPU device
 
 
@@ -155,11 +157,13 @@ class NewLLMA100Config(NewLLMConfig):
 
     A100 has 2.5x more VRAM than T4, so batch_size can be ~8x larger
 
-    Linear Scaling Rule: batch_size 8x → learning_rate 8x
+    Scaling Rule: batch_size 32→4096 (128x) → LR sqrt scaling
+    Base: batch=32, lr=0.0001
+    A100: batch=4096, lr=0.0001 * sqrt(128) ≈ 0.0011
     """
     # ========== A100 GPU-Optimized Training ==========
-    batch_size = 4096        # A100 GPU (40GB) - 8x T4
-    learning_rate = 0.0008   # 8x T4 learning rate (Linear Scaling Rule)
+    batch_size = 4096        # A100 GPU (40GB) - 128x CPU baseline
+    learning_rate = 0.0011   # sqrt(128) ≈ 11.3x CPU baseline (Square Root Scaling)
     device = "cuda"          # GPU device
 
 
@@ -178,9 +182,9 @@ class NewLLMAdvancedL4Config(NewLLML4Config):
     num_layers = 12           # 2x more layers
 
     # ========== Learning Rate Adjustment for Model Size ==========
-    learning_rate = 0.0002    # Half of baseline (Model Size Scaling Rule)
-                              # Baseline (2.74M): 0.0004
-                              # Advanced (4.84M, 1.77x larger): 0.0002
+    learning_rate = 0.0004    # Half of baseline (Model Size Scaling Rule)
+                              # Baseline (2.74M): 0.0008
+                              # Advanced (4.84M, 1.77x larger): 0.0004
 
     # batch_size=2048, device="cuda" inherited from NewLLML4Config
 
@@ -196,9 +200,9 @@ class NewLLMAdvancedA100Config(NewLLMA100Config):
     num_layers = 12           # 2x more layers
 
     # ========== Learning Rate Adjustment for Model Size ==========
-    learning_rate = 0.0004    # Half of baseline (Model Size Scaling Rule)
-                              # Baseline (2.74M): 0.0008
-                              # Advanced (4.84M, 1.77x larger): 0.0004
+    learning_rate = 0.0006    # ~Half of baseline (Model Size Scaling Rule)
+                              # Baseline (2.74M): 0.0011
+                              # Advanced (4.84M, 1.77x larger): 0.0006
 
     # batch_size=4096, device="cuda" inherited from NewLLMA100Config
 
