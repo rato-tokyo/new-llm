@@ -80,64 +80,114 @@ new-llm/
 │   │   └── baseline_llm.py            # Legacy LSTM baseline
 │   ├── training/
 │   │   ├── dataset.py                 # Data loading and tokenization
-│   │   └── trainer.py                 # Training loop
+│   │   ├── wikitext_dataset.py        # WikiText-2 dataset loader
+│   │   └── trainer.py                 # Training loop with resume support
 │   ├── evaluation/
 │   │   └── metrics.py                 # Loss, perplexity, accuracy
 │   └── utils/
 │       ├── config.py                  # Model configurations (single source of truth)
 │       └── config_helper.py           # Configuration utilities
+├── scripts/
+│   ├── train_wikitext_fp16.py         # FP16 mixed precision training (Colab)
+│   ├── train_wikitext_advanced.py     # Advanced experiments (Colab)
+│   ├── train_wikitext_int8.py         # INT8 quantization (Colab)
+│   └── run_colab_experiments.sh       # One-command Colab execution
 ├── data/
 │   └── sample_texts.txt               # Training data
 ├── experiments/
-│   ├── train_transformer.py           # Train Transformer baseline (PRIMARY)
-│   ├── train_new_llm.py               # Train new-llm model (PRIMARY)
-│   ├── compare_models.py              # Compare Transformer vs New-LLM
-│   ├── visualize_matrix_sizes.py      # Detailed matrix dimension analysis
-│   └── train_baseline.py              # Legacy LSTM training
-└── checkpoints/                       # Saved models
+│   ├── baseline_wikitext_experiment.md     # Baseline results (2.74M params)
+│   ├── colab_advanced_experiment.md        # Advanced results (4.84M params)
+│   ├── gating_improvements_summary.md      # Gating mechanism improvements
+│   └── layernorm_experiments_summary.md    # LayerNorm experiments
+└── checkpoints/                       # Saved models and training curves
 ```
 
-## Installation
+## Training on Google Colab (Recommended)
+
+**All experiments are now conducted on Google Colab** for GPU acceleration and convenience.
+
+### 🚀 Quick Start: One-Command Execution
+
+The easiest way to run experiments on Google Colab:
+
+**Step 1**: Open [Google Colab](https://colab.research.google.com/)
+
+**Step 2**: Change runtime to GPU:
+- `Runtime` → `Change runtime type` → `GPU` (Tesla T4, 15GB VRAM)
+
+**Step 3**: Execute this single command:
 
 ```bash
-# Install dependencies
-pip install -r requirements.txt
+!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/run_colab_experiments.sh | bash
 ```
 
-## Usage
+This will automatically:
+1. Clone the latest repository (`rm -rf` + `git clone`)
+2. Install dependencies
+3. Start **Experiment 1**: FP16 training (Baseline model with mixed precision)
+4. Start **Experiment 2**: Context 1024 experiment (4x larger context)
+5. Both experiments run in parallel
 
-### 1. Train Transformer Baseline (with Attention)
+### 📊 Monitor Progress
 
-Train a standard Transformer model with multi-head self-attention:
+Check experiment progress with:
 
 ```bash
-cd experiments
-python train_transformer.py
+# Experiment 1 (FP16) progress
+!tail -30 /content/fp16_log.txt
+
+# Experiment 2 (Context 1024) progress
+!tail -30 /content/ctx1024_log.txt
+
+# GPU usage
+!nvidia-smi
 ```
 
-This is the primary baseline for comparison against new-llm.
+### 🎯 Available Experiments
 
-### 2. Train New-LLM (without Attention)
+#### Experiment 1: FP16 Mixed Precision Training
 
-Train the context vector propagation model:
+- **Script**: `scripts/train_wikitext_fp16.py`
+- **Purpose**: 2x training speedup with PyTorch AMP
+- **Model**: Baseline (context=256, layers=6, 2.74M params)
+- **Expected time**: ~30 minutes (50 epochs on Tesla T4)
+- **Memory**: ~50% less than FP32
+
+#### Experiment 2: Advanced Model (Larger Context)
+
+- **Script**: `scripts/train_wikitext_advanced.py`
+- **Purpose**: Test larger model capacity
+- **Model**: Advanced (context=512/1024, layers=12, 4.84M+ params)
+- **Configurable**: Edit `context_vector_dim` in script
+- **Expected time**: ~35-40 minutes (50 epochs on Tesla T4)
+
+#### Experiment 3: INT8 Quantization
+
+- **Script**: `scripts/train_wikitext_int8.py`
+- **Purpose**: Post-training quantization for model compression
+- **Workflow**: FP32 training → INT8 conversion
+- **Expected compression**: 31 MB → 8 MB (~75% reduction)
+- **Accuracy impact**: <3% perplexity increase
+
+### 🔧 Manual Colab Execution
+
+If you prefer to run experiments manually:
 
 ```bash
-python train_new_llm.py
+# Step 1: Clone repository (use git clone, not git pull)
+%cd /content
+!rm -rf new-llm
+!git clone https://github.com/rato-tokyo/new-llm
+%cd new-llm
+
+# Step 2: Install dependencies
+!pip install -q datasets
+
+# Step 3: Run experiment
+!python scripts/train_wikitext_fp16.py
 ```
 
-### 3. Compare Results
-
-Analyze and compare both models:
-
-```bash
-python compare_models.py
-```
-
-This will generate:
-- Architecture comparison (attention vs context vectors)
-- Performance metrics comparison
-- Parameter efficiency analysis
-- Key insights and conclusions
+**Important**: Always use `rm -rf` + `git clone` (not `git pull`) in Colab to ensure clean state.
 
 ## Configuration
 
@@ -145,242 +195,204 @@ This will generate:
 
 This is the single source of truth for all model parameters. Do not hardcode values elsewhere.
 
-### TransformerConfig (Primary Baseline)
+### NewLLMConfig (Baseline)
 
 ```python
-vocab_size = 1000        # Vocabulary size
-embed_dim = 256          # Token embedding dimension
-num_heads = 4            # Number of attention heads
-hidden_dim = 1024        # FFN hidden dimension (4x embed_dim)
-num_layers = 6           # Number of Transformer blocks
-max_seq_length = 32      # Maximum sequence length
-learning_rate = 0.0001   # Lower LR for Transformer stability
-num_epochs = 50          # Training epochs
+# Model architecture
+vocab_size = 1000           # Vocabulary size
+embed_dim = 256             # Token embedding dimension
+hidden_dim = 512            # FNN hidden dimension
+num_layers = 6              # Number of FNN layers
+context_vector_dim = 256    # Context vector dimension
+dropout = 0.1               # Dropout rate
+
+# Training hyperparameters
+num_epochs = 50             # Training epochs
+batch_size = 32             # Batch size (512 for GPU)
+learning_rate = 0.0001      # Learning rate
+gradient_clip = 1.0         # Adaptive gradient clipping
+patience = 15               # Early stopping patience
+
+# Dataset
+max_seq_length = 64         # Maximum sequence length
 ```
 
-### NewLLMConfig (Context Vector Propagation)
+### AdvancedConfig (Larger Model)
 
 ```python
-vocab_size = 1000        # Vocabulary size
-embed_dim = 256          # Token embedding dimension (SAME as Transformer)
-hidden_dim = 512         # FNN hidden dimension
-num_layers = 8           # Number of FNN layers (more to compensate)
-context_vector_dim = 256 # Context vector dimension (INCREASED to 256)
-max_seq_length = 32      # Maximum sequence length
-learning_rate = 0.0001   # Learning rate (same as Transformer)
-num_epochs = 50          # Training epochs
+# Model architecture (scaled up)
+context_vector_dim = 512    # 2x larger context (or 1024 for 4x)
+num_layers = 12             # 2x more layers
+
+# Training hyperparameters (GPU-optimized)
+batch_size = 512            # Full GPU RAM utilization
+num_epochs = 50             # May need 100 for larger models
 ```
 
-See `src/utils/config.py` and `CONFIGURATION.md` for full documentation.
+See `src/utils/config.py` for full configuration options.
 
-## Experiment Design
+## Experiment Results
 
-### Primary Comparison: Transformer vs New-LLM
+### Baseline WikiText-2 Experiment
 
-#### Transformer Baseline (with Attention)
-- **Architecture**: Standard GPT-like model with multi-head self-attention
-- **Key features**:
-  - Can attend to any position in sequence
-  - Parallel processing of all tokens
-  - Scaled dot-product attention
-  - Layer normalization + residual connections
-- **Parameters**: ~5.26M
-- **Best Val Loss**: 4.8379
-- **Perplexity**: 126.5
+**Model**: New-LLM Baseline (2.74M params, context=256, layers=6)
 
-#### New-LLM (Context Vector Propagation - NO ATTENTION)
-- **Architecture**: Sequential FNN with context vector accumulation
-- **Key features**:
-  - NO attention mechanism
-  - Additive context updates: `context[t] = context[t-1] + delta[t]`
-  - Sequential processing (for loop over time steps)
-  - Indirect learning (only token prediction loss)
-  - Fixed-size context vector (256 dimensions)
-- **Parameters**: ~3.01M (43% fewer than Transformer)
-- **Best Val Loss**: 5.6358
-- **Perplexity**: 280.3
+| Metric | Value |
+|--------|-------|
+| **Best Val Perplexity** | **23.34** (Epoch 27) |
+| **Improvement** | 52% (from 48.6 → 23.34) |
+| **Training** | CPU, ~1 hour/epoch, 27 epochs |
+| **Overfitting** | None detected |
 
-### Research Questions
+**Key Findings**:
+- ✅ Stable training without overfitting
+- ✅ Continuous improvement for 27 epochs
+- ✅ Reasonable performance with small model size
+- ⏭️ GPU version achieves 100x speedup
 
-1. **Can LLMs function without attention?** ✓ YES
-2. **Is context vector propagation viable?** ✓ YES
-3. **How does it compare to attention?** 16.5% higher loss but 43% fewer parameters
-4. **What are the trade-offs?** Parameter efficiency vs performance
+See `experiments/baseline_wikitext_experiment.md` for details.
 
-## Results
+### Google Colab Advanced Experiment
 
-### Performance Summary
+**Model**: New-LLM Advanced (4.84M params, context=512, layers=12)
 
-| Metric           | Transformer (Attention) | New-LLM (No Attention) | Difference |
-|------------------|-------------------------|------------------------|------------|
-| Parameters       | 5,260,264              | 3,009,768              | -43%       |
-| Best Val Loss    | 4.8379                 | 5.6358                 | +16.5%     |
-| Perplexity       | 126.5                  | 280.3                  | +121.6%    |
+| Metric | Value |
+|--------|-------|
+| **Best Val Perplexity** | **36.45** (Epoch 50) |
+| **Training Speed** | 0.6-0.7 min/epoch (GPU) |
+| **GPU RAM Usage** | 3.2 / 15.0 GB (21%) |
+| **Improvement** | 48.9% (from 71.3 → 36.45) |
 
-### Key Findings
+**Surprising Result**: Larger model (4.84M) performed **worse** than baseline (2.74M)!
 
-✓ **VERIFICATION: Can LLM function without attention?**
-- **YES** - New-LLM successfully learns to predict tokens using only context vector propagation
-- Achieves validation loss of 5.6358, demonstrating that attention is not strictly necessary
+**Analysis**:
+- Baseline (2.74M): PPL **23.34** ✓
+- Advanced (4.84M): PPL **36.45** ✗
+- **Root cause**: Insufficient training (50 epochs not enough for larger model)
+- **Evidence**: Still improving at epoch 50, no early stopping triggered
 
-✓ **PARAMETER EFFICIENCY**
-- New-LLM uses 43% fewer parameters (3.01M vs 5.26M)
-- More parameter-efficient architecture
-- Useful for resource-constrained environments
+**Recommendations**:
+1. Extend training to 100 epochs
+2. Reduce batch_size from 512 to 256 (more frequent updates)
+3. Increase learning_rate to 0.0003 (faster convergence)
 
-✓ **PERFORMANCE GAP**
-- New-LLM has 16.5% higher validation loss
-- Suggests attention mechanisms provide significant value
-- However, the gap is not insurmountable
-
-✓ **CONTEXT COMPRESSION**
-- Transformer: Can attend to all 32 positions in sequence
-- New-LLM: Compresses all context into 256 dimensions
-- Fixed-size context vector is the key limitation
-
-✓ **TRAINING STABILITY**
-- Transformer: Stable training throughout all epochs
-- New-LLM: Some instability (epochs 19-22) but recovered
-- Context vector accumulation may need additional regularization
+See `experiments/colab_advanced_experiment.md` for full analysis.
 
 ### Key Insights
 
-1. **ATTENTION IS NOT STRICTLY NECESSARY**
-   - New-LLM proves that context vector propagation can work
-   - Fixed-size context can capture meaningful sequential information
-   - Indirect learning (only token loss) successfully trains the context
-
-2. **ATTENTION PROVIDES SIGNIFICANT BENEFITS**
-   - 16.5% lower validation loss shows attention's value
-   - Ability to attend to specific positions is powerful
-   - Parallel processing enables better gradient flow
-
-3. **PARAMETER EFFICIENCY**
-   - New-LLM achieves reasonable results with 43% fewer parameters
-   - Context vector approach is more parameter-efficient
-   - Trade-off between model size and performance
-
-4. **FUTURE DIRECTIONS**
-   - Larger context vector dimensions may close the gap
-   - Multiple context vectors (like LSTM's h and c) could help
-   - Hybrid approaches (sparse attention + context vectors)
-   - Better regularization for context vector stability
-
-## Conclusion
-
-This experiment successfully demonstrates that:
-
-✓ **LLMs CAN function without attention mechanisms**
-✓ **Context vector propagation is a viable alternative**
-✓ **Attention provides ~16% performance advantage**
-✓ **Context vectors are more parameter-efficient**
-
-The primary research question is answered: **YES, attention-free LLMs are possible**, though attention mechanisms do provide measurable benefits.
+1. **GPU Acceleration**: 100x speedup on Colab (0.7 min/epoch vs 60 min/epoch)
+2. **Model Size**: Larger models need more training time
+3. **Batch Size**: Very large batch_size (512) may slow convergence
+4. **FP16 Mixed Precision**: Expected 2x speedup with minimal accuracy loss
 
 ## Hardware Requirements
 
-- **RAM**: 16GB (optimized for limited resources)
-- **GPU**: Not required (CPU training is feasible)
+### Google Colab (Recommended)
+
+- **GPU**: Tesla T4 (15GB VRAM) - Free tier
+- **Session limit**: 90 minutes (enough for most experiments)
+- **Training speed**: 0.6-0.7 min/epoch for baseline models
+- **Cost**: Free (or Colab Pro for longer sessions)
+
+### Local Training (Legacy)
+
+- **RAM**: 16GB recommended
+- **GPU**: Optional (CPU training is slow but feasible)
 - **Storage**: <1GB for models and data
 
-## Dataset
+**Note**: All current experiments use Google Colab for GPU acceleration.
 
-The project uses a small dataset of simple English sentences for proof-of-concept:
-- 30 short sentences
-- ~91 unique tokens
-- Train/val split: 24/6 samples
+## Datasets
 
-This minimal dataset allows rapid experimentation on the core architecture ideas.
+### WikiText-2 (Pre-training)
 
-## Detailed Analysis
+- **Size**: ~4 million tokens
+- **Source**: High-quality Wikipedia articles
+- **Purpose**: Learn natural language patterns
+- **Train/Val**: 36,718 / 3,760 sequences
+- **Vocabulary**: 1,000 most frequent tokens
 
-For detailed matrix dimension analysis and architecture breakdown:
+### DailyDialog (Fine-tuning - Planned)
 
-```bash
-python experiments/visualize_matrix_sizes.py
+- **Size**: 13,118 dialogues
+- **Source**: Daily conversations (~10 turns each)
+- **Purpose**: Learn dialogue/conversation patterns
+- **Status**: Dataset prepared, fine-tuning experiments pending
+
+## Training Resume Support
+
+All Colab experiments support training resume:
+
+```python
+# Resume from checkpoint
+trainer.train(resume_from="checkpoints/new_llm_wikitext_epoch_25.pt")
 ```
 
-This shows exact matrix operations and parameter counts for each layer.
+**Use case**: Google Colab 90-minute limit
+- First session: Train to epoch 25
+- Second session: Resume from epoch 25
+
+See `RESUME_TRAINING.md` for detailed instructions.
+
+## Future Experiments
+
+### Planned
+
+1. **Training Extension**: 100 epochs for Advanced model
+2. **Batch Size Optimization**: Test 128, 256, 512
+3. **Learning Rate Scheduling**: Cosine annealing, warmup
+4. **FP16 Comparison**: FP16 vs FP32 speed/accuracy trade-off
+5. **DailyDialog Fine-tuning**: Conversation ability
+
+### Research Directions
+
+1. Larger context vector dimensions (1024, 2048)
+2. Multiple context vectors (multi-channel)
+3. Hybrid architectures (sparse attention + context)
+4. Better regularization for context stability
+5. Analysis of what linguistic features context captures
+6. Comparison with TinyGPT2 and other small LLMs
 
 ## Legacy Experiments
 
-The project previously compared against an LSTM baseline. Those experiments are preserved in:
-- `src/models/baseline_llm.py` - LSTM-based model
-- `experiments/train_baseline.py` - LSTM training script
+The project previously compared against Transformer and LSTM baselines on synthetic data. Those experiments are preserved in:
 
-The current primary comparison is **Transformer vs New-LLM** to verify if context vector propagation can compete with attention mechanisms.
+- `experiments/train_transformer.py` - Transformer baseline
+- `experiments/train_new_llm.py` - New-LLM baseline
+- `src/models/baseline_llm.py` - LSTM model
 
-## Dialogue Fine-tuning Experiments (NEW)
+**Results Summary**:
+- Transformer (5.26M params): PPL 126.5
+- New-LLM (3.01M params): PPL 280.3
+- **Conclusion**: LLMs can function without attention (43% fewer params, 16.5% higher loss)
 
-**Goal**: Train New-LLM to handle simple conversations
-
-### Step 1: Pre-training on WikiText
-
-Train on real Wikipedia text to learn natural language patterns:
-
-```bash
-python scripts/train_wikitext.py
-```
-
-This will:
-- Train New-LLM on WikiText-2 dataset
-- Train TinyGPT2 baseline for comparison
-- Save checkpoints: `checkpoints/best_new_llm_wikitext.pt` and `checkpoints/best_tinygpt2_wikitext.pt`
-
-### Step 2: Fine-tuning on Dialogue Data
-
-Fine-tune the pre-trained models on DailyDialog dataset:
+## Installation (Local Development)
 
 ```bash
-python scripts/finetune_dialog.py
+# Clone repository
+git clone https://github.com/rato-tokyo/new-llm
+cd new-llm
+
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-This will:
-- Load pre-trained checkpoints from Step 1
-- Fine-tune on DailyDialog (13k conversations)
-- Save dialogue-tuned checkpoints
+**Note**: For experiments, use Google Colab (no local installation needed).
 
-### Step 3: Evaluate and Compare
+## Documentation
 
-Evaluate both models on dialogue quality:
+- `CLAUDE.md` - Development guidelines and best practices
+- `CONFIGURATION.md` - Detailed configuration documentation
+- `RESUME_TRAINING.md` - Training resume instructions
+- `experiments/*.md` - Experiment results and analysis
 
-```bash
-python scripts/evaluate_comparison.py
-```
+## Contributing
 
-This will:
-- Calculate perplexity on test set
-- Generate sample dialogues
-- Measure inference speed
-- Compare New-LLM vs TinyGPT2
-
-### Datasets Used
-
-| Dataset | Size | Purpose | Description |
-|---------|------|---------|-------------|
-| **WikiText-2** | ~2MB | Pre-training | Wikipedia articles for natural language learning |
-| **DailyDialog** | 13k dialogues | Fine-tuning | Daily conversations (~10 turns each) |
-
-### Expected Results
-
-This experiment tests whether New-LLM can:
-- ✓ Learn from real text (not just synthetic data)
-- ✓ Handle dialogue/conversation patterns
-- ✓ Compete with GPT-2 architecture on dialogue tasks
-- ✓ Scale to larger datasets
-
-## Future Work
-
-Promising directions based on results:
-1. ✅ Scale to larger datasets (WikiText, DailyDialog) - **IN PROGRESS**
-2. Knowledge distillation from larger models (GPT-2, etc.)
-3. Experiment with larger context vector dimensions
-4. Try multiple context vectors (multi-channel context)
-5. Hybrid architectures (sparse attention + context vectors)
-6. Better regularization techniques for context stability
-7. Analyze what linguistic features the context captures
-8. Test on longer sequence lengths
-9. Instruction tuning for Q&A tasks
+See `CLAUDE.md` for:
+- Code cleanup policy (no old files, fixed file names)
+- Experiment management (process termination checklist)
+- Google Colab best practices (git clone, one-command execution)
+- Architecture principles (O(1) memory, no positional embeddings)
 
 ## License
 
