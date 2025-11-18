@@ -28,6 +28,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
+from src.utils.train_utils import print_git_info, print_gpu_info
 from src.utils.config import NewLLML4Config
 from src.models.context_vector_llm import ContextVectorLLM
 from src.training.wikitext_dataset import load_wikitext_data

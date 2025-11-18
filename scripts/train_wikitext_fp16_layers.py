@@ -12,11 +12,12 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
+from torch.utils.data import DataLoader
 from src.utils.config import NewLLML4Config
 from src.models.context_vector_llm import ContextVectorLLM
 from src.training.wikitext_dataset import load_wikitext_data
 from src.training.fp16_trainer import FP16Trainer
-from torch.utils.data import DataLoader
+from src.utils.train_utils import print_git_info, print_gpu_info
 import time
 import argparse
 
@@ -79,32 +80,15 @@ def main():
     print("="*80)
 
     # Git version information
-    try:
-        import subprocess
-        git_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=os.path.dirname(__file__) + '/..').decode().strip()
-        git_commit_short = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], cwd=os.path.dirname(__file__) + '/..').decode().strip()
-        git_date = subprocess.check_output(['git', 'log', '-1', '--format=%cd', '--date=short'], cwd=os.path.dirname(__file__) + '/..').decode().strip()
-        print(f"\n📌 Git Version: {git_commit_short} ({git_date})")
-        print(f"   Full commit: {git_commit}")
-    except Exception:
-        print(f"\n📌 Git Version: Unknown (not a git repository)")
-
+    print_git_info()
     print("="*80)
 
     # 設定作成
     config = LayerExperimentConfig(num_layers=num_layers)
 
-    # GPU必須チェック
-    if not torch.cuda.is_available():
-        raise RuntimeError("❌ GPU not available! FP16 training requires CUDA GPU.")
-
-    # デバイス情報表示
-    print(f"\n🖥️  Device Information:")
-    print(f"  Device: CUDA (GPU)")
-    gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
-    print(f"  GPU: {torch.cuda.get_device_name(0)}")
-    print(f"  GPU Memory: {gpu_memory:.1f} GB")
-    print(f"  FP16 Mixed Precision: ENABLED ✓")
+    # GPU必須チェックと情報表示
+    print_gpu_info()
+    print(f"   FP16 Mixed Precision: ENABLED ✓")
 
     print(f"\n🔬 実験設定:")
     print(f"  Model: New-LLM Baseline")

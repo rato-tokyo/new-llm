@@ -5,75 +5,8 @@ IMPORTANT: This is the single source of truth for all model configurations.
 All parameters should be defined here and referenced from other modules.
 Do not hardcode configuration values elsewhere.
 
-NOTE: The primary comparison is now between:
-- TransformerConfig: Standard Transformer with self-attention (like GPT)
-- NewLLMConfig: Context vector propagation (NO attention mechanism)
-
-Goal: Verify if context vector propagation can compete with attention mechanisms.
+Primary architecture: New-LLM with context vector propagation (NO attention mechanism)
 """
-
-class BaseConfig:
-    """
-    Base configuration - NOT USED for main experiments
-
-    Kept for backward compatibility with LSTM experiments.
-    Use TransformerConfig or NewLLMConfig for primary experiments.
-    """
-    # ========== Model Architecture ==========
-    vocab_size = 1000        # Size of vocabulary (number of unique tokens)
-    embed_dim = 128          # Dimension of token embeddings
-    hidden_dim = 256         # Dimension of hidden states (LSTM) or FNN hidden layers
-    num_layers = 3           # Number of stacked layers (LSTM or FNN)
-    max_seq_length = 32      # Maximum sequence length for positional embeddings
-    dropout = 0.1            # Dropout rate for regularization
-
-    # ========== Training Hyperparameters ==========
-    batch_size = 16          # Number of samples per batch
-    learning_rate = 0.001    # Learning rate for optimizer
-    num_epochs = 50          # Number of training epochs
-    gradient_clip = 1.0      # Gradient clipping threshold
-
-    # ========== Data ==========
-    train_split = 0.8        # Fraction of data for training (rest for validation)
-    random_seed = 42         # Random seed for reproducibility
-
-    # ========== Device ==========
-    device = "cpu"           # Device for training (cpu/cuda) - CPU for 16GB RAM systems
-
-
-class TransformerConfig:
-    """
-    Configuration for Transformer-based Language Model (Baseline with Attention)
-
-    This is a standard GPT-like model with:
-    - Multi-head self-attention
-    - Feed-forward layers
-    - Layer normalization
-    - Positional embeddings
-
-    This serves as the primary baseline to compare against New-LLM.
-    """
-    # ========== Model Architecture ==========
-    vocab_size = 1000        # Size of vocabulary
-    embed_dim = 256          # Token embedding dimension (increased from 128)
-    num_heads = 4            # Number of attention heads (embed_dim must be divisible by this)
-    hidden_dim = 1024        # FFN hidden dimension (typically 4x embed_dim)
-    num_layers = 6           # Number of Transformer blocks
-    max_seq_length = 32      # Maximum sequence length
-    dropout = 0.1            # Dropout rate
-
-    # ========== Training Hyperparameters ==========
-    batch_size = 16          # Batch size
-    learning_rate = 0.0001   # Lower LR for Transformer (more stable)
-    num_epochs = 50          # Training epochs
-    gradient_clip = 1.0      # Gradient clipping
-
-    # ========== Data ==========
-    train_split = 0.8        # Train/val split
-    random_seed = 42         # Random seed
-
-    # ========== Device ==========
-    device = "cpu"           # Device
 
 
 class NewLLMConfig:
@@ -205,18 +138,3 @@ class NewLLMAdvancedA100Config(NewLLMA100Config):
                               # Advanced (4.84M, 1.77x larger): 0.0006
 
     # batch_size=4096, device="cuda" inherited from NewLLMA100Config
-
-
-# Legacy alias for backward compatibility
-class NewLLMAdvancedGPUConfig(NewLLMAdvancedL4Config):
-    """
-    Legacy alias - use NewLLMAdvancedL4Config or NewLLMAdvancedA100Config instead
-    Defaults to L4 optimization.
-    """
-    pass
-
-
-# Legacy alias for backward compatibility
-class LSTMConfig(BaseConfig):
-    """Legacy LSTM configuration (for old experiments)"""
-    pass

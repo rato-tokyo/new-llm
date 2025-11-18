@@ -22,8 +22,11 @@ from src.models.context_vector_llm import ContextVectorLLM
 from src.training.fp16_trainer import FP16Trainer
 from src.training.dolly_dataset import load_dolly_data
 from src.utils.config import NewLLML4Config
+from src.utils.train_utils import (
+    print_git_info, print_gpu_info, print_model_info,
+    print_config_info, print_dataset_info, print_dataloader_info
+)
 import argparse
-import subprocess
 
 
 class DollyTrainConfig(NewLLML4Config):
@@ -85,37 +88,17 @@ def main():
     print("="*80)
 
     # Git version information
-    try:
-        git_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=os.path.dirname(__file__) + '/..').decode().strip()
-        git_commit_short = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], cwd=os.path.dirname(__file__) + '/..').decode().strip()
-        git_date = subprocess.check_output(['git', 'log', '-1', '--format=%cd', '--date=short'], cwd=os.path.dirname(__file__) + '/..').decode().strip()
-        print(f"\n📌 Git Version: {git_commit_short} ({git_date})")
-        print(f"   Full commit: {git_commit}")
-    except Exception:
-        print(f"\n📌 Git Version: Unknown (not a git repository)")
+    print_git_info()
 
     # Create configuration
     config = DollyTrainConfig(num_layers=args.num_layers)
     config.max_seq_length = args.max_seq_length
 
-    print(f"\n⚙️  Configuration:")
-    print(f"   Num layers: {config.num_layers}")
-    print(f"   Max seq length: {config.max_seq_length}")
-    print(f"   Embed dim: {config.embed_dim}")
-    print(f"   Hidden dim: {config.hidden_dim}")
-    print(f"   Context dim: {config.context_vector_dim}")
-    print(f"   Batch size: {config.batch_size}")
-    print(f"   Learning rate: {config.learning_rate}")
-    print(f"   Epochs: {config.num_epochs}")
-    print(f"   Device: {config.device}")
+    # Print configuration
+    print_config_info(config)
 
-    # GPU check
-    if not torch.cuda.is_available():
-        raise RuntimeError("❌ GPU not available! FP16 training requires CUDA GPU.")
-
-    print(f"\n🎮 GPU Information:")
-    print(f"   Device: {torch.cuda.get_device_name(0)}")
-    print(f"   VRAM: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+    # GPU check and info
+    print_gpu_info()
 
     # Load Dolly-15k dataset
     print("\n" + "="*80)
@@ -123,20 +106,13 @@ def main():
     print("="*80)
 
     train_dataset, val_dataset, tokenizer = load_dolly_data(config)
-
-    print(f"\n✓ Dataset ready")
-    print(f"   Training sequences: {len(train_dataset)}")
-    print(f"   Validation sequences: {len(val_dataset)}")
-    print(f"   Vocabulary size: {len(tokenizer.word2idx)}")
+    print_dataset_info(train_dataset, val_dataset, tokenizer)
 
     # Create DataLoaders
     print(f"\n📦 Creating DataLoaders...")
     train_dataloader = DataLoader(train_dataset, batch_size=config.batch_size, shuffle=True)
     val_dataloader = DataLoader(val_dataset, batch_size=config.batch_size, shuffle=False)
-
-    print(f"✓ DataLoaders created")
-    print(f"   Train batches: {len(train_dataloader)}")
-    print(f"   Val batches: {len(val_dataloader)}")
+    print_dataloader_info(train_dataloader, val_dataloader)
 
     # Create model
     print("\n" + "="*80)
@@ -144,15 +120,7 @@ def main():
     print("="*80)
 
     model = ContextVectorLLM(config).to(config.device)
-
-    # Count parameters
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
-    print(f"\n📊 Model Statistics:")
-    print(f"   Total parameters: {total_params:,}")
-    print(f"   Trainable parameters: {trainable_params:,}")
-    print(f"   Model size: {total_params * 4 / 1024**2:.2f} MB (FP32)")
+    print_model_info(model)
 
     # Create trainer
     print("\n" + "="*80)
