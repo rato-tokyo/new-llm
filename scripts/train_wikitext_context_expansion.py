@@ -162,6 +162,27 @@ def expand_context_vector_weights(old_state_dict, old_context_dim, new_context_d
                 new_param[:old_context_dim] = old_param
                 new_state_dict[key] = new_param
                 print(f"   ✓ {key}: {old_param.shape} → {new_param.shape}")
+
+        elif 'forget_gate' in key or 'input_gate' in key:
+            # Gates: (hidden, old_context) -> (hidden, new_context)
+            if 'weight' in key:
+                old_weight = value  # [old_context_dim, hidden_dim]
+                hidden_dim = old_weight.size(1)
+
+                # Create new weight: [new_context_dim, hidden_dim]
+                new_weight = torch.zeros(new_context_dim, hidden_dim)
+                new_weight[:old_context_dim, :] = old_weight
+
+                new_state_dict[key] = new_weight
+                print(f"   ✓ {key}: {old_weight.shape} → {new_weight.shape}")
+
+            elif 'bias' in key:
+                old_bias = value  # [old_context_dim]
+                new_bias = torch.zeros(new_context_dim)
+                new_bias[:old_context_dim] = old_bias
+                new_state_dict[key] = new_bias
+                print(f"   ✓ {key}: {old_bias.shape} → {new_bias.shape}")
+
         else:
             # All other parameters remain unchanged
             new_state_dict[key] = value
