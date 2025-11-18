@@ -70,8 +70,8 @@ class AdvancedConfig(NewLLMConfig):
     # Early Stopping
     patience = 15
 
-    # デバイス
-    device = "cpu"
+    # デバイス（GPU自動検出）
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def get_experiment_name(self):
         """実験名を自動生成"""
