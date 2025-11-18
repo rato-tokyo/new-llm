@@ -13,12 +13,27 @@ cd /content
 rm -rf new-llm
 git clone https://github.com/rato-tokyo/new-llm
 cd new-llm
+
+# Git情報を表示
+GIT_COMMIT=$(git rev-parse HEAD)
+GIT_COMMIT_SHORT=$(git rev-parse --short HEAD)
+GIT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+GIT_DATE=$(git log -1 --format=%cd --date=short)
+
+echo ""
+echo "📌 Git Version Information:"
+echo "  Branch: $GIT_BRANCH"
+echo "  Commit: $GIT_COMMIT_SHORT ($GIT_COMMIT)"
+echo "  Date: $GIT_DATE"
+echo ""
+
 pip install -q datasets
 
 echo ""
 echo "=================================="
 echo "実験1: FP16訓練（Baseline）開始"
 echo "=================================="
+echo "Git version: $GIT_COMMIT_SHORT"
 nohup python3 scripts/train_wikitext_fp16.py > /content/fp16_log.txt 2>&1 &
 FP16_PID=$!
 echo "PID: $FP16_PID"
@@ -38,6 +53,7 @@ echo ""
 echo "=================================="
 echo "実験2: Context 1024訓練開始"
 echo "=================================="
+echo "Git version: $GIT_COMMIT_SHORT"
 nohup python3 scripts/train_wikitext_advanced.py > /content/ctx1024_log.txt 2>&1 &
 CTX1024_PID=$!
 echo "PID: $CTX1024_PID"

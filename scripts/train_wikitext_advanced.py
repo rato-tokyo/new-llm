@@ -132,6 +132,19 @@ def train_new_llm_advanced():
     print("Advanced WikiText-2 Training Experiment")
     print("="*80)
 
+    # Git version information
+    try:
+        import subprocess
+        git_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=os.path.dirname(__file__) + '/..').decode().strip()
+        git_commit_short = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], cwd=os.path.dirname(__file__) + '/..').decode().strip()
+        git_date = subprocess.check_output(['git', 'log', '-1', '--format=%cd', '--date=short'], cwd=os.path.dirname(__file__) + '/..').decode().strip()
+        print(f"\n📌 Git Version: {git_commit_short} ({git_date})")
+        print(f"   Full commit: {git_commit}")
+    except Exception:
+        print(f"\n📌 Git Version: Unknown (not a git repository)")
+
+    print("="*80)
+
     # GPU/CPU情報を明示的に表示
     print(f"\n🖥️  Device Information:")
     print(f"  Device: {config.device.upper()}")

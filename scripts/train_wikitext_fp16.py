@@ -153,6 +153,19 @@ def main():
     print("WikiText-2 Training with FP16 Mixed Precision")
     print("="*80)
 
+    # Git version information
+    try:
+        import subprocess
+        git_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=os.path.dirname(__file__) + '/..').decode().strip()
+        git_commit_short = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], cwd=os.path.dirname(__file__) + '/..').decode().strip()
+        git_date = subprocess.check_output(['git', 'log', '-1', '--format=%cd', '--date=short'], cwd=os.path.dirname(__file__) + '/..').decode().strip()
+        print(f"\n📌 Git Version: {git_commit_short} ({git_date})")
+        print(f"   Full commit: {git_commit}")
+    except Exception:
+        print(f"\n📌 Git Version: Unknown (not a git repository)")
+
+    print("="*80)
+
     config = FP16Config()
 
     # GPU必須チェック
