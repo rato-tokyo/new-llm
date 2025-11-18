@@ -20,7 +20,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
-from torch.cuda.amp import autocast, GradScaler
+import torch.amp
 from src.utils.config import NewLLML4Config
 from src.models.context_vector_llm import ContextVectorLLM
 from src.training.wikitext_dataset import load_wikitext_data
@@ -48,7 +48,7 @@ class FP16Config(NewLLML4Config):
 
     # 訓練ハイパーパラメータ（NewLLML4Configから継承）
     # batch_size = 2048     ← NewLLML4Configから自動継承（L4用）
-    # learning_rate = 0.0004 ← NewLLML4Configから自動継承（Linear Scaling Rule適用済み）
+    # learning_rate = 0.0008 ← NewLLML4Configから自動継承（Square Root Scaling適用済み）
     # device = "cuda"       ← NewLLML4Configから自動継承
     num_epochs = 50
     weight_decay = 0.0
@@ -75,7 +75,7 @@ class FP16Trainer(Trainer):
             raise RuntimeError("GPU not available! FP16 training requires CUDA GPU.")
 
         self.use_amp = use_amp
-        self.scaler = GradScaler()
+        self.scaler = torch.amp.GradScaler('cuda')
         print(f"\n✓ FP16 Mixed Precision enabled (AMP)")
 
     def train_epoch(self) -> tuple[float, float]:
@@ -95,7 +95,7 @@ class FP16Trainer(Trainer):
             self.optimizer.zero_grad()
 
             # FP16 mixed precision forward/backward
-            with autocast():
+            with torch.amp.autocast('cuda'):
                 outputs = self.model(inputs)
                 if isinstance(outputs, tuple):
                     logits = outputs[0]

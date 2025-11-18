@@ -64,7 +64,8 @@ class AdvancedConfig(NewLLMAdvancedGPUConfig):
 
     # 訓練ハイパーパラメータ（NewLLMAdvancedL4Configから継承）
     # batch_size = 2048     ← NewLLMAdvancedL4Configから自動継承
-    # learning_rate = 0.0004 ← NewLLMAdvancedL4Configから自動継承（Linear Scaling Rule適用済み）
+    # learning_rate = 0.0004 ← NewLLMAdvancedL4Configから自動継承
+    #                         （Square Root Scaling 0.0008 → Model Size Scaling 0.0004）
     # device = "cuda"       ← NewLLMAdvancedL4Configから自動継承
     num_epochs = 50
     weight_decay = 0.0

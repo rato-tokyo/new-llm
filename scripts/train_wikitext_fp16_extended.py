@@ -14,7 +14,7 @@ import os
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
-from torch.cuda.amp import autocast, GradScaler
+import torch.amp
 from src.utils.config import NewLLML4Config
 from src.models.context_vector_llm import ContextVectorLLM
 from src.training.wikitext_dataset import load_wikitext_data
@@ -42,7 +42,7 @@ class FP16ExtendedConfig(NewLLML4Config):
 
     # 訓練ハイパーパラメータ（NewLLML4Configから継承）
     # batch_size = 2048     ← NewLLML4Configから自動継承（L4用）
-    # learning_rate = 0.0004 ← NewLLML4Configから自動継承（Linear Scaling Rule適用済み）
+    # learning_rate = 0.0008 ← NewLLML4Configから自動継承（Square Root Scaling適用済み）
     # device = "cuda"       ← NewLLML4Configから自動継承
     num_epochs = 150  # 合計150エポック（50から再開して+100）
     weight_decay = 0.0
@@ -66,7 +66,7 @@ class FP16Trainer(Trainer):
     def __init__(self, model, train_dataloader, val_dataloader, config, model_name="new_llm", use_amp=True):
         super().__init__(model, train_dataloader, val_dataloader, config, model_name)
         self.use_amp = use_amp
-        self.scaler = GradScaler() if use_amp else None
+        self.scaler = torch.amp.GradScaler('cuda') if use_amp else None
 
     def train_epoch(self):
         """1エポックの訓練（FP16対応）"""
@@ -82,7 +82,7 @@ class FP16Trainer(Trainer):
 
             # FP16混合精度で訓練
             if self.use_amp:
-                with autocast():
+                with torch.amp.autocast('cuda'):
                     logits = self.model(input_ids)
                     loss = self.criterion(logits, target_ids)
 

@@ -82,8 +82,9 @@ class Trainer:
         # Current epoch counter for adaptive gradient clipping
         self.current_epoch = 0
 
-        # Early stopping
-        self.early_stopping = EarlyStopping(patience=10, min_delta=0.001)
+        # Early stopping (respect config.patience if available)
+        patience = getattr(config, 'patience', 10)
+        self.early_stopping = EarlyStopping(patience=patience, min_delta=0.001)
 
     def train_epoch(self) -> tuple[float, float]:
         """Train for one epoch"""
