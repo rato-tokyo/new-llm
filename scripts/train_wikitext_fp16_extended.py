@@ -186,10 +186,12 @@ def main():
     )
 
     # チェックポイントから再開
-    checkpoint_path = os.path.join("checkpoints", config.checkpoint_to_resume)
+    # Note: resume_from_checkpoint() will automatically add "checkpoints/" prefix
+    checkpoint_name = config.checkpoint_to_resume
+    checkpoint_path = os.path.join("checkpoints", checkpoint_name)
     if os.path.exists(checkpoint_path):
         print(f"\n📂 Resuming from checkpoint: {checkpoint_path}")
-        start_epoch = trainer.resume_from_checkpoint(checkpoint_path)
+        start_epoch = trainer.resume_from_checkpoint(checkpoint_name)
         print(f"✓ Resumed from epoch {start_epoch}")
         print(f"📊 Previous best validation PPL: {min(trainer.val_ppls) if trainer.val_ppls else 'N/A'}")
     else:
