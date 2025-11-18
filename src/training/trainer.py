@@ -185,18 +185,31 @@ class Trainer:
 
         return avg_loss, avg_ppl, avg_accuracy
 
-    def train(self, num_epochs: Optional[int] = None):
-        """Full training loop"""
+    def train(self, num_epochs: Optional[int] = None, resume_from: Optional[str] = None):
+        """Full training loop
+
+        Args:
+            num_epochs: Number of epochs to train (default: config.num_epochs)
+            resume_from: Path to checkpoint file to resume from (default: None)
+        """
         if num_epochs is None:
             num_epochs = self.config.num_epochs
+
+        # Resume from checkpoint if specified
+        start_epoch = 0
+        best_val_loss = float('inf')
+
+        if resume_from:
+            start_epoch = self.resume_from_checkpoint(resume_from)
+            if self.val_losses:
+                best_val_loss = min(self.val_losses)
+            print(f"Resuming from epoch {start_epoch + 1}")
 
         print(f"\n{'='*60}")
         print(f"Training {self.model_name}")
         print(f"{'='*60}")
 
-        best_val_loss = float('inf')
-
-        for epoch in range(num_epochs):
+        for epoch in range(start_epoch, num_epochs):
             self.current_epoch = epoch
             print(f"\nEpoch {epoch + 1}/{num_epochs}")
 
@@ -238,6 +251,10 @@ class Trainer:
         print(f"\n{'='*60}")
         print(f"Training completed! Best Val Loss: {best_val_loss:.4f}")
         print(f"{'='*60}\n")
+
+        # Save final checkpoint (for resume)
+        self.save_checkpoint(f"{self.model_name}_final.pt")
+        print(f"✓ Final checkpoint saved: {self.model_name}_final.pt")
 
         # Save training curves as image
         self.plot_and_save_training_curves()
@@ -338,6 +355,9 @@ class Trainer:
             'optimizer_state_dict': self.optimizer.state_dict(),
             'train_losses': self.train_losses,
             'val_losses': self.val_losses,
+            'train_ppls': self.train_ppls,
+            'val_ppls': self.val_ppls,
+            'current_epoch': self.current_epoch,
             'config': self.config,
         }
 
@@ -353,5 +373,52 @@ class Trainer:
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.train_losses = checkpoint.get('train_losses', [])
         self.val_losses = checkpoint.get('val_losses', [])
+        self.train_ppls = checkpoint.get('train_ppls', [])
+        self.val_ppls = checkpoint.get('val_ppls', [])
+        self.current_epoch = checkpoint.get('current_epoch', 0)
 
         print(f"Loaded checkpoint from {filepath}")
+
+    def resume_from_checkpoint(self, checkpoint_path: str) -> int:
+        """Resume training from a checkpoint
+
+        Args:
+            checkpoint_path: Path to checkpoint file (relative to checkpoints/ or absolute)
+
+        Returns:
+            Starting epoch number for resumed training
+        """
+        # Handle both absolute and relative paths
+        if not os.path.isabs(checkpoint_path):
+            checkpoint_path = os.path.join("checkpoints", checkpoint_path)
+
+        if not os.path.exists(checkpoint_path):
+            raise FileNotFoundError(f"Checkpoint not found: {checkpoint_path}")
+
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+
+        # Restore model and optimizer state
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        # Restore training history
+        self.train_losses = checkpoint.get('train_losses', [])
+        self.val_losses = checkpoint.get('val_losses', [])
+        self.train_ppls = checkpoint.get('train_ppls', [])
+        self.val_ppls = checkpoint.get('val_ppls', [])
+
+        # Get the epoch to resume from
+        current_epoch = checkpoint.get('current_epoch', 0)
+        self.current_epoch = current_epoch
+
+        print(f"\n{'='*60}")
+        print(f"Resuming from checkpoint: {os.path.basename(checkpoint_path)}")
+        print(f"{'='*60}")
+        print(f"Completed epochs: {current_epoch}")
+        if self.val_losses:
+            print(f"Best Val Loss so far: {min(self.val_losses):.4f}")
+            print(f"Best Val PPL so far: {min(self.val_ppls):.2f}")
+        print(f"{'='*60}\n")
+
+        # Return next epoch to start training from
+        return current_epoch + 1
