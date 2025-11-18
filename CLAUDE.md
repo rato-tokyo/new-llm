@@ -1,5 +1,116 @@
 # Claude Code Development Guidelines for New-LLM Project
 
+## 🧪 コード修正時の必須テストポリシー - CRITICAL
+
+**すべてのコード修正後、必ず手元でテストしてからコミット・デプロイすること**
+
+### 必須実行手順
+
+#### 1. ローカルでのテスト（最重要）
+
+**Colabで実行されるスクリプトは特に重要**:
+
+```bash
+# ステップ1: 構文チェック
+python3 -m py_compile scripts/your_script.py
+
+# ステップ2: 簡易テストスクリプト作成
+# - 主要な関数をインポート
+# - 基本的な動作確認
+# - エッジケースの確認
+
+# ステップ3: 可能な限りエンドツーエンドテスト
+python3 scripts/your_script.py  # 実際に実行してみる
+```
+
+#### 2. チェックリスト
+
+コミット前に必ず確認：
+
+- [ ] **構文チェック完了** - `python3 -m py_compile`
+- [ ] **インポートエラーなし** - `python3 -c "import module"`
+- [ ] **テストスクリプトで動作確認**
+- [ ] **エラーメッセージを実際に確認**
+- [ ] **ユーザーが実行する環境を考慮**（Colab = PyTorch 2.6+）
+
+#### 3. 絶対に避けるべき間違い
+
+**❌ やってはいけないこと**:
+```
+1. コード修正 → すぐコミット → ユーザーがエラー報告 → また修正
+2. 「たぶん動くだろう」で推測
+3. 手元でテストせずに「修正しました」
+4. エラーメッセージを見ずに推測で修正
+```
+
+**✅ 正しい手順**:
+```
+1. コード修正
+2. ローカルで構文チェック
+3. テストスクリプト作成・実行
+4. 動作確認完了
+5. コミット・プッシュ
+6. ユーザーに実行依頼
+```
+
+#### 4. テストスクリプトの例
+
+```python
+#!/usr/bin/env python3
+"""Test script for checkpoint loading"""
+
+import sys
+import os
+sys.path.append(os.path.dirname(__file__))
+
+# Import the modules you're testing
+from src.training.trainer import Trainer
+
+def test_checkpoint_load():
+    """Test the specific functionality"""
+    try:
+        # Test code here
+        print("✓ Test passed")
+        return True
+    except Exception as e:
+        print(f"❌ Test failed: {e}")
+        return False
+
+if __name__ == "__main__":
+    success = test_checkpoint_load()
+    sys.exit(0 if success else 1)
+```
+
+#### 5. PyTorchバージョン差異への対応
+
+**Colabの環境を考慮**:
+- Colab = PyTorch 2.6+
+- ローカル環境と異なる可能性
+
+**対策**:
+```bash
+# PyTorchバージョン確認
+python3 -c "import torch; print(f'PyTorch: {torch.__version__}')"
+
+# 必要に応じてバージョン固有の対処を追加
+```
+
+### このポリシーの重要性
+
+**過去の失敗例**:
+1. チェックポイントパス重複 → ローカルテストなし → エラー
+2. PyTorch 2.6の`weights_only`変更 → ローカルテストなし → エラー
+3. 同じ修正を2-3回繰り返す → ユーザーの時間を無駄にする
+
+**影響**:
+- ユーザーの実験時間が無駄になる
+- Colab GPUクレジットの浪費
+- 信頼性の低下
+
+**鉄則**: **手元でテストしてから、ユーザーに渡す**
+
+---
+
 ## 実験管理ポリシー - CRITICAL
 
 ### 🛑 実験終了時の必須チェックリスト

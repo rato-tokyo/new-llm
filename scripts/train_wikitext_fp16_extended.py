@@ -23,6 +23,36 @@ from torch.utils.data import DataLoader
 import time
 
 
+class FP16Config(NewLLML4Config):
+    """FP16混合精度訓練用の設定（L4 GPU最適化）
+
+    This class is needed for checkpoint compatibility.
+    The checkpoint was saved with FP16Config, so we need to define it here
+    even though we use FP16ExtendedConfig for training.
+    """
+    # データ関連（WikiText-2用）
+    max_seq_length = 64
+    vocab_size = 1000
+
+    # モデルアーキテクチャ（Baseline）
+    embed_dim = 256
+    hidden_dim = 512
+    num_layers = 6
+    context_vector_dim = 256
+    dropout = 0.1
+
+    # 訓練ハイパーパラメータ（NewLLML4Configから継承）
+    num_epochs = 50
+    weight_decay = 0.0
+    gradient_clip = 1.0
+
+    # Early Stopping
+    patience = 15
+
+    # FP16設定
+    use_amp = True
+
+
 class FP16ExtendedConfig(NewLLML4Config):
     """FP16混合精度訓練用の設定（100エポック延長版）
 
