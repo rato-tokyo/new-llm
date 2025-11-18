@@ -238,6 +238,141 @@ nvidia-smi
 
 **この方針により、Colab実験が確実・効率的になります。**
 
+### 🚀 GPU最適化設定の確認 - CRITICAL
+
+**スクリプト作成・修正時は、必ずGPU用の設定になっているか確認すること**
+
+#### ❌ 発生した問題（2025-11-18）
+
+**問題**: `train_wikitext_fp16.py`が`batch_size=32`（CPU用）のまま
+**影響**: L4 GPUの性能を全く活かせず、期待の1/16の速度
+**原因**: CPU用設定がそのまま残っていた
+
+#### ✅ GPU用設定の必須確認事項
+
+**新しいスクリプト作成時・修正時に必ず確認**:
+
+```python
+# ❌ 悪い例 - CPU用設定
+batch_size = 32  # CPUでも動くように32
+
+# ✅ 良い例 - GPU用設定
+batch_size = 512  # GPU最適化（L4/A100用）
+```
+
+**チェックリスト**:
+- [ ] `batch_size`がGPU用（512以上）になっているか？
+- [ ] コメントが「CPU」ではなく「GPU」になっているか？
+- [ ] T4: 512、L4: 512-1024、A100: 1024-2048が目安
+
+#### GPU別の推奨batch_size
+
+| GPU | VRAM | 推奨batch_size | 備考 |
+|-----|------|---------------|------|
+| **T4** | 16GB | 512 | Baseline model |
+| **L4** | 24GB | 512-1024 | Advanced model |
+| **A100** | 40GB | 1024-2048 | 最大モデル |
+
+#### スクリプトレビュー時の確認コマンド
+
+```bash
+# 全訓練スクリプトのbatch_size確認
+grep -n "batch_size" scripts/train_*.py
+
+# CPU用設定が残っていないか確認
+grep -n "CPUでも" scripts/train_*.py
+```
+
+**この確認を怠ると、GPU性能を全く活かせません！**
+
+### 📦 設定の一元管理ポリシー - CRITICAL
+
+**すべての設定値は `src/utils/config.py` で一元管理すること**
+
+#### 🎯 Single Source of Truth 原則
+
+**基本原則**: 設定値をスクリプト内にハードコードしない
+
+```python
+# ❌ 悪い例 - スクリプトで独自に設定を定義
+class MyConfig:
+    batch_size = 512
+    learning_rate = 0.0001
+    # ... 他の設定
+
+# ✅ 良い例 - config.pyから継承
+from src.utils.config import NewLLMGPUConfig
+
+class MyConfig(NewLLMGPUConfig):
+    # GPU最適化設定を自動継承
+    # 必要な部分のみ上書き
+    num_epochs = 100
+```
+
+#### 利用可能な設定クラス
+
+| クラス名 | 用途 | 主要設定 |
+|---------|------|---------|
+| `NewLLMConfig` | CPU訓練（ベースライン） | batch_size=16, device="cpu" |
+| **`NewLLMGPUConfig`** | **GPU訓練（推奨）** | **batch_size=512, device="cuda"** |
+| **`NewLLMAdvancedGPUConfig`** | **大規模モデル（GPU）** | **context=512, layers=12** |
+| `TransformerConfig` | Transformerベースライン | 比較実験用 |
+
+#### 実装パターン
+
+**新しい実験スクリプトを作成する時**:
+
+```python
+# 1. 適切な設定クラスをインポート
+from src.utils.config import NewLLMGPUConfig  # または NewLLMAdvancedGPUConfig
+
+# 2. 継承して、実験固有の設定のみ上書き
+class MyExperimentConfig(NewLLMGPUConfig):
+    """My experiment configuration
+
+    Inherits GPU optimization from NewLLMGPUConfig:
+    - batch_size = 512
+    - device = "cuda"
+    """
+    # 実験固有の設定のみ記述
+    num_epochs = 100
+    learning_rate = 0.0005
+
+# 3. 使用
+config = MyExperimentConfig()
+```
+
+#### 設定変更が必要な場合
+
+**新しいGPUタイプに対応する場合**:
+
+1. **`src/utils/config.py`に追加** ← ここだけ変更
+2. 全てのスクリプトが自動的に新設定を使える
+
+```python
+# src/utils/config.py に追加
+class NewLLMH100Config(NewLLMGPUConfig):
+    """H100 GPU (80GB VRAM) 用設定"""
+    batch_size = 2048  # H100は超大容量
+```
+
+#### チェックリスト
+
+新しいスクリプト作成時:
+- [ ] `src/utils.config`から設定クラスをインポートしているか？
+- [ ] 適切な設定クラス（GPU用など）を継承しているか？
+- [ ] 重複した設定値を定義していないか？
+- [ ] batch_size、device、num_layersなどは自動継承されているか？
+
+#### この原則の利点
+
+1. **一貫性**: 全スクリプトで同じ設定が使われる
+2. **保守性**: 設定変更が1箇所で済む
+3. **可読性**: 実験固有の設定のみが記述される
+4. **エラー防止**: 設定の不一致によるバグを防ぐ
+
+**違反した場合**: 今回のようなbatch_size不一致が再発します
+
 ---
 
 ## New-LLM Architecture Design Principles - CRITICAL

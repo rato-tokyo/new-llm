@@ -19,18 +19,20 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 import torch
 import torch.quantization
-from src.utils.config import NewLLMConfig
+from src.utils.config import NewLLMAdvancedGPUConfig
 from src.models.context_vector_llm import ContextVectorLLM
 from src.training.wikitext_dataset import load_wikitext_data
 from src.training.trainer import Trainer
 
 
-class AdvancedConfig(NewLLMConfig):
+class AdvancedConfig(NewLLMAdvancedGPUConfig):
     """拡張実験用の柔軟な設定クラス
 
+    GPU最適化設定（batch_size=512, device="cuda", context_vector_dim=512, num_layers=12）を継承
+
     簡単に変更できるパラメータ:
-    - context_vector_dim: コンテキストベクトルの次元数
-    - num_layers: レイヤー数
+    - context_vector_dim: コンテキストベクトルの次元数（512, 1024, 2048など）
+    - num_layers: レイヤー数（12, 24, 48など）
     - quantization_mode: 量子化モード ('none', 'int8')
     """
 
@@ -38,11 +40,11 @@ class AdvancedConfig(NewLLMConfig):
     # 実験パラメータ（ここを変更するだけ！）
     # ========================================
 
-    # コンテキストベクトル次元（256, 512, 1024, 2048など）
-    context_vector_dim = 512  # デフォルト256の2倍
+    # コンテキストベクトル次元 - NewLLMAdvancedGPUConfigから継承
+    # context_vector_dim = 512  ← 自動継承（変更したい場合のみ上書き）
 
-    # レイヤー数（6, 12, 24, 48など）
-    num_layers = 12  # デフォルト6の2倍
+    # レイヤー数 - NewLLMAdvancedGPUConfigから継承
+    # num_layers = 12  ← 自動継承（変更したい場合のみ上書き）
 
     # 量子化モード: 'none', 'int8'
     quantization_mode = 'none'  # 'int8'で有効化
@@ -51,7 +53,7 @@ class AdvancedConfig(NewLLMConfig):
     # 基本設定（通常は変更不要）
     # ========================================
 
-    # データ関連
+    # データ関連（WikiText-2用）
     max_seq_length = 64
     vocab_size = 1000
 
@@ -60,18 +62,16 @@ class AdvancedConfig(NewLLMConfig):
     hidden_dim = 512
     dropout = 0.1
 
-    # 訓練ハイパーパラメータ
+    # 訓練ハイパーパラメータ（NewLLMAdvancedGPUConfigから継承）
+    # batch_size = 512  ← NewLLMAdvancedGPUConfigから自動継承
+    # device = "cuda"   ← NewLLMAdvancedGPUConfigから自動継承
     num_epochs = 50
-    batch_size = 512  # GPU RAM (15GB) をフル活用（32 → 512で16倍）
     learning_rate = 0.0001
     weight_decay = 0.0
     gradient_clip = 1.0
 
     # Early Stopping
     patience = 15
-
-    # デバイス（GPU自動検出）
-    device = "cuda" if torch.cuda.is_available() else "cpu"
 
     def get_experiment_name(self):
         """実験名を自動生成"""

@@ -118,6 +118,42 @@ class NewLLMConfig:
     device = "cpu"           # Device
 
 
+class NewLLMGPUConfig(NewLLMConfig):
+    """
+    GPU-optimized configuration for New-LLM (Colab/Cloud)
+
+    Optimized for:
+    - T4 GPU (16GB): batch_size=512
+    - L4 GPU (24GB): batch_size=512-1024
+    - A100 GPU (40GB): batch_size=1024-2048
+
+    Use this for all Google Colab experiments.
+    """
+    # ========== GPU-Optimized Training ==========
+    batch_size = 512         # GPU batch size (16x larger than CPU)
+    device = "cuda"          # GPU device
+
+    # Inherit all other settings from NewLLMConfig
+    # (vocab_size, embed_dim, hidden_dim, num_layers, etc.)
+
+
+class NewLLMAdvancedGPUConfig(NewLLMGPUConfig):
+    """
+    Advanced GPU configuration with larger capacity
+
+    For experiments with:
+    - Larger context vectors (512, 1024, 2048)
+    - More layers (12, 24, 48)
+
+    Inherits GPU optimization from NewLLMGPUConfig.
+    """
+    # ========== Scaled-up Architecture ==========
+    context_vector_dim = 512  # 2x larger context (can be 1024, 2048)
+    num_layers = 12           # 2x more layers
+
+    # All other settings inherited from NewLLMGPUConfig
+
+
 # Legacy alias for backward compatibility
 class LSTMConfig(BaseConfig):
     """Legacy LSTM configuration (for old experiments)"""
