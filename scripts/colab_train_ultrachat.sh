@@ -5,6 +5,7 @@ set -e
 MAX_SAMPLES=""
 EPOCHS=5
 BATCH_SIZE=32
+LEARNING_RATE=""
 OUTPUT_DIR="checkpoints/ultrachat"
 
 while [[ $# -gt 0 ]]; do
@@ -12,6 +13,7 @@ while [[ $# -gt 0 ]]; do
         --max-samples) MAX_SAMPLES="$2"; shift 2 ;;
         --epochs) EPOCHS="$2"; shift 2 ;;
         --batch-size) BATCH_SIZE="$2"; shift 2 ;;
+        --learning-rate) LEARNING_RATE="$2"; shift 2 ;;
         --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
@@ -44,6 +46,9 @@ pip install -q transformers tokenizers datasets tensorboard
 CMD="python train.py --dataset ultrachat --epochs $EPOCHS --batch-size $BATCH_SIZE --output-dir $OUTPUT_DIR"
 if [ -n "$MAX_SAMPLES" ]; then
     CMD="$CMD --max-samples $MAX_SAMPLES"
+fi
+if [ -n "$LEARNING_RATE" ]; then
+    CMD="$CMD --learning-rate $LEARNING_RATE"
 fi
 LOG_FILE="/content/ultrachat_training.log"
 
