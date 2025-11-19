@@ -7,6 +7,7 @@ EPOCHS=30
 BATCH_SIZE=32
 LR=""
 LAYERS=1
+CONTEXT_DIM=""
 OUTPUT_DIR="checkpoints"
 
 while [[ $# -gt 0 ]]; do
@@ -16,6 +17,7 @@ while [[ $# -gt 0 ]]; do
         --batch-size) BATCH_SIZE="$2"; shift 2 ;;
         --lr) LR="$2"; shift 2 ;;
         --layers) LAYERS="$2"; shift 2 ;;
+        --context-dim) CONTEXT_DIM="$2"; shift 2 ;;
         --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
@@ -51,6 +53,9 @@ if [ -n "$MAX_SAMPLES" ]; then
 fi
 if [ -n "$LR" ]; then
     CMD="$CMD --lr $LR"
+fi
+if [ -n "$CONTEXT_DIM" ]; then
+    CMD="$CMD --context-dim $CONTEXT_DIM"
 fi
 LOG_FILE="/content/wikitext_training.log"
 
