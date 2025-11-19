@@ -12,10 +12,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from datasets import load_dataset
-from tokenizers import Tokenizer
-from tokenizers.models import BPE
-from tokenizers.trainers import BpeTrainer
-from tokenizers.pre_tokenizers import Whitespace
+from transformers import GPT2Tokenizer
 import math
 import matplotlib.pyplot as plt
 
@@ -57,8 +54,8 @@ def collate_fn(batch):
     return torch.stack(padded)
 
 
-def load_wikitext_data(max_samples=None):
-    """Load WikiText-103 dataset"""
+def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512):
+    """Load and tokenize WikiText-103 dataset efficiently"""
     print("\n📥 Loading WikiText dataset...")
     dataset = load_dataset("wikitext", "wikitext-103-raw-v1")
 
@@ -69,69 +66,49 @@ def load_wikitext_data(max_samples=None):
         train_data = train_data.select(range(min(max_samples, len(train_data))))
         val_data = val_data.select(range(min(max_samples // 10, len(val_data))))
 
-    # Extract non-empty texts
-    train_texts = [ex['text'] for ex in train_data if ex['text'].strip()]
-    val_texts = [ex['text'] for ex in val_data if ex['text'].strip()]
+    print(f"✓ Loaded {len(train_data)} train, {len(val_data)} val samples")
 
-    print(f"✓ Loaded {len(train_texts)} train, {len(val_texts)} val texts")
+    # Tokenize using HuggingFace map() for parallel processing + caching
+    print("\n⚙️  Tokenizing dataset (with caching)...")
 
-    return train_texts, val_texts
+    def tokenize_function(examples):
+        """Tokenize a batch of examples"""
+        # Filter out empty texts and tokenize
+        return tokenizer(
+            examples['text'],
+            max_length=max_length,
+            truncation=True,
+            padding=False,  # We'll pad in collate_fn
+        )
 
-
-def create_tokenizer(texts, vocab_size=10000, output_dir='./tokenizer'):
-    """Create or load BPE tokenizer"""
-    tokenizer_path = f"{output_dir}/tokenizer.json"
-
-    # Check if tokenizer already exists
-    if os.path.exists(tokenizer_path):
-        print(f"\n🔤 Loading existing tokenizer from {tokenizer_path}...")
-        tokenizer = Tokenizer.from_file(tokenizer_path)
-        print(f"✓ Tokenizer loaded: {tokenizer.get_vocab_size()} tokens")
-        return tokenizer
-
-    # Create new tokenizer if not exists
-    print(f"\n🔤 Training BPE tokenizer (vocab_size={vocab_size})...")
-
-    tokenizer = Tokenizer(BPE(unk_token="<unk>"))
-    tokenizer.pre_tokenizer = Whitespace()
-
-    trainer = BpeTrainer(
-        vocab_size=vocab_size,
-        special_tokens=["<unk>", "<pad>", "<bos>", "<eos>"],
-        min_frequency=2
+    # Parallel tokenization with caching
+    train_tokenized = train_data.map(
+        tokenize_function,
+        batched=True,
+        batch_size=1000,
+        remove_columns=['text'],
+        desc="Tokenizing train"
     )
 
-    tokenizer.train_from_iterator(texts, trainer)
+    val_tokenized = val_data.map(
+        tokenize_function,
+        batched=True,
+        batch_size=1000,
+        remove_columns=['text'],
+        desc="Tokenizing val"
+    )
 
-    # Save tokenizer
-    os.makedirs(output_dir, exist_ok=True)
-    tokenizer.save(tokenizer_path)
+    # Filter out sequences that are too short
+    train_tokenized = train_tokenized.filter(lambda x: len(x['input_ids']) >= 2)
+    val_tokenized = val_tokenized.filter(lambda x: len(x['input_ids']) >= 2)
 
-    print(f"✓ Tokenizer created: {tokenizer.get_vocab_size()} tokens")
-    print(f"✓ Saved to {tokenizer_path}")
+    print(f"✓ Tokenized {len(train_tokenized)} train, {len(val_tokenized)} val samples")
 
-    return tokenizer
+    # Convert to format expected by TextDataset
+    train_encodings = {'input_ids': train_tokenized['input_ids']}
+    val_encodings = {'input_ids': val_tokenized['input_ids']}
 
-
-def tokenize_texts(texts, tokenizer, max_length=512):
-    """Tokenize texts"""
-    print("\n⚙️  Tokenizing texts...")
-
-    encodings = {'input_ids': []}
-
-    for text in texts:
-        encoding = tokenizer.encode(text)
-        ids = encoding.ids
-
-        # Skip if too short
-        if len(ids) < 2:
-            continue
-
-        encodings['input_ids'].append(ids)
-
-    print(f"✓ Tokenized {len(encodings['input_ids'])} texts")
-
-    return encodings
+    return train_encodings, val_encodings
 
 
 def _compute_batch_metrics(model, input_ids, device, context_loss_weight=1.0):
@@ -303,7 +280,6 @@ def main():
     parser.add_argument('--lr', type=float, default=5e-4, help='Learning rate')
     parser.add_argument('--context-loss-weight', type=float, default=1.0, help='Reconstruction loss weight')
     parser.add_argument('--layers', type=int, default=1, help='Number of FNN layers')
-    parser.add_argument('--vocab-size', type=int, default=10000, help='Vocabulary size')
     parser.add_argument('--context-dim', type=int, default=256, help='Context vector dimension')
     parser.add_argument('--output-dir', type=str, default='./experiments', help='Output directory')
     parser.add_argument('--device', type=str, default='cpu', help='Device (cpu/cuda)')
@@ -322,23 +298,24 @@ def main():
     print(f"  Learning rate: {args.lr}")
     print(f"  Context loss weight: {args.context_loss_weight}")
     print(f"  FNN layers: {args.layers}")
-    print(f"  Vocabulary size: {args.vocab_size}")
     print(f"  Context vector dim: {args.context_dim}")
     print(f"  Device: {args.device}")
     print(f"  Model version: {'Gated (LSTM-style gates)' if args.use_gated else 'Simple (direct overwrite)'}")
     print(f"  Output directory: {args.output_dir}")
     print()
 
-    # Load data
-    train_texts, val_texts = load_wikitext_data(args.max_samples)
+    # Load GPT-2 tokenizer (pretrained, no training needed)
+    print("\n🔤 Loading GPT-2 tokenizer...")
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+    tokenizer.pad_token = tokenizer.eos_token  # GPT-2 doesn't have pad token by default
+    print(f"✓ Tokenizer loaded: {len(tokenizer):,} tokens")
 
-    # Create tokenizer
-    tokenizer = create_tokenizer(train_texts, vocab_size=args.vocab_size,
-                                  output_dir=f"{args.output_dir}/tokenizer")
-
-    # Tokenize
-    train_encodings = tokenize_texts(train_texts, tokenizer)
-    val_encodings = tokenize_texts(val_texts, tokenizer)
+    # Load and tokenize data (efficient with caching)
+    train_encodings, val_encodings = load_and_tokenize_wikitext(
+        tokenizer,
+        max_samples=args.max_samples,
+        max_length=512
+    )
 
     # Create datasets
     train_dataset = TextDataset(train_encodings)
@@ -355,15 +332,15 @@ def main():
     # Create model
     print(f"\n🧠 Creating model...")
     config = NewLLMConfig()
-    config.vocab_size = tokenizer.get_vocab_size()
+    config.vocab_size = len(tokenizer)  # GPT-2 has 50,257 tokens
     config.embed_dim = 256
     config.hidden_dim = 512
     config.context_vector_dim = args.context_dim
     config.num_layers = args.layers
     config.max_seq_length = 512
-    config.pad_token_id = 1
-    config.bos_token_id = 2
-    config.eos_token_id = 3
+    config.pad_token_id = tokenizer.pad_token_id
+    config.bos_token_id = tokenizer.bos_token_id if tokenizer.bos_token_id else tokenizer.eos_token_id
+    config.eos_token_id = tokenizer.eos_token_id
 
     device = torch.device(args.device)
 
