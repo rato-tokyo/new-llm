@@ -316,6 +316,7 @@ def main():
     parser.add_argument('--layers', type=int, default=1, help='Number of FNN layers')
     parser.add_argument('--context-dim', type=int, default=256, help='Context vector dimension')
     parser.add_argument('--context-update-strategy', type=str, default='simple', choices=['simple', 'gated'], help='Context update strategy')
+    parser.add_argument('--max-length', type=int, default=256, help='Maximum sequence length')
     parser.add_argument('--output-dir', type=str, default='./experiments', help='Output directory')
     parser.add_argument('--device', type=str, default='cpu', help='Device (cpu/cuda)')
 
@@ -348,7 +349,7 @@ def main():
     train_encodings, val_encodings = load_and_tokenize_wikitext(
         tokenizer,
         max_samples=args.max_samples,
-        max_length=512
+        max_length=args.max_length
     )
 
     # Create datasets
