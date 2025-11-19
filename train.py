@@ -20,6 +20,7 @@ import math
 import matplotlib.pyplot as plt
 
 from src.models.context_vector_llm import ContextVectorLLM
+from src.models.context_vector_llm_gated import ContextVectorLLM as ContextVectorLLMGated
 from src.utils.config import NewLLMConfig
 
 
@@ -132,6 +133,8 @@ def train_epoch(model, dataloader, optimizer, device, context_loss_weight=1.0):
     total_tokens = 0
     total_context_change = 0
     num_context_samples = 0
+    total_recon_cosine_sim = 0
+    num_recon_samples = 0
 
     for batch_idx, input_ids in enumerate(dataloader):
         input_ids = input_ids.to(device)
@@ -171,6 +174,16 @@ def train_epoch(model, dataloader, optimizer, device, context_loss_weight=1.0):
 
             # MSE loss
             recon_loss = F.mse_loss(reconstructed, recon_targets)
+
+            # Reconstruction accuracy (cosine similarity)
+            # Flatten for cosine similarity calculation
+            recon_flat = reconstructed.view(-1, reconstructed.size(-1))
+            target_flat = recon_targets.view(-1, recon_targets.size(-1))
+
+            # Cosine similarity: closer to 1.0 = better reconstruction
+            cosine_sim = F.cosine_similarity(recon_flat, target_flat, dim=-1).mean().item()
+            total_recon_cosine_sim += cosine_sim
+            num_recon_samples += 1
         else:
             recon_loss = torch.tensor(0.0, device=device)
 
@@ -200,11 +213,13 @@ def train_epoch(model, dataloader, optimizer, device, context_loss_weight=1.0):
         total_tokens += shift_labels.numel()
 
     avg_context_change = total_context_change / num_context_samples if num_context_samples > 0 else 0
+    avg_recon_accuracy = total_recon_cosine_sim / num_recon_samples if num_recon_samples > 0 else 0
 
     return {
         'loss': total_loss / len(dataloader),
         'token_loss': total_token_loss / len(dataloader),
         'recon_loss': total_recon_loss / len(dataloader),
+        'recon_accuracy': avg_recon_accuracy,
         'context_change': avg_context_change,
     }
 
@@ -219,6 +234,8 @@ def evaluate(model, dataloader, device, context_loss_weight=1.0):
     correct = 0
     total_context_change = 0
     num_context_samples = 0
+    total_recon_cosine_sim = 0
+    num_recon_samples = 0
 
     with torch.no_grad():
         for input_ids in dataloader:
@@ -252,6 +269,13 @@ def evaluate(model, dataloader, device, context_loss_weight=1.0):
                 reconstructed = reconstructed.view(batch_size, seq_len, -1)
 
                 recon_loss = F.mse_loss(reconstructed, recon_targets)
+
+                # Reconstruction accuracy (cosine similarity)
+                recon_flat = reconstructed.view(-1, reconstructed.size(-1))
+                target_flat = recon_targets.view(-1, recon_targets.size(-1))
+                cosine_sim = F.cosine_similarity(recon_flat, target_flat, dim=-1).mean().item()
+                total_recon_cosine_sim += cosine_sim
+                num_recon_samples += 1
             else:
                 recon_loss = torch.tensor(0.0, device=device)
 
@@ -278,11 +302,13 @@ def evaluate(model, dataloader, device, context_loss_weight=1.0):
     accuracy = correct / total_tokens if total_tokens > 0 else 0
     perplexity = math.exp(min(total_token_loss / len(dataloader), 20))  # Cap at 20 to avoid overflow
     avg_context_change = total_context_change / num_context_samples if num_context_samples > 0 else 0
+    avg_recon_accuracy = total_recon_cosine_sim / num_recon_samples if num_recon_samples > 0 else 0
 
     return {
         'loss': total_loss / len(dataloader),
         'token_loss': total_token_loss / len(dataloader),
         'recon_loss': total_recon_loss / len(dataloader),
+        'recon_accuracy': avg_recon_accuracy,
         'perplexity': perplexity,
         'accuracy': accuracy,
         'context_change': avg_context_change,
@@ -298,8 +324,10 @@ def main():
     parser.add_argument('--context-loss-weight', type=float, default=1.0, help='Reconstruction loss weight')
     parser.add_argument('--layers', type=int, default=1, help='Number of FNN layers')
     parser.add_argument('--vocab-size', type=int, default=10000, help='Vocabulary size')
+    parser.add_argument('--context-dim', type=int, default=256, help='Context vector dimension')
     parser.add_argument('--output-dir', type=str, default='./experiments', help='Output directory')
     parser.add_argument('--device', type=str, default='cpu', help='Device (cpu/cuda)')
+    parser.add_argument('--use-gated', action='store_true', help='Use gated version (LSTM-style gates)')
 
     args = parser.parse_args()
 
@@ -315,7 +343,9 @@ def main():
     print(f"  Context loss weight: {args.context_loss_weight}")
     print(f"  FNN layers: {args.layers}")
     print(f"  Vocabulary size: {args.vocab_size}")
+    print(f"  Context vector dim: {args.context_dim}")
     print(f"  Device: {args.device}")
+    print(f"  Model version: {'Gated (LSTM-style gates)' if args.use_gated else 'Simple (direct overwrite)'}")
     print(f"  Output directory: {args.output_dir}")
     print()
 
@@ -348,7 +378,7 @@ def main():
     config.vocab_size = tokenizer.get_vocab_size()
     config.embed_dim = 256
     config.hidden_dim = 512
-    config.context_vector_dim = 256
+    config.context_vector_dim = args.context_dim
     config.num_layers = args.layers
     config.max_seq_length = 512
     config.pad_token_id = 1
@@ -356,7 +386,12 @@ def main():
     config.eos_token_id = 3
 
     device = torch.device(args.device)
-    model = ContextVectorLLM(config).to(device)
+
+    # Select model version based on --use-gated flag
+    if args.use_gated:
+        model = ContextVectorLLMGated(config).to(device)
+    else:
+        model = ContextVectorLLM(config).to(device)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
@@ -375,10 +410,12 @@ def main():
         'train_loss': [],
         'train_token_loss': [],
         'train_recon_loss': [],
+        'train_recon_accuracy': [],
         'train_context_change': [],
         'val_loss': [],
         'val_token_loss': [],
         'val_recon_loss': [],
+        'val_recon_accuracy': [],
         'val_perplexity': [],
         'val_accuracy': [],
         'val_context_change': [],
@@ -401,10 +438,12 @@ def main():
         history['train_loss'].append(train_metrics['loss'])
         history['train_token_loss'].append(train_metrics['token_loss'])
         history['train_recon_loss'].append(train_metrics['recon_loss'])
+        history['train_recon_accuracy'].append(train_metrics['recon_accuracy'])
         history['train_context_change'].append(train_metrics['context_change'])
         history['val_loss'].append(val_metrics['loss'])
         history['val_token_loss'].append(val_metrics['token_loss'])
         history['val_recon_loss'].append(val_metrics['recon_loss'])
+        history['val_recon_accuracy'].append(val_metrics['recon_accuracy'])
         history['val_perplexity'].append(val_metrics['perplexity'])
         history['val_accuracy'].append(val_metrics['accuracy'])
         history['val_context_change'].append(val_metrics['context_change'])
@@ -414,7 +453,8 @@ def main():
         print(f"\n✓ Epoch {epoch + 1}/{args.epochs} DONE - "
               f"PPL: {val_metrics['perplexity']:.2f}, "
               f"Loss: {val_metrics['loss']:.2f}, "
-              f"Acc: {val_metrics['accuracy']:.2%} "
+              f"Acc: {val_metrics['accuracy']:.2%}, "
+              f"Recon Acc: {val_metrics['recon_accuracy']:.2%} "
               f"({progress_pct:.0f}% complete)")
 
         # Print detailed results
@@ -424,10 +464,12 @@ def main():
         print(f"Train - Loss: {train_metrics['loss']:.4f} | "
               f"Token: {train_metrics['token_loss']:.4f} | "
               f"Recon: {train_metrics['recon_loss']:.4f} | "
+              f"ReconAcc: {train_metrics['recon_accuracy']:.2%} | "
               f"CtxΔ: {train_metrics['context_change']:.4f}")
         print(f"Val   - Loss: {val_metrics['loss']:.4f} | "
               f"Token: {val_metrics['token_loss']:.4f} | "
               f"Recon: {val_metrics['recon_loss']:.4f} | "
+              f"ReconAcc: {val_metrics['recon_accuracy']:.2%} | "
               f"CtxΔ: {val_metrics['context_change']:.4f}")
         print(f"Val   - PPL: {val_metrics['perplexity']:.2f} | "
               f"Acc: {val_metrics['accuracy']:.2%}")
@@ -453,8 +495,10 @@ def main():
         f.write(f"  Batch size: {args.batch_size}\n")
         f.write(f"  Learning rate: {args.lr}\n")
         f.write(f"  FNN layers: {args.layers}\n")
+        f.write(f"  Context vector dim: {args.context_dim}\n")
         f.write(f"  Max samples: {args.max_samples if args.max_samples else 'All'}\n")
         f.write(f"  Device: {args.device}\n")
+        f.write(f"  Model version: {'Gated' if args.use_gated else 'Simple'}\n")
         f.write(f"\nFinal Results:\n")
         f.write(f"  Train Loss: {history['train_loss'][-1]:.4f}\n")
         f.write(f"  Val Loss: {history['val_loss'][-1]:.4f}\n")
@@ -474,7 +518,7 @@ def main():
     print(f"\n📊 Generating training curves...")
     epochs = range(1, args.epochs + 1)
 
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig, axes = plt.subplots(3, 2, figsize=(14, 14))
     fig.suptitle('New-LLM Training - Reconstruction Learning', fontsize=16, fontweight='bold')
 
     # Plot 1: Total Loss
@@ -501,14 +545,32 @@ def main():
     axes[1, 0].set_title('Validation Accuracy')
     axes[1, 0].grid(True, alpha=0.3)
 
-    # Plot 4: Context Vector Change
-    axes[1, 1].plot(epochs, history['train_context_change'], 'b-o', label='Train Ctx Change', linewidth=2)
-    axes[1, 1].plot(epochs, history['val_context_change'], 'r-s', label='Val Ctx Change', linewidth=2)
+    # Plot 4: Reconstruction Accuracy
+    axes[1, 1].plot(epochs, [acc * 100 for acc in history['train_recon_accuracy']], 'b-o', label='Train Recon Acc', linewidth=2)
+    axes[1, 1].plot(epochs, [acc * 100 for acc in history['val_recon_accuracy']], 'r-s', label='Val Recon Acc', linewidth=2)
     axes[1, 1].set_xlabel('Epoch')
-    axes[1, 1].set_ylabel('Context Change (L2 norm)')
-    axes[1, 1].set_title('Context Vector Change per Timestep')
+    axes[1, 1].set_ylabel('Reconstruction Accuracy (%)')
+    axes[1, 1].set_title('Context Vector Reconstruction Accuracy')
     axes[1, 1].legend()
     axes[1, 1].grid(True, alpha=0.3)
+
+    # Plot 5: Context Vector Change
+    axes[2, 0].plot(epochs, history['train_context_change'], 'b-o', label='Train Ctx Change', linewidth=2)
+    axes[2, 0].plot(epochs, history['val_context_change'], 'r-s', label='Val Ctx Change', linewidth=2)
+    axes[2, 0].set_xlabel('Epoch')
+    axes[2, 0].set_ylabel('Context Change (L2 norm)')
+    axes[2, 0].set_title('Context Vector Change per Timestep')
+    axes[2, 0].legend()
+    axes[2, 0].grid(True, alpha=0.3)
+
+    # Plot 6: Token Loss vs Reconstruction Loss
+    axes[2, 1].plot(epochs, history['train_token_loss'], 'b-o', label='Train Token Loss', linewidth=2)
+    axes[2, 1].plot(epochs, history['train_recon_loss'], 'r-s', label='Train Recon Loss', linewidth=2)
+    axes[2, 1].set_xlabel('Epoch')
+    axes[2, 1].set_ylabel('Loss')
+    axes[2, 1].set_title('Token Loss vs Reconstruction Loss')
+    axes[2, 1].legend()
+    axes[2, 1].grid(True, alpha=0.3)
 
     plt.tight_layout()
     plot_path = f"{args.output_dir}/training_curves.png"
