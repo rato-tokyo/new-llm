@@ -268,6 +268,242 @@ python3 -c "import torch; print(f'PyTorch: {torch.__version__}')"
 
 ---
 
+## 🔄 コード品質・保守性の鉄則 - CRITICAL
+
+**コードの重複、パラメータの不整合、キャッシュ不足によるミスを防ぐ**
+
+### 1. コード重複の徹底排除 - DRY原則
+
+**❌ 絶対に避けるべきパターン**:
+
+```python
+# ❌ 悪い例 - trainとevalで同じロジックを重複実装
+def train_epoch(...):
+    # Token loss計算
+    token_loss = F.cross_entropy(...)
+    # Reconstruction loss計算
+    recon_loss = F.mse_loss(...)
+    # Context change計算
+    context_change = torch.norm(...)
+    # ... 約90行のロジック
+
+def evaluate(...):
+    # ← まったく同じロジックをコピペ
+    token_loss = F.cross_entropy(...)
+    recon_loss = F.mse_loss(...)
+    context_change = torch.norm(...)
+    # ... 約90行の重複コード
+```
+
+**問題点**:
+- 片方を修正しても、もう片方を修正し忘れる
+- メトリクス追加時に2箇所修正が必要
+- バグの温床になる
+
+**✅ 正しいパターン - 共通関数で一元化**:
+
+```python
+# ✅ 良い例 - 共通ロジックを1箇所に集約
+def _compute_batch_metrics(model, input_ids, device, context_loss_weight):
+    """共通のメトリクス計算（trainとval両方で使用）"""
+    # Token loss計算
+    token_loss = F.cross_entropy(...)
+    # Reconstruction loss計算
+    recon_loss = F.mse_loss(...)
+    # Context change計算
+    context_change = torch.norm(...)
+
+    return {
+        'loss': loss,
+        'token_loss': token_loss,
+        'recon_loss': recon_loss,
+        'context_change': context_change,
+        # ...
+    }
+
+def train_epoch(...):
+    for input_ids in dataloader:
+        metrics = _compute_batch_metrics(...)  # 共通関数を使用
+        # Train固有の処理のみ
+        optimizer.zero_grad()
+        metrics['loss'].backward()
+        optimizer.step()
+
+def evaluate(...):
+    for input_ids in dataloader:
+        metrics = _compute_batch_metrics(...)  # 同じ関数を使用
+        # Eval固有の処理のみ
+        # Accuracy計算など
+```
+
+**利点**:
+- ✅ 修正箇所が1箇所のみ
+- ✅ train/eval間の一貫性が保証される
+- ✅ コード量が約30-50%削減
+- ✅ バグが発生しにくい
+
+**チェックリスト**:
+- [ ] trainとevalで同じロジックを重複実装していないか？
+- [ ] 共通処理を`_compute_*`などの関数に抽出したか？
+- [ ] メトリクス追加時に1箇所修正で済むか？
+
+---
+
+### 2. パラメータ同期の徹底 - CRITICAL
+
+**❌ 発生した問題**:
+
+```python
+# train.py - パラメータを追加
+parser.add_argument('--context-dim', type=int, default=256)
+
+# scripts/colab_train_*.sh - 追加し忘れ ← バグ
+# → ユーザーが--context-dimを指定するとエラー
+```
+
+**✅ 必須チェック項目**:
+
+新しいパラメータを追加する際は、**必ず以下の全てを更新**すること：
+
+1. **`train.py`** - `argparse`にパラメータ定義
+2. **`scripts/colab_train_*.sh`** - パラメータ解析に追加
+3. **ドキュメント** - 使用例を記載
+4. **テスト** - パラメータ付きで動作確認
+
+**パラメータ追加のチェックリスト**:
+
+```bash
+# 1. train.pyに追加
+parser.add_argument('--new-param', type=int, default=100)
+
+# 2. colab_train_*.shに追加（必須）
+NEW_PARAM=""
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --new-param) NEW_PARAM="$2"; shift 2 ;;
+    esac
+done
+
+if [ -n "$NEW_PARAM" ]; then
+    CMD="$CMD --new-param $NEW_PARAM"
+fi
+
+# 3. 構文チェック
+bash -n scripts/colab_train_*.sh
+
+# 4. 動作テスト
+!curl -s ... | bash -s -- --new-param 200
+```
+
+**チェックリスト**:
+- [ ] `train.py`にパラメータ定義を追加したか？
+- [ ] **`scripts/colab_train_*.sh`にパラメータ解析を追加したか？** ← 最重要
+- [ ] ドキュメントに使用例を記載したか？
+- [ ] 実際にColabで`--new-param`付きで実行してテストしたか？
+
+---
+
+### 3. キャッシュの積極活用 - パフォーマンス最適化
+
+**❌ 発生した問題**:
+
+```python
+# 毎回トークナイザーを訓練（約30秒）
+def create_tokenizer(texts, ...):
+    tokenizer.train_from_iterator(texts, trainer)
+    return tokenizer
+
+# → 2回目の実験でも30秒かかる（無駄）
+```
+
+**✅ 正しいパターン - キャッシュを活用**:
+
+```python
+def create_tokenizer(texts, vocab_size=10000, output_dir='./tokenizer'):
+    """Create or load BPE tokenizer"""
+    tokenizer_path = f"{output_dir}/tokenizer.json"
+
+    # 既存のトークナイザーを確認
+    if os.path.exists(tokenizer_path):
+        print(f"Loading existing tokenizer from {tokenizer_path}...")
+        return Tokenizer.from_file(tokenizer_path)  # 0.1秒で完了
+
+    # 初回のみ訓練
+    print(f"Training BPE tokenizer...")
+    tokenizer.train_from_iterator(texts, trainer)
+    tokenizer.save(tokenizer_path)
+    return tokenizer
+```
+
+**効果**:
+- 1回目: トークナイザー訓練（約30秒）
+- 2回目以降: キャッシュから読み込み（**0.1秒** - 約300倍高速）
+
+**キャッシュすべきもの**:
+1. **トークナイザー** - `tokenizer.json`
+2. **データセット** - HuggingFace Datasetsが自動キャッシュ
+3. **モデルチェックポイント** - 実験再開時に再利用
+
+**チェックリスト**:
+- [ ] トークナイザーを毎回訓練していないか？
+- [ ] `os.path.exists()`でキャッシュを確認しているか？
+- [ ] キャッシュがある場合は再利用しているか？
+- [ ] 2回目の実行が高速化されることをテストしたか？
+
+---
+
+### 4. 実装時の必須確認事項
+
+**新機能実装・バグ修正時は必ず確認**:
+
+1. **コード重複チェック**:
+   ```bash
+   # 同じロジックが複数箇所にないか確認
+   grep -n "F.cross_entropy" train.py
+   grep -n "F.mse_loss" train.py
+   # 2箇所以上見つかったら共通化を検討
+   ```
+
+2. **パラメータ同期チェック**:
+   ```bash
+   # train.pyのパラメータ一覧
+   grep "add_argument" train.py
+
+   # colab_train_*.shのパラメータ解析
+   grep "case.*in" scripts/colab_train_*.sh
+
+   # 一致しているか確認
+   ```
+
+3. **キャッシュ活用チェック**:
+   ```bash
+   # 2回実行して速度を比較
+   time python3 train.py --max-samples 100 --epochs 1
+   time python3 train.py --max-samples 100 --epochs 1
+   # 2回目が高速なら正常
+   ```
+
+---
+
+### まとめ
+
+**二度と同じミスをしないための鉄則**:
+
+1. **DRY原則を徹底** - コードを重複させない
+2. **パラメータ同期を徹底** - `train.py`と`colab_train_*.sh`の両方を更新
+3. **キャッシュを活用** - 同じ処理を繰り返さない
+4. **テストを徹底** - 実装後は必ず2回実行してキャッシュ動作を確認
+
+**違反した場合の影響**:
+- ユーザーの時間を無駄にする
+- バグが発生しやすくなる
+- メンテナンスコストが増大
+- 信頼性が低下
+
+**これらの原則を守ることで、品質の高いコードベースを維持できます。**
+
+---
+
 ## 実験管理ポリシー - CRITICAL
 
 ### 🛑 実験終了時の必須チェックリスト
