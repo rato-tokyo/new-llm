@@ -95,7 +95,7 @@ def parse_args():
 
     # Dataset
     parser.add_argument('--dataset', type=str, default='ultrachat',
-                       choices=['ultrachat'],
+                       choices=['ultrachat', 'wikitext'],
                        help='Dataset to train on')
     parser.add_argument('--max-samples', type=int, default=None,
                        help='Limit dataset (for testing). None = full dataset')
@@ -194,6 +194,30 @@ def load_dataset_texts(dataset_name, max_samples=None):
                         parts.append(turn)
                 if parts:
                     val_texts.append(' '.join(parts))
+
+        print(f"✓ Extracted {len(train_texts):,} train texts, {len(val_texts):,} val texts")
+
+        return train_texts, val_texts
+
+    elif dataset_name == 'wikitext':
+        from datasets import load_dataset
+
+        # Load WikiText-103-raw-v1 (larger version)
+        dataset = load_dataset("wikitext", "wikitext-103-raw-v1")
+
+        train_data = dataset['train']
+        val_data = dataset['validation']
+
+        # Limit samples
+        if max_samples:
+            train_data = train_data.select(range(min(max_samples, len(train_data))))
+            val_data = val_data.select(range(min(max_samples // 10, len(val_data))))
+
+        print(f"✓ Loaded {len(train_data):,} train, {len(val_data):,} val samples")
+
+        # Extract texts (filter out empty lines)
+        train_texts = [ex['text'] for ex in train_data if ex['text'].strip()]
+        val_texts = [ex['text'] for ex in val_data if ex['text'].strip()]
 
         print(f"✓ Extracted {len(train_texts):,} train texts, {len(val_texts):,} val texts")
 
