@@ -47,13 +47,7 @@ if [ -n "$MAX_SAMPLES" ]; then
 fi
 LOG_FILE="/content/ultrachat_training.log"
 
-# 4. GPU確認
-echo "========================================="
-echo "🔍 GPU Information"
-echo "========================================="
-nvidia-smi
-
-# 5. 実験開始（バックグラウンド）
+# 4. 実験開始（バックグラウンド）
 echo ""
 echo "========================================="
 echo "🚀 Starting Training"
@@ -75,6 +69,5 @@ echo "========================================="
 echo "📊 Monitoring Commands"
 echo "========================================="
 echo "Watch progress: tail -f $LOG_FILE"
-echo "Check GPU: nvidia-smi"
 echo "Kill training: kill -9 $PID"
 echo ""
