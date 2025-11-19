@@ -136,7 +136,8 @@ class ContextVectorLLM(nn.Module):
             logits_list.append(token_logits)
 
             # Get context update (delta to add)
-            context_delta = self.context_update(hidden)  # [batch, context_dim]
+            # Apply tanh to bound context_delta to [-1, 1] (LSTM-style)
+            context_delta = torch.tanh(self.context_update(hidden))  # [batch, context_dim]
 
             # Gated context update (LSTM-style)
             forget_g = torch.sigmoid(self.forget_gate(hidden))  # [batch, context_dim]
