@@ -79,7 +79,17 @@ def load_wikitext_data(max_samples=None):
 
 
 def create_tokenizer(texts, vocab_size=10000, output_dir='./tokenizer'):
-    """Create BPE tokenizer"""
+    """Create or load BPE tokenizer"""
+    tokenizer_path = f"{output_dir}/tokenizer.json"
+
+    # Check if tokenizer already exists
+    if os.path.exists(tokenizer_path):
+        print(f"\n🔤 Loading existing tokenizer from {tokenizer_path}...")
+        tokenizer = Tokenizer.from_file(tokenizer_path)
+        print(f"✓ Tokenizer loaded: {tokenizer.get_vocab_size()} tokens")
+        return tokenizer
+
+    # Create new tokenizer if not exists
     print(f"\n🔤 Training BPE tokenizer (vocab_size={vocab_size})...")
 
     tokenizer = Tokenizer(BPE(unk_token="<unk>"))
@@ -95,10 +105,10 @@ def create_tokenizer(texts, vocab_size=10000, output_dir='./tokenizer'):
 
     # Save tokenizer
     os.makedirs(output_dir, exist_ok=True)
-    tokenizer.save(f"{output_dir}/tokenizer.json")
+    tokenizer.save(tokenizer_path)
 
     print(f"✓ Tokenizer created: {tokenizer.get_vocab_size()} tokens")
-    print(f"✓ Saved to {output_dir}/tokenizer.json")
+    print(f"✓ Saved to {tokenizer_path}")
 
     return tokenizer
 
