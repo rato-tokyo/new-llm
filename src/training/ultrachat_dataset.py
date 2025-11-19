@@ -14,6 +14,7 @@ import torch
 from torch.utils.data import Dataset
 from typing import List, Tuple
 from datasets import load_dataset
+from tqdm import tqdm
 
 
 class UltraChatDataset(Dataset):
@@ -37,7 +38,9 @@ class UltraChatDataset(Dataset):
         self.max_length = max_length
         self.sequences = []
 
-        for example in data:
+        # Add progress bar for large datasets
+        print(f"Processing {len(data):,} conversations...")
+        for example in tqdm(data, desc="Creating sequences", ncols=80):
             # UltraChat format: 'data' field contains conversation
             # Each conversation is a list of turns
             if 'data' in example:
@@ -143,7 +146,7 @@ def load_ultrachat_data(config, max_samples: int = None) -> Tuple[UltraChatDatas
     print(f"Building vocabulary from {vocab_sample_size:,} samples...")
 
     train_texts = []
-    for i, example in enumerate(train_data):
+    for i, example in enumerate(tqdm(train_data, total=vocab_sample_size, desc="Extracting vocab text", ncols=80)):
         if i >= vocab_sample_size:
             break
 
@@ -173,7 +176,9 @@ def load_ultrachat_data(config, max_samples: int = None) -> Tuple[UltraChatDatas
     print(f"Built vocabulary: {len(tokenizer.word2idx)} words")
 
     # Create datasets
-    print(f"Creating datasets...")
+    print(f"\n{'='*80}")
+    print(f"Creating datasets (this may take 10-20 minutes for full dataset)...")
+    print(f"{'='*80}")
     train_dataset = UltraChatDataset(train_data, tokenizer, config.max_seq_length)
     val_dataset = UltraChatDataset(val_data, tokenizer, config.max_seq_length)
 
