@@ -4,10 +4,11 @@ import torch
 from torch.utils.data import Dataset
 from typing import List, Tuple
 import random
+import re
 
 
 class SimpleTokenizer:
-    """Simple word-level tokenizer"""
+    """Simple word-level tokenizer with proper punctuation handling"""
 
     def __init__(self, vocab_size: int = 1000):
         self.vocab_size = vocab_size
@@ -15,11 +16,20 @@ class SimpleTokenizer:
         self.idx2word = {0: "<PAD>", 1: "<UNK>", 2: "<BOS>", 3: "<EOS>"}
         self.next_idx = 4
 
+    def _tokenize(self, text: str) -> List[str]:
+        """Tokenize text into words, separating punctuation"""
+        tokens = re.findall(r'\w+|[^\w\s]', text.lower())
+        return tokens
+
     def build_vocab(self, texts: List[str]):
-        """Build vocabulary from texts"""
+        """Build vocabulary from texts
+
+        Args:
+            texts: List of text strings
+        """
         word_freq = {}
         for text in texts:
-            for word in text.lower().split():
+            for word in self._tokenize(text):
                 word_freq[word] = word_freq.get(word, 0) + 1
 
         # Sort by frequency and take top vocab_size - 4 words
@@ -32,12 +42,17 @@ class SimpleTokenizer:
 
     def encode(self, text: str) -> List[int]:
         """Encode text to token indices"""
-        tokens = [self.word2idx.get(word.lower(), 1) for word in text.split()]
+        tokens = [self.word2idx.get(word, 1) for word in self._tokenize(text)]
         return [2] + tokens + [3]  # Add BOS and EOS
 
     def decode(self, indices: List[int]) -> str:
         """Decode token indices to text"""
-        words = [self.idx2word.get(idx, "<UNK>") for idx in indices]
+        words = []
+        for idx in indices:
+            word = self.idx2word.get(idx, "<UNK>")
+            # Skip special tokens except UNK (which indicates unknown words)
+            if word not in ["<PAD>", "<BOS>", "<EOS>"]:
+                words.append(word)
         return " ".join(words)
 
 

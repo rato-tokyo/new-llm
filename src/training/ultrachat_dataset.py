@@ -172,7 +172,6 @@ def load_ultrachat_data(config, max_samples: int = None) -> Tuple[UltraChatDatas
     from .dataset import SimpleTokenizer
     tokenizer = SimpleTokenizer(vocab_size=config.vocab_size)
     tokenizer.build_vocab(train_texts)
-
     print(f"Built vocabulary: {len(tokenizer.word2idx)} words")
 
     # Create datasets

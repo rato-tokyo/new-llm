@@ -16,28 +16,33 @@ An experimental language model that replaces attention mechanisms with **context
 
 ### 1. Train on UltraChat (1.5M Conversations)
 
-**One-line command (Google Colab)**:
 ```bash
-!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash
+# Simple one-line training
+python train.py --dataset ultrachat --epochs 50
+
+# GPU optimized (recommended for Colab)
+python train.py --dataset ultrachat --epochs 50 --batch-size 2048
 ```
 
-**That's it!** Training starts automatically.
-
-See `ULTRACHAT_TRAINING.md` for details.
+**That's it!** Training will automatically:
+- ✅ Download UltraChat dataset
+- ✅ Build vocabulary (1000 most common words)
+- ✅ Train with FP16 mixed precision
+- ✅ Save checkpoints with tokenizer included
 
 ### 2. Chat with Trained Model
 
 ```bash
-python scripts/chat.py --checkpoint checkpoints/best_new_llm_ultrachat_layers1.pt
+python chat.py --checkpoint checkpoints/best_new_llm_ultrachat_layers1.pt
 ```
 
 **Example**:
 ```
-You: Hello, how are you?
-Assistant: I'm doing well, thank you! How can I help you today?
+You: What can you help me with?
+Assistant: I can help you with various tasks and questions...
 ```
 
-See `CHAT.md` for full chat guide.
+**Note**: Model quality depends on training epochs. Expect useful conversations after ~20-50 epochs.
 
 ---
 

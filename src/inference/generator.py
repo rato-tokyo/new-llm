@@ -40,7 +40,8 @@ class TextGenerator:
         temperature: float = 1.0,
         top_k: int = 0,
         top_p: float = 1.0,
-        stop_tokens: list = None
+        stop_tokens: list = None,
+        repetition_penalty: float = 1.0
     ) -> str:
         """Generate text from a prompt
 
@@ -52,6 +53,7 @@ class TextGenerator:
             top_k: If > 0, only sample from top k tokens
             top_p: If < 1.0, nucleus sampling (sample from top tokens with cumulative prob >= p)
             stop_tokens: List of token IDs to stop generation
+            repetition_penalty: Penalty for repeating tokens (>1.0 = discourage repetition)
 
         Returns:
             Generated text string
@@ -88,7 +90,19 @@ class TextGenerator:
                     logits = output
 
                 # Get logits for next token (last position)
-                next_token_logits = logits[0, -1, :]
+                next_token_logits = logits[0, -1, :].clone()
+
+                # Apply repetition penalty (discourage recently generated tokens)
+                if repetition_penalty != 1.0:
+                    # Penalize tokens that appear in the generated sequence
+                    # Look at last 50 tokens to avoid repetition
+                    lookback = min(50, len(full_sequence))
+                    for prev_token in full_sequence[-lookback:]:
+                        # If token was already generated, reduce its logit
+                        if next_token_logits[prev_token] > 0:
+                            next_token_logits[prev_token] /= repetition_penalty
+                        else:
+                            next_token_logits[prev_token] *= repetition_penalty
 
                 # Apply temperature
                 if temperature != 1.0:
@@ -126,7 +140,8 @@ class TextGenerator:
         context: str = "",
         max_length: int = 100,
         temperature: float = 0.8,
-        top_p: float = 0.9
+        top_p: float = 0.9,
+        repetition_penalty: float = 1.2
     ) -> tuple:
         """Generate chat response
 
@@ -136,6 +151,7 @@ class TextGenerator:
             max_length: Maximum tokens to generate
             temperature: Sampling temperature
             top_p: Nucleus sampling parameter
+            repetition_penalty: Penalty for repeating tokens (default: 1.2)
 
         Returns:
             (response, updated_context) tuple
@@ -151,7 +167,8 @@ class TextGenerator:
             prompt,
             max_length=max_length,
             temperature=temperature,
-            top_p=top_p
+            top_p=top_p,
+            repetition_penalty=repetition_penalty
         )
 
         # Extract assistant's response
