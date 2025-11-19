@@ -17,11 +17,25 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# 1. 最新版を取得（git pullではなくclone）
-cd /content
-rm -rf new-llm
-git clone https://github.com/rato-tokyo/new-llm
-cd new-llm
+# 1. 最新版を取得（リポジトリの有無で自動判定）
+echo "========================================="
+echo "📦 Fetching Latest Code"
+echo "========================================="
+
+if [ -d "/content/new-llm/.git" ]; then
+    echo "✓ Repository exists, updating with git pull..."
+    cd /content/new-llm
+    git fetch origin
+    git reset --hard origin/main
+    git pull origin main
+else
+    echo "✓ Repository not found, cloning..."
+    cd /content
+    git clone https://github.com/rato-tokyo/new-llm
+    cd new-llm
+fi
+
+echo ""
 
 # 2. 依存関係インストール
 pip install -q transformers tokenizers datasets tensorboard

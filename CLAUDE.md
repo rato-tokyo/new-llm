@@ -355,42 +355,53 @@ ls -lh checkpoints/best_*.pt
 
 ### 🌐 Colab実験の推奨ワークフロー
 
-**基本原則**: `git pull`ではなく、**毎回`git clone`で最新版を取得**
+**基本原則**: リポジトリが既に存在する場合は`git pull origin main`で更新
 
-#### なぜ`git clone`が推奨されるのか？
+#### Git更新の推奨方法
 
-**❌ 悪い方法**: `git pull`
+**✅ 推奨方法**: リポジトリの有無で自動判定
+
 ```bash
+# リポジトリが既に存在する場合は git pull で更新
+if [ -d "/content/new-llm/.git" ]; then
+    cd /content/new-llm
+    git fetch origin
+    git reset --hard origin/main  # ローカル変更を破棄して最新版に同期
+    git pull origin main
+else
+    # リポジトリが存在しない場合のみ git clone
+    cd /content
+    git clone https://github.com/rato-tokyo/new-llm
+    cd new-llm
+fi
+```
+
+**理由**:
+- ✅ **効率的**: 既存リポジトリがある場合、差分のみダウンロード
+- ✅ **確実**: `git reset --hard`でローカル変更を破棄し、クリーンな状態を保証
+- ✅ **柔軟**: 初回は`clone`、2回目以降は`pull`を自動選択
+
+**旧方式（非推奨）**: 毎回`rm -rf` → `git clone`
+
+```bash
+# ❌ 非効率 - 毎回全ファイルをダウンロード
+rm -rf new-llm
+git clone https://github.com/rato-tokyo/new-llm
 cd new-llm
-git pull origin main  # ❌ 問題が発生しやすい
 ```
 
 **問題点**:
-- マージコンフリクトが発生する可能性
-- ローカル変更が残っている場合にエラー
-- 状態が不確実（どのコミットか不明確）
-
-**✅ 推奨方法**: `rm -rf` → `git clone`
-```bash
-rm -rf new-llm           # 古いディレクトリを完全削除
-git clone https://...    # 最新版を新規クローン
-cd new-llm
-```
-
-**利点**:
-- ✅ **確実に最新版**を取得
-- ✅ マージコンフリクト不要
-- ✅ クリーンな状態で開始
-- ✅ 状態が明確（常にmain branchの最新）
+- ⚠️ 時間がかかる（全ファイルを再ダウンロード）
+- ⚠️ 帯域幅の無駄遣い
 
 #### Colabの特性
 
 **Colabはステートレス環境**:
 - セッション終了で全ファイルが消失
-- 毎回クリーンな環境から開始
-- ローカル変更を保持する必要がない
+- 同一セッション内では既存リポジトリを再利用可能
+- `git reset --hard`で常にクリーンな状態を保証
 
-→ **毎回`git clone`が最適解**
+→ **条件付きで`git pull`と`git clone`を使い分けるのが最適解**
 
 ### 📦 実験スクリプトの設計原則 - CRITICAL
 
