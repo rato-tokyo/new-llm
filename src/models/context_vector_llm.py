@@ -68,6 +68,14 @@ class ContextVectorLLM(nn.Module):
         # 4. Layer normalization for context vector (CRITICAL for stability)
         self.context_norm = nn.LayerNorm(self.context_dim)
 
+        # 5. Context Decoder for reconstruction learning (NEW)
+        # Reconstructs [prev_context + current_token_embedding] from context vector
+        self.context_decoder = nn.Sequential(
+            nn.Linear(self.context_dim, config.embed_dim + self.context_dim),
+            nn.ReLU(),
+            nn.Linear(config.embed_dim + self.context_dim, config.embed_dim + self.context_dim),
+        )
+
         # Initialize weights
         self.apply(self._init_weights)
 
@@ -105,11 +113,17 @@ class ContextVectorLLM(nn.Module):
 
         logits_list = []
         context_list = []
+        reconstruction_targets = []  # NEW: Store [prev_context + current_token] for reconstruction
 
         # Process each position sequentially (context propagation)
         for t in range(seq_len):
             # Get current token embedding
             current_token = token_embeds[:, t, :]  # [batch, embed]
+
+            # Store reconstruction target: [prev_context, current_token]
+            # This is what the context_decoder should reconstruct
+            reconstruction_target = torch.cat([context, current_token], dim=-1)  # [batch, context_dim + embed]
+            reconstruction_targets.append(reconstruction_target)
 
             # Concatenate token embedding with context vector
             fnn_input = torch.cat([current_token, context], dim=-1)  # [batch, embed + context_dim]
@@ -143,6 +157,11 @@ class ContextVectorLLM(nn.Module):
         # Stack results
         logits = torch.stack(logits_list, dim=1)  # [batch, seq, vocab_size]
         context_trajectory = torch.stack(context_list, dim=1)  # [batch, seq, context_dim]
+        reconstruction_targets_tensor = torch.stack(reconstruction_targets, dim=1)  # [batch, seq, context_dim + embed]
+
+        # Store for reconstruction learning
+        self.context_history = context_list  # List of (batch, context_dim) tensors
+        self.reconstruction_targets = reconstruction_targets_tensor
 
         return logits, context_trajectory
 
