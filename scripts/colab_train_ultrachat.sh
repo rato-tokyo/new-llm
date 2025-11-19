@@ -6,6 +6,7 @@ MAX_SAMPLES=""
 EPOCHS=5
 BATCH_SIZE=32
 LEARNING_RATE=""
+LAYERS=""
 OUTPUT_DIR="checkpoints/ultrachat"
 
 while [[ $# -gt 0 ]]; do
@@ -14,6 +15,7 @@ while [[ $# -gt 0 ]]; do
         --epochs) EPOCHS="$2"; shift 2 ;;
         --batch-size) BATCH_SIZE="$2"; shift 2 ;;
         --learning-rate) LEARNING_RATE="$2"; shift 2 ;;
+        --layers) LAYERS="$2"; shift 2 ;;
         --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
@@ -49,6 +51,9 @@ if [ -n "$MAX_SAMPLES" ]; then
 fi
 if [ -n "$LEARNING_RATE" ]; then
     CMD="$CMD --learning-rate $LEARNING_RATE"
+fi
+if [ -n "$LAYERS" ]; then
+    CMD="$CMD --layers $LAYERS"
 fi
 LOG_FILE="/content/ultrachat_training.log"
 
