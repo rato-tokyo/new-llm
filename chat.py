@@ -1,110 +1,69 @@
 #!/usr/bin/env python3
 """
-New-LLM Chat Interface
+New-LLM Chat with HuggingFace Generation
 
-Simple chat interface that loads everything from checkpoint.
+Uses HuggingFace's GenerationMixin for state-of-the-art text generation:
+- Beam search
+- Nucleus sampling
+- Repetition penalty (built-in, no custom code needed!)
+- Temperature sampling
+- All Exposure Bias mitigations included
 
 Usage:
-    python chat.py --checkpoint checkpoints/best_new_llm_ultrachat_layers1.pt
-    python chat.py --checkpoint checkpoints/best_new_llm_ultrachat_layers1.pt --temperature 0.9
+    python chat.py --model-path checkpoints/ultrachat_50epochs/final_model
+    python chat.py --model-path test_run/final_model --temperature 0.9
 """
 
 import argparse
-import torch
-
-from src.models.context_vector_llm import ContextVectorLLM
-from src.inference.generator import TextGenerator
+from transformers import AutoTokenizer, AutoModelForCausalLM
 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Chat with New-LLM')
 
-    parser.add_argument('--checkpoint', type=str, required=True,
-                       help='Path to model checkpoint')
-    parser.add_argument('--device', type=str, default='cuda',
-                       choices=['cuda', 'cpu'],
-                       help='Device to use')
+    parser.add_argument('--model-path', type=str, required=True,
+                       help='Path to trained model directory')
 
     # Generation parameters
     parser.add_argument('--max-length', type=int, default=100,
                        help='Maximum tokens to generate (default: 100)')
     parser.add_argument('--temperature', type=float, default=0.9,
-                       help='Sampling temperature (default: 0.9, higher = more random)')
+                       help='Sampling temperature (default: 0.9)')
     parser.add_argument('--top-p', type=float, default=0.95,
                        help='Nucleus sampling top-p (default: 0.95)')
+    parser.add_argument('--top-k', type=int, default=50,
+                       help='Top-k sampling (default: 50)')
     parser.add_argument('--repetition-penalty', type=float, default=1.2,
-                       help='Repetition penalty (default: 1.2, prevents loops)')
+                       help='Repetition penalty (default: 1.2)')
+    parser.add_argument('--no-cuda', action='store_true',
+                       help='Use CPU instead of CUDA')
 
     return parser.parse_args()
 
 
-def load_checkpoint(checkpoint_path, device):
-    """Load model, tokenizer, and config from checkpoint
-
-    Args:
-        checkpoint_path: Path to checkpoint file
-        device: Device to load on
-
-    Returns:
-        (model, tokenizer, config) tuple
-    """
-    print(f"📂 Loading checkpoint: {checkpoint_path}")
-
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-
-    # Extract components
-    config = checkpoint['config']
-    print(f"✓ Config loaded:")
-    print(f"   Layers: {config.num_layers}")
-    print(f"   Context dim: {config.context_vector_dim}")
-    print(f"   Vocab size: {config.vocab_size}")
-
-    # Check for tokenizer
-    if 'tokenizer' not in checkpoint:
-        raise ValueError(
-            f"❌ Checkpoint does not contain tokenizer!\n"
-            f"   This checkpoint was created with an old version.\n"
-            f"   Please retrain with: python train.py --dataset ultrachat --epochs 50"
-        )
-
-    tokenizer = checkpoint['tokenizer']
-    print(f"✓ Tokenizer loaded: {len(tokenizer.word2idx)} words")
-
-    # Create and load model
-    model = ContextVectorLLM(config)
-    model.load_state_dict(checkpoint['model_state_dict'])
-    model.to(device)
-    model.eval()
-
-    total_params = sum(p.numel() for p in model.parameters())
-    print(f"✓ Model loaded: {total_params:,} parameters")
-
-    return model, tokenizer, config
-
-
-def chat_loop(generator, args):
+def chat_loop(model, tokenizer, args):
     """Interactive chat loop
 
     Args:
-        generator: TextGenerator instance
+        model: Loaded model
+        tokenizer: Loaded tokenizer
         args: Command-line arguments
     """
     print("\n" + "="*80)
-    print("🤖 New-LLM Chat Interface")
+    print("🤖 New-LLM Chat (HuggingFace Generation)")
     print("="*80)
-    print(f"⚙️  Settings:")
+    print(f"⚙️  Generation Settings:")
     print(f"   Max length: {args.max_length}")
     print(f"   Temperature: {args.temperature}")
     print(f"   Top-p: {args.top_p}")
+    print(f"   Top-k: {args.top_k}")
     print(f"   Repetition penalty: {args.repetition_penalty}")
     print(f"\n💡 Commands:")
     print(f"   'exit' or 'quit' - End conversation")
     print(f"   'reset' - Clear conversation context")
-    print(f"   'help' - Show this help")
     print("="*80 + "\n")
 
-    context = ""
-    turn = 0
+    conversation_history = ""
 
     while True:
         # Get user input
@@ -120,63 +79,119 @@ def chat_loop(generator, args):
             break
 
         if user_input.lower() == 'reset':
-            context = ""
-            turn = 0
-            print("🔄 Conversation context reset\n")
-            continue
-
-        if user_input.lower() == 'help':
-            print("\nCommands:")
-            print("  exit/quit - End conversation")
-            print("  reset - Clear conversation context")
-            print("  help - Show this help\n")
+            conversation_history = ""
+            print("🔄 Conversation reset\n")
             continue
 
         if not user_input.strip():
             continue
 
-        # Generate response
-        turn += 1
-        print(f"Assistant: ", end='', flush=True)
+        # Build prompt
+        if conversation_history:
+            prompt = f"{conversation_history}\nHuman: {user_input}\n\nAssistant:"
+        else:
+            prompt = f"Human: {user_input}\n\nAssistant:"
+
+        # Tokenize
+        input_ids = tokenizer.encode(prompt, return_tensors="pt")
+        if not args.no_cuda and model.device.type == 'cuda':
+            input_ids = input_ids.to('cuda')
+
+        # Generate with HuggingFace's generate() method
+        # This includes ALL best practices:
+        # - Repetition penalty
+        # - Temperature sampling
+        # - Top-p/top-k sampling
+        # - Proper handling of special tokens
+        print("Assistant: ", end='', flush=True)
 
         try:
-            response, context = generator.chat(
-                user_input,
-                context=context,
-                max_length=args.max_length,
-                temperature=args.temperature,
-                top_p=args.top_p
-            )
+            with model.no_grad():
+                output_ids = model.generate(
+                    input_ids,
+                    max_new_tokens=args.max_length,
+                    temperature=args.temperature,
+                    top_p=args.top_p,
+                    top_k=args.top_k,
+                    repetition_penalty=args.repetition_penalty,
+                    do_sample=True,
+                    pad_token_id=tokenizer.pad_token_id,
+                    eos_token_id=tokenizer.eos_token_id,
+                )
+
+            # Decode output
+            full_text = tokenizer.decode(output_ids[0], skip_special_tokens=True)
+
+            # Extract assistant's response (everything after "Assistant:")
+            if "Assistant:" in full_text:
+                parts = full_text.split("Assistant:")
+                response = parts[-1].strip()
+
+                # Stop at next "Human:" if present
+                if "Human:" in response:
+                    response = response.split("Human:")[0].strip()
+            else:
+                # Fallback: use everything after the prompt
+                response = full_text[len(prompt):].strip()
+
             print(response)
+
+            # Update conversation history
+            conversation_history = f"{prompt} {response}"
 
         except Exception as e:
             print(f"\n❌ Error: {e}")
-            print(f"   Try 'reset' to clear context")
+            print("   Try 'reset' to clear context")
 
-        print()  # Empty line for readability
+        print()  # Empty line
 
 
 def main():
     args = parse_args()
 
-    # Check device
-    if args.device == 'cuda' and not torch.cuda.is_available():
-        print("⚠️  CUDA not available, using CPU")
-        args.device = 'cpu'
+    print("=" * 80)
+    print("Loading New-LLM Model")
+    print("=" * 80)
 
-    # Load checkpoint
+    # Load model and tokenizer
+    print(f"\n📂 Loading from: {args.model_path}")
+
     try:
-        model, tokenizer, config = load_checkpoint(args.checkpoint, args.device)
-    except Exception as e:
-        print(f"❌ Failed to load checkpoint: {e}")
-        return 1
+        # Load tokenizer
+        tokenizer = AutoTokenizer.from_pretrained(args.model_path)
+        print(f"✓ Tokenizer loaded: {len(tokenizer)} tokens")
 
-    # Create generator with anti-repetition measures
-    generator = TextGenerator(model, tokenizer, args.device)
+        # Load model
+        model = AutoModelForCausalLM.from_pretrained(
+            args.model_path,
+            trust_remote_code=True  # Allow custom models
+        )
+
+        # Move to device
+        if not args.no_cuda:
+            import torch
+            if torch.cuda.is_available():
+                model = model.to('cuda')
+                print(f"✓ Model loaded on CUDA")
+            else:
+                print(f"⚠️  CUDA not available, using CPU")
+        else:
+            print(f"✓ Model loaded on CPU")
+
+        model.eval()
+
+        total_params = sum(p.numel() for p in model.parameters())
+        print(f"✓ Model parameters: {total_params:,}")
+
+    except Exception as e:
+        print(f"❌ Failed to load model: {e}")
+        import traceback
+        traceback.print_exc()
+        return 1
 
     # Start chat
     try:
-        chat_loop(generator, args)
+        chat_loop(model, tokenizer, args)
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
