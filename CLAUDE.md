@@ -990,6 +990,30 @@ New-LLMの実装・修正時は必ず確認：
 
 **古いコード・ファイルを残すことは厳禁です (Leaving old code/files is strictly prohibited)**
 
+### ⚠️ 重要：無効化ではなく削除
+
+**不要なコードは必ず削除すること。コメントアウトや無効化では不十分です。**
+
+```python
+# ❌ 禁止 - コメントアウトで残す
+# logging_steps=args.logging_steps,  # 使わないけど残しておく
+
+# ❌ 禁止 - 無効化で残す
+if False:  # 古いコード
+    old_function()
+
+# ✅ 正しい - 完全に削除
+# （不要なコードは何も残さない）
+```
+
+**理由**:
+- コメントアウトされたコードは混乱の元
+- 何が有効で何が無効かわからなくなる
+- コードベースが肥大化する
+- 後で「なぜこれがあるのか」と疑問に思う
+
+**徹底的に削除すること。**
+
 ### 基本原則
 
 新しい実装、バグ修正、ファイル更新を行った際は、**必ず古いバージョンを完全に削除**してください。
@@ -1003,6 +1027,7 @@ New-LLMの実装・修正時は必ず確認：
 - ✗ デバッグ用の一時コード
 - ✗ 重複した機能を持つコード
 - ✗ 古いバージョンのスクリプト
+- ✗ **不要になったパラメータ・引数** ← 重要！
 
 **例**:
 ```python
@@ -1019,6 +1044,20 @@ def new_function():
 def new_function():
     # 新しい実装
     pass
+```
+
+**不要なパラメータの例**:
+```python
+# ✗ 悪い例 - 使わないパラメータを残す
+parser.add_argument('--logging-steps', type=int, default=10,
+                   help='Log every N steps')  # ← logging_strategy="no"なので不要
+parser.add_argument('--save-steps', type=int, default=500,
+                   help='Save checkpoint every N steps')  # ← save_strategy="epoch"なので不要
+
+# ✓ 良い例 - 不要なパラメータは完全に削除
+# （上記の--logging-steps、--save-stepsは削除済み）
+parser.add_argument('--output-dir', type=str, default='./checkpoints',
+                   help='Output directory for checkpoints')
 ```
 
 #### 2. 古い画像・グラフファイル

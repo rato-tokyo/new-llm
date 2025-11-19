@@ -1,5 +1,7 @@
 # Model checkpoints (too large for GitHub)
 checkpoints/*.pt
+test_run/
+experiments/
 
 # Python
 __pycache__/

@@ -119,12 +119,6 @@ def parse_args():
     # Output
     parser.add_argument('--output-dir', type=str, default='./checkpoints',
                        help='Output directory for checkpoints')
-    parser.add_argument('--logging-steps', type=int, default=10,
-                       help='Log every N steps')
-    parser.add_argument('--save-steps', type=int, default=500,
-                       help='Save checkpoint every N steps')
-    parser.add_argument('--eval-steps', type=int, default=100,
-                       help='Evaluate every N steps')
 
     # Device
     parser.add_argument('--no-cuda', action='store_true',
@@ -293,7 +287,7 @@ def main():
         learning_rate=args.learning_rate,
         weight_decay=0.01,
         logging_dir=f"{args.output_dir}/logs",
-        logging_steps=args.logging_steps,
+        logging_strategy="no",  # Disable step-level logging
         save_strategy="epoch",  # Save at end of each epoch
         save_total_limit=3,  # Keep only 3 checkpoints
         eval_strategy="epoch",  # Evaluate at end of each epoch
@@ -304,6 +298,7 @@ def main():
         no_cuda=args.no_cuda,
         fp16=not args.no_cuda,  # Use FP16 if CUDA available
         dataloader_num_workers=0,
+        disable_tqdm=True,  # Disable progress bars for cleaner output
     )
 
     # Create Trainer
