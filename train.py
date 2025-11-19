@@ -298,7 +298,6 @@ def main():
         no_cuda=args.no_cuda,
         fp16=not args.no_cuda,  # Use FP16 if CUDA available
         dataloader_num_workers=0,
-        disable_tqdm=True,  # Disable progress bars for cleaner output
     )
 
     # Create Trainer
