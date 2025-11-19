@@ -3,6 +3,9 @@ checkpoints/*.pt
 test_run/
 experiments/
 
+# Training logs
+*.log
+
 # Python
 __pycache__/
 *.py[cod]

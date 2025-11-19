@@ -2,7 +2,7 @@
 
 An experimental language model that replaces attention mechanisms with **context vector propagation** for **O(1) memory usage**.
 
-**Now powered by HuggingFace Transformers** for maximum reliability and ease of use.
+**Powered by Reconstruction Learning** - a self-supervised approach where the context vector learns to compress previous context and current token information.
 
 ---
 
@@ -13,38 +13,20 @@ An experimental language model that replaces attention mechanisms with **context
 **One-line command** to start training:
 
 ```python
-!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash -s -- --max-samples 1000 --epochs 5 --batch-size 32
-```
-
-**Full training** (all data, 50 epochs):
-
-```python
-!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash -s -- --epochs 50 --batch-size 32
+!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_wikitext.sh | bash
 ```
 
 ### Local Training
 
 ```bash
 # Install dependencies
-pip install transformers tokenizers datasets tensorboard
+pip install torch tokenizers datasets tqdm
 
-# Quick test (1000 samples, 5 epochs)
-python train.py --dataset ultrachat --max-samples 1000 --epochs 5
+# Quick test (100 samples, 2 epochs)
+python train.py --max-samples 100 --epochs 2 --batch-size 8 --layers 1 --device cpu --output-dir test_run
 
-# Full training
-python train.py --dataset ultrachat --epochs 50 --batch-size 32
-```
-
-### Chat with Trained Model
-
-```bash
-python chat.py --model-path checkpoints/ultrachat/final_model --temperature 0.9
-```
-
-**Example**:
-```
-You: hello
-Assistant: Hello! How can I help you today?
+# Full training on GPU
+python train.py --epochs 30 --batch-size 32 --layers 4 --device cuda --output-dir checkpoints
 ```
 
 ---
@@ -62,6 +44,17 @@ Assistant: Hello! How can I help you today?
 
 See `ARCHITECTURE.md` for technical details.
 
+### Reconstruction Learning
+
+New-LLM uses a unique **dual-loss training approach**:
+
+1. **Token Prediction Loss**: Standard next-token prediction (cross-entropy)
+2. **Reconstruction Loss**: Context vector learns to compress `[previous_context + current_token_embedding]`
+
+The context vector acts as an **autoencoder** - compressing 512 dimensions (256 context + 256 token) into 256 dimensions, then reconstructing it back.
+
+See `RECONSTRUCTION_LEARNING.md` for details.
+
 ---
 
 ## 🏗️ Architecture Overview
@@ -72,10 +65,13 @@ for token in sequence:
     # 1. Embed token
     embedding = embed(token)
 
-    # 2. Process with context
+    # 2. Store reconstruction target
+    reconstruction_target = concat([context, embedding])  # 512 dims
+
+    # 3. Process with context
     hidden = FNN([embedding, context])  # Concatenate and process
 
-    # 3. Update context (gated mechanism)
+    # 4. Update context (gated mechanism)
     forget_gate = sigmoid(W_forget @ hidden)
     input_gate = sigmoid(W_input @ hidden)
     context_delta = tanh(W_context @ hidden)
@@ -83,11 +79,15 @@ for token in sequence:
     context = forget_gate * context + input_gate * context_delta
     context = LayerNorm(context)  # Normalize for stability
 
-    # 4. Predict next token
+    # 5. Predict next token
     logits = W_output @ hidden
+
+    # 6. Reconstruct (for training)
+    reconstructed = context_decoder(context)  # 256 → 512 dims
+    reconstruction_loss = MSE(reconstructed, reconstruction_target)
 ```
 
-**Key Innovation**: Fixed-size context vector (256-512 dims) instead of O(n²) attention.
+**Key Innovation**: Fixed-size context vector (256 dims) instead of O(n²) attention.
 
 ---
 
@@ -95,74 +95,44 @@ for token in sequence:
 
 ```
 new-llm/
-├── train.py                           # 🆕 HuggingFace Trainer-based training
-├── chat.py                            # 🆕 HuggingFace generation-based chat
-├── scripts/
-│   └── colab_train_ultrachat.sh       # One-line Colab training script
+├── train.py                           # Pure PyTorch training script
 ├── src/
 │   ├── models/
 │   │   ├── context_vector_llm.py      # Core New-LLM architecture
-│   │   ├── new_llm_config.py          # 🆕 HuggingFace PretrainedConfig
-│   │   └── new_llm_hf.py              # 🆕 HuggingFace model wrapper
-│   ├── training/
-│   │   ├── hf_tokenizer.py            # 🆕 BPE tokenizer creation
-│   │   ├── dataset.py                 # Dataset loading
-│   │   └── ultrachat_dataset.py       # UltraChat-specific loader
+│   │   └── transformer_baseline.py    # Transformer comparison model
 │   └── utils/
 │       └── config.py                  # Model hyperparameters
+├── scripts/
+│   ├── colab_train_wikitext.sh        # One-line Colab training
+│   └── colab_train_ultrachat.sh       # UltraChat dataset training
 ├── checkpoints/                       # Trained models (auto-saved)
-└── experiments/                       # Experiment results & analysis
+├── ARCHITECTURE.md                    # Architecture documentation
+├── RECONSTRUCTION_LEARNING.md         # Reconstruction learning details
+└── CLAUDE.md                          # Development guidelines
 ```
-
----
-
-## 🔧 HuggingFace Integration
-
-### Why HuggingFace Transformers?
-
-✅ **Industry-standard BPE tokenization** - eliminates tokenizer bugs
-✅ **Automatic checkpoint management** - model + tokenizer + config saved together
-✅ **Built-in Exposure Bias mitigations** - temperature, top-p, repetition penalty
-✅ **Simple interfaces** - `train.py` and `chat.py` are under 400 lines total
-✅ **FP16 mixed precision** - 2x faster training on GPU
-
-### Features Inherited from HuggingFace
-
-- 📊 **Automatic metrics** - Loss, Perplexity, Accuracy displayed per epoch
-- 💾 **Smart checkpointing** - Keep only best 3 checkpoints, auto-save tokenizer
-- 📈 **TensorBoard logging** - Real-time training visualization
-- 🎛️ **Generation utilities** - Beam search, nucleus sampling, temperature
-- 🔄 **Resume training** - Automatic state restoration
 
 ---
 
 ## 📖 Training Output Example
 
 ```
-================================================================================
-📊 Epoch 1 Results:
-================================================================================
-  Loss:       9.1468
-  Perplexity: 9384.11
-  Accuracy:   0.04%
-================================================================================
+Epoch 1/2
+Train: Loss 7.67 | Token 7.34 | Recon 0.33: 100%|████████| 13/13 [00:42<00:00,  3.25s/it]
+Val: Loss 7.09, PPL 1026.57, Acc 2.82%
 
-================================================================================
-📊 Epoch 2 Results:
-================================================================================
-  Loss:       9.1134
-  Perplexity: 9075.98
-  Accuracy:   3.08%
-================================================================================
+Epoch 2/2
+Train: Loss 6.65 | Token 6.57 | Recon 0.08: 100%|████████| 13/13 [00:42<00:00,  3.22s/it]
+Val: Loss 6.38, PPL 567.61, Acc 2.82%
 
-... (continues for all epochs)
-
-================================================================================
-✅ Training Complete!
-================================================================================
-
-Model saved to: checkpoints/ultrachat/final_model
+Training complete!
+Best checkpoint saved to: test_run/best_model.pt
 ```
+
+**Key Metrics**:
+- **Token Loss**: Next-token prediction accuracy
+- **Recon Loss**: Context reconstruction accuracy
+- **PPL**: Perplexity (lower is better)
+- **Acc**: Token prediction accuracy
 
 ---
 
@@ -187,16 +157,16 @@ New-LLM maintains **O(1) memory** regardless of sequence length, unlike Transfor
 
 Position is learned implicitly through sequential processing - no explicit positional embeddings needed.
 
-### 3. Scalability
+### 3. Self-Supervised Reconstruction Learning
 
-Successfully scales from 1-layer to 12-layer models with proper hyperparameter tuning.
+No external teacher model needed - the model learns to compress its own context vectors.
 
 ---
 
 ## 🚀 Future Work
 
-1. **Multi-language support** - Japanese, Chinese datasets
-2. **Longer sequences** - Test O(1) memory advantage with 10k+ token sequences
+1. **Longer context experiments** - Test O(1) memory advantage with 10k+ token sequences
+2. **Multi-layer scaling** - Experiment with deeper architectures (8-12 layers)
 3. **Comparison with Mamba/RWKV** - Benchmark against other sub-quadratic architectures
 4. **Hybrid models** - Combine context propagation with sparse attention
 
@@ -221,4 +191,4 @@ MIT
 
 ---
 
-**Status**: Active research project, now powered by HuggingFace Transformers ecosystem.
+**Status**: Active research project using pure PyTorch with reconstruction learning.

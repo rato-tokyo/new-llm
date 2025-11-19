@@ -1,37 +1,6 @@
 # New-LLM Architecture
 
-**Now powered by HuggingFace Transformers** - combines New-LLM's innovative O(1) memory architecture with HuggingFace's battle-tested ecosystem.
-
----
-
-## 🔧 HuggingFace Integration
-
-New-LLM is now fully integrated with HuggingFace Transformers:
-
-```python
-# Model definition (src/models/new_llm_hf.py)
-from transformers import PreTrainedModel, PretrainedConfig
-
-class NewLLMForCausalLM(PreTrainedModel):
-    """HuggingFace-compatible New-LLM wrapper"""
-
-    def __init__(self, config: NewLLMConfig):
-        super().__init__(config)
-        self.model = ContextVectorLLM(config)  # Core New-LLM architecture
-
-    def forward(self, input_ids, labels=None, **kwargs):
-        logits = self.model(input_ids)
-        # Standard HF CausalLM loss computation
-        # ...
-```
-
-**Benefits of HuggingFace Integration**:
-- ✅ Automatic tokenizer saving/loading
-- ✅ Built-in text generation (`model.generate()`)
-- ✅ Trainer API for training
-- ✅ Compatible with all HF utilities
-
-The **core New-LLM architecture** (`ContextVectorLLM`) remains unchanged - we just wrap it in HuggingFace interfaces.
+**Pure PyTorch implementation** - O(1) memory architecture with reconstruction learning.
 
 ---
 
@@ -55,16 +24,43 @@ This is the fundamental advantage over Transformers:
 ## Architecture Overview
 
 ```
-Token 1 → [Embed + Context(0)] → FNN → [Token Pred 1, Context Update 1]
+Token 1 → [Embed + Context(0)] → FNN → [Token Pred 1, Context Update 1, Reconstruct 1]
                                                 ↓
-Token 2 → [Embed + Context(1)] → FNN → [Token Pred 2, Context Update 2]
+Token 2 → [Embed + Context(1)] → FNN → [Token Pred 2, Context Update 2, Reconstruct 2]
                                                 ↓
-Token 3 → [Embed + Context(2)] → FNN → [Token Pred 3, Context Update 3]
+Token 3 → [Embed + Context(2)] → FNN → [Token Pred 3, Context Update 3, Reconstruct 3]
                                                 ↓
                                               ...
 ```
 
-**Key idea**: The context vector carries information across positions, and its updates are learned indirectly by optimizing next-token prediction loss.
+**Key idea**: The context vector carries information across positions. It learns to compress `[previous_context + current_token]` through reconstruction learning.
+
+---
+
+## Reconstruction Learning
+
+### What is it?
+
+At each timestep `t`, the context vector learns to compress:
+- **Input**: `[context[t-1], token_embed[t]]` (512 dimensions)
+- **Output**: `context[t]` (256 dimensions)
+
+Then a decoder reconstructs the original 512 dimensions:
+- **Decoder**: `context[t]` (256 dims) → `reconstructed` (512 dims)
+- **Loss**: MSE between `reconstructed` and `[context[t-1], token_embed[t]]`
+
+### Why Reconstruction Learning?
+
+**Problem with previous approach**: We didn't know what the "correct" context vector should represent.
+
+**Solution**: Define it explicitly:
+> The context vector should be a compressed representation of "previous context + current token"
+
+This is similar to an **autoencoder**:
+- **Encoder**: FNN layers compress 512 → 256 dimensions
+- **Decoder**: Linear layers reconstruct 256 → 512 dimensions
+
+See `RECONSTRUCTION_LEARNING.md` for detailed explanation with examples.
 
 ---
 
@@ -99,11 +95,12 @@ Like RNN/LSTM, position information is **implicitly learned** through sequential
 
 ### ✅ ALLOWED
 
-- **Fixed-size context vector** (e.g., 512 dimensions)
+- **Fixed-size context vector** (e.g., 256 dimensions)
 - **Token embeddings** (reused for each token, not stored)
 - **FNN parameters** (fixed regardless of sequence)
 - **Gated updates** (forget gate, input gate)
 - **LayerNorm** (applied per-step)
+- **Context decoder** (for reconstruction learning)
 
 ### ❌ PROHIBITED
 
@@ -119,14 +116,28 @@ Like RNN/LSTM, position information is **implicitly learned** through sequential
 ### 1. Context Vector
 
 ```python
-context = torch.zeros(batch_size, context_vector_dim)  # Fixed size
+context = torch.zeros(batch_size, context_vector_dim)  # Fixed size (256 dims)
 ```
 
 - Carries all contextual information
 - Updated at each time step
 - Normalized with LayerNorm
 
-### 2. Gated Update Mechanism
+### 2. Context Decoder (NEW)
+
+```python
+self.context_decoder = nn.Sequential(
+    nn.Linear(256, 512),  # context_dim → (context_dim + embed_dim)
+    nn.ReLU(),
+    nn.Linear(512, 512),
+)
+```
+
+- Reconstructs original `[context, token_embed]` from compressed context
+- Trained with MSE loss
+- Enables self-supervised learning
+
+### 3. Gated Update Mechanism
 
 ```python
 forget_gate = sigmoid(W_f @ [token_embed, context])
@@ -141,7 +152,7 @@ context = LayerNorm(context)
 - **Input gate**: Controls how much new information to add
 - **LayerNorm**: Stabilizes training
 
-### 3. Feedforward Network (FNN)
+### 4. Feedforward Network (FNN)
 
 ```python
 hidden = FNN([token_embed, context])
@@ -154,6 +165,38 @@ logits = output_layer(hidden)
 
 ---
 
+## Dual Loss Training
+
+New-LLM is trained with two losses:
+
+### 1. Token Prediction Loss (Cross-Entropy)
+
+```python
+token_loss = F.cross_entropy(logits, labels)
+```
+
+Standard next-token prediction loss.
+
+### 2. Reconstruction Loss (MSE)
+
+```python
+reconstruction_target = torch.cat([context[t-1], token_embed[t]], dim=-1)
+reconstructed = context_decoder(context[t])
+reconstruction_loss = F.mse_loss(reconstructed, reconstruction_target)
+```
+
+Ensures context vector learns meaningful compression.
+
+### Combined Loss
+
+```python
+total_loss = token_loss + context_loss_weight * reconstruction_loss
+```
+
+Typically `context_loss_weight = 1.0` for equal importance.
+
+---
+
 ## Comparison with Transformers
 
 | Feature | Transformer | New-LLM |
@@ -163,16 +206,18 @@ logits = output_layer(hidden)
 | **Positional Encoding** | Required | Not needed |
 | **Context** | All previous tokens | Fixed-size vector |
 | **Sequence Length** | Limited by memory | Unlimited |
-| **Training Speed** | Slower (attention) | Faster (FNN only) |
+| **Training** | Next-token prediction | Token prediction + Reconstruction |
+| **Teacher Data** | Not needed | Not needed (self-supervised) |
 
 ---
 
 ## Advantages
 
 1. **Unlimited sequence length**: Not constrained by memory
-2. **Faster training**: No attention computation
-3. **Simpler architecture**: Fewer components
+2. **Self-supervised learning**: No external teacher model needed
+3. **Simpler architecture**: Fewer components than Transformer
 4. **Memory efficient**: O(1) memory usage
+5. **Explicit learning objective**: Context vector has clear purpose
 
 ---
 
@@ -180,7 +225,8 @@ logits = output_layer(hidden)
 
 1. **Information compression**: Context vector must compress all information
 2. **No explicit attention**: Cannot directly attend to specific positions
-3. **Sequential processing**: Cannot parallelize across time (but can parallelize across batch)
+3. **Sequential processing**: Cannot parallelize across time (but can across batch)
+4. **Additional decoder overhead**: Reconstruction decoder adds parameters
 
 ---
 
@@ -194,7 +240,7 @@ logits = output_layer(hidden)
 | Context dim | 256 |
 | Embed dim | 256 |
 | Hidden dim | 512 |
-| **Total params** | **~1.4M** |
+| **Total params** | **~2.7M** (including decoder) |
 
 ### Optimized (Layer 4-5)
 
@@ -204,9 +250,9 @@ logits = output_layer(hidden)
 | Context dim | 256 |
 | Embed dim | 256 |
 | Hidden dim | 512 |
-| **Total params** | **~2.5-2.6M** |
+| **Total params** | **~3.5-3.7M** |
 
-### Advanced
+### Advanced (Layer 12)
 
 | Parameter | Value |
 |-----------|-------|
@@ -221,5 +267,6 @@ logits = output_layer(hidden)
 ## See Also
 
 - `README.md` - Project overview
+- `RECONSTRUCTION_LEARNING.md` - Detailed explanation of reconstruction learning
 - `src/models/context_vector_llm.py` - Implementation
-- `experiments/` - Experimental results
+- `train.py` - Training script
