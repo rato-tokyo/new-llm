@@ -124,103 +124,113 @@ def tokenize_texts(texts, tokenizer, max_length=512):
     return encodings
 
 
+def _compute_batch_metrics(model, input_ids, device, context_loss_weight=1.0):
+    """
+    Compute metrics for a single batch (shared between train and eval)
+
+    Returns:
+        dict with keys: loss, token_loss, recon_loss, recon_accuracy, context_change,
+                       shift_logits, shift_labels
+    """
+    batch_size, seq_len = input_ids.shape
+
+    # Skip if too short
+    if seq_len < 2:
+        return None
+
+    # Forward pass
+    logits, context_trajectory = model(input_ids)
+
+    # Token prediction loss
+    shift_logits = logits[:, :-1, :].contiguous()
+    shift_labels = input_ids[:, 1:].contiguous()
+
+    token_loss = F.cross_entropy(
+        shift_logits.view(-1, shift_logits.size(-1)),
+        shift_labels.view(-1),
+        ignore_index=0,
+        reduction='mean'
+    )
+
+    # Reconstruction loss
+    recon_loss = torch.tensor(0.0, device=device)
+    recon_accuracy = 0.0
+
+    if hasattr(model, 'reconstruction_targets') and model.reconstruction_targets is not None:
+        recon_targets = model.reconstruction_targets
+        batch_size, seq_len, context_dim = context_trajectory.shape
+
+        # Decode context vectors
+        flat_context = context_trajectory.view(-1, context_dim)
+        reconstructed = model.context_decoder(flat_context)
+        reconstructed = reconstructed.view(batch_size, seq_len, -1)
+
+        # MSE loss
+        recon_loss = F.mse_loss(reconstructed, recon_targets)
+
+        # Reconstruction accuracy (cosine similarity)
+        recon_flat = reconstructed.view(-1, reconstructed.size(-1))
+        target_flat = recon_targets.view(-1, recon_targets.size(-1))
+        recon_accuracy = F.cosine_similarity(recon_flat, target_flat, dim=-1).mean().item()
+
+    # Combined loss
+    loss = token_loss + context_loss_weight * recon_loss
+
+    # Calculate context change
+    context_change = 0.0
+    if context_trajectory.size(1) > 1:
+        context_diff = context_trajectory[:, 1:, :] - context_trajectory[:, :-1, :]
+        context_change = torch.norm(context_diff, dim=-1).mean().item()
+
+    return {
+        'loss': loss,
+        'token_loss': token_loss,
+        'recon_loss': recon_loss,
+        'recon_accuracy': recon_accuracy,
+        'context_change': context_change,
+        'shift_logits': shift_logits,
+        'shift_labels': shift_labels,
+    }
+
+
 def train_epoch(model, dataloader, optimizer, device, context_loss_weight=1.0):
     """Train for one epoch"""
     model.train()
     total_loss = 0
     total_token_loss = 0
     total_recon_loss = 0
-    total_tokens = 0
     total_context_change = 0
-    num_context_samples = 0
-    total_recon_cosine_sim = 0
-    num_recon_samples = 0
+    total_recon_accuracy = 0
+    num_batches = 0
 
     for batch_idx, input_ids in enumerate(dataloader):
         input_ids = input_ids.to(device)
-        batch_size, seq_len = input_ids.shape
 
-        # Skip if too short
-        if seq_len < 2:
+        # Compute batch metrics (shared logic)
+        metrics = _compute_batch_metrics(model, input_ids, device, context_loss_weight)
+        if metrics is None:
             continue
 
-        # Forward pass
-        logits, context_trajectory = model(input_ids)
-
-        # Token prediction loss
-        shift_logits = logits[:, :-1, :].contiguous()
-        shift_labels = input_ids[:, 1:].contiguous()
-
-        token_loss = F.cross_entropy(
-            shift_logits.view(-1, shift_logits.size(-1)),
-            shift_labels.view(-1),
-            ignore_index=0,  # Ignore padding
-            reduction='mean'
-        )
-
-        # Reconstruction loss
-        if hasattr(model, 'reconstruction_targets') and model.reconstruction_targets is not None:
-            # Get context trajectory and reconstruction targets
-            # context_trajectory: (batch, seq_len, context_dim)
-            # reconstruction_targets: (batch, seq_len, context_dim + embed_dim)
-
-            recon_targets = model.reconstruction_targets
-            batch_size, seq_len, context_dim = context_trajectory.shape
-
-            # Decode context vectors
-            flat_context = context_trajectory.view(-1, context_dim)
-            reconstructed = model.context_decoder(flat_context)
-            reconstructed = reconstructed.view(batch_size, seq_len, -1)
-
-            # MSE loss
-            recon_loss = F.mse_loss(reconstructed, recon_targets)
-
-            # Reconstruction accuracy (cosine similarity)
-            # Flatten for cosine similarity calculation
-            recon_flat = reconstructed.view(-1, reconstructed.size(-1))
-            target_flat = recon_targets.view(-1, recon_targets.size(-1))
-
-            # Cosine similarity: closer to 1.0 = better reconstruction
-            cosine_sim = F.cosine_similarity(recon_flat, target_flat, dim=-1).mean().item()
-            total_recon_cosine_sim += cosine_sim
-            num_recon_samples += 1
-        else:
-            recon_loss = torch.tensor(0.0, device=device)
-
-        # Combined loss
-        loss = token_loss + context_loss_weight * recon_loss
-
-        # Backward
+        # Backward pass (train-specific)
         optimizer.zero_grad()
-        loss.backward()
+        metrics['loss'].backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
-        # Calculate context change (how much context vector changes per timestep)
-        if context_trajectory.size(1) > 1:
-            # context_trajectory: (batch, seq_len, context_dim)
-            # Calculate ||context[t] - context[t-1]|| for each t
-            context_diff = context_trajectory[:, 1:, :] - context_trajectory[:, :-1, :]
-            context_change = torch.norm(context_diff, dim=-1)  # (batch, seq_len-1)
-            avg_context_change = context_change.mean().item()
-            total_context_change += avg_context_change
-            num_context_samples += 1
-
-        # Stats
-        total_loss += loss.item()
-        total_token_loss += token_loss.item()
-        total_recon_loss += recon_loss.item()
-        total_tokens += shift_labels.numel()
-
-    avg_context_change = total_context_change / num_context_samples if num_context_samples > 0 else 0
-    avg_recon_accuracy = total_recon_cosine_sim / num_recon_samples if num_recon_samples > 0 else 0
+        # Accumulate stats
+        total_loss += metrics['loss'].item()
+        total_token_loss += metrics['token_loss'].item()
+        total_recon_loss += metrics['recon_loss'].item()
+        total_recon_accuracy += metrics['recon_accuracy']
+        total_context_change += metrics['context_change']
+        num_batches += 1
 
     return {
-        'loss': total_loss / len(dataloader),
-        'token_loss': total_token_loss / len(dataloader),
-        'recon_loss': total_recon_loss / len(dataloader),
-        'recon_accuracy': avg_recon_accuracy,
-        'context_change': avg_context_change,
+        'loss': total_loss / num_batches if num_batches > 0 else 0,
+        'token_loss': total_token_loss / num_batches if num_batches > 0 else 0,
+        'recon_loss': total_recon_loss / num_batches if num_batches > 0 else 0,
+        'recon_accuracy': total_recon_accuracy / num_batches if num_batches > 0 else 0,
+        'context_change': total_context_change / num_batches if num_batches > 0 else 0,
     }
 
 
@@ -230,84 +240,44 @@ def evaluate(model, dataloader, device, context_loss_weight=1.0):
     total_loss = 0
     total_token_loss = 0
     total_recon_loss = 0
-    total_tokens = 0
-    correct = 0
-    total_context_change = 0
-    num_context_samples = 0
     total_recon_cosine_sim = 0
-    num_recon_samples = 0
-
+    total_context_change = 0
+    correct = 0
+    total_tokens = 0
+    num_batches = 0
     with torch.no_grad():
         for input_ids in dataloader:
             input_ids = input_ids.to(device)
-            batch_size, seq_len = input_ids.shape
 
-            if seq_len < 2:
+            # Compute batch metrics (shared logic)
+            metrics = _compute_batch_metrics(model, input_ids, device, context_loss_weight)
+            if metrics is None:
                 continue
 
-            # Forward
-            logits, context_trajectory = model(input_ids)
-
-            # Token loss
-            shift_logits = logits[:, :-1, :].contiguous()
-            shift_labels = input_ids[:, 1:].contiguous()
-
-            token_loss = F.cross_entropy(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1),
-                ignore_index=0,
-                reduction='mean'
-            )
-
-            # Reconstruction loss
-            if hasattr(model, 'reconstruction_targets') and model.reconstruction_targets is not None:
-                recon_targets = model.reconstruction_targets
-                batch_size, seq_len, context_dim = context_trajectory.shape
-
-                flat_context = context_trajectory.view(-1, context_dim)
-                reconstructed = model.context_decoder(flat_context)
-                reconstructed = reconstructed.view(batch_size, seq_len, -1)
-
-                recon_loss = F.mse_loss(reconstructed, recon_targets)
-
-                # Reconstruction accuracy (cosine similarity)
-                recon_flat = reconstructed.view(-1, reconstructed.size(-1))
-                target_flat = recon_targets.view(-1, recon_targets.size(-1))
-                cosine_sim = F.cosine_similarity(recon_flat, target_flat, dim=-1).mean().item()
-                total_recon_cosine_sim += cosine_sim
-                num_recon_samples += 1
-            else:
-                recon_loss = torch.tensor(0.0, device=device)
-
-            loss = token_loss + context_loss_weight * recon_loss
-
-            # Accuracy
-            predictions = shift_logits.argmax(dim=-1)
-            mask = shift_labels != 0
-            correct += ((predictions == shift_labels) & mask).sum().item()
+            # Accuracy calculation (eval-specific)
+            predictions = metrics['shift_logits'].argmax(dim=-1)
+            mask = metrics['shift_labels'] != 0
+            correct += ((predictions == metrics['shift_labels']) & mask).sum().item()
             total_tokens += mask.sum().item()
 
-            # Calculate context change
-            if context_trajectory.size(1) > 1:
-                context_diff = context_trajectory[:, 1:, :] - context_trajectory[:, :-1, :]
-                context_change = torch.norm(context_diff, dim=-1)
-                avg_context_change = context_change.mean().item()
-                total_context_change += avg_context_change
-                num_context_samples += 1
-
-            total_loss += loss.item()
-            total_token_loss += token_loss.item()
-            total_recon_loss += recon_loss.item()
+            # Accumulate stats
+            total_loss += metrics['loss'].item()
+            total_token_loss += metrics['token_loss'].item()
+            total_recon_loss += metrics['recon_loss'].item()
+            total_recon_cosine_sim += metrics['recon_accuracy']
+            total_context_change += metrics['context_change']
+            num_batches += 1
 
     accuracy = correct / total_tokens if total_tokens > 0 else 0
-    perplexity = math.exp(min(total_token_loss / len(dataloader), 20))  # Cap at 20 to avoid overflow
-    avg_context_change = total_context_change / num_context_samples if num_context_samples > 0 else 0
-    avg_recon_accuracy = total_recon_cosine_sim / num_recon_samples if num_recon_samples > 0 else 0
+    avg_token_loss = total_token_loss / num_batches if num_batches > 0 else 0
+    perplexity = math.exp(min(avg_token_loss, 20))  # Cap at 20 to avoid overflow
+    avg_context_change = total_context_change / num_batches if num_batches > 0 else 0
+    avg_recon_accuracy = total_recon_cosine_sim / num_batches if num_batches > 0 else 0
 
     return {
-        'loss': total_loss / len(dataloader),
-        'token_loss': total_token_loss / len(dataloader),
-        'recon_loss': total_recon_loss / len(dataloader),
+        'loss': total_loss / num_batches if num_batches > 0 else 0,
+        'token_loss': avg_token_loss,
+        'recon_loss': total_recon_loss / num_batches if num_batches > 0 else 0,
         'recon_accuracy': avg_recon_accuracy,
         'perplexity': perplexity,
         'accuracy': accuracy,
