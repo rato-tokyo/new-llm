@@ -24,11 +24,36 @@ from transformers import (
     Trainer,
     TrainingArguments,
     DataCollatorForLanguageModeling,
+    TrainerCallback,
 )
 
 from src.models.new_llm_config import NewLLMConfig
 from src.models.new_llm_hf import NewLLMForCausalLM
 from src.training.hf_tokenizer import create_tokenizer
+
+
+class MetricsCallback(TrainerCallback):
+    """Custom callback to display metrics at the end of each epoch"""
+
+    def on_epoch_end(self, args, state, control, **kwargs):
+        """Called at the end of each epoch"""
+        if state.log_history:
+            # Get the latest evaluation metrics
+            latest_logs = state.log_history[-1]
+
+            if 'eval_loss' in latest_logs:
+                epoch = latest_logs.get('epoch', state.epoch)
+                eval_loss = latest_logs.get('eval_loss', 0)
+                eval_ppl = latest_logs.get('eval_perplexity', 0)
+                eval_acc = latest_logs.get('eval_accuracy', 0)
+
+                print(f"\n{'='*80}")
+                print(f"📊 Epoch {int(epoch)} Results:")
+                print(f"{'='*80}")
+                print(f"  Loss:       {eval_loss:.4f}")
+                print(f"  Perplexity: {eval_ppl:.2f}")
+                print(f"  Accuracy:   {eval_acc:.2%}")
+                print(f"{'='*80}\n")
 
 
 def compute_metrics(eval_pred):
@@ -285,10 +310,9 @@ def main():
         weight_decay=0.01,
         logging_dir=f"{args.output_dir}/logs",
         logging_steps=args.logging_steps,
-        save_steps=args.save_steps,
+        save_strategy="epoch",  # Save at end of each epoch
         save_total_limit=3,  # Keep only 3 checkpoints
-        eval_strategy="steps",
-        eval_steps=args.eval_steps,
+        eval_strategy="epoch",  # Evaluate at end of each epoch
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
@@ -313,6 +337,7 @@ def main():
         data_collator=data_collator,
         compute_metrics=compute_metrics,
         preprocess_logits_for_metrics=lambda logits, labels: logits,  # Keep all logits
+        callbacks=[MetricsCallback()],  # Add custom callback for epoch-end metrics display
     )
 
     # Train
