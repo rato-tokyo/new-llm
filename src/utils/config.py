@@ -36,6 +36,11 @@ class NewLLMConfig:
                               # Unlike attention which can look at all positions,
                               # this must compress everything into fixed size
 
+    context_update_strategy = "simple"  # Context update strategy: "simple" or "gated"
+                                        # - "simple": Complete overwrite (context_new = f(hidden))
+                                        # - "gated": LSTM-style gated addition (context_new = forget*context + input*delta)
+                                        # See src/models/context_updaters.py for implementation
+
     # ========== Training Hyperparameters ==========
     batch_size = 16          # Batch size
     learning_rate = 0.0001   # Learning rate (same as Transformer)

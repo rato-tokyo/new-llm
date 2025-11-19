@@ -16,8 +16,7 @@ from transformers import GPT2Tokenizer
 import math
 import matplotlib.pyplot as plt
 
-from src.models.context_vector_llm import ContextVectorLLM
-from src.models.context_vector_llm_gated import ContextVectorLLM as ContextVectorLLMGated
+from src.models.new_llm import NewLLM
 from src.utils.config import NewLLMConfig
 
 
@@ -316,9 +315,9 @@ def main():
     parser.add_argument('--context-loss-weight', type=float, default=1.0, help='Reconstruction loss weight')
     parser.add_argument('--layers', type=int, default=1, help='Number of FNN layers')
     parser.add_argument('--context-dim', type=int, default=256, help='Context vector dimension')
+    parser.add_argument('--context-update-strategy', type=str, default='simple', choices=['simple', 'gated'], help='Context update strategy')
     parser.add_argument('--output-dir', type=str, default='./experiments', help='Output directory')
     parser.add_argument('--device', type=str, default='cpu', help='Device (cpu/cuda)')
-    parser.add_argument('--use-gated', action='store_true', help='Use gated version (LSTM-style gates)')
 
     args = parser.parse_args()
 
@@ -334,8 +333,8 @@ def main():
     print(f"  Context loss weight: {args.context_loss_weight}")
     print(f"  FNN layers: {args.layers}")
     print(f"  Context vector dim: {args.context_dim}")
+    print(f"  Context update strategy: {args.context_update_strategy}")
     print(f"  Device: {args.device}")
-    print(f"  Model version: {'Gated (LSTM-style gates)' if args.use_gated else 'Simple (direct overwrite)'}")
     print(f"  Output directory: {args.output_dir}")
     print()
 
@@ -371,6 +370,7 @@ def main():
     config.embed_dim = 256
     config.hidden_dim = 512
     config.context_vector_dim = args.context_dim
+    config.context_update_strategy = args.context_update_strategy  # "simple" or "gated"
     config.num_layers = args.layers
     config.max_seq_length = 512
     config.pad_token_id = tokenizer.pad_token_id
@@ -379,11 +379,8 @@ def main():
 
     device = torch.device(args.device)
 
-    # Select model version based on --use-gated flag
-    if args.use_gated:
-        model = ContextVectorLLMGated(config).to(device)
-    else:
-        model = ContextVectorLLM(config).to(device)
+    # Create model (context update strategy is controlled by config.context_update_strategy)
+    model = NewLLM(config).to(device)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())

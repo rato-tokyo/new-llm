@@ -8,6 +8,7 @@ BATCH_SIZE=32
 LR=""
 LAYERS=1
 CONTEXT_DIM=""
+CONTEXT_STRATEGY=""
 OUTPUT_DIR="checkpoints"
 
 while [[ $# -gt 0 ]]; do
@@ -18,6 +19,7 @@ while [[ $# -gt 0 ]]; do
         --lr) LR="$2"; shift 2 ;;
         --layers) LAYERS="$2"; shift 2 ;;
         --context-dim) CONTEXT_DIM="$2"; shift 2 ;;
+        --context-update-strategy) CONTEXT_STRATEGY="$2"; shift 2 ;;
         --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
@@ -56,6 +58,9 @@ if [ -n "$LR" ]; then
 fi
 if [ -n "$CONTEXT_DIM" ]; then
     CMD="$CMD --context-dim $CONTEXT_DIM"
+fi
+if [ -n "$CONTEXT_STRATEGY" ]; then
+    CMD="$CMD --context-update-strategy $CONTEXT_STRATEGY"
 fi
 LOG_FILE="/content/wikitext_training.log"
 
