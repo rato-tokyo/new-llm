@@ -385,7 +385,11 @@ def main():
     }
 
     for epoch in range(args.epochs):
-        print(f"\nEpoch {epoch + 1}/{args.epochs}")
+        # Progress display - Starting
+        progress_pct = (epoch) / args.epochs * 100
+        print(f"\n{'='*80}")
+        print(f"🔄 Epoch {epoch + 1}/{args.epochs} - Starting... ({progress_pct:.0f}% complete)")
+        print("=" * 80)
 
         # Train
         train_metrics = train_epoch(model, train_loader, optimizer, device, args.context_loss_weight)
@@ -405,9 +409,17 @@ def main():
         history['val_accuracy'].append(val_metrics['accuracy'])
         history['val_context_change'].append(val_metrics['context_change'])
 
-        # Print results
+        # Quick summary (1 line)
+        progress_pct = (epoch + 1) / args.epochs * 100
+        print(f"\n✓ Epoch {epoch + 1}/{args.epochs} DONE - "
+              f"PPL: {val_metrics['perplexity']:.2f}, "
+              f"Loss: {val_metrics['loss']:.2f}, "
+              f"Acc: {val_metrics['accuracy']:.2%} "
+              f"({progress_pct:.0f}% complete)")
+
+        # Print detailed results
         print(f"\n{'='*80}")
-        print(f"Epoch {epoch + 1} Results")
+        print(f"Epoch {epoch + 1} Results (Detail)")
         print("=" * 80)
         print(f"Train - Loss: {train_metrics['loss']:.4f} | "
               f"Token: {train_metrics['token_loss']:.4f} | "
