@@ -1179,11 +1179,17 @@ git add -A  # 削除も含めてステージング
 - [ ] 未使用のインポートが残っていないか
 - [ ] デバッグ用のコードが残っていないか
 
-## コミットメッセージ
+## コミットメッセージ - CRITICAL
 
-古いファイルを削除した場合、コミットメッセージに明記：
+**コミットメッセージは1行で簡潔に記述すること**
 
 ```bash
+# ✅ 正しい - 1行で簡潔に
+git commit -m "Add WikiText dataset support and re-enable tqdm"
+git commit -m "Fix perplexity calculation bug in MetricsCallback"
+git commit -m "Remove obsolete logging parameters from train.py"
+
+# ❌ 禁止 - 複数行や詳細な説明
 git commit -m "Fix graph bug and remove old buggy version
 
 - Fixed: Perplexity plot now uses linear scale
@@ -1191,6 +1197,12 @@ git commit -m "Fix graph bug and remove old buggy version
 - Added: new_graph_fixed.png (correct version)
 "
 ```
+
+**原則**:
+- 1行で何をしたか明確に記述
+- 50文字以内を目安
+- 英語で記述
+- 動詞で始める（Add, Fix, Remove, Update など）
 
 ## ファイル命名規則 - 完全固定方針
 
