@@ -54,26 +54,45 @@ def collate_fn(batch):
     return torch.stack(padded)
 
 
-def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512):
-    """Load and tokenize WikiText-103 dataset efficiently"""
-    print("\n📥 Loading WikiText dataset...")
+def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512, cache_dir='./tokenizer'):
+    """Load and tokenize WikiText-103 dataset efficiently with file caching"""
+    import pickle
+
+    cache_file = f"{cache_dir}/tokenized_wikitext103_gpt2.pkl"
+
+    # Check if tokenized dataset already exists
+    if os.path.exists(cache_file):
+        print(f"\n📂 Loading tokenized dataset from {cache_file}...")
+        with open(cache_file, 'rb') as f:
+            cached_data = pickle.load(f)
+
+        train_encodings = cached_data['train']
+        val_encodings = cached_data['val']
+
+        print(f"✓ Loaded {len(train_encodings['input_ids'])} train, {len(val_encodings['input_ids'])} val samples from cache")
+
+        # Apply max_samples AFTER loading from cache
+        if max_samples:
+            train_encodings['input_ids'] = train_encodings['input_ids'][:max_samples]
+            val_encodings['input_ids'] = val_encodings['input_ids'][:max_samples // 10]
+            print(f"✓ Using {len(train_encodings['input_ids'])} train, {len(val_encodings['input_ids'])} val samples (max_samples={max_samples})")
+
+        return train_encodings, val_encodings
+
+    # First time: tokenize and save
+    print("\n📥 Loading WikiText dataset (first time, will be cached)...")
     dataset = load_dataset("wikitext", "wikitext-103-raw-v1")
 
     train_data = dataset['train']
     val_data = dataset['validation']
 
-    if max_samples:
-        train_data = train_data.select(range(min(max_samples, len(train_data))))
-        val_data = val_data.select(range(min(max_samples // 10, len(val_data))))
-
     print(f"✓ Loaded {len(train_data)} train, {len(val_data)} val samples")
 
-    # Tokenize using HuggingFace map() for parallel processing + caching
-    print("\n⚙️  Tokenizing dataset (with caching)...")
+    # Tokenize using HuggingFace map() for parallel processing
+    print("\n⚙️  Tokenizing FULL dataset (this will be cached for future use)...")
 
     def tokenize_function(examples):
         """Tokenize a batch of examples"""
-        # Filter out empty texts and tokenize
         return tokenizer(
             examples['text'],
             max_length=max_length,
@@ -81,7 +100,7 @@ def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512):
             padding=False,  # We'll pad in collate_fn
         )
 
-    # Parallel tokenization with caching
+    # Parallel tokenization
     train_tokenized = train_data.map(
         tokenize_function,
         batched=True,
@@ -107,6 +126,22 @@ def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512):
     # Convert to format expected by TextDataset
     train_encodings = {'input_ids': train_tokenized['input_ids']}
     val_encodings = {'input_ids': val_tokenized['input_ids']}
+
+    # Save to cache file
+    print(f"\n💾 Saving tokenized dataset to {cache_file}...")
+    os.makedirs(cache_dir, exist_ok=True)
+    with open(cache_file, 'wb') as f:
+        pickle.dump({
+            'train': train_encodings,
+            'val': val_encodings
+        }, f)
+    print(f"✓ Cached for future use")
+
+    # Apply max_samples
+    if max_samples:
+        train_encodings['input_ids'] = train_encodings['input_ids'][:max_samples]
+        val_encodings['input_ids'] = val_encodings['input_ids'][:max_samples // 10]
+        print(f"✓ Using {len(train_encodings['input_ids'])} train, {len(val_encodings['input_ids'])} val samples (max_samples={max_samples})")
 
     return train_encodings, val_encodings
 
