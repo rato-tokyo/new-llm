@@ -18,6 +18,7 @@ Usage:
 
 import argparse
 import os
+import numpy as np
 from datasets import Dataset
 from transformers import (
     Trainer,
@@ -28,6 +29,56 @@ from transformers import (
 from src.models.new_llm_config import NewLLMConfig
 from src.models.new_llm_hf import NewLLMForCausalLM
 from src.training.hf_tokenizer import create_tokenizer
+
+
+def compute_metrics(eval_pred):
+    """Compute perplexity and accuracy
+
+    Args:
+        eval_pred: EvalPrediction with predictions and label_ids
+
+    Returns:
+        dict: Dictionary with metrics (perplexity, accuracy)
+    """
+    logits = eval_pred.predictions
+    labels = eval_pred.label_ids
+
+    # Shift for next-token prediction
+    shift_logits = logits[..., :-1, :]
+    shift_labels = labels[..., 1:]
+
+    # Flatten
+    shift_logits = shift_logits.reshape(-1, shift_logits.shape[-1])
+    shift_labels = shift_labels.reshape(-1)
+
+    # Filter out ignored labels (-100)
+    mask = shift_labels != -100
+    shift_logits_filtered = shift_logits[mask]
+    shift_labels_filtered = shift_labels[mask]
+
+    # Compute predictions (argmax)
+    predictions = np.argmax(shift_logits_filtered, axis=-1)
+
+    # Accuracy
+    accuracy = np.mean(predictions == shift_labels_filtered)
+
+    # Compute loss for perplexity
+    import torch
+    if isinstance(shift_logits_filtered, np.ndarray):
+        shift_logits_filtered = torch.from_numpy(shift_logits_filtered)
+    if isinstance(shift_labels_filtered, np.ndarray):
+        shift_labels_filtered = torch.from_numpy(shift_labels_filtered)
+
+    loss_fct = torch.nn.CrossEntropyLoss()
+    loss = loss_fct(shift_logits_filtered, shift_labels_filtered)
+
+    # Perplexity = exp(loss)
+    perplexity = torch.exp(loss).item()
+
+    return {
+        "perplexity": perplexity,
+        "accuracy": accuracy,
+    }
 
 
 def parse_args():
@@ -260,6 +311,8 @@ def main():
         eval_dataset=val_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
+        compute_metrics=compute_metrics,
+        preprocess_logits_for_metrics=lambda logits, labels: logits,  # Keep all logits
     )
 
     # Train

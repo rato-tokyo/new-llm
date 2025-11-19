@@ -106,7 +106,8 @@ def chat_loop(model, tokenizer, args):
         print("Assistant: ", end='', flush=True)
 
         try:
-            with model.no_grad():
+            import torch
+            with torch.no_grad():
                 output_ids = model.generate(
                     input_ids,
                     max_new_tokens=args.max_length,
