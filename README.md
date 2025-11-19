@@ -22,11 +22,16 @@ An experimental language model that replaces attention mechanisms with **context
 # Install dependencies
 pip install torch tokenizers datasets tqdm
 
-# Quick test (100 samples, 2 epochs)
-python train.py --max-samples 100 --epochs 2 --batch-size 8 --layers 1 --device cpu --output-dir test_run
+# Quick test (100 samples, 10 epochs)
+python train.py --max-samples 100 --epochs 10 --batch-size 8 --layers 1 --device cpu
 
 # Full training on GPU
-python train.py --epochs 30 --batch-size 32 --layers 4 --device cuda --output-dir checkpoints
+python train.py --epochs 30 --batch-size 32 --layers 4 --device cuda
+
+# Results are saved to experiments/ directory by default
+# - training_curves.png: Training visualization (overwritten each run)
+# - final_model.pt: Latest model checkpoint (overwritten each run)
+# - experiment_log.txt: Log of all experiments (appended each run)
 ```
 
 ---

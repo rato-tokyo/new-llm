@@ -298,7 +298,7 @@ def main():
     parser.add_argument('--context-loss-weight', type=float, default=1.0, help='Reconstruction loss weight')
     parser.add_argument('--layers', type=int, default=1, help='Number of FNN layers')
     parser.add_argument('--vocab-size', type=int, default=10000, help='Vocabulary size')
-    parser.add_argument('--output-dir', type=str, default='./checkpoints', help='Output directory')
+    parser.add_argument('--output-dir', type=str, default='./experiments', help='Output directory')
     parser.add_argument('--device', type=str, default='cpu', help='Device (cpu/cuda)')
 
     args = parser.parse_args()
@@ -440,6 +440,35 @@ def main():
         'model_state_dict': model.state_dict(),
         'config': config.__dict__,
     }, f"{args.output_dir}/final_model.pt")
+
+    # Log experiment parameters and results
+    from datetime import datetime
+    log_path = f"{args.output_dir}/experiment_log.txt"
+    with open(log_path, 'a') as f:
+        f.write(f"\n{'='*80}\n")
+        f.write(f"Experiment: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"{'='*80}\n")
+        f.write(f"Parameters:\n")
+        f.write(f"  Epochs: {args.epochs}\n")
+        f.write(f"  Batch size: {args.batch_size}\n")
+        f.write(f"  Learning rate: {args.lr}\n")
+        f.write(f"  FNN layers: {args.layers}\n")
+        f.write(f"  Max samples: {args.max_samples if args.max_samples else 'All'}\n")
+        f.write(f"  Device: {args.device}\n")
+        f.write(f"\nFinal Results:\n")
+        f.write(f"  Train Loss: {history['train_loss'][-1]:.4f}\n")
+        f.write(f"  Val Loss: {history['val_loss'][-1]:.4f}\n")
+        f.write(f"  Val PPL: {history['val_perplexity'][-1]:.2f}\n")
+        f.write(f"  Val Accuracy: {history['val_accuracy'][-1]:.2%}\n")
+        f.write(f"  Train Context Change: {history['train_context_change'][-1]:.4f}\n")
+        f.write(f"  Val Context Change: {history['val_context_change'][-1]:.4f}\n")
+        f.write(f"  Model params: {total_params:,}\n")
+        f.write(f"\nBest Results:\n")
+        best_ppl_idx = history['val_perplexity'].index(min(history['val_perplexity']))
+        f.write(f"  Best PPL: {history['val_perplexity'][best_ppl_idx]:.2f} (Epoch {best_ppl_idx + 1})\n")
+        f.write(f"  Best Accuracy: {max(history['val_accuracy']):.2%}\n")
+        f.write(f"{'='*80}\n")
+    print(f"✓ Experiment log saved to {log_path}")
 
     # Plot training curves
     print(f"\n📊 Generating training curves...")

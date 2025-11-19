@@ -1,6 +1,7 @@
 # Model checkpoints (too large for GitHub)
 checkpoints/*.pt
 test_run/
+test_*/
 experiments/
 
 # Training logs
