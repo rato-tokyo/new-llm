@@ -58,10 +58,14 @@ class ContextVectorLLM(nn.Module):
         # 1. Token prediction head
         self.token_output = nn.Linear(config.hidden_dim, config.vocab_size)
 
-        # 2. Context vector update head (simple overwrite - no gates)
+        # 2. Context vector update head (outputs delta to add to context)
         self.context_update = nn.Linear(config.hidden_dim, self.context_dim)
 
-        # 3. Layer normalization for context vector (CRITICAL for stability)
+        # 3. Gated context update (LSTM-style gates)
+        self.forget_gate = nn.Linear(config.hidden_dim, self.context_dim)
+        self.input_gate = nn.Linear(config.hidden_dim, self.context_dim)
+
+        # 4. Layer normalization for context vector (CRITICAL for stability)
         self.context_norm = nn.LayerNorm(self.context_dim)
 
         # 5. Context Decoder for reconstruction learning (NEW)
@@ -131,16 +135,19 @@ class ContextVectorLLM(nn.Module):
             token_logits = self.token_output(hidden)  # [batch, vocab_size]
             logits_list.append(token_logits)
 
-            # Get context update (simple overwrite - no gates)
-            # Apply tanh to bound output to [-1, 1]
-            new_context = torch.tanh(self.context_update(hidden))  # [batch, context_dim]
+            # Get context update (delta to add)
+            # Apply tanh to bound context_delta to [-1, 1] (LSTM-style)
+            context_delta = torch.tanh(self.context_update(hidden))  # [batch, context_dim]
+
+            # Gated context update (LSTM-style)
+            forget_g = torch.sigmoid(self.forget_gate(hidden))  # [batch, context_dim]
+            input_g = torch.sigmoid(self.input_gate(hidden))    # [batch, context_dim]
 
             # Store current context before update
             context_list.append(context.clone())
 
-            # Simple overwrite: new context replaces old context
-            # This follows the original instruction: compress [prev_context + current_token]
-            context = new_context  # [batch, context_dim]
+            # Update context with gates: forget old + accept new
+            context = forget_g * context + input_g * context_delta  # [batch, context_dim]
 
             # Normalize context vector (CRITICAL: prevents unbounded growth)
             context = self.context_norm(context)
