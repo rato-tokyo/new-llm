@@ -34,16 +34,39 @@
 
 ## 🚀 Google Colabでの実行方法
 
-### ⚠️ 重要：データセット規模について
+### 🎯 最も簡単な方法：1行コマンド（推奨）
+
+**Layer 1、フルデータセット（1.5M件、2.5-3.5時間）**:
+```bash
+!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash
+```
+
+**Layer 4、フルデータセット（より高性能）**:
+```bash
+!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash -s -- --num_layers 4
+```
+
+**Layer 4、サブセット10万件（20-40分、動作確認用）**:
+```bash
+!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash -s -- --num_layers 4 --max_samples 100000
+```
+
+**これだけで全自動で訓練が開始されます！**
+
+---
+
+### 📋 詳細な手順（カスタマイズしたい場合のみ）
+
+#### ⚠️ データセット規模について
 
 UltraChatは**1.5M件**と非常に大規模です。以下の選択肢があります：
 
 1. **フルデータセット（1.5M件）**: 2-3時間の訓練時間
 2. **サブセット（10万件など）**: 20-40分の訓練時間（推奨）
 
-### ステップ1: 環境セットアップ
+#### ステップ1: 環境セットアップ
 
-```python
+```bash
 # GPU確認
 !nvidia-smi
 
@@ -54,42 +77,39 @@ UltraChatは**1.5M件**と非常に大規模です。以下の選択肢があり
 %cd new-llm
 
 # 依存関係インストール
-!pip install -q datasets
+!pip install -q datasets tqdm
 ```
 
-### ステップ2: UltraChat訓練開始
+#### ステップ2: UltraChat訓練開始
 
-#### オプションA: サブセット訓練（推奨、20-40分）
+**オプションA: サブセット訓練（推奨、20-40分）**
 
 ```bash
 # Layer 1（10万件サンプル）
-!nohup python3 scripts/train_ultrachat.py --num_layers 1 --max_samples 100000 > /content/ultrachat_layer1_100k.log 2>&1 &
+!nohup python scripts/train_ultrachat.py --num_layers 1 --max_samples 100000 > /content/ultrachat_layer1_100k.log 2>&1 &
 
-# ログ確認
-!tail -20 /content/ultrachat_layer1_100k.log
-
-# GPU使用状況
-!nvidia-smi
+# 10秒待機してログ確認
+!sleep 10 && tail -30 /content/ultrachat_layer1_100k.log
 ```
 
-#### オプションB: フルデータセット訓練（2-3時間）
+**オプションB: フルデータセット訓練（2-3時間）**
 
 ```bash
 # Layer 1（全1.5M件）
-!nohup python3 scripts/train_ultrachat.py --num_layers 1 > /content/ultrachat_layer1_full.log 2>&1 &
+!nohup python scripts/train_ultrachat.py --num_layers 1 > /content/ultrachat_layer1_full.log 2>&1 &
 
-# ログ確認
-!tail -20 /content/ultrachat_layer1_full.log
+# 10秒待機してログ確認
+!sleep 10 && tail -30 /content/ultrachat_layer1_full.log
 ```
 
-### ステップ3: Layer 4で訓練（推奨）
+**オプションC: Layer 4で訓練（より高性能）**
 
 ```bash
 # Layer 4（10万件サンプル）
-!nohup python3 scripts/train_ultrachat.py --num_layers 4 --max_samples 100000 > /content/ultrachat_layer4_100k.log 2>&1 &
+!nohup python scripts/train_ultrachat.py --num_layers 4 --max_samples 100000 > /content/ultrachat_layer4_100k.log 2>&1 &
 
-# ログ確認
-!tail -20 /content/ultrachat_layer4_100k.log
+# 10秒待機してログ確認
+!sleep 10 && tail -30 /content/ultrachat_layer4_100k.log
 ```
 
 ---

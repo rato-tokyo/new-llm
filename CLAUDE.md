@@ -249,13 +249,16 @@ cd new-llm
 
 → **毎回`git clone`が最適解**
 
-### 📦 実験スクリプトの設計原則
+### 📦 実験スクリプトの設計原則 - CRITICAL
 
-**1行コマンドで実験開始できるようにする**
+**🎯 鉄則：1行コマンドで実験開始できるようにする**
 
-**悪い例** - 複数ステップが必要:
+すべての訓練スクリプトは、Colabで**1行のcurlコマンド**で実行開始できるようにすること。
+
+#### ❌ 悪い例 - 複数ステップが必要
+
 ```bash
-# ❌ 手間が多い
+# ❌ 手間が多い、エラーが起きやすい
 !git clone https://...
 %cd new-llm
 !pip install datasets
@@ -263,44 +266,107 @@ cd new-llm
 !python script.py
 ```
 
-**良い例** - 1行で完結:
+**問題点**:
+- 5-6行のコマンドを順番に実行する必要がある
+- コピペミス、実行忘れのリスク
+- ユーザーが設定を間違えやすい
+
+#### ✅ 良い例 - 1行で完結
+
 ```bash
 # ✅ 1行で全自動
-!curl -s https://raw.githubusercontent.com/.../run_experiments.sh | bash
+!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash
 ```
 
-**スクリプト内に含めるべき処理**:
-1. `rm -rf` + `git clone`（最新版取得）
-2. 依存関係インストール
-3. 設定ファイルの自動編集
-4. バックグラウンド実行
-5. 初期ログ表示
+**利点**:
+- ✅ 1行コピペするだけで完了
+- ✅ エラー防止（スクリプト内で全自動化）
+- ✅ 設定ミス防止
+- ✅ 最新版を自動取得
+
+#### パラメータ付き実行
+
+```bash
+# Layer 4で実行
+!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash -s -- --num_layers 4
+
+# サブセット10万件で実行
+!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash -s -- --num_layers 4 --max_samples 100000
+```
+
+#### スクリプト内に含めるべき処理
+
+1. **最新版取得**: `rm -rf` + `git clone`
+2. **依存関係インストール**: `pip install -q datasets tqdm`
+3. **設定の自動調整**: 必要に応じてパラメータ調整
+4. **バックグラウンド実行**: `nohup ... &`
+5. **初期ログ表示**: `sleep 10 && tail -30 log.txt`
+6. **モニタリングコマンド表示**: ユーザーが進捗確認できるようにコマンドを表示
 
 ### 🔄 実験スクリプトのテンプレート
+
+**`scripts/colab_train_<dataset>.sh`の標準テンプレート**:
 
 ```bash
 #!/bin/bash
 set -e
 
+# Parse arguments (optional)
+NUM_LAYERS=1
+MAX_SAMPLES=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --num_layers) NUM_LAYERS="$2"; shift 2 ;;
+        --max_samples) MAX_SAMPLES="$2"; shift 2 ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
+
 # 1. 最新版を取得（git pullではなくclone）
 cd /content
-rm -rf project-name
-git clone https://github.com/user/project-name
-cd project-name
+rm -rf new-llm
+git clone https://github.com/rato-tokyo/new-llm
+cd new-llm
 
 # 2. 依存関係インストール
-pip install -q package1 package2
+pip install -q datasets tqdm
 
-# 3. 設定の自動調整（必要に応じて）
-sed -i 's/old_value/new_value/' config.py
+# 3. 訓練コマンド構築
+CMD="python scripts/train_<dataset>.py --num_layers $NUM_LAYERS"
+if [ -n "$MAX_SAMPLES" ]; then
+    CMD="$CMD --max_samples $MAX_SAMPLES"
+fi
+LOG_FILE="/content/<dataset>_layer${NUM_LAYERS}.log"
 
 # 4. 実験開始（バックグラウンド）
-nohup python3 script.py > /content/log.txt 2>&1 &
+nohup $CMD > $LOG_FILE 2>&1 &
 
 # 5. 初期状態表示
-sleep 5
-tail -20 /content/log.txt
+sleep 10
+tail -30 $LOG_FILE
+
+# 6. モニタリングコマンド表示
+echo "========================================="
+echo "✅ Training Started!"
+echo "========================================="
+echo "📋 Monitoring: !tail -20 $LOG_FILE"
+echo "🛑 Stop: !pkill -9 -f train_<dataset>"
+echo "========================================="
 ```
+
+### 📚 実装例
+
+**UltraChat訓練**（実装済み）:
+- ファイル: `scripts/colab_train_ultrachat.sh`
+- 1行コマンド:
+  ```bash
+  !curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash
+  ```
+- パラメータ付き:
+  ```bash
+  !curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash -s -- --num_layers 4 --max_samples 100000
+  ```
 
 ### ⚡ Colab実験の効率化
 
@@ -328,24 +394,42 @@ nvidia-smi
 
 ### 📋 Colab実験チェックリスト
 
-実験スクリプト作成時の確認事項:
+新しい訓練データセット実装時の確認事項:
+
+#### 必須実装
+
+- [ ] **`scripts/train_<dataset>.py`** - Python訓練スクリプト
+- [ ] **`scripts/colab_train_<dataset>.sh`** - 1行実行用bashスクリプト（**必須！**）
+- [ ] **テストスクリプト** - `tests/test_<dataset>_training.py`
+- [ ] **ドキュメント** - `<DATASET>_TRAINING.md`（Colab実行ガイド）
+
+#### スクリプトの要件
 
 - [ ] `rm -rf` + `git clone`で最新版取得
-- [ ] 1行コマンドで実行可能
+- [ ] **curlで1行実行可能**（最重要）
 - [ ] インデントなし（コピペエラー防止）
 - [ ] バックグラウンド実行（`nohup` + `&`）
 - [ ] ログファイル出力（進捗確認用）
-- [ ] GPU確認コマンド提供
-- [ ] 90分以内に完了する設計
+- [ ] 進捗バー実装（tqdm）
+- [ ] モニタリングコマンド表示
+- [ ] パラメータ対応（`--num_layers`, `--max_samples`など）
+
+#### 品質チェック
+
+- [ ] 構文チェック: `bash -n scripts/colab_train_<dataset>.sh`
+- [ ] ローカルテスト: スクリプトが正常に動作するか
+- [ ] GitHubにpush後、curlコマンドでアクセス可能か確認
 
 ### 🎯 ベストプラクティスまとめ
 
 **鉄則**:
 1. ✅ **`git clone`を使う**（`git pull`は使わない）
-2. ✅ **1行で実行できる**スクリプトを提供
-3. ✅ **インデント不要**な設計（コピペ対応）
-4. ✅ **バックグラウンド実行**で複数実験並列化
-5. ✅ **ログファイル**で進捗確認可能に
+2. ✅ **1行curlコマンドで実行できる**スクリプトを提供（**最重要**）
+3. ✅ **`scripts/colab_train_*.sh`を必ず作成**する
+4. ✅ **インデント不要**な設計（コピペ対応）
+5. ✅ **バックグラウンド実行**で複数実験並列化
+6. ✅ **ログファイル**で進捗確認可能に
+7. ✅ **進捗バー（tqdm）**でユーザーに進捗を表示
 
 **この方針により、Colab実験が確実・効率的になります。**
 
