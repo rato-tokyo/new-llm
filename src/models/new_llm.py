@@ -177,9 +177,9 @@ class NewLLM(nn.Module):
 
         # ========== Step 4: Return Results ==========
 
-        # Store for reconstruction learning
-        self.context_history = context_trajectory  # Use pre-allocated tensor instead of list
-        self.reconstruction_targets = reconstruction_targets_tensor
+        # Store for reconstruction learning (detach to avoid memory leak)
+        self.context_history = context_trajectory.detach()
+        self.reconstruction_targets = reconstruction_targets_tensor.detach()
 
         return logits, context_trajectory
 
