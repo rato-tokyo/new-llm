@@ -153,6 +153,7 @@ def main():
         val_dataloader=val_dataloader,
         config=config,
         model_name=f"new_llm_ultrachat_layers{config.num_layers}",
+        tokenizer=tokenizer,  # Save tokenizer in checkpoints
         use_amp=config.use_amp
     )
 

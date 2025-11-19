@@ -55,6 +55,7 @@ class Trainer:
         config,
         model_name: str = "model",
         experiment_name: Optional[str] = None,
+        tokenizer = None,
     ):
         self.model = model
         self.train_dataloader = train_dataloader
@@ -62,6 +63,7 @@ class Trainer:
         self.config = config
         self.model_name = model_name
         self.experiment_name = experiment_name  # For multi-experiment workflows
+        self.tokenizer = tokenizer  # Store tokenizer for checkpoint saving
 
         self.device = config.device
         self.model.to(self.device)
@@ -361,6 +363,10 @@ class Trainer:
             'current_epoch': self.current_epoch,
             'config': self.config,
         }
+
+        # Include tokenizer if available
+        if self.tokenizer is not None:
+            checkpoint['tokenizer'] = self.tokenizer
 
         filepath = os.path.join(checkpoint_dir, filename)
         torch.save(checkpoint, filepath)

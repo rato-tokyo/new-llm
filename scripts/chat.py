@@ -17,6 +17,17 @@ from src.models.context_vector_llm import ContextVectorLLM
 from src.training.dataset import SimpleTokenizer
 from src.inference.generator import TextGenerator
 
+# Import config classes for checkpoint loading
+# These are needed because configs are pickled in checkpoints
+script_dir = os.path.dirname(__file__)
+if script_dir not in sys.path:
+    sys.path.insert(0, script_dir)
+
+try:
+    from train_ultrachat import UltraChatTrainConfig
+except ImportError:
+    pass  # Config may not be needed if not in checkpoint
+
 
 def load_model(checkpoint_path, device='cuda'):
     """Load trained model from checkpoint
@@ -33,14 +44,31 @@ def load_model(checkpoint_path, device='cuda'):
     # Load checkpoint
     checkpoint = torch.load(checkpoint_path, map_location=device)
 
-    # Extract config and tokenizer
+    # Extract config
     config = checkpoint['config']
-    tokenizer = checkpoint['tokenizer']
 
     print(f"✓ Config loaded:")
     print(f"   Layers: {config.num_layers}")
     print(f"   Context dim: {config.context_vector_dim}")
     print(f"   Vocab size: {config.vocab_size}")
+
+    # Extract or load tokenizer
+    if 'tokenizer' in checkpoint:
+        tokenizer = checkpoint['tokenizer']
+        print(f"✓ Tokenizer loaded from checkpoint")
+    else:
+        # Try to load pre-built tokenizer
+        tokenizer_path = "checkpoints/ultrachat_tokenizer.pkl"
+        if os.path.exists(tokenizer_path):
+            print(f"⚠️  Tokenizer not in checkpoint, loading from {tokenizer_path}")
+            import pickle
+            with open(tokenizer_path, 'rb') as f:
+                tokenizer = pickle.load(f)
+            print(f"✓ Tokenizer loaded: {len(tokenizer.word2idx)} words")
+        else:
+            print(f"❌ Tokenizer not found!")
+            print(f"   Please run: python scripts/save_ultrachat_tokenizer.py")
+            raise FileNotFoundError(f"Tokenizer file not found: {tokenizer_path}")
 
     # Create model
     model = ContextVectorLLM(config)
