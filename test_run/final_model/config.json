@@ -1,0 +1,18 @@
+{
+  "architectures": [
+    "NewLLMForCausalLM"
+  ],
+  "bos_token_id": 2,
+  "context_vector_dim": 256,
+  "dropout": 0.1,
+  "dtype": "float32",
+  "embed_dim": 256,
+  "eos_token_id": 3,
+  "hidden_dim": 512,
+  "max_seq_length": 512,
+  "model_type": "new_llm",
+  "num_layers": 1,
+  "pad_token_id": 0,
+  "transformers_version": "4.57.1",
+  "vocab_size": 10000
+}

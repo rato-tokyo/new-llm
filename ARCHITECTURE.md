@@ -1,5 +1,40 @@
 # New-LLM Architecture
 
+**Now powered by HuggingFace Transformers** - combines New-LLM's innovative O(1) memory architecture with HuggingFace's battle-tested ecosystem.
+
+---
+
+## 🔧 HuggingFace Integration
+
+New-LLM is now fully integrated with HuggingFace Transformers:
+
+```python
+# Model definition (src/models/new_llm_hf.py)
+from transformers import PreTrainedModel, PretrainedConfig
+
+class NewLLMForCausalLM(PreTrainedModel):
+    """HuggingFace-compatible New-LLM wrapper"""
+
+    def __init__(self, config: NewLLMConfig):
+        super().__init__(config)
+        self.model = ContextVectorLLM(config)  # Core New-LLM architecture
+
+    def forward(self, input_ids, labels=None, **kwargs):
+        logits = self.model(input_ids)
+        # Standard HF CausalLM loss computation
+        # ...
+```
+
+**Benefits of HuggingFace Integration**:
+- ✅ Automatic tokenizer saving/loading
+- ✅ Built-in text generation (`model.generate()`)
+- ✅ Trainer API for training
+- ✅ Compatible with all HF utilities
+
+The **core New-LLM architecture** (`ContextVectorLLM`) remains unchanged - we just wrap it in HuggingFace interfaces.
+
+---
+
 ## Core Design Principles
 
 ### 🎯 Fixed Memory Usage (O(1))

@@ -151,20 +151,34 @@ echo "🛑 Stop: !pkill -9 -f train_<dataset>"
 
 #### 1. ローカルでのテスト（最重要）
 
-**Colabで実行されるスクリプトは特に重要**:
+**テストは最小限のデータ・epoch・stepで実施する**
 
 ```bash
 # ステップ1: 構文チェック
-python3 -m py_compile scripts/your_script.py
+python3 -m py_compile train.py chat.py
 
-# ステップ2: 簡易テストスクリプト作成
-# - 主要な関数をインポート
-# - 基本的な動作確認
-# - エッジケースの確認
+# ステップ2: 最小限のデータでエンドツーエンドテスト
+python3 train.py \
+    --dataset ultrachat \
+    --max-samples 100 \      # 最小限のデータ（100サンプル）
+    --epochs 2 \             # 最小限のepoch（2エポック）
+    --output-dir test_run \
+    --no-cuda \
+    --batch-size 4 \
+    --gradient-accumulation-steps 2 \
+    --logging-steps 5
 
-# ステップ3: 可能な限りエンドツーエンドテスト
-python3 scripts/your_script.py  # 実際に実行してみる
+# ステップ3: 動作確認
+# - エポックごとのメトリクス表示を確認
+# - エラーなく完了することを確認
+# - 出力ファイルが正しく生成されることを確認
 ```
+
+**テスト時間の目安**:
+- 100サンプル、2エポック → **4-5分**
+- 1000サンプル、5エポック → **30-40分** ← 通常は不要、最小限で十分
+
+**鉄則**: テストするときは**epoch=2、samples=100**で十分
 
 #### 2. チェックリスト
 
