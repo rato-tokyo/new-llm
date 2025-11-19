@@ -1,5 +1,148 @@
 # Claude Code Development Guidelines for New-LLM Project
 
+## 🎯 Colab実験の1行コマンド完結ポリシー - CRITICAL
+
+**⚠️ 絶対ルール：すべての訓練は1行curlコマンドで開始できること**
+
+### 基本原則
+
+**すべての訓練データセットは、Google Colabで1行のcurlコマンドをコピペするだけで実験が開始できること。**
+
+```bash
+# ✅ これが正しい形
+!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_<dataset>.sh | bash
+```
+
+**この方針は例外なく徹底する。**
+
+### 必須実装要件
+
+新しい訓練データセットを追加する際は、**必ず以下の4つを実装**すること：
+
+1. ✅ `scripts/train_<dataset>.py` - Python訓練スクリプト
+2. ✅ **`scripts/colab_train_<dataset>.sh`** - 1行実行用bashスクリプト（**最重要・必須**）
+3. ✅ `tests/test_<dataset>_training.py` - テストスクリプト
+4. ✅ `<DATASET>_TRAINING.md` - ドキュメント（1行コマンドを最初に記載）
+
+**`scripts/colab_train_<dataset>.sh`がない実装は不完全とみなす。**
+
+### 禁止事項
+
+**❌ 絶対にやってはいけないこと**:
+
+```bash
+# ❌ 複数ステップが必要（禁止）
+!git clone https://...
+%cd new-llm
+!pip install datasets
+!python scripts/train_xxx.py
+```
+
+**理由**:
+- ユーザーがコピペミスをする
+- 実行順序を間違える
+- 依存関係のインストール忘れ
+- 設定ミス
+- エラーが起きやすい
+
+### colab_train_*.sh スクリプトの必須内容
+
+```bash
+#!/bin/bash
+set -e
+
+# 1. パラメータ解析（必須）
+NUM_LAYERS=1
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --num_layers) NUM_LAYERS="$2"; shift 2 ;;
+        --max_samples) MAX_SAMPLES="$2"; shift 2 ;;
+        *) echo "Unknown: $1"; exit 1 ;;
+    esac
+done
+
+# 2. 最新版取得（必須）
+cd /content
+rm -rf new-llm
+git clone https://github.com/rato-tokyo/new-llm
+cd new-llm
+
+# 3. 依存関係インストール（必須）
+pip install -q datasets tqdm
+
+# 4. バックグラウンド実行（必須）
+nohup python scripts/train_<dataset>.py --num_layers $NUM_LAYERS > /content/log.txt 2>&1 &
+
+# 5. 初期ログ表示（必須）
+sleep 10
+tail -30 /content/log.txt
+
+# 6. モニタリングコマンド表示（必須）
+echo "📋 Monitoring: !tail -20 /content/log.txt"
+echo "🛑 Stop: !pkill -9 -f train_<dataset>"
+```
+
+### 実装チェックリスト
+
+新しいデータセット実装時に必ず確認：
+
+- [ ] `scripts/colab_train_<dataset>.sh` を作成したか？
+- [ ] 1行curlコマンドで実行できることをテストしたか？
+- [ ] パラメータ（`--num_layers`, `--max_samples`など）に対応しているか？
+- [ ] GitHubにpush後、curlコマンドでアクセスできることを確認したか？
+- [ ] ドキュメントに1行コマンドを**最初に**記載したか？
+- [ ] 構文チェック（`bash -n scripts/colab_train_<dataset>.sh`）を実行したか？
+
+### 既存スクリプトの扱い
+
+**既存の訓練スクリプトも全て1行コマンド化すること**:
+
+- Dolly-15k → `scripts/colab_train_dolly.sh` 作成
+- HH-RLHF → `scripts/colab_train_hh_rlhf.sh` 作成
+- WikiText → `scripts/colab_train_wikitext.sh` 作成
+- UltraChat → ✅ 実装済み（`scripts/colab_train_ultrachat.sh`）
+
+**全てのデータセットで統一すること。**
+
+### Claude AIの対応
+
+**新しい訓練データセット実装を依頼された場合**:
+
+1. `scripts/train_<dataset>.py` を作成
+2. **`scripts/colab_train_<dataset>.sh` を必ず作成**（忘れない）
+3. テストスクリプト作成
+4. ドキュメント作成（1行コマンドを最初に記載）
+5. GitHubにpush
+6. ユーザーに1行コマンドを提示
+
+**`colab_train_*.sh`の作成を忘れたら、即座に追加すること。**
+
+### 利点
+
+この方針により：
+
+- ✅ **ユーザビリティ向上**: 1回のコピペで完了
+- ✅ **エラー防止**: 複数ステップでのミスを排除
+- ✅ **一貫性**: すべてのデータセットで同じ体験
+- ✅ **メンテナンス性**: スクリプトで一元管理
+- ✅ **最新版保証**: 毎回`git clone`で最新版を取得
+
+### 例
+
+**UltraChat訓練**（標準実装）:
+
+```bash
+# Layer 1、フルデータセット
+!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash
+
+# Layer 4、サブセット10万件
+!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash -s -- --num_layers 4 --max_samples 100000
+```
+
+**これが全てのデータセットで実現されるべき形。**
+
+---
+
 ## 🧪 コード修正時の必須テストポリシー - CRITICAL
 
 **すべてのコード修正後、必ず手元でテストしてからコミット・デプロイすること**
@@ -251,57 +394,23 @@ cd new-llm
 
 ### 📦 実験スクリプトの設計原則 - CRITICAL
 
-**🎯 鉄則：1行コマンドで実験開始できるようにする**
+**⚠️ このセクションは冒頭の「Colab実験の1行コマンド完結ポリシー」に統合されました。**
 
-すべての訓練スクリプトは、Colabで**1行のcurlコマンド**で実行開始できるようにすること。
+**詳細は冒頭のセクションを参照してください。**
 
-#### ❌ 悪い例 - 複数ステップが必要
+#### 要約
 
+- ✅ すべての訓練は**1行curlコマンド**で開始できること
+- ✅ `scripts/colab_train_<dataset>.sh` を必ず作成すること
+- ✅ 複数ステップのコマンドは禁止
+- ✅ 既存スクリプトも全て1行コマンド化すること
+
+**例**:
 ```bash
-# ❌ 手間が多い、エラーが起きやすい
-!git clone https://...
-%cd new-llm
-!pip install datasets
-!sed -i 's/512/1024/' script.py
-!python script.py
-```
-
-**問題点**:
-- 5-6行のコマンドを順番に実行する必要がある
-- コピペミス、実行忘れのリスク
-- ユーザーが設定を間違えやすい
-
-#### ✅ 良い例 - 1行で完結
-
-```bash
-# ✅ 1行で全自動
 !curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash
 ```
 
-**利点**:
-- ✅ 1行コピペするだけで完了
-- ✅ エラー防止（スクリプト内で全自動化）
-- ✅ 設定ミス防止
-- ✅ 最新版を自動取得
-
-#### パラメータ付き実行
-
-```bash
-# Layer 4で実行
-!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash -s -- --num_layers 4
-
-# サブセット10万件で実行
-!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash -s -- --num_layers 4 --max_samples 100000
-```
-
-#### スクリプト内に含めるべき処理
-
-1. **最新版取得**: `rm -rf` + `git clone`
-2. **依存関係インストール**: `pip install -q datasets tqdm`
-3. **設定の自動調整**: 必要に応じてパラメータ調整
-4. **バックグラウンド実行**: `nohup ... &`
-5. **初期ログ表示**: `sleep 10 && tail -30 log.txt`
-6. **モニタリングコマンド表示**: ユーザーが進捗確認できるようにコマンドを表示
+**詳細な実装ガイドラインは冒頭のセクションを参照。**
 
 ### 🔄 実験スクリプトのテンプレート
 
