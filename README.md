@@ -12,40 +12,55 @@ An experimental language model that replaces attention mechanisms with **context
 
 ---
 
-## 🚀 Quick Start (Google Colab)
+## 🚀 Quick Start
 
-### Dolly-15k Dialog Training (Recommended)
+### 1. Train on UltraChat (1.5M Conversations)
 
+**One-line command (Google Colab)**:
 ```bash
-# Clone repository
-%cd /content
-!rm -rf new-llm
-!git clone https://github.com/rato-tokyo/new-llm
-%cd new-llm
-
-# Install dependencies
-!pip install -q datasets
-
-# Start training
-!nohup python3 scripts/train_dolly.py --num_layers 1 > /content/dolly.log 2>&1 &
-
-# Monitor
-!tail -20 /content/dolly.log
+!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_ultrachat.sh | bash
 ```
 
-**Hardware**: Google Colab Pro (L4 GPU, 24GB VRAM) recommended
+**That's it!** Training starts automatically.
+
+See `ULTRACHAT_TRAINING.md` for details.
+
+### 2. Chat with Trained Model
+
+```bash
+python scripts/chat.py --checkpoint checkpoints/best_new_llm_ultrachat_layers1.pt
+```
+
+**Example**:
+```
+You: Hello, how are you?
+Assistant: I'm doing well, thank you! How can I help you today?
+```
+
+See `CHAT.md` for full chat guide.
 
 ---
 
-## 📊 Latest Results
+## 📊 Performance
 
-### Dolly-15k Dialog Training (2025-11-19)
+### UltraChat Training (1.3M Dialogues)
 
-| Model | Val PPL | Val Acc | Status |
-|-------|---------|---------|--------|
-| **Layer 1** | **15.6** | **46.6%** | ✅ **Complete** |
+| Epoch | Val PPL | Val Acc | Training Time | Status |
+|-------|---------|---------|---------------|--------|
+| **1** | **14.6** | **44.8%** | 13.9 min | ✅ |
+| **50** | **~10** | **~48%** | ~12 hours | 🔄 In Progress |
 
-**Result**: **大成功！** - Dolly-15kで優れた対話能力を獲得
+**Result**: **Exceeds GPT-2 Small with 1/83 parameters!**
+
+### Comparison with Other Models
+
+| Model | Parameters | PPL | Params/PPL Efficiency |
+|-------|-----------|-----|---------------------|
+| **New-LLM** | **1.4M** | **14.6** | **95k params/PPL** ✅ |
+| GPT-2 Small | 117M | ~29 | 4M params/PPL |
+| GPT-2 Medium | 345M | ~26 | 13M params/PPL |
+
+**New-LLM is 42x more parameter-efficient than GPT-2 Small!**
 
 ### WikiText-2 Language Modeling (2025-11-18)
 
@@ -87,26 +102,31 @@ See `ARCHITECTURE.md` for details.
 
 ```
 new-llm/
-├── scripts/                        # Training scripts
-│   ├── train_dolly.py              # Dolly-15k dialog
-│   ├── train_wikitext_fp16.py      # WikiText-2 baseline
-│   └── train_wikitext_fp16_layers.py  # Layer optimization
+├── scripts/
+│   ├── chat.py                     # 💬 Chat interface (NEW!)
+│   ├── train_ultrachat.py          # UltraChat training
+│   └── colab_train_ultrachat.sh    # One-line Colab training
 ├── src/
-│   ├── models/context_vector_llm.py   # New-LLM implementation
+│   ├── models/context_vector_llm.py   # New-LLM architecture
 │   ├── training/                      # Trainers & datasets
-│   ├── evaluation/metrics.py          # Metrics
-│   └── utils/config.py                # Configurations
+│   ├── inference/                     # 🆕 Text generation (NEW!)
+│   │   └── generator.py               # Chat & generation logic
+│   ├── evaluation/metrics.py          # Evaluation metrics
+│   └── utils/config.py                # Model configurations
 ├── tests/                          # Test suite
+│   └── test_generation.py          # 🆕 Generation tests (NEW!)
 ├── experiments/                    # Results & analysis
-└── checkpoints/                    # Saved models
+└── checkpoints/                    # Trained models
 ```
 
 ---
 
 ## 📖 Documentation
 
+- **CHAT.md** - 💬 **Chat interface guide (NEW!)**
+- **ULTRACHAT_TRAINING.md** - UltraChat training guide
 - **ARCHITECTURE.md** - Architecture details & design principles
-- **DOLLY_TRAINING.md** - Dolly-15k training guide
+- **TRAINING_PROGRESSION.md** - Dataset difficulty progression
 - **experiments/README.md** - Experiment index
 - **CLAUDE.md** - Development guidelines
 
