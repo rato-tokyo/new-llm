@@ -16,8 +16,8 @@ from tokenizers import Tokenizer
 from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
 from tokenizers.pre_tokenizers import Whitespace
-from tqdm import tqdm
 import math
+import matplotlib.pyplot as plt
 
 from src.models.context_vector_llm import ContextVectorLLM
 from src.utils.config import NewLLMConfig
@@ -108,7 +108,7 @@ def tokenize_texts(texts, tokenizer, max_length=512):
 
     encodings = {'input_ids': []}
 
-    for text in tqdm(texts, desc="Tokenizing"):
+    for text in texts:
         encoding = tokenizer.encode(text)
         ids = encoding.ids
 
@@ -130,10 +130,10 @@ def train_epoch(model, dataloader, optimizer, device, context_loss_weight=1.0):
     total_token_loss = 0
     total_recon_loss = 0
     total_tokens = 0
+    total_context_change = 0
+    num_context_samples = 0
 
-    pbar = tqdm(dataloader, desc="Training")
-
-    for batch_idx, input_ids in enumerate(pbar):
+    for batch_idx, input_ids in enumerate(dataloader):
         input_ids = input_ids.to(device)
         batch_size, seq_len = input_ids.shape
 
@@ -183,23 +183,29 @@ def train_epoch(model, dataloader, optimizer, device, context_loss_weight=1.0):
         torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         optimizer.step()
 
+        # Calculate context change (how much context vector changes per timestep)
+        if context_trajectory.size(1) > 1:
+            # context_trajectory: (batch, seq_len, context_dim)
+            # Calculate ||context[t] - context[t-1]|| for each t
+            context_diff = context_trajectory[:, 1:, :] - context_trajectory[:, :-1, :]
+            context_change = torch.norm(context_diff, dim=-1)  # (batch, seq_len-1)
+            avg_context_change = context_change.mean().item()
+            total_context_change += avg_context_change
+            num_context_samples += 1
+
         # Stats
         total_loss += loss.item()
         total_token_loss += token_loss.item()
         total_recon_loss += recon_loss.item()
         total_tokens += shift_labels.numel()
 
-        # Update progress bar
-        pbar.set_postfix({
-            'loss': f'{loss.item():.4f}',
-            'token': f'{token_loss.item():.4f}',
-            'recon': f'{recon_loss.item():.4f}'
-        })
+    avg_context_change = total_context_change / num_context_samples if num_context_samples > 0 else 0
 
     return {
         'loss': total_loss / len(dataloader),
         'token_loss': total_token_loss / len(dataloader),
         'recon_loss': total_recon_loss / len(dataloader),
+        'context_change': avg_context_change,
     }
 
 
@@ -211,9 +217,11 @@ def evaluate(model, dataloader, device, context_loss_weight=1.0):
     total_recon_loss = 0
     total_tokens = 0
     correct = 0
+    total_context_change = 0
+    num_context_samples = 0
 
     with torch.no_grad():
-        for input_ids in tqdm(dataloader, desc="Evaluating"):
+        for input_ids in dataloader:
             input_ids = input_ids.to(device)
             batch_size, seq_len = input_ids.shape
 
@@ -255,12 +263,21 @@ def evaluate(model, dataloader, device, context_loss_weight=1.0):
             correct += ((predictions == shift_labels) & mask).sum().item()
             total_tokens += mask.sum().item()
 
+            # Calculate context change
+            if context_trajectory.size(1) > 1:
+                context_diff = context_trajectory[:, 1:, :] - context_trajectory[:, :-1, :]
+                context_change = torch.norm(context_diff, dim=-1)
+                avg_context_change = context_change.mean().item()
+                total_context_change += avg_context_change
+                num_context_samples += 1
+
             total_loss += loss.item()
             total_token_loss += token_loss.item()
             total_recon_loss += recon_loss.item()
 
     accuracy = correct / total_tokens if total_tokens > 0 else 0
     perplexity = math.exp(min(total_token_loss / len(dataloader), 20))  # Cap at 20 to avoid overflow
+    avg_context_change = total_context_change / num_context_samples if num_context_samples > 0 else 0
 
     return {
         'loss': total_loss / len(dataloader),
@@ -268,6 +285,7 @@ def evaluate(model, dataloader, device, context_loss_weight=1.0):
         'recon_loss': total_recon_loss / len(dataloader),
         'perplexity': perplexity,
         'accuracy': accuracy,
+        'context_change': avg_context_change,
     }
 
 
@@ -288,9 +306,18 @@ def main():
     print("=" * 80)
     print("New-LLM Training - Reconstruction Learning")
     print("=" * 80)
-    print(f"Context loss weight: {args.context_loss_weight}")
-    print(f"Layers: {args.layers}")
-    print(f"Device: {args.device}")
+    print("\n📋 Training Parameters:")
+    print(f"  Dataset: WikiText-103")
+    print(f"  Max samples: {args.max_samples if args.max_samples else 'All'}")
+    print(f"  Epochs: {args.epochs}")
+    print(f"  Batch size: {args.batch_size}")
+    print(f"  Learning rate: {args.lr}")
+    print(f"  Context loss weight: {args.context_loss_weight}")
+    print(f"  FNN layers: {args.layers}")
+    print(f"  Vocabulary size: {args.vocab_size}")
+    print(f"  Device: {args.device}")
+    print(f"  Output directory: {args.output_dir}")
+    print()
 
     # Load data
     train_texts, val_texts = load_wikitext_data(args.max_samples)
@@ -343,6 +370,20 @@ def main():
     print("Training")
     print("=" * 80)
 
+    # Store metrics for plotting
+    history = {
+        'train_loss': [],
+        'train_token_loss': [],
+        'train_recon_loss': [],
+        'train_context_change': [],
+        'val_loss': [],
+        'val_token_loss': [],
+        'val_recon_loss': [],
+        'val_perplexity': [],
+        'val_accuracy': [],
+        'val_context_change': [],
+    }
+
     for epoch in range(args.epochs):
         print(f"\nEpoch {epoch + 1}/{args.epochs}")
 
@@ -352,16 +393,30 @@ def main():
         # Evaluate
         val_metrics = evaluate(model, val_loader, device, args.context_loss_weight)
 
+        # Store metrics
+        history['train_loss'].append(train_metrics['loss'])
+        history['train_token_loss'].append(train_metrics['token_loss'])
+        history['train_recon_loss'].append(train_metrics['recon_loss'])
+        history['train_context_change'].append(train_metrics['context_change'])
+        history['val_loss'].append(val_metrics['loss'])
+        history['val_token_loss'].append(val_metrics['token_loss'])
+        history['val_recon_loss'].append(val_metrics['recon_loss'])
+        history['val_perplexity'].append(val_metrics['perplexity'])
+        history['val_accuracy'].append(val_metrics['accuracy'])
+        history['val_context_change'].append(val_metrics['context_change'])
+
         # Print results
         print(f"\n{'='*80}")
         print(f"Epoch {epoch + 1} Results")
         print("=" * 80)
         print(f"Train - Loss: {train_metrics['loss']:.4f} | "
               f"Token: {train_metrics['token_loss']:.4f} | "
-              f"Recon: {train_metrics['recon_loss']:.4f}")
+              f"Recon: {train_metrics['recon_loss']:.4f} | "
+              f"CtxΔ: {train_metrics['context_change']:.4f}")
         print(f"Val   - Loss: {val_metrics['loss']:.4f} | "
               f"Token: {val_metrics['token_loss']:.4f} | "
-              f"Recon: {val_metrics['recon_loss']:.4f}")
+              f"Recon: {val_metrics['recon_loss']:.4f} | "
+              f"CtxΔ: {val_metrics['context_change']:.4f}")
         print(f"Val   - PPL: {val_metrics['perplexity']:.2f} | "
               f"Acc: {val_metrics['accuracy']:.2%}")
         print("=" * 80)
@@ -373,6 +428,51 @@ def main():
         'model_state_dict': model.state_dict(),
         'config': config.__dict__,
     }, f"{args.output_dir}/final_model.pt")
+
+    # Plot training curves
+    print(f"\n📊 Generating training curves...")
+    epochs = range(1, args.epochs + 1)
+
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle('New-LLM Training - Reconstruction Learning', fontsize=16, fontweight='bold')
+
+    # Plot 1: Total Loss
+    axes[0, 0].plot(epochs, history['train_loss'], 'b-o', label='Train Loss', linewidth=2)
+    axes[0, 0].plot(epochs, history['val_loss'], 'r-s', label='Val Loss', linewidth=2)
+    axes[0, 0].set_xlabel('Epoch')
+    axes[0, 0].set_ylabel('Loss')
+    axes[0, 0].set_title('Total Loss (Token + Reconstruction)')
+    axes[0, 0].legend()
+    axes[0, 0].grid(True, alpha=0.3)
+
+    # Plot 2: Perplexity
+    axes[0, 1].plot(epochs, history['val_perplexity'], 'g-^', label='Val Perplexity', linewidth=2)
+    axes[0, 1].set_xlabel('Epoch')
+    axes[0, 1].set_ylabel('Perplexity')
+    axes[0, 1].set_title('Validation Perplexity')
+    axes[0, 1].legend()
+    axes[0, 1].grid(True, alpha=0.3)
+
+    # Plot 3: Accuracy
+    axes[1, 0].plot(epochs, [acc * 100 for acc in history['val_accuracy']], 'purple', marker='d', linewidth=2)
+    axes[1, 0].set_xlabel('Epoch')
+    axes[1, 0].set_ylabel('Accuracy (%)')
+    axes[1, 0].set_title('Validation Accuracy')
+    axes[1, 0].grid(True, alpha=0.3)
+
+    # Plot 4: Context Vector Change
+    axes[1, 1].plot(epochs, history['train_context_change'], 'b-o', label='Train Ctx Change', linewidth=2)
+    axes[1, 1].plot(epochs, history['val_context_change'], 'r-s', label='Val Ctx Change', linewidth=2)
+    axes[1, 1].set_xlabel('Epoch')
+    axes[1, 1].set_ylabel('Context Change (L2 norm)')
+    axes[1, 1].set_title('Context Vector Change per Timestep')
+    axes[1, 1].legend()
+    axes[1, 1].grid(True, alpha=0.3)
+
+    plt.tight_layout()
+    plot_path = f"{args.output_dir}/training_curves.png"
+    plt.savefig(plot_path, dpi=150, bbox_inches='tight')
+    print(f"✓ Saved to {plot_path}")
 
     print("\n✅ Training complete!")
 
