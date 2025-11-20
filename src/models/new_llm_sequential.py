@@ -97,6 +97,33 @@ class NewLLMSequential(nn.Module):
             elif isinstance(module, nn.Embedding):
                 nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
+    def _update_context_one_step(self, token_embed, context, return_hidden=False):
+        """
+        Update context for one iteration (shared between training and inference)
+
+        Args:
+            token_embed: Token embedding [batch, embed_dim]
+            context: Current context [batch, context_dim]
+            return_hidden: If True, return hidden state
+
+        Returns:
+            context_new: Updated context [batch, context_dim]
+            hidden: Hidden state [batch, hidden_dim] (if return_hidden=True)
+        """
+        fnn_input = torch.cat([token_embed, context], dim=-1)
+        hidden = self.fnn(fnn_input)
+
+        context_delta = torch.tanh(self.context_delta_proj(hidden))
+        forget = torch.sigmoid(self.forget_gate(hidden))
+        input_g = torch.sigmoid(self.input_gate(hidden))
+
+        context_new = forget * context + input_g * context_delta
+        context_new = self.context_norm(context_new)
+
+        if return_hidden:
+            return context_new, hidden
+        return context_new
+
     def forward(self, input_ids, return_context_trajectory=False):
         """
         Forward pass with sequential FNN
@@ -130,23 +157,12 @@ class NewLLMSequential(nn.Module):
             # Current token
             current_token = token_embeds[:, t, :]  # [batch, embed_dim]
 
-            # Concatenate [token, context]
-            fnn_input = torch.cat([current_token, context], dim=-1)
-
-            # Sequential FNN processing (all layers at once)
-            hidden = self.fnn(fnn_input)  # [batch, hidden_dim]
+            # Update context and get hidden using shared method
+            context, hidden = self._update_context_one_step(current_token, context, return_hidden=True)
 
             # Token prediction
             token_logits = self.token_output(hidden)
             logits[:, t, :] = token_logits
-
-            # Context update (gated) - only at final layer
-            context_delta = torch.tanh(self.context_delta_proj(hidden))
-            forget = torch.sigmoid(self.forget_gate(hidden))
-            input_g = torch.sigmoid(self.input_gate(hidden))
-
-            context = forget * context + input_g * context_delta
-            context = self.context_norm(context)
 
             if return_context_trajectory:
                 context_trajectory[:, t, :] = context
@@ -192,20 +208,15 @@ class NewLLMSequential(nn.Module):
 
                 # Fixed-point iteration with warmup
                 for iteration in range(max_iterations):
-                    fnn_input = torch.cat([current_token, context], dim=-1)
-                    hidden = self.fnn(fnn_input)
+                    context_old = context
 
-                    # Update context
-                    context_delta = torch.tanh(self.context_delta_proj(hidden))
-                    forget = torch.sigmoid(self.forget_gate(hidden))
-                    input_g = torch.sigmoid(self.input_gate(hidden))
-
-                    context_new = forget * context + input_g * context_delta
-                    context_new = self.context_norm(context_new)
+                    # Update context using shared method
+                    context_new = self._update_context_one_step(current_token, context)
 
                     # Only check convergence after warmup iterations (n)
                     if iteration >= warmup_iterations:
-                        delta = torch.norm(context_new - context, dim=-1)  # [batch]
+                        # Use MSE for consistency with training
+                        delta = torch.mean((context_new - context_old) ** 2, dim=-1)  # [batch]
 
                         # Check if converged (element-wise for batch)
                         converged[:, t] = delta < tolerance

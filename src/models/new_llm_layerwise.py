@@ -102,6 +102,35 @@ class NewLLMLayerwise(nn.Module):
             elif isinstance(module, nn.Embedding):
                 nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
+    def _update_context_one_step(self, token_embed, context, return_hidden=False):
+        """
+        Update context for one iteration (shared between training and inference)
+
+        Args:
+            token_embed: Token embedding [batch, embed_dim]
+            context: Current context [batch, context_dim]
+            return_hidden: If True, return final hidden state
+
+        Returns:
+            context_new: Updated context [batch, context_dim]
+            hidden: Final hidden state [batch, hidden_dim] (if return_hidden=True)
+        """
+        context_temp = context
+        for layer_idx in range(self.num_layers):
+            fnn_input = torch.cat([token_embed, context_temp], dim=-1)
+            hidden = self.fnn_layers[layer_idx](fnn_input)
+
+            context_delta = torch.tanh(self.context_delta_projs[layer_idx](hidden))
+            forget = torch.sigmoid(self.forget_gates[layer_idx](hidden))
+            input_g = torch.sigmoid(self.input_gates[layer_idx](hidden))
+
+            context_temp = forget * context_temp + input_g * context_delta
+            context_temp = self.context_norms[layer_idx](context_temp)
+
+        if return_hidden:
+            return context_temp, hidden
+        return context_temp
+
     def forward(self, input_ids, return_context_trajectory=False):
         """
         Forward pass with layer-wise context update
@@ -135,21 +164,8 @@ class NewLLMLayerwise(nn.Module):
             # Initialize context for this token
             context = torch.zeros(batch_size, self.context_dim, device=device)
 
-            # Layer-wise processing
-            for layer_idx in range(self.num_layers):
-                # Concatenate [token, context]
-                fnn_input = torch.cat([current_token, context], dim=-1)
-
-                # FNN processing
-                hidden = self.fnn_layers[layer_idx](fnn_input)  # [batch, hidden_dim]
-
-                # Context update (gated)
-                context_delta = torch.tanh(self.context_delta_projs[layer_idx](hidden))
-                forget = torch.sigmoid(self.forget_gates[layer_idx](hidden))
-                input_g = torch.sigmoid(self.input_gates[layer_idx](hidden))
-
-                context = forget * context + input_g * context_delta
-                context = self.context_norms[layer_idx](context)
+            # Layer-wise processing using shared method
+            context, hidden = self._update_context_one_step(current_token, context, return_hidden=True)
 
             # Token prediction (from final layer's hidden state)
             token_logits = self.token_output(hidden)
@@ -201,22 +217,13 @@ class NewLLMLayerwise(nn.Module):
                 for iteration in range(max_iterations):
                     context_old = context.clone()
 
-                    # Layer-wise processing
-                    for layer_idx in range(self.num_layers):
-                        fnn_input = torch.cat([current_token, context], dim=-1)
-                        hidden = self.fnn_layers[layer_idx](fnn_input)
-
-                        # Context update
-                        context_delta = torch.tanh(self.context_delta_projs[layer_idx](hidden))
-                        forget = torch.sigmoid(self.forget_gates[layer_idx](hidden))
-                        input_g = torch.sigmoid(self.input_gates[layer_idx](hidden))
-
-                        context = forget * context + input_g * context_delta
-                        context = self.context_norms[layer_idx](context)
+                    # Update context using shared method
+                    context = self._update_context_one_step(current_token, context)
 
                     # Only check convergence after warmup iterations (n)
                     if iteration >= warmup_iterations:
-                        delta = torch.norm(context - context_old, dim=-1)  # [batch]
+                        # Use MSE for consistency with training
+                        delta = torch.mean((context - context_old) ** 2, dim=-1)  # [batch]
 
                         # Check if converged (element-wise for batch)
                         converged[:, t] = delta < tolerance
