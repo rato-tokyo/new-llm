@@ -52,9 +52,26 @@ def collate_fn(batch):
     return torch.stack(padded)
 
 
-def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512, cache_dir='./tokenizer'):
-    """Load and tokenize WikiText-103 dataset efficiently with file caching"""
+def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512, cache_dir=None):
+    """Load and tokenize WikiText-103 dataset efficiently with file caching
+
+    Args:
+        cache_dir: Cache directory. If None, uses:
+                   1. /content/drive/MyDrive/new-llm-cache/ (if Google Drive mounted)
+                   2. /content/wikitext_cache/ (fallback, outside repo)
+    """
     import pickle
+
+    # Auto-detect cache location if not specified
+    if cache_dir is None:
+        if os.path.exists('/content/drive/MyDrive'):
+            # Google Drive is mounted
+            cache_dir = '/content/drive/MyDrive/new-llm-cache'
+            print(f"💾 Using Google Drive cache: {cache_dir}")
+        else:
+            # Fallback to /content (outside repo, survives rm -rf new-llm)
+            cache_dir = '/content/wikitext_cache'
+            print(f"💾 Using local cache: {cache_dir}")
 
     cache_file = f"{cache_dir}/tokenized_wikitext103_gpt2.pkl"
 
