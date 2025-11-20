@@ -90,7 +90,7 @@ class TextGenerator:
                     logits = output
 
                 # Get logits for next token (last position)
-                next_token_logits = logits[0, -1, :].clone()
+                next_token_logits = logits[0, -1, :].detach().clone()
 
                 # Apply repetition penalty (discourage recently generated tokens)
                 if repetition_penalty != 1.0:
@@ -98,11 +98,8 @@ class TextGenerator:
                     # Look at last 50 tokens to avoid repetition
                     lookback = min(50, len(full_sequence))
                     for prev_token in full_sequence[-lookback:]:
-                        # If token was already generated, reduce its logit
-                        if next_token_logits[prev_token] > 0:
-                            next_token_logits[prev_token] /= repetition_penalty
-                        else:
-                            next_token_logits[prev_token] *= repetition_penalty
+                        # Standard repetition penalty: always divide to reduce probability
+                        next_token_logits[prev_token] /= repetition_penalty
 
                 # Apply temperature
                 if temperature != 1.0:

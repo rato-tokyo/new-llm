@@ -354,8 +354,8 @@ def main():
     )
 
     # Create datasets
-    train_dataset = TextDataset(train_encodings)
-    val_dataset = TextDataset(val_encodings)
+    train_dataset = TextDataset(train_encodings, max_length=args.max_length)
+    val_dataset = TextDataset(val_encodings, max_length=args.max_length)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
                                shuffle=True, collate_fn=collate_fn)
@@ -374,7 +374,7 @@ def main():
     config.context_vector_dim = args.context_dim
     config.context_update_strategy = args.context_update_strategy  # "simple" or "gated"
     config.num_layers = args.layers
-    config.max_seq_length = 512
+    config.max_seq_length = args.max_length
     config.pad_token_id = tokenizer.pad_token_id
     config.bos_token_id = tokenizer.bos_token_id if tokenizer.bos_token_id else tokenizer.eos_token_id
     config.eos_token_id = tokenizer.eos_token_id
@@ -489,7 +489,7 @@ def main():
         f.write(f"  Context vector dim: {args.context_dim}\n")
         f.write(f"  Max samples: {args.max_samples if args.max_samples else 'All'}\n")
         f.write(f"  Device: {args.device}\n")
-        f.write(f"  Model version: {'Gated' if args.use_gated else 'Simple'}\n")
+        f.write(f"  Context update strategy: {config.context_update_strategy}\n")
         f.write(f"\nFinal Results:\n")
         f.write(f"  Train Loss: {history['train_loss'][-1]:.4f}\n")
         f.write(f"  Val Loss: {history['val_loss'][-1]:.4f}\n")

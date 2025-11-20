@@ -58,11 +58,3 @@ class FeedForwardNetwork(nn.Module):
             hidden: Hidden representation [batch, hidden_dim]
         """
         return self.layers(x)
-
-    def _init_weights(self):
-        """Initialize weights"""
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-                if module.bias is not None:
-                    torch.nn.init.zeros_(module.bias)

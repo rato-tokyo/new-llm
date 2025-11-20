@@ -47,7 +47,3 @@ class TokenEmbedding(nn.Module):
         embeds = self.norm(embeds)
 
         return embeds
-
-    def _init_weights(self):
-        """Initialize weights"""
-        torch.nn.init.normal_(self.embedding.weight, mean=0.0, std=0.02)

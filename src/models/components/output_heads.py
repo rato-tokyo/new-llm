@@ -40,12 +40,6 @@ class TokenPredictionHead(nn.Module):
         """
         return self.output(hidden)
 
-    def _init_weights(self):
-        """Initialize weights"""
-        torch.nn.init.normal_(self.output.weight, mean=0.0, std=0.02)
-        if self.output.bias is not None:
-            torch.nn.init.zeros_(self.output.bias)
-
 
 class ContextDecoder(nn.Module):
     """
@@ -82,11 +76,3 @@ class ContextDecoder(nn.Module):
             reconstruction: Reconstructed [prev_context + token] [batch, target_dim]
         """
         return self.decoder(context)
-
-    def _init_weights(self):
-        """Initialize weights"""
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
-                if module.bias is not None:
-                    torch.nn.init.zeros_(module.bias)
