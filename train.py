@@ -61,20 +61,27 @@ def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512, cach
 
     # Check if tokenized dataset already exists
     if os.path.exists(cache_file):
-        print(f"\n📂 Loading tokenized dataset from {cache_file}...")
+        cache_size_mb = os.path.getsize(cache_file) / 1024 / 1024
+        print(f"\n📂 Loading tokenized dataset from {cache_file} ({cache_size_mb:.1f} MB)...")
+        print("⏳ This may take 2-3 minutes for large datasets. Please wait...")
+
+        import time
+        start_time = time.time()
         with open(cache_file, 'rb') as f:
             cached_data = pickle.load(f)
+        load_time = time.time() - start_time
 
         train_encodings = cached_data['train']
         val_encodings = cached_data['val']
 
-        print(f"✓ Loaded {len(train_encodings['input_ids'])} train, {len(val_encodings['input_ids'])} val samples from cache")
+        print(f"✓ Loaded {len(train_encodings['input_ids'])} train, {len(val_encodings['input_ids'])} val samples from cache in {load_time:.1f}s")
 
         # Apply max_samples AFTER loading from cache
         if max_samples:
+            print(f"\n✂️  Applying max_samples={max_samples}...")
             train_encodings['input_ids'] = train_encodings['input_ids'][:max_samples]
             val_encodings['input_ids'] = val_encodings['input_ids'][:max_samples // 10]
-            print(f"✓ Using {len(train_encodings['input_ids'])} train, {len(val_encodings['input_ids'])} val samples (max_samples={max_samples})")
+            print(f"✓ Using {len(train_encodings['input_ids'])} train, {len(val_encodings['input_ids'])} val samples")
 
         return train_encodings, val_encodings
 
@@ -124,8 +131,11 @@ def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512, cach
 
     # Convert to Python lists (necessary for proper pickling)
     print("\n📦 Converting to Python lists for caching...")
-    train_encodings = {'input_ids': [x for x in train_tokenized['input_ids']]}
-    val_encodings = {'input_ids': [x for x in val_tokenized['input_ids']]}
+    print("⏳ This may take 3-5 minutes for large datasets. Please wait...")
+
+    from tqdm import tqdm
+    train_encodings = {'input_ids': [x for x in tqdm(train_tokenized['input_ids'], desc="Converting train")]}
+    val_encodings = {'input_ids': [x for x in tqdm(val_tokenized['input_ids'], desc="Converting val")]}
 
     # Save to cache file
     print(f"\n💾 Saving tokenized dataset to {cache_file}...")
@@ -139,9 +149,10 @@ def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512, cach
 
     # Apply max_samples
     if max_samples:
+        print(f"\n✂️  Applying max_samples={max_samples}...")
         train_encodings['input_ids'] = train_encodings['input_ids'][:max_samples]
         val_encodings['input_ids'] = val_encodings['input_ids'][:max_samples // 10]
-        print(f"✓ Using {len(train_encodings['input_ids'])} train, {len(val_encodings['input_ids'])} val samples (max_samples={max_samples})")
+        print(f"✓ Using {len(train_encodings['input_ids'])} train, {len(val_encodings['input_ids'])} val samples")
 
     return train_encodings, val_encodings
 
@@ -354,13 +365,18 @@ def main():
     )
 
     # Create datasets
+    print(f"\n📊 Creating TextDataset objects (max_length={args.max_length})...")
     train_dataset = TextDataset(train_encodings, max_length=args.max_length)
     val_dataset = TextDataset(val_encodings, max_length=args.max_length)
+    print(f"✓ Created train dataset ({len(train_dataset)} sequences)")
+    print(f"✓ Created val dataset ({len(val_dataset)} sequences)")
 
+    print(f"\n⚙️  Creating DataLoaders (batch_size={args.batch_size})...")
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size,
                                shuffle=True, collate_fn=collate_fn)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size,
                              shuffle=False, collate_fn=collate_fn)
+    print(f"✓ DataLoaders ready")
 
     print(f"\n✓ Train batches: {len(train_loader)}")
     print(f"✓ Val batches: {len(val_loader)}")
@@ -380,21 +396,36 @@ def main():
     config.eos_token_id = tokenizer.eos_token_id
 
     device = torch.device(args.device)
+    print(f"✓ Using device: {device}")
 
     # Create model (context update strategy is controlled by config.context_update_strategy)
-    model = NewLLM(config).to(device)
+    print(f"\n🏗️  Building model architecture...")
+    model = NewLLM(config)
 
     # Count parameters
     total_params = sum(p.numel() for p in model.parameters())
     print(f"✓ Model created: {total_params:,} parameters")
 
+    print(f"\n📲 Moving model to {device}...")
+    model = model.to(device)
+    print(f"✓ Model ready on {device}")
+
     # Optimizer
+    print(f"\n⚙️  Creating optimizer (lr={args.lr})...")
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+    print(f"✓ Optimizer ready")
 
     # Training loop
     print(f"\n{'='*80}")
-    print("Training")
+    print("🚀 Ready to Start Training")
     print("=" * 80)
+    print(f"📊 Dataset: {len(train_dataset)} train, {len(val_dataset)} val sequences")
+    print(f"📦 Batches: {len(train_loader)} train, {len(val_loader)} val batches")
+    print(f"🧠 Model: {total_params:,} parameters on {device}")
+    print(f"⚙️  Config: lr={args.lr}, batch={args.batch_size}, epochs={args.epochs}")
+    print(f"📏 Sequence: max_length={args.max_length}, context_dim={args.context_dim}")
+    print("=" * 80)
+    print(f"\n🏁 Starting training...\n")
 
     # Store metrics for plotting
     history = {
