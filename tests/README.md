@@ -51,6 +51,41 @@ These tests will pass once the model is trained on dialogue data.
 
 ---
 
+### 3. `test_global_attractor.py` ⭐ **NEW**
+
+**Purpose**: Detect global attractor problem (degenerate solution)
+
+**Tests**:
+1. ✓ Different Tokens → Different Contexts - Verify token diversity
+2. ✓ Context Norm Consistency - Verify LayerNorm working correctly
+3. ✓ Convergence Speed Variation - Observe convergence patterns
+4. ✓ Fixed-Point Consistency - Same token → same fixed point
+
+**Status**: ✅ All 4 tests pass
+
+**Run**:
+```bash
+python3 tests/test_global_attractor.py
+```
+
+**What is Global Attractor Problem?**
+
+A critical bug where **all tokens converge to the same identical fixed point**, losing token-specific information. The model appears to work (low loss) but is actually broken.
+
+**Symptoms**:
+- ❌ All different tokens → Same context (L2 distance < 0.001)
+- ❌ Cosine similarity > 0.999 between all tokens
+- ❌ Loss appears good but predictions are meaningless
+
+**Causes**:
+1. Using "simple" context updater (overwrites previous context)
+2. Insufficient model capacity
+3. Poor initialization
+
+**Current Implementation**: ✅ Uses gated updater (LSTM-style) - Safe from this problem
+
+---
+
 ## Test Results Summary
 
 ### Untrained Model
@@ -59,6 +94,7 @@ These tests will pass once the model is trained on dialogue data.
 |------------|-----------|-------|
 | **Basic Functionality** | 8/8 (100%) | ✅ All pass |
 | **Fixed-Point Convergence** | 4/6 (67%) | ⚠️ Expected for untrained model |
+| **Global Attractor Detection** | 4/4 (100%) | ✅ No problem detected |
 
 ### After Training (Expected)
 
@@ -66,6 +102,7 @@ These tests will pass once the model is trained on dialogue data.
 |------------|-----------|------------------|
 | **Basic Functionality** | 8/8 (100%) | ✅ Should still pass |
 | **Fixed-Point Convergence** | 6/6 (100%) | ✅ Convergence tests should pass |
+| **Global Attractor Detection** | 4/4 (100%) | ✅ Should still pass |
 
 ---
 
