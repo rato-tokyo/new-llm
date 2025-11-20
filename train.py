@@ -122,9 +122,10 @@ def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512, cach
 
     print(f"✓ Tokenized {len(train_tokenized)} train, {len(val_tokenized)} val samples")
 
-    # Convert to format expected by TextDataset
-    train_encodings = {'input_ids': train_tokenized['input_ids']}
-    val_encodings = {'input_ids': val_tokenized['input_ids']}
+    # Convert to Python lists (necessary for proper pickling)
+    print("\n📦 Converting to Python lists for caching...")
+    train_encodings = {'input_ids': [x for x in train_tokenized['input_ids']]}
+    val_encodings = {'input_ids': [x for x in val_tokenized['input_ids']]}
 
     # Save to cache file
     print(f"\n💾 Saving tokenized dataset to {cache_file}...")
@@ -134,7 +135,7 @@ def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512, cach
             'train': train_encodings,
             'val': val_encodings
         }, f)
-    print(f"✓ Cached for future use")
+    print(f"✓ Cached for future use (file size: {os.path.getsize(cache_file) / 1024 / 1024:.1f} MB)")
 
     # Apply max_samples
     if max_samples:
