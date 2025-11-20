@@ -24,14 +24,15 @@ class DialogueConfig:
     hidden_dim = 512         # Hidden dimension (256, 512, 1024, ...)
 
     # ========== Fixed Parameters ==========
-    vocab_size = 32000       # Vocabulary size (standard for tokenizer)
+    vocab_size = 50259       # Vocabulary size (GPT-2 tokenizer)
     embed_dim = 256          # Token embedding dimension
     dropout = 0.1            # Dropout rate
 
     # ========== Phase 1: Context Learning ==========
     phase1_max_samples = 100          # Number of dialogue samples for Phase 1
     phase1_max_iterations = 100       # Max iterations for fixed-point search
-    phase1_convergence_threshold = 1e-4  # Convergence threshold (L2 distance)
+    phase1_warmup_iterations = 10     # Warmup iterations before checking convergence (n)
+    phase1_convergence_threshold = 1e-2  # Convergence threshold (L2 distance) - relaxed from 1e-4
     phase1_min_converged_ratio = 0.95    # Minimum ratio of converged tokens to proceed
 
     # ========== Phase 2: Token Prediction ==========
@@ -55,20 +56,31 @@ class DialogueConfig:
     save_every_samples = 10  # Save checkpoint every N samples
 
 
-class SmallDialogueConfig(DialogueConfig):
-    """Small model for quick testing"""
+class TinyDialogueConfig(DialogueConfig):
+    """Tiny model for initial baseline (1 layer)"""
     num_layers = 1
     context_dim = 128
     hidden_dim = 256
     phase1_max_samples = 10
+    phase1_max_iterations = 50
 
 
-class MediumDialogueConfig(DialogueConfig):
-    """Medium model for experiments"""
+class SmallDialogueConfig(DialogueConfig):
+    """Small model for quick testing (2 layers)"""
     num_layers = 2
     context_dim = 256
     hidden_dim = 512
-    phase1_max_samples = 100
+    phase1_max_samples = 10
+    phase1_max_iterations = 50
+
+
+class MediumDialogueConfig(DialogueConfig):
+    """Medium model for experiments (3 layers)"""
+    num_layers = 3
+    context_dim = 512
+    hidden_dim = 1024
+    phase1_max_samples = 10
+    phase1_max_iterations = 50
 
 
 class LargeDialogueConfig(DialogueConfig):

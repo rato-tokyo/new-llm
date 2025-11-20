@@ -18,11 +18,19 @@ import torch.optim as optim
 import os
 import json
 import math
+import time
 from tqdm import tqdm
 
 from src.models.new_llm_flexible import NewLLMFlexible
-from src.utils.dialogue_config import DialogueConfig, SmallDialogueConfig
+from src.utils.dialogue_config import (
+    DialogueConfig,
+    TinyDialogueConfig,
+    SmallDialogueConfig,
+    MediumDialogueConfig,
+    LargeDialogueConfig
+)
 from src.data.ultrachat_loader import UltraChatLoader
+import argparse
 
 
 class ContextCache:
@@ -140,7 +148,8 @@ class TwoPhaseTrainer:
             fixed_contexts, converged, num_iters = self.model.get_fixed_point_context(
                 input_ids,
                 max_iterations=self.config.phase1_max_iterations,
-                tolerance=self.config.phase1_convergence_threshold
+                tolerance=self.config.phase1_convergence_threshold,
+                warmup_iterations=self.config.phase1_warmup_iterations
             )
 
         # Statistics
@@ -179,11 +188,24 @@ class TwoPhaseTrainer:
         dataset = self.data_loader.load_dataset(max_samples=max_samples)
 
         converged_samples = 0
+        start_time = time.time()
 
         for idx in range(len(dataset)):
+            sample_start = time.time()
+
             converged = self.phase1_train_sample(idx, dataset)
             if converged:
                 converged_samples += 1
+
+            # Time estimation
+            sample_time = time.time() - sample_start
+            elapsed = time.time() - start_time
+            avg_time_per_sample = elapsed / (idx + 1)
+            remaining_samples = len(dataset) - (idx + 1)
+            eta_seconds = avg_time_per_sample * remaining_samples
+            eta_minutes = eta_seconds / 60
+
+            print(f"  Time: {sample_time:.1f}s | Avg: {avg_time_per_sample:.1f}s/sample | ETA: {eta_minutes:.1f} min\n")
 
             # Save cache periodically
             if (idx + 1) % 10 == 0:
@@ -192,6 +214,8 @@ class TwoPhaseTrainer:
         # Final save
         self.context_cache.save_to_disk()
 
+        total_time = time.time() - start_time
+
         # Show statistics
         stats = self.context_cache.get_convergence_stats()
         print("\n" + "=" * 60)
@@ -199,6 +223,8 @@ class TwoPhaseTrainer:
         print(f"  Total samples: {stats['total_samples']}")
         print(f"  Convergence rate: {stats['convergence_rate']:.1%}")
         print(f"  Avg iterations: {stats['avg_iterations']:.1f}")
+        print(f"  Total time: {total_time/60:.1f} min ({total_time:.1f}s)")
+        print(f"  Avg time per sample: {total_time/max_samples:.1f}s")
         print("=" * 60)
 
         # Check if we can proceed to Phase 2
@@ -332,15 +358,34 @@ class TwoPhaseTrainer:
 
 def main():
     """Main training function"""
-    # Use small config for testing
-    config = SmallDialogueConfig()
+    # Parse arguments
+    parser = argparse.ArgumentParser(description="New-LLM Two-Phase Dialogue Training")
+    parser.add_argument("--config", type=str, default="tiny",
+                        choices=["tiny", "small", "medium", "large"],
+                        help="Config size (tiny=1layer, small=2layer, medium=3layer, large=4layer)")
+    parser.add_argument("--device", type=str, default="cpu",
+                        choices=["cpu", "cuda"],
+                        help="Device to use (cpu or cuda)")
+    args = parser.parse_args()
+
+    # Select config
+    config_map = {
+        "tiny": TinyDialogueConfig(),
+        "small": SmallDialogueConfig(),
+        "medium": MediumDialogueConfig(),
+        "large": LargeDialogueConfig()
+    }
+    config = config_map[args.config]
+    config.device = args.device
 
     print("=" * 60)
     print("New-LLM Two-Phase Dialogue Training")
     print("=" * 60)
-    print(f"Model: {config.num_layers} layers, context_dim={config.context_dim}")
+    print(f"Config: {args.config.upper()}")
+    print(f"Model: {config.num_layers} layers, context_dim={config.context_dim}, hidden_dim={config.hidden_dim}")
     print(f"Dataset: {config.dataset_name}")
     print(f"Device: {config.device}")
+    print(f"Phase 1: {config.phase1_max_samples} samples, max_iter={config.phase1_max_iterations}")
     print("=" * 60)
 
     # Initialize trainer

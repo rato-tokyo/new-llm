@@ -159,7 +159,7 @@ class NewLLMFlexible(nn.Module):
         else:
             return logits
 
-    def get_fixed_point_context(self, input_ids, max_iterations=100, tolerance=1e-4):
+    def get_fixed_point_context(self, input_ids, max_iterations=100, tolerance=1e-4, warmup_iterations=10):
         """
         Compute fixed-point context vectors for each token
 
@@ -170,6 +170,7 @@ class NewLLMFlexible(nn.Module):
             input_ids: Token IDs [batch, seq_len]
             max_iterations: Maximum iterations for fixed-point search
             tolerance: Convergence threshold (L2 distance)
+            warmup_iterations: Number of warmup iterations before checking convergence (n)
 
         Returns:
             fixed_contexts: Fixed-point contexts [batch, seq_len, context_dim]
@@ -195,7 +196,7 @@ class NewLLMFlexible(nn.Module):
                 # Initialize context
                 context = torch.zeros(batch_size, self.context_dim, device=device)
 
-                # Fixed-point iteration
+                # Fixed-point iteration with warmup
                 for iteration in range(max_iterations):
                     fnn_input = torch.cat([current_token, context], dim=-1)
                     hidden = self.fnn(fnn_input)
@@ -209,14 +210,28 @@ class NewLLMFlexible(nn.Module):
                     context_new = self.context_norm(context_new)
                     context_new = torch.clamp(context_new, min=-10.0, max=10.0)
 
-                    # Check convergence
-                    delta = torch.norm(context_new - context, dim=-1)  # [batch]
-                    converged[:, t] = delta < tolerance
+                    # Only check convergence after warmup iterations (n)
+                    if iteration >= warmup_iterations:
+                        delta = torch.norm(context_new - context, dim=-1)  # [batch]
+
+                        # Check if converged (element-wise for batch)
+                        converged[:, t] = delta < tolerance
+
+                        # If all in batch converged, break early
+                        if converged[:, t].all():
+                            num_iters[:, t] = iteration + 1
+                            context = context_new
+                            break
 
                     context = context_new
-
-                    # Update iteration count for non-converged
                     num_iters[:, t] = iteration + 1
+
+                # Progress logging every 10 tokens
+                if (t + 1) % 10 == 0 or t == seq_len - 1:
+                    converged_count = converged[:, :t+1].sum().item()
+                    total_count = batch_size * (t + 1)
+                    progress_pct = (t + 1) / seq_len * 100
+                    print(f"  Token {t+1}/{seq_len} ({progress_pct:.1f}%) | Converged: {converged_count}/{total_count} ({converged_count/total_count*100:.1f}%)", end='\r')
 
                     # Early stop if all converged
                     if converged[:, t].all():
