@@ -65,12 +65,16 @@ def load_and_tokenize_wikitext(tokenizer, max_samples=None, max_length=512, cach
     # Auto-detect cache location if not specified
     if cache_dir is None:
         if os.path.exists('/content/drive/MyDrive'):
-            # Google Drive is mounted
+            # Google Drive is mounted (Colab)
             cache_dir = '/content/drive/MyDrive/new-llm-cache'
             print(f"💾 Using Google Drive cache: {cache_dir}")
-        else:
-            # Fallback to /content (outside repo, survives rm -rf new-llm)
+        elif os.path.exists('/content'):
+            # Colab local storage
             cache_dir = '/content/wikitext_cache'
+            print(f"💾 Using Colab cache: {cache_dir}")
+        else:
+            # Local environment - use cache directory in project
+            cache_dir = './cache'
             print(f"💾 Using local cache: {cache_dir}")
 
     cache_file = f"{cache_dir}/tokenized_wikitext103_gpt2.pkl"
