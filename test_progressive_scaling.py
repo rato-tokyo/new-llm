@@ -80,8 +80,9 @@ def main():
     print("Sequential vs Layer-wise (WITH TRAINING)")
     print("="*70)
 
-    # Test parameters
-    token_counts = [20, 30, 40, 50, 60, 70, 80, 90, 100]
+    # Test parameters - 100 token increments up to 2000
+    token_counts = [100, 200, 300, 400, 500, 600, 700, 800, 900, 1000,
+                    1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000]
     seq_active = True
     layer_active = True
 
