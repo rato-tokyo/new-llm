@@ -150,7 +150,6 @@ class NewLLMLayerwise(nn.Module):
 
                 context = forget * context + input_g * context_delta
                 context = self.context_norms[layer_idx](context)
-                context = torch.clamp(context, min=-10.0, max=10.0)
 
             # Token prediction (from final layer's hidden state)
             token_logits = self.token_output(hidden)
@@ -214,7 +213,6 @@ class NewLLMLayerwise(nn.Module):
 
                         context = forget * context + input_g * context_delta
                         context = self.context_norms[layer_idx](context)
-                        context = torch.clamp(context, min=-10.0, max=10.0)
 
                     # Only check convergence after warmup iterations (n)
                     if iteration >= warmup_iterations:

@@ -147,7 +147,6 @@ class NewLLMSequential(nn.Module):
 
             context = forget * context + input_g * context_delta
             context = self.context_norm(context)
-            context = torch.clamp(context, min=-10.0, max=10.0)
 
             if return_context_trajectory:
                 context_trajectory[:, t, :] = context
@@ -203,7 +202,6 @@ class NewLLMSequential(nn.Module):
 
                     context_new = forget * context + input_g * context_delta
                     context_new = self.context_norm(context_new)
-                    context_new = torch.clamp(context_new, min=-10.0, max=10.0)
 
                     # Only check convergence after warmup iterations (n)
                     if iteration >= warmup_iterations:
