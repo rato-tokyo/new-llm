@@ -119,10 +119,11 @@ def train_single_token_cvfpt(
     )
 
     # Loss function
+    # CRITICAL: token_weight=0.01 prevents degenerate solution
     loss_fn = ContextConvergenceLoss(
         cycle_length=1,  # Single token repetition
         convergence_weight=1.0,
-        token_weight=0.0
+        token_weight=0.01  # Reconstruction loss (prevents degenerate solution)
     )
 
     # Optimizer

@@ -304,10 +304,12 @@ def main():
     )
 
     # Loss function
+    # CRITICAL: token_weight=0.01 prevents degenerate solution where model stops updating context
+    # Without reconstruction loss, model can achieve low convergence loss by simply not updating context
     loss_fn = ContextConvergenceLoss(
         cycle_length=1,
         convergence_weight=1.0,
-        token_weight=0.0
+        token_weight=0.01  # Reconstruction loss (prevents degenerate solution)
     )
 
     # Optimizer

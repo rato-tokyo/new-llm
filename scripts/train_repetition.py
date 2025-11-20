@@ -182,8 +182,8 @@ def main():
     # Loss parameters
     parser.add_argument('--convergence-weight', type=float, default=1.0,
                        help='Weight for convergence loss')
-    parser.add_argument('--token-weight', type=float, default=0.0,
-                       help='Weight for token prediction loss (usually 0)')
+    parser.add_argument('--token-weight', type=float, default=0.01,
+                       help='Weight for token prediction loss (0.01 prevents degenerate solution)')
 
     # System
     parser.add_argument('--device', type=str, default='cuda',
