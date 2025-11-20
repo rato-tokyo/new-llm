@@ -1,0 +1,19 @@
+================================================================================
+CVFPT Context Vector Comparison Experiment
+================================================================================
+
+🔤 Loading tokenizer...
+✓ Tokenizer loaded: 50,257 tokens
+
+📥 Loading model from checkpoints/new_llm_repetition_final.pt...
+Traceback (most recent call last):
+  File "/Users/sakajiritomoyoshi/Desktop/git/new-llm/scripts/cvfpt_context_comparison.py", line 593, in <module>
+    main()
+  File "/Users/sakajiritomoyoshi/Desktop/git/new-llm/scripts/cvfpt_context_comparison.py", line 566, in main
+    model, config = load_trained_model(args.checkpoint, device)
+  File "/Users/sakajiritomoyoshi/Desktop/git/new-llm/scripts/cvfpt_context_comparison.py", line 40, in load_trained_model
+    model.load_state_dict(checkpoint['model_state_dict'])
+  File "/Users/sakajiritomoyoshi/Library/Python/3.9/lib/python/site-packages/torch/nn/modules/module.py", line 2153, in load_state_dict
+    raise RuntimeError('Error(s) in loading state_dict for {}:\n\t{}'.format(
+RuntimeError: Error(s) in loading state_dict for NewLLM:
+	Missing key(s) in state_dict: "context_updater.forget_gate.weight", "context_updater.forget_gate.bias", "context_updater.input_gate.weight", "context_updater.input_gate.bias". 

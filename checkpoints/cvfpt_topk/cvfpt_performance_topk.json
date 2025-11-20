@@ -1,0 +1,2302 @@
+[
+  {
+    "token_text": "a",
+    "token_id": 64,
+    "initial_loss": 0.6989442110061646,
+    "final_loss": 0.05138969048857689,
+    "loss_reduction": 0.6475545205175877,
+    "improvement_rate": 0.9264752612878804,
+    "initial_change_rate": 13.348962783813477,
+    "final_change_rate": 3.611137866973877,
+    "total_time": 0.5504410266876221,
+    "avg_epoch_time": 0.18348034222920737,
+    "converged": false,
+    "epoch_losses": [
+      0.6989442110061646,
+      0.12451731413602829,
+      0.05138969048857689
+    ],
+    "epoch_change_rates": [
+      13.348962783813477,
+      5.629336357116699,
+      3.611137866973877
+    ]
+  },
+  {
+    "token_text": ".",
+    "token_id": 13,
+    "initial_loss": 0.6166913509368896,
+    "final_loss": 0.046086180955171585,
+    "loss_reduction": 0.5706051699817181,
+    "improvement_rate": 0.9252686438926757,
+    "initial_change_rate": 12.505444526672363,
+    "final_change_rate": 3.412506341934204,
+    "total_time": 0.5483369827270508,
+    "avg_epoch_time": 0.18277899424235025,
+    "converged": false,
+    "epoch_losses": [
+      0.6166913509368896,
+      0.10835961997509003,
+      0.046086180955171585
+    ],
+    "epoch_change_rates": [
+      12.505444526672363,
+      5.229259490966797,
+      3.412506341934204
+    ]
+  },
+  {
+    "token_text": "{",
+    "token_id": 90,
+    "initial_loss": 0.759024977684021,
+    "final_loss": 0.057568639516830444,
+    "loss_reduction": 0.7014563381671906,
+    "improvement_rate": 0.9241544860717402,
+    "initial_change_rate": 13.91822338104248,
+    "final_change_rate": 3.7988667488098145,
+    "total_time": 0.5837349891662598,
+    "avg_epoch_time": 0.19457832972208658,
+    "converged": false,
+    "epoch_losses": [
+      0.759024977684021,
+      0.12685862183570862,
+      0.057568639516830444
+    ],
+    "epoch_change_rates": [
+      13.91822338104248,
+      5.652570724487305,
+      3.7988667488098145
+    ]
+  },
+  {
+    "token_text": "D",
+    "token_id": 35,
+    "initial_loss": 0.7101510167121887,
+    "final_loss": 0.05559568852186203,
+    "loss_reduction": 0.6545553281903267,
+    "improvement_rate": 0.9217128649913713,
+    "initial_change_rate": 13.467451095581055,
+    "final_change_rate": 3.7482011318206787,
+    "total_time": 0.572821855545044,
+    "avg_epoch_time": 0.19094061851501465,
+    "converged": false,
+    "epoch_losses": [
+      0.7101510167121887,
+      0.11635984480381012,
+      0.05559568852186203
+    ],
+    "epoch_change_rates": [
+      13.467451095581055,
+      5.424922466278076,
+      3.7482011318206787
+    ]
+  },
+  {
+    "token_text": "p",
+    "token_id": 79,
+    "initial_loss": 0.5155773758888245,
+    "final_loss": 0.040534935891628265,
+    "loss_reduction": 0.4750424399971962,
+    "improvement_rate": 0.9213795294610271,
+    "initial_change_rate": 11.464704513549805,
+    "final_change_rate": 3.195714235305786,
+    "total_time": 0.5847561359405518,
+    "avg_epoch_time": 0.19491871198018393,
+    "converged": false,
+    "epoch_losses": [
+      0.5155773758888245,
+      0.09191079437732697,
+      0.040534935891628265
+    ],
+    "epoch_change_rates": [
+      11.464704513549805,
+      4.8244099617004395,
+      3.195714235305786
+    ]
+  },
+  {
+    "token_text": "t",
+    "token_id": 83,
+    "initial_loss": 0.654578447341919,
+    "final_loss": 0.05385672673583031,
+    "loss_reduction": 0.6007217206060886,
+    "improvement_rate": 0.9177230369338784,
+    "initial_change_rate": 12.899025917053223,
+    "final_change_rate": 3.697598695755005,
+    "total_time": 0.5368599891662598,
+    "avg_epoch_time": 0.17895332972208658,
+    "converged": false,
+    "epoch_losses": [
+      0.654578447341919,
+      0.11270806193351746,
+      0.05385672673583031
+    ],
+    "epoch_change_rates": [
+      12.899025917053223,
+      5.311366558074951,
+      3.697598695755005
+    ]
+  },
+  {
+    "token_text": "c",
+    "token_id": 66,
+    "initial_loss": 0.5842946171760559,
+    "final_loss": 0.04822564870119095,
+    "loss_reduction": 0.536068968474865,
+    "improvement_rate": 0.9174634725641159,
+    "initial_change_rate": 12.204425811767578,
+    "final_change_rate": 3.471695899963379,
+    "total_time": 0.5962140560150146,
+    "avg_epoch_time": 0.19873801867167154,
+    "converged": false,
+    "epoch_losses": [
+      0.5842946171760559,
+      0.10451135784387589,
+      0.04822564870119095
+    ],
+    "epoch_change_rates": [
+      12.204425811767578,
+      5.151512622833252,
+      3.471695899963379
+    ]
+  },
+  {
+    "token_text": "4",
+    "token_id": 19,
+    "initial_loss": 0.6336314678192139,
+    "final_loss": 0.052387785166502,
+    "loss_reduction": 0.5812436826527119,
+    "improvement_rate": 0.9173213645041866,
+    "initial_change_rate": 12.695680618286133,
+    "final_change_rate": 3.628272771835327,
+    "total_time": 0.568378210067749,
+    "avg_epoch_time": 0.18945940335591635,
+    "converged": false,
+    "epoch_losses": [
+      0.6336314678192139,
+      0.12325019389390945,
+      0.052387785166502
+    ],
+    "epoch_change_rates": [
+      12.695680618286133,
+      5.596534252166748,
+      3.628272771835327
+    ]
+  },
+  {
+    "token_text": "_",
+    "token_id": 62,
+    "initial_loss": 0.535940408706665,
+    "final_loss": 0.044368501752614975,
+    "loss_reduction": 0.49157190695405006,
+    "improvement_rate": 0.9172137404983414,
+    "initial_change_rate": 11.674541473388672,
+    "final_change_rate": 3.3541717529296875,
+    "total_time": 0.592292070388794,
+    "avg_epoch_time": 0.197430690129598,
+    "converged": false,
+    "epoch_losses": [
+      0.535940408706665,
+      0.11079103499650955,
+      0.044368501752614975
+    ],
+    "epoch_change_rates": [
+      11.674541473388672,
+      5.3083953857421875,
+      3.3541717529296875
+    ]
+  },
+  {
+    "token_text": "b",
+    "token_id": 65,
+    "initial_loss": 0.5729787349700928,
+    "final_loss": 0.04767001420259476,
+    "loss_reduction": 0.525308720767498,
+    "improvement_rate": 0.9168031703566051,
+    "initial_change_rate": 12.068281173706055,
+    "final_change_rate": 3.4677987098693848,
+    "total_time": 0.5486400127410889,
+    "avg_epoch_time": 0.18288000424702963,
+    "converged": false,
+    "epoch_losses": [
+      0.5729787349700928,
+      0.10400175303220749,
+      0.04767001420259476
+    ],
+    "epoch_change_rates": [
+      12.068281173706055,
+      5.128818511962891,
+      3.4677987098693848
+    ]
+  },
+  {
+    "token_text": "^",
+    "token_id": 61,
+    "initial_loss": 0.5790280699729919,
+    "final_loss": 0.04832520708441734,
+    "loss_reduction": 0.5307028628885746,
+    "improvement_rate": 0.9165408214377735,
+    "initial_change_rate": 12.138633728027344,
+    "final_change_rate": 3.4915215969085693,
+    "total_time": 0.5319139957427979,
+    "avg_epoch_time": 0.17730466524759927,
+    "converged": false,
+    "epoch_losses": [
+      0.5790280699729919,
+      0.10318012535572052,
+      0.04832520708441734
+    ],
+    "epoch_change_rates": [
+      12.138633728027344,
+      5.106971263885498,
+      3.4915215969085693
+    ]
+  },
+  {
+    "token_text": "%",
+    "token_id": 4,
+    "initial_loss": 0.6052466034889221,
+    "final_loss": 0.05119428411126137,
+    "loss_reduction": 0.5540523193776608,
+    "improvement_rate": 0.915415825853208,
+    "initial_change_rate": 12.380167007446289,
+    "final_change_rate": 3.6057467460632324,
+    "total_time": 0.5486080646514893,
+    "avg_epoch_time": 0.18286935488382974,
+    "converged": false,
+    "epoch_losses": [
+      0.6052466034889221,
+      0.10610939562320709,
+      0.05119428411126137
+    ],
+    "epoch_change_rates": [
+      12.380167007446289,
+      5.172320365905762,
+      3.6057467460632324
+    ]
+  },
+  {
+    "token_text": "f",
+    "token_id": 69,
+    "initial_loss": 0.5722775459289551,
+    "final_loss": 0.048478249460458755,
+    "loss_reduction": 0.5237992964684963,
+    "improvement_rate": 0.9152889191523914,
+    "initial_change_rate": 12.051689147949219,
+    "final_change_rate": 3.504808187484741,
+    "total_time": 0.5398831367492676,
+    "avg_epoch_time": 0.1799610455830892,
+    "converged": false,
+    "epoch_losses": [
+      0.5722775459289551,
+      0.09661838412284851,
+      0.048478249460458755
+    ],
+    "epoch_change_rates": [
+      12.051689147949219,
+      4.944603443145752,
+      3.504808187484741
+    ]
+  },
+  {
+    "token_text": "Y",
+    "token_id": 56,
+    "initial_loss": 0.5725891590118408,
+    "final_loss": 0.04877585545182228,
+    "loss_reduction": 0.5238133035600185,
+    "improvement_rate": 0.914815265563186,
+    "initial_change_rate": 12.07497787475586,
+    "final_change_rate": 3.4978580474853516,
+    "total_time": 0.5311510562896729,
+    "avg_epoch_time": 0.17705035209655762,
+    "converged": false,
+    "epoch_losses": [
+      0.5725891590118408,
+      0.100148506462574,
+      0.04877585545182228
+    ],
+    "epoch_change_rates": [
+      12.07497787475586,
+      5.030426502227783,
+      3.4978580474853516
+    ]
+  },
+  {
+    "token_text": ")",
+    "token_id": 8,
+    "initial_loss": 0.5894447565078735,
+    "final_loss": 0.05073966085910797,
+    "loss_reduction": 0.5387050956487656,
+    "improvement_rate": 0.9139195653215888,
+    "initial_change_rate": 12.249341011047363,
+    "final_change_rate": 3.58056902885437,
+    "total_time": 0.6055600643157959,
+    "avg_epoch_time": 0.20185335477193198,
+    "converged": false,
+    "epoch_losses": [
+      0.5894447565078735,
+      0.12122105062007904,
+      0.05073966085910797
+    ],
+    "epoch_change_rates": [
+      12.249341011047363,
+      5.546284198760986,
+      3.58056902885437
+    ]
+  },
+  {
+    "token_text": "s",
+    "token_id": 82,
+    "initial_loss": 0.6179020404815674,
+    "final_loss": 0.05327907204627991,
+    "loss_reduction": 0.5646229684352875,
+    "improvement_rate": 0.9137742416180461,
+    "initial_change_rate": 12.544109344482422,
+    "final_change_rate": 3.6588151454925537,
+    "total_time": 0.5787129402160645,
+    "avg_epoch_time": 0.19290431340535483,
+    "converged": false,
+    "epoch_losses": [
+      0.6179020404815674,
+      0.09384459257125854,
+      0.05327907204627991
+    ],
+    "epoch_change_rates": [
+      12.544109344482422,
+      4.874409198760986,
+      3.6588151454925537
+    ]
+  },
+  {
+    "token_text": "#",
+    "token_id": 2,
+    "initial_loss": 0.5585691928863525,
+    "final_loss": 0.048931218683719635,
+    "loss_reduction": 0.5096379742026329,
+    "improvement_rate": 0.9123990021166898,
+    "initial_change_rate": 11.90122127532959,
+    "final_change_rate": 3.51969838142395,
+    "total_time": 0.5361580848693848,
+    "avg_epoch_time": 0.17871936162312826,
+    "converged": false,
+    "epoch_losses": [
+      0.5585691928863525,
+      0.09672291576862335,
+      0.048931218683719635
+    ],
+    "epoch_change_rates": [
+      11.90122127532959,
+      4.947430610656738,
+      3.51969838142395
+    ]
+  },
+  {
+    "token_text": ":",
+    "token_id": 25,
+    "initial_loss": 0.6440234780311584,
+    "final_loss": 0.056754324585199356,
+    "loss_reduction": 0.5872691534459591,
+    "improvement_rate": 0.9118753795145749,
+    "initial_change_rate": 12.819438934326172,
+    "final_change_rate": 3.7919914722442627,
+    "total_time": 0.5423018932342529,
+    "avg_epoch_time": 0.18076729774475098,
+    "converged": false,
+    "epoch_losses": [
+      0.6440234780311584,
+      0.12099065631628036,
+      0.056754324585199356
+    ],
+    "epoch_change_rates": [
+      12.819438934326172,
+      5.532500743865967,
+      3.7919914722442627
+    ]
+  },
+  {
+    "token_text": "6",
+    "token_id": 21,
+    "initial_loss": 0.6749850511550903,
+    "final_loss": 0.05951644480228424,
+    "loss_reduction": 0.6154686063528061,
+    "improvement_rate": 0.9118255364316072,
+    "initial_change_rate": 13.0989990234375,
+    "final_change_rate": 3.8578810691833496,
+    "total_time": 0.6041219234466553,
+    "avg_epoch_time": 0.20137397448221842,
+    "converged": false,
+    "epoch_losses": [
+      0.6749850511550903,
+      0.11651717871427536,
+      0.05951644480228424
+    ],
+    "epoch_change_rates": [
+      13.0989990234375,
+      5.439082145690918,
+      3.8578810691833496
+    ]
+  },
+  {
+    "token_text": "<",
+    "token_id": 27,
+    "initial_loss": 0.5625746250152588,
+    "final_loss": 0.05033830553293228,
+    "loss_reduction": 0.5122363194823265,
+    "improvement_rate": 0.9105215498627103,
+    "initial_change_rate": 11.951313018798828,
+    "final_change_rate": 3.555586814880371,
+    "total_time": 0.5356240272521973,
+    "avg_epoch_time": 0.17854134241739908,
+    "converged": false,
+    "epoch_losses": [
+      0.5625746250152588,
+      0.09292953461408615,
+      0.05033830553293228
+    ],
+    "epoch_change_rates": [
+      11.951313018798828,
+      4.834386348724365,
+      3.555586814880371
+    ]
+  },
+  {
+    "token_text": "g",
+    "token_id": 70,
+    "initial_loss": 0.5707690715789795,
+    "final_loss": 0.0516195185482502,
+    "loss_reduction": 0.5191495530307293,
+    "improvement_rate": 0.9095614651903797,
+    "initial_change_rate": 12.037616729736328,
+    "final_change_rate": 3.6149518489837646,
+    "total_time": 0.5344119071960449,
+    "avg_epoch_time": 0.17813730239868164,
+    "converged": false,
+    "epoch_losses": [
+      0.5707690715789795,
+      0.11267783492803574,
+      0.0516195185482502
+    ],
+    "epoch_change_rates": [
+      12.037616729736328,
+      5.343367576599121,
+      3.6149518489837646
+    ]
+  },
+  {
+    "token_text": "~",
+    "token_id": 93,
+    "initial_loss": 0.5520274639129639,
+    "final_loss": 0.05025891587138176,
+    "loss_reduction": 0.5017685480415821,
+    "improvement_rate": 0.9089557691294398,
+    "initial_change_rate": 11.854610443115234,
+    "final_change_rate": 3.5623159408569336,
+    "total_time": 0.5585851669311523,
+    "avg_epoch_time": 0.18619505564371744,
+    "converged": false,
+    "epoch_losses": [
+      0.5520274639129639,
+      0.09839077293872833,
+      0.05025891587138176
+    ],
+    "epoch_change_rates": [
+      11.854610443115234,
+      4.976541042327881,
+      3.5623159408569336
+    ]
+  },
+  {
+    "token_text": "S",
+    "token_id": 50,
+    "initial_loss": 0.6096408367156982,
+    "final_loss": 0.055542271584272385,
+    "loss_reduction": 0.5540985651314259,
+    "improvement_rate": 0.9088934529328878,
+    "initial_change_rate": 12.455615043640137,
+    "final_change_rate": 3.7557077407836914,
+    "total_time": 0.53812575340271,
+    "avg_epoch_time": 0.17937525113423666,
+    "converged": false,
+    "epoch_losses": [
+      0.6096408367156982,
+      0.12506887316703796,
+      0.055542271584272385
+    ],
+    "epoch_change_rates": [
+      12.455615043640137,
+      5.635044574737549,
+      3.7557077407836914
+    ]
+  },
+  {
+    "token_text": "A",
+    "token_id": 32,
+    "initial_loss": 0.563673734664917,
+    "final_loss": 0.05137321352958679,
+    "loss_reduction": 0.5123005211353302,
+    "improvement_rate": 0.908860018889959,
+    "initial_change_rate": 11.967995643615723,
+    "final_change_rate": 3.606466054916382,
+    "total_time": 0.5748960971832275,
+    "avg_epoch_time": 0.19163203239440918,
+    "converged": false,
+    "epoch_losses": [
+      0.563673734664917,
+      0.10638849437236786,
+      0.05137321352958679
+    ],
+    "epoch_change_rates": [
+      11.967995643615723,
+      5.151260852813721,
+      3.606466054916382
+    ]
+  },
+  {
+    "token_text": "0",
+    "token_id": 15,
+    "initial_loss": 0.5012853145599365,
+    "final_loss": 0.045828670263290405,
+    "loss_reduction": 0.4554566442966461,
+    "improvement_rate": 0.9085776723710288,
+    "initial_change_rate": 11.27727222442627,
+    "final_change_rate": 3.4050841331481934,
+    "total_time": 0.5939300060272217,
+    "avg_epoch_time": 0.19797666867574057,
+    "converged": false,
+    "epoch_losses": [
+      0.5012853145599365,
+      0.10111621022224426,
+      0.045828670263290405
+    ],
+    "epoch_change_rates": [
+      11.27727222442627,
+      5.059152126312256,
+      3.4050841331481934
+    ]
+  },
+  {
+    "token_text": "J",
+    "token_id": 41,
+    "initial_loss": 0.5400062203407288,
+    "final_loss": 0.0493798591196537,
+    "loss_reduction": 0.49062636122107506,
+    "improvement_rate": 0.9085568697921731,
+    "initial_change_rate": 11.71867561340332,
+    "final_change_rate": 3.530435085296631,
+    "total_time": 0.6322050094604492,
+    "avg_epoch_time": 0.21073500315348306,
+    "converged": false,
+    "epoch_losses": [
+      0.5400062203407288,
+      0.11478578299283981,
+      0.0493798591196537
+    ],
+    "epoch_change_rates": [
+      11.71867561340332,
+      5.375494003295898,
+      3.530435085296631
+    ]
+  },
+  {
+    "token_text": "o",
+    "token_id": 78,
+    "initial_loss": 0.5200546979904175,
+    "final_loss": 0.0476001538336277,
+    "loss_reduction": 0.4724545441567898,
+    "improvement_rate": 0.9084708704342773,
+    "initial_change_rate": 11.50583553314209,
+    "final_change_rate": 3.476031541824341,
+    "total_time": 0.5345511436462402,
+    "avg_epoch_time": 0.17818371454874674,
+    "converged": false,
+    "epoch_losses": [
+      0.5200546979904175,
+      0.10370191931724548,
+      0.0476001538336277
+    ],
+    "epoch_change_rates": [
+      11.50583553314209,
+      5.133691310882568,
+      3.476031541824341
+    ]
+  },
+  {
+    "token_text": "\ufffd",
+    "token_id": 99,
+    "initial_loss": 0.6011210083961487,
+    "final_loss": 0.05503900721669197,
+    "loss_reduction": 0.5460820011794567,
+    "improvement_rate": 0.9084393883295785,
+    "initial_change_rate": 12.350669860839844,
+    "final_change_rate": 3.7357451915740967,
+    "total_time": 0.5579409599304199,
+    "avg_epoch_time": 0.18598031997680664,
+    "converged": false,
+    "epoch_losses": [
+      0.6011210083961487,
+      0.11652489006519318,
+      0.05503900721669197
+    ],
+    "epoch_change_rates": [
+      12.350669860839844,
+      5.437875270843506,
+      3.7357451915740967
+    ]
+  },
+  {
+    "token_text": "5",
+    "token_id": 20,
+    "initial_loss": 0.5932528972625732,
+    "final_loss": 0.05439196899533272,
+    "loss_reduction": 0.5388609282672405,
+    "improvement_rate": 0.9083157128329052,
+    "initial_change_rate": 12.29488468170166,
+    "final_change_rate": 3.7096498012542725,
+    "total_time": 0.541682243347168,
+    "avg_epoch_time": 0.1805607477823893,
+    "converged": false,
+    "epoch_losses": [
+      0.5932528972625732,
+      0.11587399244308472,
+      0.05439196899533272
+    ],
+    "epoch_change_rates": [
+      12.29488468170166,
+      5.429684638977051,
+      3.7096498012542725
+    ]
+  },
+  {
+    "token_text": "7",
+    "token_id": 22,
+    "initial_loss": 0.6307459473609924,
+    "final_loss": 0.05820038914680481,
+    "loss_reduction": 0.5725455582141876,
+    "improvement_rate": 0.9077276843548308,
+    "initial_change_rate": 12.647468566894531,
+    "final_change_rate": 3.8389203548431396,
+    "total_time": 0.5628328323364258,
+    "avg_epoch_time": 0.18761094411214194,
+    "converged": false,
+    "epoch_losses": [
+      0.6307459473609924,
+      0.12127349525690079,
+      0.05820038914680481
+    ],
+    "epoch_change_rates": [
+      12.647468566894531,
+      5.542821407318115,
+      3.8389203548431396
+    ]
+  },
+  {
+    "token_text": "W",
+    "token_id": 54,
+    "initial_loss": 0.48351922631263733,
+    "final_loss": 0.04491165652871132,
+    "loss_reduction": 0.438607569783926,
+    "improvement_rate": 0.9071150554421346,
+    "initial_change_rate": 11.082306861877441,
+    "final_change_rate": 3.3766932487487793,
+    "total_time": 0.5494818687438965,
+    "avg_epoch_time": 0.18316062291463217,
+    "converged": false,
+    "epoch_losses": [
+      0.48351922631263733,
+      0.10048024356365204,
+      0.04491165652871132
+    ],
+    "epoch_change_rates": [
+      11.082306861877441,
+      5.039303779602051,
+      3.3766932487487793
+    ]
+  },
+  {
+    "token_text": "j",
+    "token_id": 73,
+    "initial_loss": 0.5623313784599304,
+    "final_loss": 0.0523003451526165,
+    "loss_reduction": 0.5100310333073139,
+    "improvement_rate": 0.9069937279761043,
+    "initial_change_rate": 11.947290420532227,
+    "final_change_rate": 3.6179091930389404,
+    "total_time": 0.5471210479736328,
+    "avg_epoch_time": 0.1823736826578776,
+    "converged": false,
+    "epoch_losses": [
+      0.5623313784599304,
+      0.10878174006938934,
+      0.0523003451526165
+    ],
+    "epoch_change_rates": [
+      11.947290420532227,
+      5.240732192993164,
+      3.6179091930389404
+    ]
+  },
+  {
+    "token_text": "x",
+    "token_id": 87,
+    "initial_loss": 0.5034394264221191,
+    "final_loss": 0.04684276506304741,
+    "loss_reduction": 0.45659666135907173,
+    "improvement_rate": 0.9069545160657101,
+    "initial_change_rate": 11.320594787597656,
+    "final_change_rate": 3.4434022903442383,
+    "total_time": 0.5619268417358398,
+    "avg_epoch_time": 0.18730894724527994,
+    "converged": false,
+    "epoch_losses": [
+      0.5034394264221191,
+      0.09190867841243744,
+      0.04684276506304741
+    ],
+    "epoch_change_rates": [
+      11.320594787597656,
+      4.828738689422607,
+      3.4434022903442383
+    ]
+  },
+  {
+    "token_text": "T",
+    "token_id": 51,
+    "initial_loss": 0.6109434962272644,
+    "final_loss": 0.05694305896759033,
+    "loss_reduction": 0.5540004372596741,
+    "improvement_rate": 0.9067948847655657,
+    "initial_change_rate": 12.478583335876465,
+    "final_change_rate": 3.7880752086639404,
+    "total_time": 0.556938886642456,
+    "avg_epoch_time": 0.18564629554748535,
+    "converged": false,
+    "epoch_losses": [
+      0.6109434962272644,
+      0.11617851257324219,
+      0.05694305896759033
+    ],
+    "epoch_change_rates": [
+      12.478583335876465,
+      5.422723770141602,
+      3.7880752086639404
+    ]
+  },
+  {
+    "token_text": "\ufffd",
+    "token_id": 97,
+    "initial_loss": 0.5516021251678467,
+    "final_loss": 0.05162285268306732,
+    "loss_reduction": 0.49997927248477936,
+    "improvement_rate": 0.906412882895694,
+    "initial_change_rate": 11.845203399658203,
+    "final_change_rate": 3.6207120418548584,
+    "total_time": 0.5709419250488281,
+    "avg_epoch_time": 0.19031397501627603,
+    "converged": false,
+    "epoch_losses": [
+      0.5516021251678467,
+      0.09993492811918259,
+      0.05162285268306732
+    ],
+    "epoch_change_rates": [
+      11.845203399658203,
+      5.038363456726074,
+      3.6207120418548584
+    ]
+  },
+  {
+    "token_text": "\\",
+    "token_id": 59,
+    "initial_loss": 0.5395867824554443,
+    "final_loss": 0.05056944116950035,
+    "loss_reduction": 0.489017341285944,
+    "improvement_rate": 0.9062811714190274,
+    "initial_change_rate": 11.700394630432129,
+    "final_change_rate": 3.571183681488037,
+    "total_time": 0.5991132259368896,
+    "avg_epoch_time": 0.19970440864562988,
+    "converged": false,
+    "epoch_losses": [
+      0.5395867824554443,
+      0.12029615044593811,
+      0.05056944116950035
+    ],
+    "epoch_change_rates": [
+      11.700394630432129,
+      5.523589611053467,
+      3.571183681488037
+    ]
+  },
+  {
+    "token_text": "&",
+    "token_id": 5,
+    "initial_loss": 0.640343964099884,
+    "final_loss": 0.060384515672922134,
+    "loss_reduction": 0.5799594484269619,
+    "improvement_rate": 0.9056998752884269,
+    "initial_change_rate": 12.766538619995117,
+    "final_change_rate": 3.8878002166748047,
+    "total_time": 0.6157126426696777,
+    "avg_epoch_time": 0.20523754755655924,
+    "converged": false,
+    "epoch_losses": [
+      0.640343964099884,
+      0.11723873764276505,
+      0.060384515672922134
+    ],
+    "epoch_change_rates": [
+      12.766538619995117,
+      5.458950996398926,
+      3.8878002166748047
+    ]
+  },
+  {
+    "token_text": "G",
+    "token_id": 38,
+    "initial_loss": 0.5212751030921936,
+    "final_loss": 0.049303434789180756,
+    "loss_reduction": 0.47197166830301285,
+    "improvement_rate": 0.9054176297760745,
+    "initial_change_rate": 11.503870010375977,
+    "final_change_rate": 3.5152335166931152,
+    "total_time": 0.6442921161651611,
+    "avg_epoch_time": 0.21476403872172037,
+    "converged": false,
+    "epoch_losses": [
+      0.5212751030921936,
+      0.10626628994941711,
+      0.049303434789180756
+    ],
+    "epoch_change_rates": [
+      11.503870010375977,
+      5.185577869415283,
+      3.5152335166931152
+    ]
+  },
+  {
+    "token_text": "`",
+    "token_id": 63,
+    "initial_loss": 0.539387583732605,
+    "final_loss": 0.0511077381670475,
+    "loss_reduction": 0.4882798455655575,
+    "improvement_rate": 0.9052485824509012,
+    "initial_change_rate": 11.722766876220703,
+    "final_change_rate": 3.591498851776123,
+    "total_time": 0.5907931327819824,
+    "avg_epoch_time": 0.1969310442606608,
+    "converged": false,
+    "epoch_losses": [
+      0.539387583732605,
+      0.11356274783611298,
+      0.0511077381670475
+    ],
+    "epoch_change_rates": [
+      11.722766876220703,
+      5.344763278961182,
+      3.591498851776123
+    ]
+  },
+  {
+    "token_text": ";",
+    "token_id": 26,
+    "initial_loss": 0.5139336585998535,
+    "final_loss": 0.04879274591803551,
+    "loss_reduction": 0.465140912681818,
+    "improvement_rate": 0.9050602249890285,
+    "initial_change_rate": 11.420997619628906,
+    "final_change_rate": 3.515460729598999,
+    "total_time": 0.6128878593444824,
+    "avg_epoch_time": 0.20429595311482748,
+    "converged": false,
+    "epoch_losses": [
+      0.5139336585998535,
+      0.09380818158388138,
+      0.04879274591803551
+    ],
+    "epoch_change_rates": [
+      11.420997619628906,
+      4.871119499206543,
+      3.515460729598999
+    ]
+  },
+  {
+    "token_text": ">",
+    "token_id": 29,
+    "initial_loss": 0.5674678683280945,
+    "final_loss": 0.05387736111879349,
+    "loss_reduction": 0.513590507209301,
+    "improvement_rate": 0.9050565430646673,
+    "initial_change_rate": 11.996757507324219,
+    "final_change_rate": 3.6758618354797363,
+    "total_time": 0.7398149967193604,
+    "avg_epoch_time": 0.24660499890645346,
+    "converged": false,
+    "epoch_losses": [
+      0.5674678683280945,
+      0.1007976233959198,
+      0.05387736111879349
+    ],
+    "epoch_change_rates": [
+      11.996757507324219,
+      5.033976078033447,
+      3.6758618354797363
+    ]
+  },
+  {
+    "token_text": "\ufffd",
+    "token_id": 94,
+    "initial_loss": 0.5502637028694153,
+    "final_loss": 0.05243159830570221,
+    "loss_reduction": 0.4978321045637131,
+    "improvement_rate": 0.9047155063430653,
+    "initial_change_rate": 11.831787109375,
+    "final_change_rate": 3.630013942718506,
+    "total_time": 0.5916180610656738,
+    "avg_epoch_time": 0.1972060203552246,
+    "converged": false,
+    "epoch_losses": [
+      0.5502637028694153,
+      0.1089361384510994,
+      0.05243159830570221
+    ],
+    "epoch_change_rates": [
+      11.831787109375,
+      5.255535125732422,
+      3.630013942718506
+    ]
+  },
+  {
+    "token_text": "n",
+    "token_id": 77,
+    "initial_loss": 0.5426469445228577,
+    "final_loss": 0.051944125443696976,
+    "loss_reduction": 0.4907028190791607,
+    "improvement_rate": 0.9042763882336594,
+    "initial_change_rate": 11.756837844848633,
+    "final_change_rate": 3.6257448196411133,
+    "total_time": 0.6010470390319824,
+    "avg_epoch_time": 0.2003490130106608,
+    "converged": false,
+    "epoch_losses": [
+      0.5426469445228577,
+      0.10986080765724182,
+      0.051944125443696976
+    ],
+    "epoch_change_rates": [
+      11.756837844848633,
+      5.260365962982178,
+      3.6257448196411133
+    ]
+  },
+  {
+    "token_text": "h",
+    "token_id": 71,
+    "initial_loss": 0.5174340605735779,
+    "final_loss": 0.04955962672829628,
+    "loss_reduction": 0.4678744338452816,
+    "improvement_rate": 0.9042204011978662,
+    "initial_change_rate": 11.488839149475098,
+    "final_change_rate": 3.53627610206604,
+    "total_time": 0.5341541767120361,
+    "avg_epoch_time": 0.17805139223734537,
+    "converged": false,
+    "epoch_losses": [
+      0.5174340605735779,
+      0.10024307668209076,
+      0.04955962672829628
+    ],
+    "epoch_change_rates": [
+      11.488839149475098,
+      5.016768455505371,
+      3.53627610206604
+    ]
+  },
+  {
+    "token_text": "'",
+    "token_id": 6,
+    "initial_loss": 0.4782712459564209,
+    "final_loss": 0.0458337627351284,
+    "loss_reduction": 0.4324374832212925,
+    "improvement_rate": 0.9041678480096111,
+    "initial_change_rate": 11.024381637573242,
+    "final_change_rate": 3.406036853790283,
+    "total_time": 0.512639045715332,
+    "avg_epoch_time": 0.1708796819051107,
+    "converged": false,
+    "epoch_losses": [
+      0.4782712459564209,
+      0.10150618106126785,
+      0.0458337627351284
+    ],
+    "epoch_change_rates": [
+      11.024381637573242,
+      5.054348468780518,
+      3.406036853790283
+    ]
+  },
+  {
+    "token_text": "]",
+    "token_id": 60,
+    "initial_loss": 0.47689542174339294,
+    "final_loss": 0.045831941068172455,
+    "loss_reduction": 0.4310634806752205,
+    "improvement_rate": 0.9038951959307472,
+    "initial_change_rate": 11.023996353149414,
+    "final_change_rate": 3.3965280055999756,
+    "total_time": 0.6420261859893799,
+    "avg_epoch_time": 0.21400872866312662,
+    "converged": false,
+    "epoch_losses": [
+      0.47689542174339294,
+      0.1030740737915039,
+      0.045831941068172455
+    ],
+    "epoch_change_rates": [
+      11.023996353149414,
+      5.115128993988037,
+      3.3965280055999756
+    ]
+  },
+  {
+    "token_text": "P",
+    "token_id": 47,
+    "initial_loss": 0.5687732100486755,
+    "final_loss": 0.05469102784991264,
+    "loss_reduction": 0.5140821821987629,
+    "improvement_rate": 0.9038438750565763,
+    "initial_change_rate": 11.997045516967773,
+    "final_change_rate": 3.726787805557251,
+    "total_time": 0.531663179397583,
+    "avg_epoch_time": 0.17722105979919434,
+    "converged": false,
+    "epoch_losses": [
+      0.5687732100486755,
+      0.11661668121814728,
+      0.05469102784991264
+    ],
+    "epoch_change_rates": [
+      11.997045516967773,
+      5.430391311645508,
+      3.726787805557251
+    ]
+  },
+  {
+    "token_text": "i",
+    "token_id": 72,
+    "initial_loss": 0.4838709533214569,
+    "final_loss": 0.04688735678792,
+    "loss_reduction": 0.4369835965335369,
+    "improvement_rate": 0.9030994597504375,
+    "initial_change_rate": 11.103289604187012,
+    "final_change_rate": 3.4374208450317383,
+    "total_time": 0.5480787754058838,
+    "avg_epoch_time": 0.1826929251352946,
+    "converged": false,
+    "epoch_losses": [
+      0.4838709533214569,
+      0.09927316009998322,
+      0.04688735678792
+    ],
+    "epoch_change_rates": [
+      11.103289604187012,
+      5.0081634521484375,
+      3.4374208450317383
+    ]
+  },
+  {
+    "token_text": "/",
+    "token_id": 14,
+    "initial_loss": 0.549988865852356,
+    "final_loss": 0.05330967530608177,
+    "loss_reduction": 0.4966791905462742,
+    "improvement_rate": 0.9030713554110517,
+    "initial_change_rate": 11.834860801696777,
+    "final_change_rate": 3.652482509613037,
+    "total_time": 0.5178678035736084,
+    "avg_epoch_time": 0.1726226011912028,
+    "converged": false,
+    "epoch_losses": [
+      0.549988865852356,
+      0.1115071028470993,
+      0.05330967530608177
+    ],
+    "epoch_change_rates": [
+      11.834860801696777,
+      5.318795680999756,
+      3.652482509613037
+    ]
+  },
+  {
+    "token_text": "Q",
+    "token_id": 48,
+    "initial_loss": 0.5168911814689636,
+    "final_loss": 0.05066569522023201,
+    "loss_reduction": 0.4662254862487316,
+    "improvement_rate": 0.9019799581872453,
+    "initial_change_rate": 11.468231201171875,
+    "final_change_rate": 3.5787668228149414,
+    "total_time": 0.5205020904541016,
+    "avg_epoch_time": 0.17350069681803384,
+    "converged": false,
+    "epoch_losses": [
+      0.5168911814689636,
+      0.11160815507173538,
+      0.05066569522023201
+    ],
+    "epoch_change_rates": [
+      11.468231201171875,
+      5.300582408905029,
+      3.5787668228149414
+    ]
+  },
+  {
+    "token_text": "C",
+    "token_id": 34,
+    "initial_loss": 0.452895849943161,
+    "final_loss": 0.04450387880206108,
+    "loss_reduction": 0.40839197114109993,
+    "improvement_rate": 0.901734849617972,
+    "initial_change_rate": 10.732888221740723,
+    "final_change_rate": 3.3592002391815186,
+    "total_time": 0.5279979705810547,
+    "avg_epoch_time": 0.17599932352701822,
+    "converged": false,
+    "epoch_losses": [
+      0.452895849943161,
+      0.08124570548534393,
+      0.04450387880206108
+    ],
+    "epoch_change_rates": [
+      10.732888221740723,
+      4.535811424255371,
+      3.3592002391815186
+    ]
+  },
+  {
+    "token_text": "\ufffd",
+    "token_id": 95,
+    "initial_loss": 0.548582911491394,
+    "final_loss": 0.05400804802775383,
+    "loss_reduction": 0.4945748634636402,
+    "improvement_rate": 0.9015498899137673,
+    "initial_change_rate": 11.812734603881836,
+    "final_change_rate": 3.698495864868164,
+    "total_time": 0.5864100456237793,
+    "avg_epoch_time": 0.19547001520792642,
+    "converged": false,
+    "epoch_losses": [
+      0.548582911491394,
+      0.10202010720968246,
+      0.05400804802775383
+    ],
+    "epoch_change_rates": [
+      11.812734603881836,
+      5.058271408081055,
+      3.698495864868164
+    ]
+  },
+  {
+    "token_text": "K",
+    "token_id": 42,
+    "initial_loss": 0.5935492515563965,
+    "final_loss": 0.058462955057621,
+    "loss_reduction": 0.5350862964987755,
+    "improvement_rate": 0.9015027735199391,
+    "initial_change_rate": 12.28928279876709,
+    "final_change_rate": 3.8431501388549805,
+    "total_time": 0.5255076885223389,
+    "avg_epoch_time": 0.1751692295074463,
+    "converged": false,
+    "epoch_losses": [
+      0.5935492515563965,
+      0.11887410283088684,
+      0.058462955057621
+    ],
+    "epoch_change_rates": [
+      12.28928279876709,
+      5.460858345031738,
+      3.8431501388549805
+    ]
+  },
+  {
+    "token_text": "H",
+    "token_id": 39,
+    "initial_loss": 0.530396580696106,
+    "final_loss": 0.052612632513046265,
+    "loss_reduction": 0.4777839481830597,
+    "improvement_rate": 0.9008051061641534,
+    "initial_change_rate": 11.597609519958496,
+    "final_change_rate": 3.635465621948242,
+    "total_time": 0.6359171867370605,
+    "avg_epoch_time": 0.21197239557902017,
+    "converged": false,
+    "epoch_losses": [
+      0.530396580696106,
+      0.10972065478563309,
+      0.052612632513046265
+    ],
+    "epoch_change_rates": [
+      11.597609519958496,
+      5.259261608123779,
+      3.635465621948242
+    ]
+  },
+  {
+    "token_text": "8",
+    "token_id": 23,
+    "initial_loss": 0.48577746748924255,
+    "final_loss": 0.048401832580566406,
+    "loss_reduction": 0.43737563490867615,
+    "improvement_rate": 0.9003621291231705,
+    "initial_change_rate": 11.120798110961914,
+    "final_change_rate": 3.4846975803375244,
+    "total_time": 0.5429530143737793,
+    "avg_epoch_time": 0.1809843381245931,
+    "converged": false,
+    "epoch_losses": [
+      0.48577746748924255,
+      0.09576091170310974,
+      0.048401832580566406
+    ],
+    "epoch_change_rates": [
+      11.120798110961914,
+      4.920896530151367,
+      3.4846975803375244
+    ]
+  },
+  {
+    "token_text": "I",
+    "token_id": 40,
+    "initial_loss": 0.5442174673080444,
+    "final_loss": 0.05428282544016838,
+    "loss_reduction": 0.48993464186787605,
+    "improvement_rate": 0.9002552679746264,
+    "initial_change_rate": 11.749387741088867,
+    "final_change_rate": 3.7054779529571533,
+    "total_time": 0.584632158279419,
+    "avg_epoch_time": 0.19487738609313965,
+    "converged": false,
+    "epoch_losses": [
+      0.5442174673080444,
+      0.11432813853025436,
+      0.05428282544016838
+    ],
+    "epoch_change_rates": [
+      11.749387741088867,
+      5.387649059295654,
+      3.7054779529571533
+    ]
+  },
+  {
+    "token_text": "m",
+    "token_id": 76,
+    "initial_loss": 0.49095574021339417,
+    "final_loss": 0.049158960580825806,
+    "loss_reduction": 0.44179677963256836,
+    "improvement_rate": 0.8998708914993868,
+    "initial_change_rate": 11.16033935546875,
+    "final_change_rate": 3.512784719467163,
+    "total_time": 0.56595778465271,
+    "avg_epoch_time": 0.18865259488423666,
+    "converged": false,
+    "epoch_losses": [
+      0.49095574021339417,
+      0.11159034073352814,
+      0.049158960580825806
+    ],
+    "epoch_change_rates": [
+      11.16033935546875,
+      5.309894561767578,
+      3.512784719467163
+    ]
+  },
+  {
+    "token_text": "M",
+    "token_id": 44,
+    "initial_loss": 0.5025576949119568,
+    "final_loss": 0.05047622323036194,
+    "loss_reduction": 0.45208147168159485,
+    "improvement_rate": 0.899561336456693,
+    "initial_change_rate": 11.283182144165039,
+    "final_change_rate": 3.57637357711792,
+    "total_time": 0.5399789810180664,
+    "avg_epoch_time": 0.1799929936726888,
+    "converged": false,
+    "epoch_losses": [
+      0.5025576949119568,
+      0.10985516756772995,
+      0.05047622323036194
+    ],
+    "epoch_change_rates": [
+      11.283182144165039,
+      5.270645618438721,
+      3.57637357711792
+    ]
+  },
+  {
+    "token_text": "(",
+    "token_id": 7,
+    "initial_loss": 0.5172703862190247,
+    "final_loss": 0.05202298238873482,
+    "loss_reduction": 0.46524740383028984,
+    "improvement_rate": 0.8994278741356226,
+    "initial_change_rate": 11.455549240112305,
+    "final_change_rate": 3.622523546218872,
+    "total_time": 0.6760241985321045,
+    "avg_epoch_time": 0.2253413995107015,
+    "converged": false,
+    "epoch_losses": [
+      0.5172703862190247,
+      0.10344578325748444,
+      0.05202298238873482
+    ],
+    "epoch_change_rates": [
+      11.455549240112305,
+      5.117832183837891,
+      3.622523546218872
+    ]
+  },
+  {
+    "token_text": "=",
+    "token_id": 28,
+    "initial_loss": 0.572860836982727,
+    "final_loss": 0.057614121586084366,
+    "loss_reduction": 0.5152467153966427,
+    "improvement_rate": 0.8994273689757892,
+    "initial_change_rate": 12.064456939697266,
+    "final_change_rate": 3.8166472911834717,
+    "total_time": 0.5758459568023682,
+    "avg_epoch_time": 0.19194865226745605,
+    "converged": false,
+    "epoch_losses": [
+      0.572860836982727,
+      0.11987905949354172,
+      0.057614121586084366
+    ],
+    "epoch_change_rates": [
+      12.064456939697266,
+      5.504207611083984,
+      3.8166472911834717
+    ]
+  },
+  {
+    "token_text": "E",
+    "token_id": 36,
+    "initial_loss": 0.5187747478485107,
+    "final_loss": 0.05231232941150665,
+    "loss_reduction": 0.4664624184370041,
+    "improvement_rate": 0.899161766010279,
+    "initial_change_rate": 11.473045349121094,
+    "final_change_rate": 3.643566846847534,
+    "total_time": 0.5747339725494385,
+    "avg_epoch_time": 0.19157799084981283,
+    "converged": false,
+    "epoch_losses": [
+      0.5187747478485107,
+      0.11379186064004898,
+      0.05231232941150665
+    ],
+    "epoch_change_rates": [
+      11.473045349121094,
+      5.374212265014648,
+      3.643566846847534
+    ]
+  },
+  {
+    "token_text": "9",
+    "token_id": 24,
+    "initial_loss": 0.5245797038078308,
+    "final_loss": 0.05335667356848717,
+    "loss_reduction": 0.47122303023934364,
+    "improvement_rate": 0.8982868128881454,
+    "initial_change_rate": 11.535996437072754,
+    "final_change_rate": 3.6641955375671387,
+    "total_time": 0.5718729496002197,
+    "avg_epoch_time": 0.19062431653340658,
+    "converged": false,
+    "epoch_losses": [
+      0.5245797038078308,
+      0.09575536847114563,
+      0.05335667356848717
+    ],
+    "epoch_change_rates": [
+      11.535996437072754,
+      4.930410861968994,
+      3.6641955375671387
+    ]
+  },
+  {
+    "token_text": "F",
+    "token_id": 37,
+    "initial_loss": 0.5375447869300842,
+    "final_loss": 0.05473875254392624,
+    "loss_reduction": 0.482806034386158,
+    "improvement_rate": 0.8981689454072488,
+    "initial_change_rate": 11.7059965133667,
+    "final_change_rate": 3.7323668003082275,
+    "total_time": 0.5432760715484619,
+    "avg_epoch_time": 0.1810920238494873,
+    "converged": false,
+    "epoch_losses": [
+      0.5375447869300842,
+      0.11040744185447693,
+      0.05473875254392624
+    ],
+    "epoch_change_rates": [
+      11.7059965133667,
+      5.280453205108643,
+      3.7323668003082275
+    ]
+  },
+  {
+    "token_text": "V",
+    "token_id": 53,
+    "initial_loss": 0.5327115654945374,
+    "final_loss": 0.05426936224102974,
+    "loss_reduction": 0.4784422032535076,
+    "improvement_rate": 0.8981261798011663,
+    "initial_change_rate": 11.64629077911377,
+    "final_change_rate": 3.714573860168457,
+    "total_time": 0.5517377853393555,
+    "avg_epoch_time": 0.1839125951131185,
+    "converged": false,
+    "epoch_losses": [
+      0.5327115654945374,
+      0.11529207229614258,
+      0.05426936224102974
+    ],
+    "epoch_change_rates": [
+      11.64629077911377,
+      5.410922050476074,
+      3.714573860168457
+    ]
+  },
+  {
+    "token_text": "d",
+    "token_id": 67,
+    "initial_loss": 0.48191535472869873,
+    "final_loss": 0.049336668103933334,
+    "loss_reduction": 0.4325786866247654,
+    "improvement_rate": 0.8976237888670136,
+    "initial_change_rate": 11.069670677185059,
+    "final_change_rate": 3.5145013332366943,
+    "total_time": 0.5411710739135742,
+    "avg_epoch_time": 0.1803903579711914,
+    "converged": false,
+    "epoch_losses": [
+      0.48191535472869873,
+      0.10298256576061249,
+      0.049336668103933334
+    ],
+    "epoch_change_rates": [
+      11.069670677185059,
+      5.099804878234863,
+      3.5145013332366943
+    ]
+  },
+  {
+    "token_text": "R",
+    "token_id": 49,
+    "initial_loss": 0.5361224412918091,
+    "final_loss": 0.05529274791479111,
+    "loss_reduction": 0.480829693377018,
+    "improvement_rate": 0.8968654477854705,
+    "initial_change_rate": 11.68864631652832,
+    "final_change_rate": 3.74245023727417,
+    "total_time": 0.5350611209869385,
+    "avg_epoch_time": 0.17835370699564615,
+    "converged": false,
+    "epoch_losses": [
+      0.5361224412918091,
+      0.10184154659509659,
+      0.05529274791479111
+    ],
+    "epoch_change_rates": [
+      11.68864631652832,
+      5.073012351989746,
+      3.74245023727417
+    ]
+  },
+  {
+    "token_text": "U",
+    "token_id": 52,
+    "initial_loss": 0.5250628590583801,
+    "final_loss": 0.054433755576610565,
+    "loss_reduction": 0.47062910348176956,
+    "improvement_rate": 0.8963290687247825,
+    "initial_change_rate": 11.559778213500977,
+    "final_change_rate": 3.7079293727874756,
+    "total_time": 0.5959579944610596,
+    "avg_epoch_time": 0.19865266482035318,
+    "converged": false,
+    "epoch_losses": [
+      0.5250628590583801,
+      0.11106470227241516,
+      0.054433755576610565
+    ],
+    "epoch_change_rates": [
+      11.559778213500977,
+      5.299121856689453,
+      3.7079293727874756
+    ]
+  },
+  {
+    "token_text": "z",
+    "token_id": 89,
+    "initial_loss": 0.4602683484554291,
+    "final_loss": 0.04794076457619667,
+    "loss_reduction": 0.4123275838792324,
+    "improvement_rate": 0.8958417090006807,
+    "initial_change_rate": 10.809183120727539,
+    "final_change_rate": 3.4793691635131836,
+    "total_time": 0.554976224899292,
+    "avg_epoch_time": 0.18499207496643066,
+    "converged": false,
+    "epoch_losses": [
+      0.4602683484554291,
+      0.10661596804857254,
+      0.04794076457619667
+    ],
+    "epoch_change_rates": [
+      10.809183120727539,
+      5.188878536224365,
+      3.4793691635131836
+    ]
+  },
+  {
+    "token_text": "\ufffd",
+    "token_id": 98,
+    "initial_loss": 0.4757304787635803,
+    "final_loss": 0.04973434656858444,
+    "loss_reduction": 0.4259961321949959,
+    "improvement_rate": 0.8954568841209342,
+    "initial_change_rate": 11.007920265197754,
+    "final_change_rate": 3.523465871810913,
+    "total_time": 0.572512149810791,
+    "avg_epoch_time": 0.19083738327026367,
+    "converged": false,
+    "epoch_losses": [
+      0.4757304787635803,
+      0.09968805313110352,
+      0.04973434656858444
+    ],
+    "epoch_change_rates": [
+      11.007920265197754,
+      5.02376651763916,
+      3.523465871810913
+    ]
+  },
+  {
+    "token_text": "L",
+    "token_id": 43,
+    "initial_loss": 0.43947848677635193,
+    "final_loss": 0.04620931297540665,
+    "loss_reduction": 0.3932691738009453,
+    "improvement_rate": 0.8948542093280614,
+    "initial_change_rate": 10.577516555786133,
+    "final_change_rate": 3.4127986431121826,
+    "total_time": 0.5250608921051025,
+    "avg_epoch_time": 0.17502029736836752,
+    "converged": false,
+    "epoch_losses": [
+      0.43947848677635193,
+      0.09382900595664978,
+      0.04620931297540665
+    ],
+    "epoch_change_rates": [
+      10.577516555786133,
+      4.873431205749512,
+      3.4127986431121826
+    ]
+  },
+  {
+    "token_text": "u",
+    "token_id": 84,
+    "initial_loss": 0.5345190167427063,
+    "final_loss": 0.05632514879107475,
+    "loss_reduction": 0.47819386795163155,
+    "improvement_rate": 0.8946246119842222,
+    "initial_change_rate": 11.65179443359375,
+    "final_change_rate": 3.777123212814331,
+    "total_time": 0.5467240810394287,
+    "avg_epoch_time": 0.18224136034647623,
+    "converged": false,
+    "epoch_losses": [
+      0.5345190167427063,
+      0.1127312108874321,
+      0.05632514879107475
+    ],
+    "epoch_change_rates": [
+      11.65179443359375,
+      5.352795600891113,
+      3.777123212814331
+    ]
+  },
+  {
+    "token_text": "1",
+    "token_id": 16,
+    "initial_loss": 0.5201993584632874,
+    "final_loss": 0.0548739917576313,
+    "loss_reduction": 0.46532536670565605,
+    "improvement_rate": 0.894513534350112,
+    "initial_change_rate": 11.502233505249023,
+    "final_change_rate": 3.723083972930908,
+    "total_time": 0.6126070022583008,
+    "avg_epoch_time": 0.20420233408610025,
+    "converged": false,
+    "epoch_losses": [
+      0.5201993584632874,
+      0.11310432106256485,
+      0.0548739917576313
+    ],
+    "epoch_change_rates": [
+      11.502233505249023,
+      5.331238746643066,
+      3.723083972930908
+    ]
+  },
+  {
+    "token_text": "?",
+    "token_id": 30,
+    "initial_loss": 0.44517186284065247,
+    "final_loss": 0.04719916358590126,
+    "loss_reduction": 0.3979726992547512,
+    "improvement_rate": 0.8939754114630645,
+    "initial_change_rate": 10.63049030303955,
+    "final_change_rate": 3.452279567718506,
+    "total_time": 0.6495728492736816,
+    "avg_epoch_time": 0.2165242830912272,
+    "converged": false,
+    "epoch_losses": [
+      0.44517186284065247,
+      0.09925752133131027,
+      0.04719916358590126
+    ],
+    "epoch_change_rates": [
+      10.63049030303955,
+      5.0028533935546875,
+      3.452279567718506
+    ]
+  },
+  {
+    "token_text": "+",
+    "token_id": 10,
+    "initial_loss": 0.5042273998260498,
+    "final_loss": 0.05350489914417267,
+    "loss_reduction": 0.45072250068187714,
+    "improvement_rate": 0.8938873627997388,
+    "initial_change_rate": 11.314496994018555,
+    "final_change_rate": 3.676536798477173,
+    "total_time": 0.6383218765258789,
+    "avg_epoch_time": 0.21277395884195963,
+    "converged": false,
+    "epoch_losses": [
+      0.5042273998260498,
+      0.09968866407871246,
+      0.05350489914417267
+    ],
+    "epoch_change_rates": [
+      11.314496994018555,
+      5.018198013305664,
+      3.676536798477173
+    ]
+  },
+  {
+    "token_text": "\ufffd",
+    "token_id": 96,
+    "initial_loss": 0.4975076913833618,
+    "final_loss": 0.05285419151186943,
+    "loss_reduction": 0.4446534998714924,
+    "improvement_rate": 0.8937620615172723,
+    "initial_change_rate": 11.252531051635742,
+    "final_change_rate": 3.660644054412842,
+    "total_time": 0.5873410701751709,
+    "avg_epoch_time": 0.19578035672505698,
+    "converged": false,
+    "epoch_losses": [
+      0.4975076913833618,
+      0.10780157148838043,
+      0.05285419151186943
+    ],
+    "epoch_change_rates": [
+      11.252531051635742,
+      5.224816799163818,
+      3.660644054412842
+    ]
+  },
+  {
+    "token_text": "-",
+    "token_id": 12,
+    "initial_loss": 0.4769797623157501,
+    "final_loss": 0.050741516053676605,
+    "loss_reduction": 0.4262382462620735,
+    "improvement_rate": 0.8936191426501512,
+    "initial_change_rate": 11.014507293701172,
+    "final_change_rate": 3.5806291103363037,
+    "total_time": 0.5918328762054443,
+    "avg_epoch_time": 0.1972776254018148,
+    "converged": false,
+    "epoch_losses": [
+      0.4769797623157501,
+      0.10249899327754974,
+      0.050741516053676605
+    ],
+    "epoch_change_rates": [
+      11.014507293701172,
+      5.10046911239624,
+      3.5806291103363037
+    ]
+  },
+  {
+    "token_text": "v",
+    "token_id": 85,
+    "initial_loss": 0.49855130910873413,
+    "final_loss": 0.05330553278326988,
+    "loss_reduction": 0.44524577632546425,
+    "improvement_rate": 0.8930791438928025,
+    "initial_change_rate": 11.221563339233398,
+    "final_change_rate": 3.66690993309021,
+    "total_time": 0.5644421577453613,
+    "avg_epoch_time": 0.18814738591512045,
+    "converged": false,
+    "epoch_losses": [
+      0.49855130910873413,
+      0.10371405631303787,
+      0.05330553278326988
+    ],
+    "epoch_change_rates": [
+      11.221563339233398,
+      5.129978179931641,
+      3.66690993309021
+    ]
+  },
+  {
+    "token_text": "l",
+    "token_id": 75,
+    "initial_loss": 0.4794653654098511,
+    "final_loss": 0.05161808803677559,
+    "loss_reduction": 0.4278472773730755,
+    "improvement_rate": 0.8923424051857176,
+    "initial_change_rate": 11.04609489440918,
+    "final_change_rate": 3.6004233360290527,
+    "total_time": 0.6036410331726074,
+    "avg_epoch_time": 0.20121367772420248,
+    "converged": false,
+    "epoch_losses": [
+      0.4794653654098511,
+      0.10428822785615921,
+      0.05161808803677559
+    ],
+    "epoch_change_rates": [
+      11.04609489440918,
+      5.1326904296875,
+      3.6004233360290527
+    ]
+  },
+  {
+    "token_text": "*",
+    "token_id": 9,
+    "initial_loss": 0.4656902849674225,
+    "final_loss": 0.05071524903178215,
+    "loss_reduction": 0.41497503593564034,
+    "improvement_rate": 0.8910966136316759,
+    "initial_change_rate": 10.873421669006348,
+    "final_change_rate": 3.5889909267425537,
+    "total_time": 0.5486211776733398,
+    "avg_epoch_time": 0.18287372589111328,
+    "converged": false,
+    "epoch_losses": [
+      0.4656902849674225,
+      0.107652947306633,
+      0.05071524903178215
+    ],
+    "epoch_change_rates": [
+      10.873421669006348,
+      5.220219135284424,
+      3.5889909267425537
+    ]
+  },
+  {
+    "token_text": "$",
+    "token_id": 3,
+    "initial_loss": 0.5479893684387207,
+    "final_loss": 0.05975611135363579,
+    "loss_reduction": 0.4882332570850849,
+    "improvement_rate": 0.8909538856129869,
+    "initial_change_rate": 11.828169822692871,
+    "final_change_rate": 3.8939225673675537,
+    "total_time": 0.5157768726348877,
+    "avg_epoch_time": 0.17192562421162924,
+    "converged": false,
+    "epoch_losses": [
+      0.5479893684387207,
+      0.11881066858768463,
+      0.05975611135363579
+    ],
+    "epoch_change_rates": [
+      11.828169822692871,
+      5.475223541259766,
+      3.8939225673675537
+    ]
+  },
+  {
+    "token_text": "N",
+    "token_id": 45,
+    "initial_loss": 0.49523743987083435,
+    "final_loss": 0.05405378341674805,
+    "loss_reduction": 0.4411836564540863,
+    "improvement_rate": 0.8908527928929483,
+    "initial_change_rate": 11.201282501220703,
+    "final_change_rate": 3.6731131076812744,
+    "total_time": 0.5591349601745605,
+    "avg_epoch_time": 0.18637832005818686,
+    "converged": false,
+    "epoch_losses": [
+      0.49523743987083435,
+      0.11111469566822052,
+      0.05405378341674805
+    ],
+    "epoch_change_rates": [
+      11.201282501220703,
+      5.308196067810059,
+      3.6731131076812744
+    ]
+  },
+  {
+    "token_text": "q",
+    "token_id": 80,
+    "initial_loss": 0.4865994155406952,
+    "final_loss": 0.053488004952669144,
+    "loss_reduction": 0.43311141058802605,
+    "improvement_rate": 0.8900779506830381,
+    "initial_change_rate": 11.119189262390137,
+    "final_change_rate": 3.6847634315490723,
+    "total_time": 0.5311179161071777,
+    "avg_epoch_time": 0.17703930536905924,
+    "converged": false,
+    "epoch_losses": [
+      0.4865994155406952,
+      0.10674851387739182,
+      0.053488004952669144
+    ],
+    "epoch_change_rates": [
+      11.119189262390137,
+      5.1939311027526855,
+      3.6847634315490723
+    ]
+  },
+  {
+    "token_text": "e",
+    "token_id": 68,
+    "initial_loss": 0.4886031448841095,
+    "final_loss": 0.053921569138765335,
+    "loss_reduction": 0.43468157574534416,
+    "improvement_rate": 0.8896413793006698,
+    "initial_change_rate": 11.14363956451416,
+    "final_change_rate": 3.687513589859009,
+    "total_time": 0.5893590450286865,
+    "avg_epoch_time": 0.19645301500956217,
+    "converged": false,
+    "epoch_losses": [
+      0.4886031448841095,
+      0.1103748306632042,
+      0.053921569138765335
+    ],
+    "epoch_change_rates": [
+      11.14363956451416,
+      5.280612945556641,
+      3.687513589859009
+    ]
+  },
+  {
+    "token_text": ",",
+    "token_id": 11,
+    "initial_loss": 0.5610088109970093,
+    "final_loss": 0.06208757683634758,
+    "loss_reduction": 0.4989212341606617,
+    "improvement_rate": 0.889328695700862,
+    "initial_change_rate": 11.950919151306152,
+    "final_change_rate": 3.9626624584198,
+    "total_time": 0.8425421714782715,
+    "avg_epoch_time": 0.28084739049275714,
+    "converged": false,
+    "epoch_losses": [
+      0.5610088109970093,
+      0.12170425802469254,
+      0.06208757683634758
+    ],
+    "epoch_change_rates": [
+      11.950919151306152,
+      5.547959327697754,
+      3.9626624584198
+    ]
+  },
+  {
+    "token_text": "|",
+    "token_id": 91,
+    "initial_loss": 0.4685818552970886,
+    "final_loss": 0.05193397030234337,
+    "loss_reduction": 0.41664788499474525,
+    "improvement_rate": 0.8891677735378456,
+    "initial_change_rate": 10.913690567016602,
+    "final_change_rate": 3.615309953689575,
+    "total_time": 0.5738129615783691,
+    "avg_epoch_time": 0.1912709871927897,
+    "converged": false,
+    "epoch_losses": [
+      0.4685818552970886,
+      0.11320710927248001,
+      0.05193397030234337
+    ],
+    "epoch_change_rates": [
+      10.913690567016602,
+      5.352182388305664,
+      3.615309953689575
+    ]
+  },
+  {
+    "token_text": "}",
+    "token_id": 92,
+    "initial_loss": 0.556599497795105,
+    "final_loss": 0.061953477561473846,
+    "loss_reduction": 0.49464602023363113,
+    "improvement_rate": 0.8886928971246034,
+    "initial_change_rate": 11.887317657470703,
+    "final_change_rate": 3.954300880432129,
+    "total_time": 0.5367848873138428,
+    "avg_epoch_time": 0.17892829577128092,
+    "converged": false,
+    "epoch_losses": [
+      0.556599497795105,
+      0.11843536049127579,
+      0.061953477561473846
+    ],
+    "epoch_change_rates": [
+      11.887317657470703,
+      5.46491813659668,
+      3.954300880432129
+    ]
+  },
+  {
+    "token_text": "3",
+    "token_id": 18,
+    "initial_loss": 0.4239599108695984,
+    "final_loss": 0.047351349145174026,
+    "loss_reduction": 0.37660856172442436,
+    "improvement_rate": 0.8883117296443193,
+    "initial_change_rate": 10.394596099853516,
+    "final_change_rate": 3.470463991165161,
+    "total_time": 0.6724927425384521,
+    "avg_epoch_time": 0.22416424751281738,
+    "converged": false,
+    "epoch_losses": [
+      0.4239599108695984,
+      0.10296843200922012,
+      0.047351349145174026
+    ],
+    "epoch_change_rates": [
+      10.394596099853516,
+      5.108362197875977,
+      3.470463991165161
+    ]
+  },
+  {
+    "token_text": "@",
+    "token_id": 31,
+    "initial_loss": 0.4829164743423462,
+    "final_loss": 0.054405465722084045,
+    "loss_reduction": 0.42851100862026215,
+    "improvement_rate": 0.8873398017821292,
+    "initial_change_rate": 11.084479331970215,
+    "final_change_rate": 3.702141761779785,
+    "total_time": 0.631767988204956,
+    "avg_epoch_time": 0.210589329401652,
+    "converged": false,
+    "epoch_losses": [
+      0.4829164743423462,
+      0.11394501477479935,
+      0.054405465722084045
+    ],
+    "epoch_change_rates": [
+      11.084479331970215,
+      5.349903106689453,
+      3.702141761779785
+    ]
+  },
+  {
+    "token_text": "[",
+    "token_id": 58,
+    "initial_loss": 0.48525089025497437,
+    "final_loss": 0.054753419011831284,
+    "loss_reduction": 0.4304974712431431,
+    "improvement_rate": 0.8871647221851335,
+    "initial_change_rate": 11.093563079833984,
+    "final_change_rate": 3.7273762226104736,
+    "total_time": 0.5360682010650635,
+    "avg_epoch_time": 0.17868940035502115,
+    "converged": false,
+    "epoch_losses": [
+      0.48525089025497437,
+      0.1020289957523346,
+      0.054753419011831284
+    ],
+    "epoch_change_rates": [
+      11.093563079833984,
+      5.070039749145508,
+      3.7273762226104736
+    ]
+  },
+  {
+    "token_text": "O",
+    "token_id": 46,
+    "initial_loss": 0.5137974619865417,
+    "final_loss": 0.05814068764448166,
+    "loss_reduction": 0.4556567743420601,
+    "improvement_rate": 0.886841232302536,
+    "initial_change_rate": 11.403827667236328,
+    "final_change_rate": 3.835986375808716,
+    "total_time": 0.7363379001617432,
+    "avg_epoch_time": 0.24544596672058105,
+    "converged": false,
+    "epoch_losses": [
+      0.5137974619865417,
+      0.10929497331380844,
+      0.05814068764448166
+    ],
+    "epoch_change_rates": [
+      11.403827667236328,
+      5.24885892868042,
+      3.835986375808716
+    ]
+  },
+  {
+    "token_text": "y",
+    "token_id": 88,
+    "initial_loss": 0.4809584319591522,
+    "final_loss": 0.05467388778924942,
+    "loss_reduction": 0.4262845441699028,
+    "improvement_rate": 0.886323049652048,
+    "initial_change_rate": 11.010704040527344,
+    "final_change_rate": 3.6869752407073975,
+    "total_time": 0.5357809066772461,
+    "avg_epoch_time": 0.17859363555908203,
+    "converged": false,
+    "epoch_losses": [
+      0.4809584319591522,
+      0.09966999292373657,
+      0.05467388778924942
+    ],
+    "epoch_change_rates": [
+      11.010704040527344,
+      5.018507480621338,
+      3.6869752407073975
+    ]
+  },
+  {
+    "token_text": "!",
+    "token_id": 0,
+    "initial_loss": 0.42891213297843933,
+    "final_loss": 0.04915683716535568,
+    "loss_reduction": 0.37975529581308365,
+    "improvement_rate": 0.8853918241388925,
+    "initial_change_rate": 10.441217422485352,
+    "final_change_rate": 3.523238182067871,
+    "total_time": 0.7015421390533447,
+    "avg_epoch_time": 0.23384737968444824,
+    "converged": false,
+    "epoch_losses": [
+      0.42891213297843933,
+      0.09174184501171112,
+      0.04915683716535568
+    ],
+    "epoch_change_rates": [
+      10.441217422485352,
+      4.81758975982666,
+      3.523238182067871
+    ]
+  },
+  {
+    "token_text": "B",
+    "token_id": 33,
+    "initial_loss": 0.43450927734375,
+    "final_loss": 0.05115104094147682,
+    "loss_reduction": 0.3833582364022732,
+    "improvement_rate": 0.882278598850238,
+    "initial_change_rate": 10.503140449523926,
+    "final_change_rate": 3.6005496978759766,
+    "total_time": 0.5704610347747803,
+    "avg_epoch_time": 0.1901536782582601,
+    "converged": false,
+    "epoch_losses": [
+      0.43450927734375,
+      0.10064096748828888,
+      0.05115104094147682
+    ],
+    "epoch_change_rates": [
+      10.503140449523926,
+      5.001845836639404,
+      3.6005496978759766
+    ]
+  },
+  {
+    "token_text": "w",
+    "token_id": 86,
+    "initial_loss": 0.4396471083164215,
+    "final_loss": 0.05291838198900223,
+    "loss_reduction": 0.3867287263274193,
+    "improvement_rate": 0.879634413628587,
+    "initial_change_rate": 10.55468463897705,
+    "final_change_rate": 3.660412311553955,
+    "total_time": 0.5502519607543945,
+    "avg_epoch_time": 0.18341732025146484,
+    "converged": false,
+    "epoch_losses": [
+      0.4396471083164215,
+      0.09809303283691406,
+      0.05291838198900223
+    ],
+    "epoch_change_rates": [
+      10.55468463897705,
+      4.971642017364502,
+      3.660412311553955
+    ]
+  },
+  {
+    "token_text": "X",
+    "token_id": 55,
+    "initial_loss": 0.478536993265152,
+    "final_loss": 0.05769389495253563,
+    "loss_reduction": 0.42084309831261635,
+    "improvement_rate": 0.8794369175956934,
+    "initial_change_rate": 11.020879745483398,
+    "final_change_rate": 3.8095319271087646,
+    "total_time": 0.5296707153320312,
+    "avg_epoch_time": 0.1765569051106771,
+    "converged": false,
+    "epoch_losses": [
+      0.478536993265152,
+      0.1032724529504776,
+      0.05769389495253563
+    ],
+    "epoch_change_rates": [
+      11.020879745483398,
+      5.118069171905518,
+      3.8095319271087646
+    ]
+  },
+  {
+    "token_text": "r",
+    "token_id": 81,
+    "initial_loss": 0.4327905476093292,
+    "final_loss": 0.05229663476347923,
+    "loss_reduction": 0.38049391284585,
+    "improvement_rate": 0.8791641013133071,
+    "initial_change_rate": 10.466532707214355,
+    "final_change_rate": 3.636863946914673,
+    "total_time": 0.5397441387176514,
+    "avg_epoch_time": 0.1799147129058838,
+    "converged": false,
+    "epoch_losses": [
+      0.4327905476093292,
+      0.10172218829393387,
+      0.05229663476347923
+    ],
+    "epoch_change_rates": [
+      10.466532707214355,
+      5.075718402862549,
+      3.636863946914673
+    ]
+  },
+  {
+    "token_text": "k",
+    "token_id": 74,
+    "initial_loss": 0.4745975136756897,
+    "final_loss": 0.05753878504037857,
+    "loss_reduction": 0.4170587286353111,
+    "improvement_rate": 0.8787629867785254,
+    "initial_change_rate": 10.960424423217773,
+    "final_change_rate": 3.8009400367736816,
+    "total_time": 0.704404354095459,
+    "avg_epoch_time": 0.23480145136515299,
+    "converged": false,
+    "epoch_losses": [
+      0.4745975136756897,
+      0.11724161356687546,
+      0.05753878504037857
+    ],
+    "epoch_change_rates": [
+      10.960424423217773,
+      5.426074028015137,
+      3.8009400367736816
+    ]
+  },
+  {
+    "token_text": "Z",
+    "token_id": 57,
+    "initial_loss": 0.4388046860694885,
+    "final_loss": 0.05392693355679512,
+    "loss_reduction": 0.3848777525126934,
+    "improvement_rate": 0.8771049278442407,
+    "initial_change_rate": 10.554157257080078,
+    "final_change_rate": 3.6873672008514404,
+    "total_time": 0.6049201488494873,
+    "avg_epoch_time": 0.20164004961649576,
+    "converged": false,
+    "epoch_losses": [
+      0.4388046860694885,
+      0.11014167964458466,
+      0.05392693355679512
+    ],
+    "epoch_change_rates": [
+      10.554157257080078,
+      5.257216930389404,
+      3.6873672008514404
+    ]
+  },
+  {
+    "token_text": "2",
+    "token_id": 17,
+    "initial_loss": 0.45574307441711426,
+    "final_loss": 0.05772218108177185,
+    "loss_reduction": 0.3980208933353424,
+    "improvement_rate": 0.8733449078615242,
+    "initial_change_rate": 10.745226860046387,
+    "final_change_rate": 3.810206413269043,
+    "total_time": 0.5555911064147949,
+    "avg_epoch_time": 0.1851970354715983,
+    "converged": false,
+    "epoch_losses": [
+      0.45574307441711426,
+      0.11746102571487427,
+      0.05772218108177185
+    ],
+    "epoch_change_rates": [
+      10.745226860046387,
+      5.4438395500183105,
+      3.810206413269043
+    ]
+  },
+  {
+    "token_text": "\"",
+    "token_id": 1,
+    "initial_loss": 0.4049268066883087,
+    "final_loss": 0.055246852338314056,
+    "loss_reduction": 0.34967995434999466,
+    "improvement_rate": 0.8635633615117999,
+    "initial_change_rate": 10.13527774810791,
+    "final_change_rate": 3.7392561435699463,
+    "total_time": 0.5790262222290039,
+    "avg_epoch_time": 0.1930087407430013,
+    "converged": false,
+    "epoch_losses": [
+      0.4049268066883087,
+      0.08804658055305481,
+      0.055246852338314056
+    ],
+    "epoch_change_rates": [
+      10.13527774810791,
+      4.695275783538818,
+      3.7392561435699463
+    ]
+  }
+]

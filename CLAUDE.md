@@ -442,6 +442,139 @@ git commit -m "Remove obsolete parameters from train.py"
 
 ---
 
+## 🔬 CVFPT実験ガイドライン - CRITICAL
+
+**CVFPT (Context Vector Fixed Point Training) 実験時の注意事項**
+
+### 正しいスクリプトの使用
+
+**✅ CVFPT実験には `scripts/train_repetition.py` を使用**
+
+```bash
+# ✅ 正しい - トークンIDを直接使用
+python3 scripts/train_repetition.py \
+    --max-stage 1 \
+    --epochs-per-stage 10 \
+    --repetitions 10 \
+    --device cpu
+```
+
+**❌ `train.py` は使わない** - WikiText訓練用（トークナイゼーションが必要）
+
+### 重要な違い
+
+| スクリプト | 用途 | トークナイゼーション |
+|----------|------|------------------|
+| `train.py` | WikiText訓練 | ✅ 必要（全データセット） |
+| **`scripts/train_repetition.py`** | **CVFPT実験** | **❌ 不要（トークンID直接使用）** |
+
+### キャッシュの保護
+
+**`./cache/` ディレクトリは絶対に削除しない**
+
+- ✅ トークナイザーキャッシュ (`tokenizer.json`)
+- ✅ HuggingFace Datasetsキャッシュ
+- ✅ モデルチェックポイント
+
+**理由**: 再実験時に毎回トークナイゼーションする無駄を防ぐ（数分→0.1秒）
+
+---
+
+## ⚠️ グローバルアトラクター問題 - CRITICAL
+
+**退化解：すべてのトークンが同一の固定点に収束する問題**
+
+### 問題の症状
+
+- ✗ 異なるトークン間のL2距離が異常に小さい（0.000002など）
+- ✗ コサイン類似度が異常に高い（0.999以上）
+- ✗ 収束ステップが異常に少ない（1ステップ）
+- ✗ すべてのトークンが同じ文脈ベクトルに収束
+
+### 根本原因
+
+**Simple Overwrite Updater** が問題：
+
+```python
+# ❌ Simple Updater - 以前の文脈を無視
+context_new = tanh(W @ hidden)
+
+# 問題点:
+# 1. 以前の context を完全に無視
+# 2. LayerNorm + Clipping と組み合わさると全トークンが同一点に収束
+# 3. トークン固有の情報が失われる
+```
+
+### 解決策：Gated Context Updater（必須）
+
+**✅ Gated Updater - LSTM型の更新（標準設定）**
+
+```python
+# ✅ Gated Updater - 以前の文脈を保持
+context_delta = tanh(W_delta @ hidden)
+forget_gate = sigmoid(W_forget @ hidden)
+input_gate = sigmoid(W_input @ hidden)
+context_new = forget_gate * context + input_gate * context_delta
+```
+
+**`src/utils/config.py` での設定**:
+
+```python
+context_update_strategy = "gated"  # DEFAULT（変更禁止）
+```
+
+### 診断スクリプト
+
+グローバルアトラクター問題を検出：
+
+```bash
+# 異なるトークン間の距離をチェック
+python3 scripts/check_global_attractor.py
+
+# 期待される結果:
+# - Gated Updater: 平均L2距離 > 2.0（トークン固有）
+# - Simple Updater: 平均L2距離 < 0.001（グローバルアトラクター）
+```
+
+### チェックリスト
+
+CVFPT実験前に必ず確認：
+
+- [ ] `config.context_update_strategy = "gated"` を確認
+- [ ] 古い simple updater のチェックポイントを削除
+- [ ] 実験結果が「良すぎる」場合は退化解を疑う（cosine > 0.999, L2 < 0.001）
+
+---
+
+## 📊 CVFPT分析結果の解釈
+
+**繰り返し訓練（Fixed-Point）vs 単一パス（Single-Pass）の違い**
+
+### 実験結果（Gated Updater使用時）
+
+| メトリクス | 値 | 解釈 |
+|----------|---|------|
+| **L2距離** | 3.69 | ノルム（~16）の23% |
+| **コサイン類似度** | 0.973 | 方向が97.3%一致 |
+| **角度差** | 13.2° | 方向のずれは小さい |
+| **ノルム差** | 0.03% | ほぼ同じ大きさ |
+
+### 分解分析
+
+**L2距離の内訳**:
+- **方向成分**: 100%（主要な違い）
+- **大きさ成分**: 0%（ほぼ同じ）
+
+### 実用的な意味
+
+1. **方向は高精度** - 単一パスでも97.3%方向が一致
+2. **大きさも同等** - ノルムの差はわずか0.03%
+3. **主な違い** - 次元ごとの微調整（refinement）
+
+**結論**: 単一パスで「本質（essence）」を捉え、繰り返し訓練で「精緻化（refinement）」が進む
+
+---
+
 ## まとめ
 
 **鉄則**:
@@ -449,5 +582,8 @@ git commit -m "Remove obsolete parameters from train.py"
 - ✅ ファイル名は完全に固定し、常に上書き
 - ❌ 「念のため」残すことは禁止
 - ✅ Gitの履歴に残っているので、必要なら復元可能
+- ✅ **CVFPT実験は `scripts/train_repetition.py` を使用**
+- ✅ **Gated Context Updater が標準（変更禁止）**
+- ✅ **`./cache/` は保護（削除禁止）**
 
 **徹底的なクリーンアップとファイル名の統一がプロジェクトの品質を保ちます。**
