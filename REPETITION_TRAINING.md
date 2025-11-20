@@ -254,6 +254,17 @@ print(checkpoint['metrics'])
 - **Training Script**: `scripts/train_repetition.py`
 - **Colab Wrapper**: `scripts/colab_train_repetition.sh`
 
+## 🔬 Performance Evaluation
+
+To evaluate CVFPT performance across multiple tokens:
+
+- **See**: [CVFPT_TOPK_EVALUATION.md](CVFPT_TOPK_EVALUATION.md)
+- **Scripts**:
+  - `scripts/train_repetition_topk_fair.py` - Fair round-robin evaluation (recommended)
+  - `scripts/train_repetition_topk.py` - Sequential evaluation (for comparison)
+
+The Top-K evaluation measures how well CVFPT works across different tokens and provides detailed performance metrics.
+
 ## 📚 References
 
 - **Fixed Point Theory**: Study of convergent sequences in dynamical systems
