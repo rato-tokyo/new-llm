@@ -36,10 +36,15 @@ import argparse
 class ContextCache:
     """Cache for storing fixed-point context vectors"""
 
-    def __init__(self, cache_dir):
+    def __init__(self, cache_dir, clear_cache=False):
         self.cache_dir = cache_dir
         os.makedirs(cache_dir, exist_ok=True)
         self.cache_file = os.path.join(cache_dir, "context_cache.pt")
+
+        # Clear cache if requested
+        if clear_cache and os.path.exists(self.cache_file):
+            os.remove(self.cache_file)
+            print("✓ Cleared old context cache")
 
         # Load existing cache
         if os.path.exists(self.cache_file):
@@ -97,20 +102,23 @@ class ContextCache:
 class TwoPhaseTrainer:
     """Two-phase trainer for dialogue"""
 
-    def __init__(self, config):
+    def __init__(self, config, clear_cache=False):
         self.config = config
         self.device = torch.device(config.device if torch.cuda.is_available() else "cpu")
 
-        # Initialize model
+        # Initialize data loader FIRST (updates config.vocab_size)
+        self.data_loader = UltraChatLoader(config)
+
+        # Initialize model AFTER data loader (uses updated vocab_size)
         self.model = NewLLMFlexible(config).to(self.device)
         print(f"Model initialized: {self.model.count_parameters():,} parameters")
         print(f"Architecture: {config.num_layers} layers, context_dim={config.context_dim}")
 
-        # Initialize data loader
-        self.data_loader = UltraChatLoader(config)
-
-        # Initialize cache
-        self.context_cache = ContextCache(os.path.join(config.cache_dir, "contexts"))
+        # Initialize cache (with optional clearing)
+        self.context_cache = ContextCache(
+            os.path.join(config.cache_dir, "contexts"),
+            clear_cache=clear_cache
+        )
 
         # Optimizer (for Phase 2)
         self.optimizer = optim.Adam(
@@ -366,6 +374,8 @@ def main():
     parser.add_argument("--device", type=str, default="cpu",
                         choices=["cpu", "cuda"],
                         help="Device to use (cpu or cuda)")
+    parser.add_argument("--clear-cache", action="store_true",
+                        help="Clear old context cache before training")
     args = parser.parse_args()
 
     # Select config
@@ -388,8 +398,8 @@ def main():
     print(f"Phase 1: {config.phase1_max_samples} samples, max_iter={config.phase1_max_iterations}")
     print("=" * 60)
 
-    # Initialize trainer
-    trainer = TwoPhaseTrainer(config)
+    # Initialize trainer (with optional cache clearing)
+    trainer = TwoPhaseTrainer(config, clear_cache=args.clear_cache)
 
     # Phase 1: Context learning
     phase1_success = trainer.phase1_train(max_samples=config.phase1_max_samples)

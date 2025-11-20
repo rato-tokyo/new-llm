@@ -243,10 +243,6 @@ class NewLLMFlexible(nn.Module):
                     progress_pct = (t + 1) / seq_len * 100
                     print(f"  Token {t+1}/{seq_len} ({progress_pct:.1f}%) | Converged: {converged_count}/{total_count} ({converged_count/total_count*100:.1f}%)", end='\r')
 
-                    # Early stop if all converged
-                    if converged[:, t].all():
-                        break
-
                 fixed_contexts[:, t, :] = context
 
         return fixed_contexts, converged, num_iters

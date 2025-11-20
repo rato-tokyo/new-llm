@@ -61,7 +61,7 @@ class TinyDialogueConfig(DialogueConfig):
     num_layers = 1
     context_dim = 128
     hidden_dim = 256
-    phase1_max_samples = 10
+    phase1_max_samples = 1  # Start with 1 sample for initial testing
     # Inherit phase1_max_iterations=200, phase1_warmup_iterations=100 from parent
 
 
