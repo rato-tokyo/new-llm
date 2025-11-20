@@ -183,44 +183,47 @@ class TwoPhaseTrainer:
                 self.optimizer.zero_grad()
 
                 # Forward pass - update context
+                # Detach current_token to avoid gradient accumulation
+                current_token_detached = current_token.detach()
+
                 if hasattr(self.model, 'fnn_layers'):
                     # Layer-wise architecture
+                    context_temp = context.detach()  # Start fresh each iteration
                     for layer_idx in range(self.model.num_layers):
-                        fnn_input = torch.cat([current_token, context], dim=-1)
+                        fnn_input = torch.cat([current_token_detached, context_temp], dim=-1)
                         hidden = self.model.fnn_layers[layer_idx](fnn_input)
 
                         context_delta = torch.tanh(self.model.context_delta_projs[layer_idx](hidden))
                         forget = torch.sigmoid(self.model.forget_gates[layer_idx](hidden))
                         input_g = torch.sigmoid(self.model.input_gates[layer_idx](hidden))
 
-                        context_new = forget * context + input_g * context_delta
-                        context_new = self.model.context_norms[layer_idx](context_new)
+                        context_temp = forget * context_temp + input_g * context_delta
+                        context_temp = self.model.context_norms[layer_idx](context_temp)
 
-                        # Fixed-point loss
-                        loss = nn.functional.mse_loss(context_new, context.detach())
-
-                        context = context_new
+                    context_new = context_temp
                 else:
                     # Sequential architecture
-                    fnn_input = torch.cat([current_token, context], dim=-1)
+                    context_detached = context.detach()  # Start fresh each iteration
+                    fnn_input = torch.cat([current_token_detached, context_detached], dim=-1)
                     hidden = self.model.fnn(fnn_input)
 
                     context_delta = torch.tanh(self.model.context_delta_proj(hidden))
                     forget = torch.sigmoid(self.model.forget_gate(hidden))
                     input_g = torch.sigmoid(self.model.input_gate(hidden))
 
-                    context_new = forget * context + input_g * context_delta
+                    context_new = forget * context_detached + input_g * context_delta
                     context_new = self.model.context_norm(context_new)
 
-                    # Fixed-point loss
-                    loss = nn.functional.mse_loss(context_new, context.detach())
-
-                    context = context_new
+                # Fixed-point loss
+                loss = nn.functional.mse_loss(context_new, context.detach())
 
                 # Backward pass
                 loss.backward()
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
                 self.optimizer.step()
+
+                # Update context for next iteration
+                context = context_new.detach()
 
                 # Check convergence (after warmup)
                 if iteration >= self.config.phase1_warmup_iterations:
