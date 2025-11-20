@@ -102,7 +102,9 @@ class TextGenerator:
                         next_token_logits[prev_token] /= repetition_penalty
 
                 # Apply temperature
-                if temperature != 1.0:
+                if temperature <= 0:
+                    raise ValueError(f"temperature must be > 0, got {temperature}")
+                elif temperature != 1.0:
                     next_token_logits = next_token_logits / temperature
 
                 # Apply top-k filtering

@@ -228,6 +228,10 @@ class TransformerLM(nn.Module):
         self.eval()
         with torch.no_grad():
             for _ in range(max_new_tokens):
+                # Truncate BEFORE forward pass to avoid position embedding errors
+                if input_ids.size(1) > self.config.max_seq_length:
+                    input_ids = input_ids[:, -self.config.max_seq_length:]
+
                 # Forward pass (with causal masking)
                 logits = self.forward(input_ids)
 
@@ -240,9 +244,5 @@ class TransformerLM(nn.Module):
 
                 # Append to sequence
                 input_ids = torch.cat([input_ids, next_token], dim=1)
-
-                # Truncate if exceeds max length
-                if input_ids.size(1) > self.config.max_seq_length:
-                    input_ids = input_ids[:, -self.config.max_seq_length:]
 
         return input_ids

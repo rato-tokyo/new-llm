@@ -8,7 +8,6 @@ Pure PyTorch implementation with context reconstruction loss.
 import argparse
 import os
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from datasets import load_dataset
@@ -385,8 +384,8 @@ def main():
     print(f"\n🧠 Creating model...")
     config = NewLLMConfig()
     config.vocab_size = len(tokenizer)  # GPT-2 has 50,257 tokens
-    config.embed_dim = 256
-    config.hidden_dim = 512
+    # Use config defaults for embed_dim (256) and hidden_dim (1024)
+    # These can be changed in src/utils/config.py if needed
     config.context_vector_dim = args.context_dim
     config.context_update_strategy = args.context_update_strategy  # "simple" or "gated"
     config.num_layers = args.layers

@@ -9,8 +9,10 @@ LR=""
 LAYERS=1
 CONTEXT_DIM=""
 CONTEXT_STRATEGY=""
+CONTEXT_LOSS_WEIGHT=""
 MAX_LENGTH=""
 OUTPUT_DIR="checkpoints"
+DEVICE="cuda"
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -21,8 +23,10 @@ while [[ $# -gt 0 ]]; do
         --layers) LAYERS="$2"; shift 2 ;;
         --context-dim) CONTEXT_DIM="$2"; shift 2 ;;
         --context-update-strategy) CONTEXT_STRATEGY="$2"; shift 2 ;;
+        --context-loss-weight) CONTEXT_LOSS_WEIGHT="$2"; shift 2 ;;
         --max-length) MAX_LENGTH="$2"; shift 2 ;;
         --output-dir) OUTPUT_DIR="$2"; shift 2 ;;
+        --device) DEVICE="$2"; shift 2 ;;
         *) echo "Unknown option: $1"; exit 1 ;;
     esac
 done
@@ -51,7 +55,8 @@ echo ""
 pip install -q tokenizers datasets tqdm
 
 # 3. 訓練コマンド構築
-CMD="python train.py --epochs $EPOCHS --batch-size $BATCH_SIZE --layers $LAYERS --output-dir $OUTPUT_DIR --device cuda"
+# -u: unbuffered output (ログが即座に書き込まれる)
+CMD="python -u train.py --epochs $EPOCHS --batch-size $BATCH_SIZE --layers $LAYERS --output-dir $OUTPUT_DIR --device $DEVICE"
 if [ -n "$MAX_SAMPLES" ]; then
     CMD="$CMD --max-samples $MAX_SAMPLES"
 fi
@@ -63,6 +68,9 @@ if [ -n "$CONTEXT_DIM" ]; then
 fi
 if [ -n "$CONTEXT_STRATEGY" ]; then
     CMD="$CMD --context-update-strategy $CONTEXT_STRATEGY"
+fi
+if [ -n "$CONTEXT_LOSS_WEIGHT" ]; then
+    CMD="$CMD --context-loss-weight $CONTEXT_LOSS_WEIGHT"
 fi
 if [ -n "$MAX_LENGTH" ]; then
     CMD="$CMD --max-length $MAX_LENGTH"
