@@ -1,6 +1,11 @@
 """Quick test of training pipeline"""
 
 import torch
+import sys
+import os
+
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from src.models.new_llm_flexible import NewLLMFlexible
 from src.utils.dialogue_config import SmallDialogueConfig
 from src.data.ultrachat_loader import UltraChatLoader
