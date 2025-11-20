@@ -31,6 +31,8 @@ class DialogueConfig:
 
     # ========== Phase 1: Context Learning ==========
     phase1_max_samples = 100          # Number of dialogue samples for Phase 1
+    phase1_epochs = 3                 # Number of training epochs for Phase 1
+    phase1_learning_rate = 0.0001     # Learning rate for Phase 1 training
     phase1_max_iterations = 200       # Max iterations for fixed-point search
     phase1_warmup_iterations = 100    # Warmup iterations before checking convergence (n)
     phase1_convergence_threshold = 1e-2  # Convergence threshold (L2 distance) - relaxed from 1e-4

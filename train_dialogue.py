@@ -133,114 +133,214 @@ class TwoPhaseTrainer:
             clear_cache=clear_cache
         )
 
-        # Optimizer (for Phase 2)
+        # Optimizer (for Phase 1 and Phase 2)
+        # Phase 1 uses phase1_learning_rate, Phase 2 will reinitialize with phase2_learning_rate
         self.optimizer = optim.Adam(
             self.model.parameters(),
-            lr=config.phase2_learning_rate
+            lr=config.phase1_learning_rate
         )
 
-    def phase1_train_sample(self, sample_idx, dataset):
+    def phase1_train_sample(self, sample_idx, dataset, epoch):
         """
-        Phase 1: Learn fixed-point context for a single sample
+        Phase 1: Train model to reach fixed-point contexts for a single sample
 
         Args:
             sample_idx: Sample index
             dataset: UltraChat dataset
+            epoch: Current epoch number
 
         Returns:
-            converged: Whether all tokens converged
+            avg_loss: Average fixed-point loss across tokens
+            converged_ratio: Ratio of converged tokens
         """
-        # Check if already cached
-        cached = self.context_cache.load_context(sample_idx)
-        if cached is not None:
-            print(f"Sample {sample_idx}: Using cached context")
-            return cached["converged"].all().item()
-
         # Load sample
         input_ids, assistant_mask, messages = self.data_loader.get_sample(dataset, sample_idx)
         input_ids = input_ids.unsqueeze(0).to(self.device)  # [1, seq_len]
+        batch_size, seq_len = input_ids.shape
 
-        print(f"\nSample {sample_idx}: {len(input_ids[0])} tokens")
-        print(f"Dialogue: {len(messages)} messages")
+        if epoch == 0:
+            print(f"\nSample {sample_idx}: {seq_len} tokens, {len(messages)} messages")
 
-        # Get fixed-point contexts
-        self.model.eval()
-        with torch.no_grad():
-            fixed_contexts, converged, num_iters = self.model.get_fixed_point_context(
-                input_ids,
-                max_iterations=self.config.phase1_max_iterations,
-                tolerance=self.config.phase1_convergence_threshold,
-                warmup_iterations=self.config.phase1_warmup_iterations
-            )
+        # Get token embeddings
+        self.model.train()
+        token_embeds = self.model.token_embedding(input_ids)
+        if hasattr(self.model, 'embed_norm'):
+            token_embeds = self.model.embed_norm(token_embeds)
 
-        # Statistics
-        converged_ratio = converged.float().mean().item()
-        avg_iters = num_iters.float().mean().item()
+        # Track metrics
+        total_loss = 0.0
+        converged_count = 0
 
-        print(f"  Converged: {converged.sum().item()}/{converged.numel()} tokens ({converged_ratio:.1%})")
-        print(f"  Avg iterations: {avg_iters:.1f}")
+        # Train each token to reach fixed point
+        for t in range(seq_len):
+            current_token = token_embeds[:, t, :]  # [batch, embed_dim]
 
-        # Save to cache
-        self.context_cache.save_context(
-            sample_idx,
-            input_ids.squeeze(0),
-            fixed_contexts.squeeze(0),
-            converged.squeeze(0),
-            num_iters.squeeze(0)
-        )
+            # Initialize context
+            context = torch.zeros(batch_size, self.config.context_dim, device=self.device)
 
-        return converged.all().item()
+            # Fixed-point iteration with training
+            for iteration in range(self.config.phase1_max_iterations):
+                self.optimizer.zero_grad()
+
+                # Forward pass - update context
+                if hasattr(self.model, 'fnn_layers'):
+                    # Layer-wise architecture
+                    for layer_idx in range(self.model.num_layers):
+                        fnn_input = torch.cat([current_token, context], dim=-1)
+                        hidden = self.model.fnn_layers[layer_idx](fnn_input)
+
+                        context_delta = torch.tanh(self.model.context_delta_projs[layer_idx](hidden))
+                        forget = torch.sigmoid(self.model.forget_gates[layer_idx](hidden))
+                        input_g = torch.sigmoid(self.model.input_gates[layer_idx](hidden))
+
+                        context_new = forget * context + input_g * context_delta
+                        context_new = self.model.context_norms[layer_idx](context_new)
+
+                        # Fixed-point loss
+                        loss = nn.functional.mse_loss(context_new, context.detach())
+
+                        context = context_new
+                else:
+                    # Sequential architecture
+                    fnn_input = torch.cat([current_token, context], dim=-1)
+                    hidden = self.model.fnn(fnn_input)
+
+                    context_delta = torch.tanh(self.model.context_delta_proj(hidden))
+                    forget = torch.sigmoid(self.model.forget_gate(hidden))
+                    input_g = torch.sigmoid(self.model.input_gate(hidden))
+
+                    context_new = forget * context + input_g * context_delta
+                    context_new = self.model.context_norm(context_new)
+
+                    # Fixed-point loss
+                    loss = nn.functional.mse_loss(context_new, context.detach())
+
+                    context = context_new
+
+                # Backward pass
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
+                self.optimizer.step()
+
+                # Check convergence (after warmup)
+                if iteration >= self.config.phase1_warmup_iterations:
+                    if loss.item() < self.config.phase1_convergence_threshold:
+                        converged_count += 1
+                        break
+
+            total_loss += loss.item()
+
+            # Progress logging
+            if (t + 1) % 50 == 0 or t == seq_len - 1:
+                avg_loss_so_far = total_loss / (t + 1)
+                converged_ratio = converged_count / (t + 1)
+                if epoch == 0:
+                    print(f"  Token {t+1}/{seq_len} | Loss: {avg_loss_so_far:.6f} | Converged: {converged_ratio:.1%}", end='\r')
+
+        avg_loss = total_loss / seq_len
+        converged_ratio = converged_count / seq_len
+
+        if epoch == 0:
+            print(f"  Token {seq_len}/{seq_len} | Loss: {avg_loss:.6f} | Converged: {converged_ratio:.1%}")
+
+        return avg_loss, converged_ratio
 
     def phase1_train(self, max_samples):
         """
-        Phase 1: Train fixed-point contexts for multiple samples
+        Phase 1: Train model to reach fixed-point contexts
 
         Args:
             max_samples: Maximum number of samples to process
 
         Returns:
-            success: Whether enough samples converged
+            success: Whether training achieved sufficient convergence
         """
         print("\n" + "=" * 60)
-        print("PHASE 1: Context Vector Fixed-Point Learning")
+        print("PHASE 1: Context Vector Fixed-Point Training")
         print("=" * 60)
 
         # Load dataset
         dataset = self.data_loader.load_dataset(max_samples=max_samples)
 
-        converged_samples = 0
         start_time = time.time()
 
-        for idx in range(len(dataset)):
-            sample_start = time.time()
+        # Training epochs
+        num_epochs = getattr(self.config, 'phase1_epochs', 3)
 
-            converged = self.phase1_train_sample(idx, dataset)
-            if converged:
-                converged_samples += 1
+        for epoch in range(num_epochs):
+            print(f"\n{'='*60}")
+            print(f"Epoch {epoch+1}/{num_epochs}")
+            print(f"{'='*60}")
 
-            # Time estimation
-            sample_time = time.time() - sample_start
-            elapsed = time.time() - start_time
-            avg_time_per_sample = elapsed / (idx + 1)
-            remaining_samples = len(dataset) - (idx + 1)
-            eta_seconds = avg_time_per_sample * remaining_samples
-            eta_minutes = eta_seconds / 60
+            epoch_loss = 0.0
+            epoch_convergence = 0.0
 
-            print(f"  Time: {sample_time:.1f}s | Avg: {avg_time_per_sample:.1f}s/sample | ETA: {eta_minutes:.1f} min\n")
+            for idx in range(len(dataset)):
+                avg_loss, converged_ratio = self.phase1_train_sample(idx, dataset, epoch)
 
-            # Save cache periodically
-            if (idx + 1) % 10 == 0:
-                self.context_cache.save_to_disk()
+                epoch_loss += avg_loss
+                epoch_convergence += converged_ratio
 
-        # Final save
-        self.context_cache.save_to_disk()
+            # Epoch summary
+            avg_epoch_loss = epoch_loss / len(dataset)
+            avg_epoch_convergence = epoch_convergence / len(dataset)
+
+            print(f"\nEpoch {epoch+1} Summary:")
+            print(f"  Average Loss: {avg_epoch_loss:.6f}")
+            print(f"  Average Convergence: {avg_epoch_convergence:.1%}")
+
+            # Save checkpoint
+            checkpoint_path = os.path.join(self.config.cache_dir, "checkpoints", f"phase1_epoch{epoch+1}.pt")
+            os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+            torch.save({
+                "epoch": epoch + 1,
+                "model_state_dict": self.model.state_dict(),
+                "optimizer_state_dict": self.optimizer.state_dict(),
+                "loss": avg_epoch_loss,
+                "convergence": avg_epoch_convergence
+            }, checkpoint_path)
+            print(f"  Checkpoint saved: {checkpoint_path}")
 
         total_time = time.time() - start_time
+
+        # Final evaluation: cache fixed-point contexts
+        print(f"\n{'='*60}")
+        print("Caching Fixed-Point Contexts (Evaluation Mode)")
+        print(f"{'='*60}")
+
+        self.model.eval()
+        with torch.no_grad():
+            for idx in range(len(dataset)):
+                input_ids, assistant_mask, messages = self.data_loader.get_sample(dataset, idx)
+                input_ids = input_ids.unsqueeze(0).to(self.device)
+
+                # Get fixed-point contexts (without training)
+                fixed_contexts, converged, num_iters = self.model.get_fixed_point_context(
+                    input_ids,
+                    max_iterations=self.config.phase1_max_iterations,
+                    tolerance=self.config.phase1_convergence_threshold,
+                    warmup_iterations=self.config.phase1_warmup_iterations
+                )
+
+                # Save to cache
+                self.context_cache.save_context(
+                    idx,
+                    input_ids.squeeze(0),
+                    fixed_contexts.squeeze(0),
+                    converged.squeeze(0),
+                    num_iters.squeeze(0)
+                )
+
+                if (idx + 1) % 10 == 0:
+                    print(f"  Cached {idx+1}/{len(dataset)} samples", end='\r')
+
+        print(f"  Cached {len(dataset)}/{len(dataset)} samples")
+        self.context_cache.save_to_disk()
 
         # Show statistics
         stats = self.context_cache.get_convergence_stats()
         print("\n" + "=" * 60)
-        print("Phase 1 Results:")
+        print("Phase 1 Training Results:")
         print(f"  Total samples: {stats['total_samples']}")
         print(f"  Convergence rate: {stats['convergence_rate']:.1%}")
         print(f"  Avg iterations: {stats['avg_iterations']:.1f}")
@@ -253,12 +353,12 @@ class TwoPhaseTrainer:
             print(f"\n⚠️  Convergence rate too low: {stats['convergence_rate']:.1%}")
             print(f"   Required: {self.config.phase1_min_converged_ratio:.1%}")
             print("   Consider:")
+            print("   - Training for more epochs")
+            print("   - Adjusting learning rate")
             print("   - Increasing num_layers")
-            print("   - Increasing context_dim")
-            print("   - Adjusting hidden_dim")
             return False
 
-        print("\n✓ Phase 1 completed successfully!")
+        print("\n✓ Phase 1 training completed successfully!")
         return True
 
     def phase2_train_sample(self, sample_idx, dataset):
