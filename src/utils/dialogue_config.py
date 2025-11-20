@@ -19,6 +19,7 @@ class DialogueConfig:
     """
 
     # ========== Model Architecture (EASY TO CHANGE) ==========
+    architecture = "sequential"  # "sequential" or "layerwise"
     num_layers = 2           # Number of FNN layers (1, 2, 3, 4, ...)
     context_dim = 256        # Context vector dimension (128, 256, 512, 1024, ...)
     hidden_dim = 512         # Hidden dimension (256, 512, 1024, ...)
@@ -57,7 +58,7 @@ class DialogueConfig:
 
 
 class TinyDialogueConfig(DialogueConfig):
-    """Tiny model for initial baseline (1 layer)"""
+    """Tiny model for initial baseline (1 layer, 128 dim)"""
     num_layers = 1
     context_dim = 128
     hidden_dim = 256
@@ -65,13 +66,40 @@ class TinyDialogueConfig(DialogueConfig):
     # Inherit phase1_max_iterations=200, phase1_warmup_iterations=100 from parent
 
 
+class Tiny256DialogueConfig(DialogueConfig):
+    """Tiny model with doubled context_dim (1 layer, 256 dim)"""
+    num_layers = 1
+    context_dim = 256  # Doubled from Tiny
+    hidden_dim = 512   # Doubled to match context_dim ratio
+    phase1_max_samples = 1
+    # Inherit phase1_max_iterations=200, phase1_warmup_iterations=100 from parent
+
+
 class SmallDialogueConfig(DialogueConfig):
-    """Small model for quick testing (2 layers)"""
+    """Small model for quick testing (2 layers, 256 dim)"""
     num_layers = 2
     context_dim = 256
     hidden_dim = 512
-    phase1_max_samples = 10
+    phase1_max_samples = 1  # Changed from 10 to 1 for comparison
     # Inherit phase1_max_iterations=200, phase1_warmup_iterations=100 from parent
+
+
+class Small2LayerSequentialConfig(DialogueConfig):
+    """Architecture A: Sequential FNN (2 layers, 256 dim)"""
+    architecture = "sequential"
+    num_layers = 2
+    context_dim = 256
+    hidden_dim = 256  # Smaller hidden_dim
+    phase1_max_samples = 1
+
+
+class Small2LayerLayerwiseConfig(DialogueConfig):
+    """Architecture B: Layer-wise context update (2 layers, 256 dim)"""
+    architecture = "layerwise"
+    num_layers = 2
+    context_dim = 256
+    hidden_dim = 256  # Smaller hidden_dim
+    phase1_max_samples = 1
 
 
 class MediumDialogueConfig(DialogueConfig):

@@ -22,10 +22,15 @@ import time
 from tqdm import tqdm
 
 from src.models.new_llm_flexible import NewLLMFlexible
+from src.models.new_llm_sequential import NewLLMSequential
+from src.models.new_llm_layerwise import NewLLMLayerwise
 from src.utils.dialogue_config import (
     DialogueConfig,
     TinyDialogueConfig,
+    Tiny256DialogueConfig,
     SmallDialogueConfig,
+    Small2LayerSequentialConfig,
+    Small2LayerLayerwiseConfig,
     MediumDialogueConfig,
     LargeDialogueConfig
 )
@@ -110,9 +115,17 @@ class TwoPhaseTrainer:
         self.data_loader = UltraChatLoader(config)
 
         # Initialize model AFTER data loader (uses updated vocab_size)
-        self.model = NewLLMFlexible(config).to(self.device)
+        # Select model based on architecture type
+        architecture = getattr(config, 'architecture', 'flexible')
+        if architecture == 'sequential':
+            self.model = NewLLMSequential(config).to(self.device)
+        elif architecture == 'layerwise':
+            self.model = NewLLMLayerwise(config).to(self.device)
+        else:
+            self.model = NewLLMFlexible(config).to(self.device)
+
         print(f"Model initialized: {self.model.count_parameters():,} parameters")
-        print(f"Architecture: {config.num_layers} layers, context_dim={config.context_dim}")
+        print(f"Architecture: {architecture}, {config.num_layers} layers, context_dim={config.context_dim}")
 
         # Initialize cache (with optional clearing)
         self.context_cache = ContextCache(
@@ -369,8 +382,8 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description="New-LLM Two-Phase Dialogue Training")
     parser.add_argument("--config", type=str, default="tiny",
-                        choices=["tiny", "small", "medium", "large"],
-                        help="Config size (tiny=1layer, small=2layer, medium=3layer, large=4layer)")
+                        choices=["tiny", "tiny256", "small", "seq2", "layer2", "medium", "large"],
+                        help="Config: tiny=1L/128D, tiny256=1L/256D, small=2L/512D, seq2=2L/256D-Sequential, layer2=2L/256D-Layerwise, medium=3L/512D, large=4L/512D")
     parser.add_argument("--device", type=str, default="cpu",
                         choices=["cpu", "cuda"],
                         help="Device to use (cpu or cuda)")
@@ -381,7 +394,10 @@ def main():
     # Select config
     config_map = {
         "tiny": TinyDialogueConfig(),
+        "tiny256": Tiny256DialogueConfig(),
         "small": SmallDialogueConfig(),
+        "seq2": Small2LayerSequentialConfig(),
+        "layer2": Small2LayerLayerwiseConfig(),
         "medium": MediumDialogueConfig(),
         "large": LargeDialogueConfig()
     }
