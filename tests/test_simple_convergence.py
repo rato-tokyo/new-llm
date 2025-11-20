@@ -59,9 +59,9 @@ def test_simple_sentence_convergence():
         with torch.no_grad():
             fixed_contexts, converged, num_iters = model.get_fixed_point_context(
                 input_ids,
-                max_iterations=100,
+                max_iterations=200,
                 tolerance=1e-2,  # Relaxed threshold
-                warmup_iterations=10
+                warmup_iterations=100  # Long warmup for stability
             )
 
         # Statistics
@@ -136,9 +136,9 @@ def test_repeated_words():
     with torch.no_grad():
         fixed_contexts, converged, num_iters = model.get_fixed_point_context(
             input_ids,
-            max_iterations=100,
+            max_iterations=200,
             tolerance=1e-2,  # Relaxed threshold
-            warmup_iterations=10
+            warmup_iterations=100  # Long warmup for stability
         )
 
     # Check if "hello" tokens have similar fixed points

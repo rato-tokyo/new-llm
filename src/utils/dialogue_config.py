@@ -30,8 +30,8 @@ class DialogueConfig:
 
     # ========== Phase 1: Context Learning ==========
     phase1_max_samples = 100          # Number of dialogue samples for Phase 1
-    phase1_max_iterations = 100       # Max iterations for fixed-point search
-    phase1_warmup_iterations = 10     # Warmup iterations before checking convergence (n)
+    phase1_max_iterations = 200       # Max iterations for fixed-point search
+    phase1_warmup_iterations = 100    # Warmup iterations before checking convergence (n)
     phase1_convergence_threshold = 1e-2  # Convergence threshold (L2 distance) - relaxed from 1e-4
     phase1_min_converged_ratio = 0.95    # Minimum ratio of converged tokens to proceed
 
@@ -62,7 +62,7 @@ class TinyDialogueConfig(DialogueConfig):
     context_dim = 128
     hidden_dim = 256
     phase1_max_samples = 10
-    phase1_max_iterations = 50
+    # Inherit phase1_max_iterations=200, phase1_warmup_iterations=100 from parent
 
 
 class SmallDialogueConfig(DialogueConfig):
@@ -71,7 +71,7 @@ class SmallDialogueConfig(DialogueConfig):
     context_dim = 256
     hidden_dim = 512
     phase1_max_samples = 10
-    phase1_max_iterations = 50
+    # Inherit phase1_max_iterations=200, phase1_warmup_iterations=100 from parent
 
 
 class MediumDialogueConfig(DialogueConfig):
@@ -80,7 +80,7 @@ class MediumDialogueConfig(DialogueConfig):
     context_dim = 512
     hidden_dim = 1024
     phase1_max_samples = 10
-    phase1_max_iterations = 50
+    # Inherit phase1_max_iterations=200, phase1_warmup_iterations=100 from parent
 
 
 class LargeDialogueConfig(DialogueConfig):

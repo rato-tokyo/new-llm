@@ -76,8 +76,18 @@ class NewLLMFlexible(nn.Module):
 
         self.fnn = nn.Sequential(*layers)
 
-        # ========== Token Prediction Head ==========
+        # ========== Output Heads ==========
+        # Token prediction head
         self.token_output = nn.Linear(self.hidden_dim, self.vocab_size)
+
+        # Context reconstruction decoder (autoencoder)
+        # Reconstructs [prev_context + current_token_embed] from context
+        target_dim = self.context_dim + self.embed_dim
+        self.context_decoder = nn.Sequential(
+            nn.Linear(self.context_dim, target_dim),
+            nn.ReLU(),
+            nn.Linear(target_dim, target_dim),
+        )
 
         # ========== Context Updater (Gated) ==========
         # LSTM-style gated update to prevent global attractor problem
