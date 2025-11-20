@@ -1,53 +1,63 @@
 # Claude Code Development Guidelines for New-LLM Project
 
-## 🎯 Colab実験の1行コマンド完結ポリシー - CRITICAL
+## 🎯 New Direction: UltraChat Dialogue Training - CRITICAL UPDATE
 
-**⚠️ 絶対ルール：すべての訓練は1行curlコマンドで開始できること**
+**⚠️ 方針転換：Colabは使用せず、ローカルGPUで長期訓練**
 
-### 基本原則
+### 基本方針（2025年更新）
 
-**すべての訓練データセットは、Google Colabで1行のcurlコマンドをコピペするだけで実験が開始できること。**
+New-LLMは以下の方向性に確定：
 
-```bash
-# ✅ これが正しい形
-!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_<dataset>.sh | bash
+1. **データセット**: UltraChat（対話データ）のみ
+2. **プラットフォーム**: ローカルGPU（Colab使用せず）
+   - 理由：GPU並列化が困難（逐次処理モデルのため）
+   - 長期戦を覚悟
+3. **柔軟なアーキテクチャ**: layerと文脈ベクトル次元数を頻繁に変更
+4. **二段階学習**:
+   - Phase 1: 文脈ベクトルの固有点学習
+   - Phase 2: 出力トークン学習
+
+### Colab関連ポリシーの廃止
+
+**以下のポリシーは廃止**:
+- ❌ 1行curlコマンド完結ポリシー
+- ❌ `colab_train_*.sh` スクリプト要件
+- ❌ Colab最適化設定
+
+**理由**: New-LLMは逐次処理のため、Colabの並列GPU利用が困難
+
+### 新しい必須実装要件
+
+訓練スクリプト作成時は以下を実装：
+
+1. ✅ 柔軟なアーキテクチャ（layerと文脈次元を簡単に変更可能）
+2. ✅ 二段階訓練（Phase 1: 文脈学習、Phase 2: トークン学習）
+3. ✅ キャッシュシステム（固有点文脈ベクトルの保存）
+4. ✅ 詳細なメトリクスロギング（ステップごとのPPL, Loss, Accuracy）
+
+### 二段階訓練の詳細
+
+**Phase 1: 文脈ベクトル学習**:
+```
+1. サンプルをトークン配列に変換
+2. 一周目：文脈ベクトルをただ保存
+3. 二周目以降：前回の文脈ベクトルを教師データとして学習
+4. 固有点が定まるまで繰り返し
+5. 収束判定：95%以上のトークンが収束 → Phase 2へ
+6. 収束しない場合：layerや文脈次元を調整
 ```
 
-**この方針は例外なく徹底する。**
+**Phase 2: 出力トークン学習**:
+```
+1. Phase 1で確定した固有点を固定
+2. 期待した出力トークンが出力されるように学習
+3. 自分の返答のトークンのみ学習（相手の返答は学習しない）
+4. ChatML形式で発言者を識別
+```
 
-### 必須実装要件
+---
 
-新しい訓練データセットを追加する際は、**必ず以下を実装**すること：
-
-1. ✅ `scripts/train_<dataset>.py` - Python訓練スクリプト
-2. ✅ **`scripts/colab_train_<dataset>.sh`** - 1行実行用bashスクリプト（**最重要・必須**）
-3. ✅ ドキュメント（1行コマンドを最初に記載）
-
-**`scripts/colab_train_<dataset>.sh`がない実装は不完全とみなす。**
-
-### colab_train_*.sh スクリプトの必須内容
-
-```bash
-#!/bin/bash
-set -e
-
-# 1. パラメータ解析
-NUM_LAYERS=1
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --num_layers) NUM_LAYERS="$2"; shift 2 ;;
-        --max_samples) MAX_SAMPLES="$2"; shift 2 ;;
-        *) echo "Unknown: $1"; exit 1 ;;
-    esac
-done
-
-# 2. 最新版取得
-cd /content
-rm -rf new-llm
-git clone https://github.com/rato-tokyo/new-llm
-cd new-llm
-
-# 3. 依存関係インストール
+## 🧪 コード修正時の必須テストポリシー - CRITICAL
 pip install -q datasets tqdm
 
 # 4. バックグラウンド実行

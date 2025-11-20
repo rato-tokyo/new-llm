@@ -7,6 +7,9 @@ experiments/
 # Training logs
 *.log
 
+# Cache files (HuggingFace datasets, tokenizers, contexts)
+cache/
+
 # Python
 __pycache__/
 *.py[cod]
