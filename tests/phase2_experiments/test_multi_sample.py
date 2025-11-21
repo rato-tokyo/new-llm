@@ -1,14 +1,18 @@
-"""Test Multi-Sample Training with Early Stopping
+"""Multi-Sample Training with Early Stopping and Cache
 
 Features:
-1. Load multiple UltraChat samples (10, 50, or 100)
-2. Train/Validation split (80/20)
-3. Phase 1 with early stopping (convergence-based)
-4. Phase 2 with early stopping (validation loss-based)
-5. Mixed [2,2] architecture (current best)
+1. Train/Validation split (80/20)
+2. Phase 1 with early stopping (convergence-based)
+3. Phase 2 with early stopping (validation loss-based)
+4. Fixed-point context caching (auto load/save)
+5. Mixed [2,2] architecture (default)
 
 Usage:
-    python3 tests/phase2_experiments/test_multi_sample_with_early_stopping.py --num-samples 10
+    # 10 samples
+    python3 tests/phase2_experiments/test_multi_sample.py --num-samples 10
+
+    # 100 samples with custom architecture
+    python3 tests/phase2_experiments/test_multi_sample.py --num-samples 100 --layer-structure 2 2 2
 """
 
 import torch
@@ -19,22 +23,11 @@ from datasets import load_dataset
 from transformers import AutoTokenizer
 from src.models.new_llm_flexible import NewLLMFlexible
 from src.utils.early_stopping import Phase1EarlyStopping, Phase2EarlyStopping
+from src.utils.cache_manager import FixedContextCache
 
 
 def load_samples(num_samples=10, train_ratio=0.8, tokenizer_model='gpt2', max_length=512):
-    """Load multiple UltraChat samples with train/val split
-
-    Args:
-        num_samples: Total number of samples to load
-        train_ratio: Ratio of training samples (default: 0.8)
-        tokenizer_model: Tokenizer to use
-        max_length: Maximum tokens per sample
-
-    Returns:
-        train_token_ids: Tensor of training tokens
-        val_token_ids: Tensor of validation tokens
-        tokenizer: Loaded tokenizer
-    """
+    """Load multiple UltraChat samples with train/val split"""
     print(f"\nLoading {num_samples} samples from UltraChat...")
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_model)
     dataset = load_dataset("HuggingFaceH4/ultrachat_200k", split="train_sft")
@@ -66,21 +59,8 @@ def load_samples(num_samples=10, train_ratio=0.8, tokenizer_model='gpt2', max_le
     return train_token_ids, val_token_ids, tokenizer
 
 
-def phase1_train_with_early_stopping(model, token_ids, early_stop, learning_rate=0.0001,
-                                     max_epochs=20, threshold=0.01):
-    """Phase 1: Train fixed-point contexts with early stopping
-
-    Args:
-        model: NewLLMFlexible model
-        token_ids: Training token IDs
-        early_stop: Phase1EarlyStopping instance
-        learning_rate: Learning rate
-        max_epochs: Maximum epochs
-        threshold: Convergence threshold per token
-
-    Returns:
-        final_convergence_rate: Final convergence rate
-    """
+def phase1_train(model, token_ids, early_stop, learning_rate=0.0001, max_epochs=20, threshold=0.01):
+    """Phase 1: Train fixed-point contexts with early stopping"""
     print(f"\nPhase 1: Training Fixed-Point Contexts ({len(token_ids)} tokens)")
     print("="*70)
 
@@ -123,18 +103,17 @@ def phase1_train_with_early_stopping(model, token_ids, early_stop, learning_rate
 
         print(f"  Epoch {epoch+1}/{max_epochs}: Loss = {avg_loss:.6f}, Convergence = {convergence_rate:.1%}")
 
-        # Check early stopping
         if early_stop(convergence_rate):
-            print(f"  → Early stopping triggered (convergence = {convergence_rate:.1%})")
+            print(f"  → Early stopping: Convergence = {convergence_rate:.1%}")
             break
 
-    print(f"Phase 1 Complete: Best Convergence = {early_stop.best_convergence:.1%}\n")
+    print(f"Phase 1 Complete\n")
     return convergence_rate
 
 
 def compute_fixed_contexts(model, token_ids, threshold=0.01):
-    """Compute fixed-point contexts for token IDs"""
-    print(f"Computing Fixed-Point Contexts for {len(token_ids)} tokens...")
+    """Compute fixed-point contexts"""
+    print(f"Computing fixed-point contexts for {len(token_ids)} tokens...")
 
     model.eval()
     with torch.no_grad():
@@ -152,30 +131,13 @@ def compute_fixed_contexts(model, token_ids, threshold=0.01):
     return contexts.squeeze(0), converged.squeeze(0)
 
 
-def phase2_train_with_early_stopping(model, train_token_ids, train_contexts,
-                                     val_token_ids, val_contexts, early_stop,
-                                     learning_rate=0.0001, max_epochs=50):
-    """Phase 2: Train token prediction with early stopping
-
-    Args:
-        model: NewLLMFlexible model
-        train_token_ids: Training token IDs
-        train_contexts: Fixed contexts for training
-        val_token_ids: Validation token IDs
-        val_contexts: Fixed contexts for validation
-        early_stop: Phase2EarlyStopping instance
-        learning_rate: Learning rate
-        max_epochs: Maximum epochs
-
-    Returns:
-        train_metrics: Final training metrics
-        val_metrics: Final validation metrics
-    """
+def phase2_train(model, train_token_ids, train_contexts, val_token_ids, val_contexts,
+                early_stop, learning_rate=0.0001, max_epochs=50):
+    """Phase 2: Train token prediction with early stopping"""
     print(f"Phase 2: Training Token Prediction")
     print("="*70)
 
     optimizer = optim.Adam(model.parameters(), lr=learning_rate)
-    model.train()
 
     for epoch in range(max_epochs):
         # Training
@@ -189,13 +151,11 @@ def phase2_train_with_early_stopping(model, train_token_ids, train_contexts,
         )
 
         print(f"  Epoch {epoch+1}/{max_epochs}:")
-        print(f"    Train: Loss = {train_loss:.4f}, PPL = {train_ppl:.2f}, Acc = {train_acc:.1%}")
-        print(f"    Val:   Loss = {val_loss:.4f}, PPL = {val_ppl:.2f}, Acc = {val_acc:.1%}")
+        print(f"    Train: Loss={train_loss:.4f}, PPL={train_ppl:.2f}, Acc={train_acc:.1%}")
+        print(f"    Val:   Loss={val_loss:.4f}, PPL={val_ppl:.2f}, Acc={val_acc:.1%}")
 
-        # Check early stopping
         if early_stop(val_loss, val_ppl, model):
-            print(f"  → Early stopping triggered")
-            print(f"    Best Val Loss = {early_stop.best_loss:.4f}, Best Val PPL = {early_stop.best_ppl:.2f}")
+            print(f"  → Early stopping: Best Val PPL = {early_stop.best_ppl:.2f}")
             break
 
     print(f"\nPhase 2 Complete\n")
@@ -203,7 +163,7 @@ def phase2_train_with_early_stopping(model, train_token_ids, train_contexts,
 
 
 def phase2_epoch(model, token_ids, fixed_contexts, optimizer=None, is_training=True):
-    """Single epoch of Phase 2 training or evaluation"""
+    """Single epoch of Phase 2"""
     if is_training:
         model.train()
     else:
@@ -221,9 +181,11 @@ def phase2_epoch(model, token_ids, fixed_contexts, optimizer=None, is_training=T
             optimizer.zero_grad()
 
         with torch.set_grad_enabled(is_training):
-            # Get last hidden state (from final block)
+            token_embed = model.token_embedding(token_ids[t].unsqueeze(0).unsqueeze(0))
+            token_embed = model.embed_norm(token_embed).squeeze(0)
+
             _, hidden = model._update_context_one_step(
-                model.embed_norm(model.token_embedding(token_ids[t].unsqueeze(0).unsqueeze(0))).squeeze(0),
+                token_embed,
                 context,
                 return_hidden=True
             )
@@ -249,21 +211,31 @@ def phase2_epoch(model, token_ids, fixed_contexts, optimizer=None, is_training=T
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Multi-Sample Training with Early Stopping')
-    parser.add_argument('--num-samples', type=int, default=10, help='Number of samples (default: 10)')
-    parser.add_argument('--train-ratio', type=float, default=0.8, help='Train/val split ratio (default: 0.8)')
-    parser.add_argument('--max-length', type=int, default=512, help='Max tokens per sample (default: 512)')
-    parser.add_argument('--vocab-size', type=int, default=50257, help='Vocabulary size (default: 50257 for GPT2)')
-    parser.add_argument('--embed-dim', type=int, default=256, help='Embedding dimension (default: 256)')
-    parser.add_argument('--context-dim', type=int, default=256, help='Context dimension (default: 256)')
-    parser.add_argument('--hidden-dim', type=int, default=512, help='Hidden dimension (default: 512)')
-    parser.add_argument('--device', type=str, default='cpu', help='Device (cpu or cuda)')
+    parser = argparse.ArgumentParser(description='Multi-Sample Training')
+    parser.add_argument('--num-samples', type=int, default=10)
+    parser.add_argument('--train-ratio', type=float, default=0.8)
+    parser.add_argument('--max-length', type=int, default=512)
+    parser.add_argument('--vocab-size', type=int, default=50257)
+    parser.add_argument('--embed-dim', type=int, default=256)
+    parser.add_argument('--context-dim', type=int, default=256)
+    parser.add_argument('--hidden-dim', type=int, default=512)
+    parser.add_argument('--layer-structure', type=int, nargs='+', default=[2, 2])
+    parser.add_argument('--phase1-lr', type=float, default=0.0001)
+    parser.add_argument('--phase2-lr', type=float, default=0.0001)
+    parser.add_argument('--phase1-max-epochs', type=int, default=20)
+    parser.add_argument('--phase2-max-epochs', type=int, default=50)
+    parser.add_argument('--clear-cache', action='store_true', help='Clear cache before run')
 
     args = parser.parse_args()
 
     print("\n" + "="*70)
-    print("Multi-Sample Training with Early Stopping")
+    print("Multi-Sample Training with Early Stopping and Cache")
     print("="*70)
+
+    # Initialize cache
+    cache = FixedContextCache()
+    if args.clear_cache:
+        cache.clear()
 
     # Load data
     train_token_ids, val_token_ids, tokenizer = load_samples(
@@ -272,56 +244,91 @@ def main():
         max_length=args.max_length
     )
 
-    # Create model (Mixed [2,2] - current best architecture)
-    print(f"\nCreating Mixed [2,2] model...")
+    # Create model
+    print(f"\nCreating model with layer structure {args.layer_structure}...")
     model = NewLLMFlexible(
         vocab_size=args.vocab_size,
         embed_dim=args.embed_dim,
         context_dim=args.context_dim,
         hidden_dim=args.hidden_dim,
-        layer_structure=[2, 2],
+        layer_structure=args.layer_structure,
         dropout=0.1
     )
-    print(f"  Architecture: {model.get_architecture_description()}")
+    arch_desc = model.get_architecture_description()
+    print(f"  Architecture: {arch_desc}")
     print(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    # Phase 1: Train fixed-point contexts
-    phase1_early_stop = Phase1EarlyStopping(
-        convergence_threshold=0.95,
-        patience=5,
-        min_delta=0.01
-    )
+    model_config = {
+        'vocab_size': args.vocab_size,
+        'embed_dim': args.embed_dim,
+        'context_dim': args.context_dim,
+        'hidden_dim': args.hidden_dim,
+        'layer_structure': args.layer_structure
+    }
 
-    phase1_train_with_early_stopping(
-        model, train_token_ids, phase1_early_stop,
-        learning_rate=0.0001, max_epochs=20, threshold=0.01
-    )
+    # Phase 1: Train or load fixed contexts
+    print("\n" + "="*70)
+    print("PHASE 1: Fixed-Point Context Learning")
+    print("="*70)
 
-    # Compute fixed contexts
-    train_contexts, train_converged = compute_fixed_contexts(model, train_token_ids, threshold=0.01)
-    val_contexts, val_converged = compute_fixed_contexts(model, val_token_ids, threshold=0.01)
+    # Try to load from cache
+    train_contexts, train_converged = cache.load(train_token_ids, arch_desc, model_config)
+    val_contexts, val_converged = cache.load(val_token_ids, arch_desc, model_config)
+
+    if train_contexts is None:
+        # Train Phase 1
+        phase1_early_stop = Phase1EarlyStopping(
+            convergence_threshold=0.95,
+            patience=5,
+            min_delta=0.01
+        )
+
+        phase1_train(model, train_token_ids, phase1_early_stop,
+                    learning_rate=args.phase1_lr,
+                    max_epochs=args.phase1_max_epochs,
+                    threshold=0.01)
+
+        # Compute and cache
+        train_contexts, train_converged = compute_fixed_contexts(model, train_token_ids)
+        cache.save(train_token_ids, train_contexts, train_converged, arch_desc, model_config)
+    else:
+        print("Using cached training fixed contexts")
+
+    if val_contexts is None:
+        val_contexts, val_converged = compute_fixed_contexts(model, val_token_ids)
+        cache.save(val_token_ids, val_contexts, val_converged, arch_desc, model_config)
+    else:
+        print("Using cached validation fixed contexts")
 
     # Phase 2: Train token prediction
+    print("\n" + "="*70)
+    print("PHASE 2: Token Prediction Training")
+    print("="*70)
+
     phase2_early_stop = Phase2EarlyStopping(
         patience=10,
         min_delta=0.001,
-        ppl_threshold=None,  # No target PPL
         restore_best=True
     )
 
-    train_metrics, val_metrics = phase2_train_with_early_stopping(
+    train_metrics, val_metrics = phase2_train(
         model, train_token_ids, train_contexts,
         val_token_ids, val_contexts, phase2_early_stop,
-        learning_rate=0.0001, max_epochs=50
+        learning_rate=args.phase2_lr,
+        max_epochs=args.phase2_max_epochs
     )
 
     # Final results
     print("\n" + "="*70)
     print("FINAL RESULTS")
     print("="*70)
-    print(f"Training:   Loss = {train_metrics[0]:.4f}, PPL = {train_metrics[1]:.2f}, Acc = {train_metrics[2]:.1%}")
-    print(f"Validation: Loss = {val_metrics[0]:.4f}, PPL = {val_metrics[1]:.2f}, Acc = {val_metrics[2]:.1%}")
+    print(f"Training:   Loss={train_metrics[0]:.4f}, PPL={train_metrics[1]:.2f}, Acc={train_metrics[2]:.1%}")
+    print(f"Validation: Loss={val_metrics[0]:.4f}, PPL={val_metrics[1]:.2f}, Acc={val_metrics[2]:.1%}")
+    print(f"PPL Difference (Val - Train): {val_metrics[1] - train_metrics[1]:.2f}")
     print("="*70)
+
+    # Cache stats
+    cache.stats()
 
 
 if __name__ == '__main__':

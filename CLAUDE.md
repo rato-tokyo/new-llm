@@ -690,22 +690,59 @@ CVFPT実験前に必ず確認：
 3. **CombinedEarlyStopping**
    - Phase 1とPhase 2の統合クラス
 
+### 固有点キャッシュシステム（2025-11-21実装）
+
+**`src/utils/cache_manager.py`**:
+
+- **FixedContextCache**: 固有点文脈ベクトルの自動保存・読み込み
+- トークン列のハッシュベース識別
+- アーキテクチャ・設定の検証
+- インデックスファイルで管理（`cache/fixed_contexts/index.json`）
+
+**主要機能**:
+- `save()`: 固有点を保存
+- `load()`: 固有点を読み込み（検証付き）
+- `exists()`: キャッシュ存在確認
+- `clear()`: キャッシュクリア
+- `stats()`: キャッシュ統計表示
+
 ### 複数サンプルテストスクリプト（2025-11-21実装）
 
-**`tests/phase2_experiments/test_multi_sample_with_early_stopping.py`**:
+**`tests/phase2_experiments/test_multi_sample.py`**:
 - Train/Validation分割（80/20）
+- Early Stopping統合（Phase 1とPhase 2）
+- 固有点キャッシュ自動管理
 - 10/50/100サンプル対応
-- Early Stopping統合済み
-- Mixed [2,2]アーキテクチャ使用
+- カスタムアーキテクチャ対応
 
 **使用例**:
 ```bash
-# 10サンプルでテスト
-python3 tests/phase2_experiments/test_multi_sample_with_early_stopping.py --num-samples 10
+# 10サンプルでテスト（Mixed [2,2]）
+python3 tests/phase2_experiments/test_multi_sample.py --num-samples 10
 
-# 100サンプルでテスト
-python3 tests/phase2_experiments/test_multi_sample_with_early_stopping.py --num-samples 100
+# 100サンプル、カスタムアーキテクチャ
+python3 tests/phase2_experiments/test_multi_sample.py --num-samples 100 --layer-structure 2 2 2
+
+# キャッシュクリアして実行
+python3 tests/phase2_experiments/test_multi_sample.py --num-samples 10 --clear-cache
 ```
+
+### PPL vs Accuracy - 重要
+
+**PPL（Perplexity）が主要指標**:
+- 確率分布全体を評価（全語彙）
+- モデルの「自信度」を反映
+- 汎化性能の指標
+
+**Accuracy**:
+- 最大確率トークンが正解かのみ
+- 確率分布の質は無視
+- 過学習の検出には不十分
+
+**例**: Layer-wise [1,1,1,1]
+- Training: PPL=3.43, Acc=62.4%（暗記）
+- Validation: PPL=37.95, Acc=43.8%（過学習）
+- PPLの劣化（11倍）が本質的問題
 
 ---
 
