@@ -122,6 +122,114 @@ for t, token_embed in enumerate(token_embeds):
 
 ---
 
+## 🚨 Phase 1実装の重大バグと修正 - CRITICAL
+
+**2025-01-22発見：Phase 1の実装バグが収束失敗の原因だった**
+
+### ❌ 間違った実装（バグあり）
+
+```python
+for t, token_embed in enumerate(token_embeds):
+    context = model._update_context_one_step(token_embed, context)
+
+    if iteration > 0:
+        loss = mse_loss(context, fixed_contexts[t])
+        loss.backward(retain_graph=True)  # 各トークンでbackward
+
+    context = context.detach()
+    context.requires_grad = True
+
+# 最後に1回だけoptimizer.step()
+if iteration > 0:
+    optimizer.step()  # ❌ 問題：各トークンの学習が独立していない
+```
+
+**問題点**:
+1. 各トークンで`backward()`するが、`optimizer.step()`は最後に1回のみ
+2. 勾配が蓄積されるが、最後のトークンの勾配で上書きされる可能性
+3. **各トークンが独立に固定点を学習できない**
+4. 結果：4層でも収束が遅い、2層では0%収束
+
+### ✅ 正しい実装（CVFP準拠）
+
+```python
+for t, token_embed in enumerate(token_embeds):
+    if iteration > 0:
+        optimizer.zero_grad()  # ✅ 各トークンで勾配リセット
+
+    context = model._update_context_one_step(token_embed, context)
+
+    if iteration > 0:
+        loss = mse_loss(context, fixed_contexts[t])
+        loss.backward()        # ✅ 各トークンでbackward
+        optimizer.step()       # ✅ 各トークンでstep
+
+    context = context.detach()  # ✅ 次のトークンへ引き継ぎ（勾配は切る）
+    context.requires_grad = True
+```
+
+**正しい理由**:
+1. ✅ **各トークンが独立に学習**: `zero_grad()` → `backward()` → `step()`のサイクル
+2. ✅ **文脈は引き継ぐ**: `context.detach()`で勾配を切るが、値は次のトークンへ
+3. ✅ **CVFP特性を実現**: 各トークン位置で独立に固定点を学習
+
+### 実験結果の比較（256次元、10サンプル）
+
+#### 4層 [1,1,1,1] の比較
+
+| Implementation | Iteration 10 収束率 | Iteration 18 収束率 | 最終結果 |
+|----------------|-------------------|-------------------|---------|
+| **バグあり** | 34.4% | - | 99.7% (Iter 20) |
+| **CVFP準拠** | **75.1%** | **99.6%** | 99.6% (Iter 18) |
+
+**改善**:
+- Iteration 10で**2.2倍速**（34.4% → 75.1%）
+- **2 iteration早く収束**（Iter 20 → Iter 18）
+
+#### 2層 [1,1] の比較
+
+| Implementation | Iteration 10 収束率 | 最終結果 | Train Effective Rank |
+|----------------|-------------------|---------|---------------------|
+| **バグあり** | 0.0% | 0.0% (Iter 50) | - |
+| **CVFP準拠** | **37.0%** | **100.0% (Iter 25)** | 7.24 / 256 (2.8%) |
+
+**改善**:
+- Iteration 10で**0% → 37.0%**（収束不可能 → 収束可能）
+- **完全収束達成**（0% → 100.0%）
+
+#### 4層 vs 2層（CVFP準拠、256次元）
+
+| 指標 | 4層 [1,1,1,1] | 2層 [1,1] | 差 |
+|------|--------------|----------|-----|
+| **収束速度（Iter 10）** | 75.1% | 37.0% | **4層が2倍速** |
+| **最終収束（完全）** | Iter 18 (99.6%) | Iter 25 (100%) | **4層が7 iter速い** |
+| **Effective Rank** | 21.38 / 256 (8.4%) | 7.24 / 256 (2.8%) | **4層が3倍多様** |
+| **Train L2距離** | 3.495 | 2.676 | **4層が30%大きい** |
+| **Train Cosine類似度** | 0.850 | 0.916 | **4層が明確に分離** |
+
+**結論**:
+- ✅ 2層でも収束可能（バグ修正により）
+- ⚠️ 4層推奨（2倍速く収束、3倍多様、固定点が明確に分離）
+- ❌ 2層のEffective Rank 2.8%は表現力不足のリスク
+
+### なぜこのバグが見つからなかったのか
+
+**理由**:
+1. 4層では最終的に99%以上収束していた（遅いが成功）
+2. バグの影響が「収束速度の低下」として現れ、「完全な失敗」ではなかった
+3. 2層で0%収束が発生して初めて、根本的な実装ミスに気づいた
+
+### 教訓
+
+**Phase 1実装の鉄則**:
+- ✅ **各トークンごとに**: `optimizer.zero_grad()` → `backward()` → `step()`
+- ✅ **文脈は引き継ぐが勾配は切る**: `context.detach()` + `requires_grad = True`
+- ❌ **全トークン処理後に1回step()は禁止**: 各トークンの学習が独立しない
+
+**このバグは二度と繰り返してはならない**
+
+---
+
 ## 🎯 Phase 1とPhase 2のTrain/Val区別 - CRITICAL
 
 **Phase 1とPhase 2で、Train/Valの扱いが異なる**

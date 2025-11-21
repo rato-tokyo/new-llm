@@ -91,13 +91,16 @@ def phase1_train(model, token_ids, max_iters=50, threshold=0.01, device='cpu'):
     converged_tokens = torch.zeros(len(token_ids), dtype=torch.bool)
 
     for iteration in range(max_iters):
-        total_loss = 0
-        optimizer.zero_grad()
+        total_loss_value = 0
 
         # Process entire sequence with context carry-over
         context = torch.zeros(1, model.context_dim).to(device)
 
         for t, token_embed in enumerate(token_embeds):
+            # Zero gradients before each token
+            if iteration > 0:
+                optimizer.zero_grad()
+
             # Update context one step
             context = model._update_context_one_step(
                 token_embed.unsqueeze(0),
@@ -107,25 +110,20 @@ def phase1_train(model, token_ids, max_iters=50, threshold=0.01, device='cpu'):
             # Loss: Match previous iteration's context (CVFP learning)
             if iteration > 0:
                 loss = torch.nn.functional.mse_loss(context, fixed_contexts[t].unsqueeze(0))
-                total_loss += loss.item()
+                total_loss_value += loss.item()
+
+                # Backprop and update weights for each token
+                loss.backward()
+                optimizer.step()
 
                 # Check convergence
                 if loss.item() < threshold:
                     converged_tokens[t] = True
 
-                # Backprop
-                loss.backward(retain_graph=(t < len(token_embeds) - 1))
-
-            # Save context for next iteration
+            # Save context for next iteration and carry over to next token
             fixed_contexts[t] = context.detach().squeeze(0)
-
-            # Detach to prevent growing computation graph
-            context = context.detach()
-            context.requires_grad = True
-
-        # Update weights (after processing all tokens)
-        if iteration > 0:
-            optimizer.step()
+            context = context.detach()  # Detach to prevent growing computation graph
+            context.requires_grad = True  # Re-enable gradients for next token
 
         # Compute convergence rate
         convergence_rate = converged_tokens.float().mean().item()
@@ -133,7 +131,7 @@ def phase1_train(model, token_ids, max_iters=50, threshold=0.01, device='cpu'):
         if iteration == 0:
             print_flush(f"Iteration 1/{max_iters}: Forward pass only (saving contexts)")
         else:
-            avg_loss = total_loss / len(token_ids)
+            avg_loss = total_loss_value / len(token_ids)
             print_flush(f"Iteration {iteration+1}/{max_iters}: Loss={avg_loss:.6f}, Converged={convergence_rate*100:.1f}%")
 
             # Early stopping check
@@ -410,6 +408,8 @@ def main():
     parser.add_argument('--embed-dim', type=int, default=256,
                         help='Token embedding dimension (default: 256)')
     parser.add_argument('--device', type=str, default='cpu', help='Device')
+    parser.add_argument('--skip-phase2', action='store_true',
+                        help='Skip Phase 2 (only run Phase 1)')
     parser.add_argument('--freeze-context', action='store_true',
                         help='Freeze context in Phase 2 (only train token output)')
     args = parser.parse_args()
@@ -460,20 +460,25 @@ def main():
     analyze_fixed_points(train_contexts, label="Train")
     analyze_fixed_points(val_contexts, label="Val")
 
-    # Phase 2: Token prediction
-    val_metrics = phase2_train(model, train_ids, train_contexts, val_ids, val_contexts,
-                                freeze_context=args.freeze_context, device=args.device)
+    # Phase 2: Token prediction (skip if requested)
+    if not args.skip_phase2:
+        val_metrics = phase2_train(model, train_ids, train_contexts, val_ids, val_contexts,
+                                    freeze_context=args.freeze_context, device=args.device)
 
-    # Final results
-    print_flush("\n" + "="*70)
-    print_flush("FINAL RESULTS")
-    print_flush("="*70)
-    print_flush(f"\nResidual Standard {args.layer_structure}:")
-    print_flush(f"  Context dim: {args.context_dim}, Embed dim: {args.embed_dim}")
-    print_flush(f"  Parameters: {model.count_parameters():,}")
-    print_flush(f"  Best Val Loss: {val_metrics['loss']:.2f}")
-    print_flush(f"  Best Val PPL:  {val_metrics['ppl']:.2f}")
-    print_flush(f"  Best Val Acc:  {val_metrics['acc']:.1f}%")
+        # Final results
+        print_flush("\n" + "="*70)
+        print_flush("FINAL RESULTS")
+        print_flush("="*70)
+        print_flush(f"\nResidual Standard {args.layer_structure}:")
+        print_flush(f"  Context dim: {args.context_dim}, Embed dim: {args.embed_dim}")
+        print_flush(f"  Parameters: {model.count_parameters():,}")
+        print_flush(f"  Best Val Loss: {val_metrics['loss']:.2f}")
+        print_flush(f"  Best Val PPL:  {val_metrics['ppl']:.2f}")
+        print_flush(f"  Best Val Acc:  {val_metrics['acc']:.1f}%")
+    else:
+        print_flush("\n" + "="*70)
+        print_flush("PHASE 1 ONLY - SKIPPING PHASE 2")
+        print_flush("="*70)
 
 
 if __name__ == '__main__':
