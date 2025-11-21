@@ -57,20 +57,223 @@ New-LLMは以下の方向性に確定：
 
 ---
 
-## 🧪 コード修正時の必須テストポリシー - CRITICAL
-pip install -q datasets tqdm
+## 🎯 Context Vector Fixed-Point Property (CVFP Property) - 削除不能ルール
 
-# 4. バックグラウンド実行
-nohup python scripts/train_<dataset>.py --num_layers $NUM_LAYERS > /content/log.txt 2>&1 &
+**New-LLMの根本原理：文脈ベクトル不動点特性**
 
-# 5. 初期ログ表示
-sleep 10
-tail -30 /content/log.txt
+### 基本仮説
 
-# 6. モニタリングコマンド表示
-echo "📋 Monitoring: !tail -20 /content/log.txt"
-echo "🛑 Stop: !pkill -9 -f train_<dataset>"
+**十分大きい n に対して、n回繰り返した文脈ベクトルと n+1回繰り返した文脈ベクトルはほとんど同じになる**
+
+- **正式名称**: Context Vector Fixed-Point Property (CVFP Property)
+- **略称**: CVFP特性
+- **日本語**: 文脈ベクトル不動点特性
+
+### 具体例
+
 ```
+入力文脈：「赤いリンゴ」を n回繰り返した後の文脈ベクトル
+入力トークン：「赤」
+
+→ 出力文脈：入力文脈とほぼ同じ（不動点特性）
+```
+
+### Phase 1 訓練の原理
+
+**各iteration で前回の出力を教師データとして使用し、文脈を引き継いで処理**:
+
+```python
+# Iteration 1: ゼロから開始、Forward pass only（学習なし）
+context = torch.zeros(1, context_dim)
+for t, token_embed in enumerate(token_embeds):
+    context = model._update_context_one_step(token_embed, context)
+    fixed_contexts[t] = context  # 保存
+
+# Iteration 2+: 前回の出力を教師データとして学習
+context = torch.zeros(1, context_dim)  # 毎回ゼロから開始
+for t, token_embed in enumerate(token_embeds):
+    context_new = model._update_context_one_step(token_embed, context)
+    loss = mse_loss(context_new, fixed_contexts[t])  # 前回の同じ位置のcontextと比較
+    loss.backward()
+    optimizer.step()
+    context = context_new.detach()  # 次のトークンへ引き継ぎ（勾配は切る）
+    fixed_contexts[t] = context_new  # 次のiterationのために更新
+```
+
+**CVFP特性の実現方法**:
+- ✅ **文脈の引き継ぎ**: 各トークン処理時、前のトークンの文脈を引き継ぐ
+- ✅ **教師データ**: 前回iteration の同じ位置の文脈ベクトルを教師として使用
+- ✅ **例**: Iteration 1で「赤いリンゴ」を処理して得た各位置の文脈が、Iteration 2で「赤いリンゴ赤いリンゴ...」を処理した時の同じ位置（0,1,2）の文脈と一致するよう学習
+- ✅ 固定点に収束するまで繰り返す
+
+### warmup_iterations（n_warmup）
+
+- **現在の設定**: `n_warmup = 0`（最初から固定点学習）
+- **理由**: 十分な試行錯誤（iteration）があれば、ゼロから開始しても固定点に収束する
+- **変数名**: `warmup_iterations` または `n_warmup`
+
+### CVFP特性の意義
+
+1. **任意長シーケンス対応**: 同じパターンが繰り返される長文でも安定した表現
+2. **メモリ効率**: 固定サイズの文脈ベクトルのみで長文を処理
+3. **RNN/LSTM的な性質**: 逐次処理で過去情報を圧縮
+
+**この特性はNew-LLMの存在意義であり、絶対に削除・変更してはならない**
+
+---
+
+## 🎯 Phase 1とPhase 2のTrain/Val区別 - CRITICAL
+
+**Phase 1とPhase 2で、Train/Valの扱いが異なる**
+
+### Phase 1: 固定点の計算
+
+**目的**: 文脈ベクトル生成NNを学習し、各トークン列に対する固定点を計算する
+
+**Train/Val区別**:
+- ✅ **Train**: 文脈ベクトル生成layers（context generation layers）を学習
+- ✅ **Val**: 学習済みのモデルで固定点を計算（評価のみ、学習なし）
+
+**理想的な動作**:
+- Trainで学習した文脈生成NNが、未知のVal dataに対しても安定した固定点を計算できる
+- Valの収束率がTrainと同等なら、Phase 1の学習が成功
+
+**評価指標**:
+```python
+# Train: 学習
+train_contexts = phase1_train(model, train_ids)  # 学習あり
+
+# Val: 評価のみ
+val_contexts = compute_fixed_contexts(model, val_ids)  # 学習なし、固定点計算のみ
+
+# 期待される結果:
+# - Train: 99.5%収束（学習済み）
+# - Val: 99.5%収束（汎化成功） ← 理想
+# - Val: 収束率が低い → Phase 1の学習失敗（過学習）
+```
+
+### Phase 2: トークン予測
+
+**目的**: 固定点文脈ベクトルから次トークンを予測するtoken_output layerを学習
+
+**Train/Val区別**:
+- ✅ **Train**: token_output layerを学習
+- ✅ **Val**: 学習なし、評価のみ
+
+**汎化性能の評価**:
+- Phase 1で計算された固定点文脈ベクトル（Train/Val両方）を使用
+- Phase 2でTrainのtoken_output layerを学習
+- Valで真の汎化性能を評価
+
+### 実装の注意点
+
+**正しい実装**:
+```python
+# Phase 1
+train_contexts = phase1_train(model, train_ids)           # 学習
+val_contexts = compute_fixed_contexts(model, val_ids)     # 評価のみ
+
+# Phase 2
+phase2_train(model, train_ids, train_contexts, ...)       # 学習
+phase2_evaluate(model, val_ids, val_contexts, ...)        # 評価のみ
+```
+
+**間違った実装**:
+```python
+# ❌ 間違い: Valでも学習してしまう
+train_contexts = phase1_train(model, train_ids)
+val_contexts = phase1_train(model, val_ids)  # ❌ 学習してしまう
+```
+
+**この区別はPhase 1の汎化性能評価に必須であり、絶対に守ること**
+
+---
+
+## 🚨🚨🚨 バックグラウンド実行時のログ出力ポリシー - 最重要・絶対厳守 🚨🚨🚨
+
+**⚠️ 重大問題：ログで進捗が確認できないのは致命的エラーです ⚠️**
+
+このミスを何度も繰り返しています。**絶対にこれを守ってください**。
+
+### 🔴 絶対禁止：`tee`コマンドの使用
+
+```bash
+# ❌❌❌ 絶対禁止 - teeは絶対に使わない ❌❌❌
+python3 -u script.py 2>&1 | tee /tmp/log.txt &
+
+# ❌ この形式も禁止
+python3 script.py | tee log.txt &
+python3 script.py 2>&1 | tee -a log.txt &
+```
+
+**なぜ禁止か**:
+- `tee`はパイプ経由のため、**出力が完全にバッファリングされる**
+- プロセスが数時間実行されてもログファイルが更新されない
+- **進捗が全く確認できず、ユーザーは何も見えない**
+- `python3 -u`（unbuffered）も`tee`経由では無意味
+
+### ✅ 正しい方法：リダイレクトのみ
+
+```bash
+# ✅✅✅ これが唯一の正しい方法 ✅✅✅
+python3 -u script.py > /tmp/log.txt 2>&1 &
+
+# または stdbuf を使用（推奨）
+stdbuf -oL -eL python3 script.py > /tmp/log.txt 2>&1 &
+```
+
+**なぜ正しいか**:
+- リダイレクト（`>`）は直接ファイルに書き込む
+- バッファリングが最小限
+- `python3 -u`が正しく機能する
+- **リアルタイムでログファイルが更新される**
+
+### 🔍 ログ監視の正しい方法
+
+```bash
+# バックグラウンド実行
+python3 -u train.py > /tmp/train.log 2>&1 &
+
+# 別のターミナルで進捗監視
+tail -f /tmp/train.log
+
+# または定期的にチェック
+watch -n 10 "tail -20 /tmp/train.log"
+```
+
+### 📋 バックグラウンド実行の必須チェックリスト
+
+**すべてのバックグラウンド実行前に必ず確認**:
+
+- [ ] ❌ `tee`コマンドを使っていないか？ → **絶対禁止**
+- [ ] ✅ `>` リダイレクトのみ使用しているか？
+- [ ] ✅ `python3 -u`でunbuffered指定しているか？
+- [ ] ✅ `2>&1`でstderrもリダイレクトしているか？
+- [ ] ✅ ログファイルがリアルタイム更新されるか事前確認したか？
+
+### 🔥 なぜこれが最重要か
+
+1. **ユーザー体験の破壊**: 何時間も実行しても進捗が見えない
+2. **繰り返されるミス**: 何度も同じ問題が発生している
+3. **時間の浪費**: プロセスを停止・再実行する無駄な時間
+4. **信頼性の喪失**: ログが見えないシステムは使えない
+
+### ⚡ 実行例
+
+```bash
+# ❌ 間違い - 何度も繰り返された失敗パターン
+python3 -u tests/phase2_experiments/test_multi_sample.py --num-samples 10 2>&1 | tee /tmp/test.log &
+
+# ✅ 正しい - 常にこの形式を使う
+python3 -u tests/phase2_experiments/test_multi_sample.py --num-samples 10 > /tmp/test.log 2>&1 &
+
+# 進捗確認
+tail -f /tmp/test.log
+```
+
+---
+
+**🚨 この原則を破ったら、即座に停止してやり直してください 🚨**
 
 ---
 
