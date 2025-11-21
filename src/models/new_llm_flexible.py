@@ -1,17 +1,21 @@
-"""New-LLM: Simplified Flexible Architecture for Dialogue Training
+"""New-LLM: Flexible Architecture (Unified Model)
 
-This is a simplified implementation focused on:
-- Variable number of layers (easy to change)
-- Variable context vector dimensions (easy to change)
-- Two-phase training: Phase 1 (context), Phase 2 (token prediction)
-- UltraChat dialogue dataset support
-- Efficient caching
+This unified architecture allows mixing Sequential and Layer-wise approaches:
+- Sequential: Deep FNN stack without intermediate context updates
+- Layer-wise: Context updates at each layer (Transformer-like)
+- Mixed: Combination of both (e.g., 2 layer-wise blocks, each with 2 sequential layers)
 
-Architecture:
-    1. Token Embedding: input_ids → token_embeds
-    2. Context Vector: Fixed-size state vector
-    3. FNN Layers: Configurable depth (1, 2, 3, ... layers)
-    4. Output Heads: Token prediction + Context update
+Configuration is specified as a simple list:
+- [4]: Pure Sequential (4 layers, no intermediate context update)
+- [1, 1, 1, 1]: Pure Layer-wise (4 layers, context update after each)
+- [2, 2]: Mixed (2 blocks of 2-layer sequential)
+- [3, 1, 2]: Mixed (3-layer sequential, then update, then 1-layer, update, then 2-layer)
+
+Benefits:
+- Single model class for all architectures
+- No config classes needed
+- Easy experimentation with different structures
+- Parameters specified as simple lists
 """
 
 import torch
@@ -20,81 +24,86 @@ import torch.nn as nn
 
 class NewLLMFlexible(nn.Module):
     """
-    Simplified New-LLM with flexible architecture
+    Unified New-LLM architecture with flexible layer structure
 
-    Key features:
-    - Easy to change num_layers (just modify config)
-    - Easy to change context_dim (just modify config)
-    - Two-phase training support
-    - Gated context updater (prevents global attractor)
+    Args:
+        vocab_size: Vocabulary size
+        embed_dim: Token embedding dimension
+        context_dim: Context vector dimension
+        hidden_dim: Hidden dimension for FNN layers
+        layer_structure: List specifying FNN layers between context updates
+                        Examples:
+                        - [4]: Sequential (4 layers, 1 context update at end)
+                        - [1, 1, 1, 1]: Layer-wise (4 layers, 4 context updates)
+                        - [2, 2]: Mixed (2 blocks of 2-layer sequential)
+        dropout: Dropout rate
     """
 
-    def __init__(self, config):
-        """
-        Initialize model
-
-        Args:
-            config: Configuration with:
-                - vocab_size: Vocabulary size
-                - embed_dim: Token embedding dimension
-                - context_dim: Context vector dimension
-                - hidden_dim: Hidden dimension for FNN layers
-                - num_layers: Number of FNN layers
-                - dropout: Dropout rate
-        """
+    def __init__(self, vocab_size, embed_dim, context_dim, hidden_dim,
+                 layer_structure, dropout=0.1):
         super().__init__()
-        self.config = config
 
-        # Extract config
-        self.vocab_size = config.vocab_size
-        self.embed_dim = config.embed_dim
-        self.context_dim = config.context_dim
-        self.hidden_dim = config.hidden_dim
-        self.num_layers = config.num_layers
+        # Store configuration
+        self.vocab_size = vocab_size
+        self.embed_dim = embed_dim
+        self.context_dim = context_dim
+        self.hidden_dim = hidden_dim
+        self.layer_structure = layer_structure
+        self.dropout = dropout
+
+        # Total number of FNN layers
+        self.total_layers = sum(layer_structure)
+        # Number of context update points
+        self.num_blocks = len(layer_structure)
 
         # ========== Token Embedding ==========
         self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
         self.embed_norm = nn.LayerNorm(self.embed_dim)
 
-        # ========== FNN Layers ==========
-        # Input: [token_embed, context] concatenated
-        fnn_input_dim = self.embed_dim + self.context_dim
+        # ========== FNN Blocks ==========
+        # Build FNN blocks based on layer_structure
+        self.fnn_blocks = nn.ModuleList()
 
-        # Build layers dynamically based on num_layers
-        layers = []
+        for block_idx, num_layers in enumerate(layer_structure):
+            # Each block is a sequential FNN
+            layers = []
 
-        # First layer: fnn_input_dim -> hidden_dim
-        layers.append(nn.Linear(fnn_input_dim, self.hidden_dim))
-        layers.append(nn.ReLU())
-        layers.append(nn.Dropout(config.dropout))
-
-        # Middle layers: hidden_dim -> hidden_dim
-        for _ in range(self.num_layers - 1):
-            layers.append(nn.Linear(self.hidden_dim, self.hidden_dim))
+            # First layer of block: input is [token_embed + context]
+            input_dim = self.embed_dim + self.context_dim
+            layers.append(nn.Linear(input_dim, self.hidden_dim))
             layers.append(nn.ReLU())
-            layers.append(nn.Dropout(config.dropout))
+            layers.append(nn.Dropout(dropout))
 
-        self.fnn = nn.Sequential(*layers)
+            # Additional layers in block: hidden_dim -> hidden_dim
+            for _ in range(num_layers - 1):
+                layers.append(nn.Linear(self.hidden_dim, self.hidden_dim))
+                layers.append(nn.ReLU())
+                layers.append(nn.Dropout(dropout))
+
+            self.fnn_blocks.append(nn.Sequential(*layers))
+
+        # ========== Context Updaters (one per block) ==========
+        self.context_delta_projs = nn.ModuleList()
+        self.forget_gates = nn.ModuleList()
+        self.input_gates = nn.ModuleList()
+        self.context_norms = nn.ModuleList()
+
+        for _ in range(self.num_blocks):
+            self.context_delta_projs.append(nn.Linear(self.hidden_dim, self.context_dim))
+            self.forget_gates.append(nn.Linear(self.hidden_dim, self.context_dim))
+            self.input_gates.append(nn.Linear(self.hidden_dim, self.context_dim))
+            self.context_norms.append(nn.LayerNorm(self.context_dim))
 
         # ========== Output Heads ==========
-        # Token prediction head
         self.token_output = nn.Linear(self.hidden_dim, self.vocab_size)
 
         # Context reconstruction decoder (autoencoder)
-        # Reconstructs [prev_context + current_token_embed] from context
         target_dim = self.context_dim + self.embed_dim
         self.context_decoder = nn.Sequential(
             nn.Linear(self.context_dim, target_dim),
             nn.ReLU(),
             nn.Linear(target_dim, target_dim),
         )
-
-        # ========== Context Updater (Gated) ==========
-        # LSTM-style gated update to prevent global attractor problem
-        self.context_delta_proj = nn.Linear(self.hidden_dim, self.context_dim)
-        self.forget_gate = nn.Linear(self.hidden_dim, self.context_dim)
-        self.input_gate = nn.Linear(self.hidden_dim, self.context_dim)
-        self.context_norm = nn.LayerNorm(self.context_dim)
 
         # Initialize weights
         self._init_weights()
@@ -109,9 +118,44 @@ class NewLLMFlexible(nn.Module):
             elif isinstance(module, nn.Embedding):
                 nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
+    def _update_context_one_step(self, token_embed, context, return_hidden=False):
+        """
+        Update context for one iteration (shared between training and inference)
+
+        Args:
+            token_embed: Token embedding [batch, embed_dim]
+            context: Current context [batch, context_dim]
+            return_hidden: If True, return final hidden state
+
+        Returns:
+            context_new: Updated context [batch, context_dim]
+            hidden: Final hidden state [batch, hidden_dim] (if return_hidden=True)
+        """
+        context_temp = context
+
+        # Process through each FNN block
+        for block_idx in range(self.num_blocks):
+            # FNN input: [token_embed, current context]
+            fnn_input = torch.cat([token_embed, context_temp], dim=-1)
+
+            # Process through FNN block
+            hidden = self.fnn_blocks[block_idx](fnn_input)
+
+            # Update context using gated mechanism
+            context_delta = torch.tanh(self.context_delta_projs[block_idx](hidden))
+            forget = torch.sigmoid(self.forget_gates[block_idx](hidden))
+            input_g = torch.sigmoid(self.input_gates[block_idx](hidden))
+
+            context_temp = forget * context_temp + input_g * context_delta
+            context_temp = self.context_norms[block_idx](context_temp)
+
+        if return_hidden:
+            return context_temp, hidden
+        return context_temp
+
     def forward(self, input_ids, return_context_trajectory=False):
         """
-        Forward pass
+        Forward pass with flexible architecture
 
         Args:
             input_ids: Token IDs [batch, seq_len]
@@ -125,11 +169,8 @@ class NewLLMFlexible(nn.Module):
         device = input_ids.device
 
         # Token embedding
-        token_embeds = self.token_embedding(input_ids)  # [batch, seq_len, embed_dim]
+        token_embeds = self.token_embedding(input_ids)
         token_embeds = self.embed_norm(token_embeds)
-
-        # Initialize context vector
-        context = torch.zeros(batch_size, self.context_dim, device=device)
 
         # Pre-allocate output tensors
         logits = torch.zeros(batch_size, seq_len, self.vocab_size, device=device)
@@ -140,26 +181,17 @@ class NewLLMFlexible(nn.Module):
         # Sequential processing
         for t in range(seq_len):
             # Current token
-            current_token = token_embeds[:, t, :]  # [batch, embed_dim]
+            current_token = token_embeds[:, t, :]
 
-            # Concatenate [token, context]
-            fnn_input = torch.cat([current_token, context], dim=-1)
+            # Initialize context for this token
+            context = torch.zeros(batch_size, self.context_dim, device=device)
 
-            # FNN processing
-            hidden = self.fnn(fnn_input)  # [batch, hidden_dim]
+            # Update context and get hidden state
+            context, hidden = self._update_context_one_step(current_token, context, return_hidden=True)
 
-            # Token prediction
+            # Token prediction (from final hidden state)
             token_logits = self.token_output(hidden)
             logits[:, t, :] = token_logits
-
-            # Context update (gated)
-            context_delta = torch.tanh(self.context_delta_proj(hidden))
-            forget = torch.sigmoid(self.forget_gate(hidden))
-            input_g = torch.sigmoid(self.input_gate(hidden))
-
-            context = forget * context + input_g * context_delta
-            context = self.context_norm(context)
-            context = torch.clamp(context, min=-10.0, max=10.0)
 
             if return_context_trajectory:
                 context_trajectory[:, t, :] = context
@@ -173,13 +205,10 @@ class NewLLMFlexible(nn.Module):
         """
         Compute fixed-point context vectors for each token
 
-        This is used in Phase 1 training where we repeatedly process
-        the same token until context converges.
-
         Args:
             input_ids: Token IDs [batch, seq_len]
             max_iterations: Maximum iterations for fixed-point search
-            tolerance: Convergence threshold (L2 distance)
+            tolerance: Convergence threshold (MSE)
             warmup_iterations: Number of warmup iterations before checking convergence (n)
 
         Returns:
@@ -208,21 +237,15 @@ class NewLLMFlexible(nn.Module):
 
                 # Fixed-point iteration with warmup
                 for iteration in range(max_iterations):
-                    fnn_input = torch.cat([current_token, context], dim=-1)
-                    hidden = self.fnn(fnn_input)
+                    context_old = context.clone()
 
-                    # Update context
-                    context_delta = torch.tanh(self.context_delta_proj(hidden))
-                    forget = torch.sigmoid(self.forget_gate(hidden))
-                    input_g = torch.sigmoid(self.input_gate(hidden))
-
-                    context_new = forget * context + input_g * context_delta
-                    context_new = self.context_norm(context_new)
-                    context_new = torch.clamp(context_new, min=-10.0, max=10.0)
+                    # Update context using shared method
+                    context = self._update_context_one_step(current_token, context)
 
                     # Only check convergence after warmup iterations (n)
                     if iteration >= warmup_iterations:
-                        delta = torch.norm(context_new - context, dim=-1)  # [batch]
+                        # Use MSE for consistency with training
+                        delta = torch.mean((context - context_old) ** 2, dim=-1)
 
                         # Check if converged (element-wise for batch)
                         converged[:, t] = delta < tolerance
@@ -230,14 +253,12 @@ class NewLLMFlexible(nn.Module):
                         # If all in batch converged, break early
                         if converged[:, t].all():
                             num_iters[:, t] = iteration + 1
-                            context = context_new
                             break
 
-                    context = context_new
                     num_iters[:, t] = iteration + 1
 
-                # Progress logging every 10 tokens
-                if (t + 1) % 10 == 0 or t == seq_len - 1:
+                # Progress logging every 100 tokens
+                if (t + 1) % 100 == 0 or t == seq_len - 1:
                     converged_count = converged[:, :t+1].sum().item()
                     total_count = batch_size * (t + 1)
                     progress_pct = (t + 1) / seq_len * 100
@@ -250,3 +271,38 @@ class NewLLMFlexible(nn.Module):
     def count_parameters(self):
         """Count trainable parameters"""
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
+    def get_architecture_description(self):
+        """Return human-readable architecture description"""
+        total = sum(self.layer_structure)
+        blocks = len(self.layer_structure)
+
+        if self.layer_structure == [total]:
+            return f"Sequential ({total} layers)"
+        elif all(x == 1 for x in self.layer_structure):
+            return f"Layer-wise ({total} layers)"
+        else:
+            structure_str = '-'.join(map(str, self.layer_structure))
+            return f"Mixed [{structure_str}] ({total} layers, {blocks} blocks)"
+
+
+# Convenience functions for creating common architectures
+def create_sequential_model(vocab_size, embed_dim, context_dim, hidden_dim,
+                           num_layers, dropout=0.1):
+    """Create pure Sequential architecture (single block)"""
+    return NewLLMFlexible(vocab_size, embed_dim, context_dim, hidden_dim,
+                         layer_structure=[num_layers], dropout=dropout)
+
+
+def create_layerwise_model(vocab_size, embed_dim, context_dim, hidden_dim,
+                          num_layers, dropout=0.1):
+    """Create pure Layer-wise architecture (one layer per block)"""
+    return NewLLMFlexible(vocab_size, embed_dim, context_dim, hidden_dim,
+                         layer_structure=[1] * num_layers, dropout=dropout)
+
+
+def create_mixed_model(vocab_size, embed_dim, context_dim, hidden_dim,
+                      layer_structure, dropout=0.1):
+    """Create mixed architecture with custom structure"""
+    return NewLLMFlexible(vocab_size, embed_dim, context_dim, hidden_dim,
+                         layer_structure=layer_structure, dropout=dropout)

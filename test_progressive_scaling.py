@@ -1,25 +1,52 @@
 """Progressive Token Scaling Test
 
 Test both Sequential and Layer-wise architectures with gradually increasing
-token counts (20, 30, 40, ...) until one architecture fails to converge.
+token counts (100, 200, 300, ..., 2000) until one architecture fails to converge.
+Uses real UltraChat data concatenated to reach target length.
 """
 
 import torch
 import torch.optim as optim
+from datasets import load_dataset
 from src.models.new_llm_sequential import NewLLMSequential
 from src.models.new_llm_layerwise import NewLLMLayerwise
 from src.utils.dialogue_config import Small2LayerSequentialConfig, Small2LayerLayerwiseConfig
 
 
-def train_model(model, config, num_tokens=20, max_iterations=50, num_epochs=3):
-    """Train model on random tokens"""
+def load_ultrachat_tokens(target_length, tokenizer_model='gpt2'):
+    """Load UltraChat samples and concatenate to reach target length"""
+    from transformers import AutoTokenizer
+
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_model)
+    dataset = load_dataset("HuggingFaceH4/ultrachat_200k", split="train_sft")
+
+    all_tokens = []
+    idx = 0
+
+    while len(all_tokens) < target_length and idx < len(dataset):
+        sample = dataset[idx]
+        # Concatenate all messages in the sample
+        text = ""
+        for msg in sample['messages']:
+            text += msg['content'] + " "
+
+        tokens = tokenizer.encode(text, add_special_tokens=False)
+        all_tokens.extend(tokens)
+        idx += 1
+
+    # Truncate to exact target length
+    return torch.tensor(all_tokens[:target_length])
+
+
+def train_model(model, config, token_ids, num_epochs=3):
+    """Train model on given tokens"""
+    num_tokens = len(token_ids)
     print(f"  Training {config.architecture} model with {num_tokens} tokens...", flush=True)
 
     optimizer = optim.Adam(model.parameters(), lr=config.phase1_learning_rate)
-    token_ids = torch.arange(num_tokens)
 
     model.train()
-    input_ids = torch.tensor([token_ids.tolist()])
+    input_ids = token_ids.unsqueeze(0)
     token_embeds = model.token_embedding(input_ids)
     if hasattr(model, 'embed_norm'):
         token_embeds = model.embed_norm(token_embeds)
@@ -29,7 +56,7 @@ def train_model(model, config, num_tokens=20, max_iterations=50, num_epochs=3):
         for t, token_embed in enumerate(token_embeds):
             context = torch.zeros(1, config.context_dim)
 
-            for iteration in range(max_iterations):
+            for iteration in range(50):
                 optimizer.zero_grad()
                 token_detached = token_embed.unsqueeze(0).detach()
                 context_detached = context.detach()
@@ -49,11 +76,12 @@ def train_model(model, config, num_tokens=20, max_iterations=50, num_epochs=3):
     print(f"  Training complete", flush=True)
 
 
-def test_convergence(model, config, num_tokens, model_name):
-    """Test if model converges for given number of tokens"""
+def test_convergence(model, config, token_ids, model_name):
+    """Test if model converges for given tokens"""
+    num_tokens = len(token_ids)
     print(f"  Testing {model_name}...", flush=True)
 
-    input_ids = torch.arange(num_tokens).unsqueeze(0)
+    input_ids = token_ids.unsqueeze(0)
 
     model.eval()
     with torch.no_grad():
@@ -78,6 +106,7 @@ def main():
     print("="*70)
     print("Progressive Token Scaling Test")
     print("Sequential vs Layer-wise (WITH TRAINING)")
+    print("Using UltraChat real data")
     print("="*70)
 
     # Test parameters - 100 token increments up to 2000
@@ -93,6 +122,11 @@ def main():
         print(f"Testing with {num_tokens} tokens", flush=True)
         print(f"{'='*70}", flush=True)
 
+        # Load UltraChat tokens
+        print(f"  Loading {num_tokens} tokens from UltraChat...", flush=True)
+        token_ids = load_ultrachat_tokens(num_tokens)
+        print(f"  Loaded {len(token_ids)} tokens", flush=True)
+
         seq_passed = False
         layer_passed = False
 
@@ -104,8 +138,8 @@ def main():
             config_seq.phase1_warmup_iterations = 0
             model_seq = NewLLMSequential(config_seq)
 
-            train_model(model_seq, config_seq, num_tokens=num_tokens, num_epochs=3)
-            seq_passed = test_convergence(model_seq, config_seq, num_tokens, "Sequential")
+            train_model(model_seq, config_seq, token_ids, num_epochs=3)
+            seq_passed = test_convergence(model_seq, config_seq, token_ids, "Sequential")
 
             if not seq_passed:
                 print(f"❌ Sequential FAILED at {num_tokens} tokens", flush=True)
@@ -121,8 +155,8 @@ def main():
             config_layer.phase1_warmup_iterations = 0
             model_layer = NewLLMLayerwise(config_layer)
 
-            train_model(model_layer, config_layer, num_tokens=num_tokens, num_epochs=3)
-            layer_passed = test_convergence(model_layer, config_layer, num_tokens, "Layer-wise")
+            train_model(model_layer, config_layer, token_ids, num_epochs=3)
+            layer_passed = test_convergence(model_layer, config_layer, token_ids, "Layer-wise")
 
             if not layer_passed:
                 print(f"❌ Layer-wise FAILED at {num_tokens} tokens", flush=True)

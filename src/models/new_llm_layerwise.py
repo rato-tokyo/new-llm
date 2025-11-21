@@ -235,8 +235,8 @@ class NewLLMLayerwise(nn.Module):
 
                     num_iters[:, t] = iteration + 1
 
-                # Progress logging every 10 tokens
-                if (t + 1) % 10 == 0 or t == seq_len - 1:
+                # Progress logging every 100 tokens
+                if (t + 1) % 100 == 0 or t == seq_len - 1:
                     converged_count = converged[:, :t+1].sum().item()
                     total_count = batch_size * (t + 1)
                     progress_pct = (t + 1) / seq_len * 100
