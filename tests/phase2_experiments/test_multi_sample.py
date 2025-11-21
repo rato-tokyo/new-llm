@@ -190,7 +190,7 @@ def phase2_epoch(model, token_ids, fixed_contexts, optimizer=None, is_training=T
                 return_hidden=True
             )
 
-            logits = model.output_proj(hidden)
+            logits = model.token_output(hidden)
             loss = nn.functional.cross_entropy(logits, target)
 
             if is_training:
