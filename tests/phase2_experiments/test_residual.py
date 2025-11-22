@@ -97,7 +97,7 @@ def phase1_train(model, token_ids, config, device='cpu'):
 
     # DDR: Dimension-wise Diversity Regularization
     if config.use_ddr:
-        ddr_dim_activity = torch.zeros(model.context_dim).to(device)  # 各次元の活性度（EMA）
+        ddr_dim_activity = torch.ones(model.context_dim).to(device)  # 各次元の活性度（EMA）、初期値=1.0
         ddr_boost_count = 0  # ブースト発生回数
 
     # Train until convergence
@@ -152,14 +152,17 @@ def phase1_train(model, token_ids, config, device='cpu'):
 
                         # ⚠️ CRITICAL: threshold is FIXED value, NOT mean of all dimensions
                         # 各次元の平均活性（EMA）が threshold 未満の次元をブースト
-                        # threshold = ddr_threshold_ratio（固定値、例: 0.5）
+                        # threshold = ddr_threshold_ratio（固定値、例: 0.3）
                         threshold = config.ddr_threshold_ratio
 
                         # 活性が閾値未満の次元にブースト適用
                         boost_mask = ddr_dim_activity < threshold
+
+                        # 修正ベクトル = (1 / 平均活性) * 係数k * 対象ベクトル
+                        # 平均活性が低いほど修正が強くなる
                         boost_amount = torch.where(
                             boost_mask,
-                            (threshold - ddr_dim_activity) / (threshold + 1e-6),
+                            (1.0 / (ddr_dim_activity + 1e-6)) * target_context.squeeze(0),
                             torch.zeros_like(ddr_dim_activity)
                         )
 
