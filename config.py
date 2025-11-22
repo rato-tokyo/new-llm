@@ -56,7 +56,7 @@ class ResidualConfig:
 
     # ========== データ ==========
     # Training data source
-    train_data_source = "text_file"                        # "ultrachat", "text_file", or "text_dir"
+    train_data_source = "ultrachat"                        # "ultrachat", "text_file", or "text_dir"
     train_text_file = "./data/example_train.txt"           # text_file使用時のパス
     train_text_dir = "./data/train/"                       # text_dir使用時のディレクトリ
 

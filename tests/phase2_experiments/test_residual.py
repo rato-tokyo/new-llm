@@ -85,7 +85,7 @@ def load_ultrachat_samples(num_samples=10):
 
     print_flush(f"Loading {num_samples} samples from UltraChat...")
 
-    dataset = load_dataset("HuggingFaceH4/ultrachat_200k", split="train_sft")
+    dataset = load_dataset("HuggingFaceH4/ultrachat_200k", split="train_sft", cache_dir="./cache")
     samples = dataset.select(range(num_samples))
 
     texts = []
