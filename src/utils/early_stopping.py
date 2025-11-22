@@ -9,21 +9,19 @@ class Phase1EarlyStopping:
 
     Stopping criteria:
     - Convergence rate >= threshold (e.g., 95% of tokens converged)
-    - OR no improvement in convergence rate for `patience` epochs
+    - OR convergence drops (decreases) twice consecutively
 
     Args:
         convergence_threshold: Target convergence rate (default: 0.95)
-        patience: Number of epochs to wait for improvement (default: 3)
-        min_delta: Minimum change to qualify as improvement (default: 0.01)
+        min_delta: Minimum change to qualify as drop (default: 0.01)
     """
 
-    def __init__(self, convergence_threshold=0.95, patience=3, min_delta=0.01):
+    def __init__(self, convergence_threshold=0.95, patience=None, min_delta=0.01):
         self.convergence_threshold = convergence_threshold
-        self.patience = patience
         self.min_delta = min_delta
 
-        self.best_convergence = 0.0
-        self.epochs_no_improve = 0
+        self.prev_convergence = 0.0
+        self.drop_count = 0
         self.should_stop = False
 
     def __call__(self, convergence_rate):
@@ -40,32 +38,35 @@ class Phase1EarlyStopping:
             self.should_stop = True
             return True
 
-        # Check if convergence improved
-        if convergence_rate > self.best_convergence + self.min_delta:
-            self.best_convergence = convergence_rate
-            self.epochs_no_improve = 0
+        # Check if convergence dropped
+        if convergence_rate < self.prev_convergence - self.min_delta:
+            self.drop_count += 1
+            print(f"  ⚠️  Convergence drop detected ({self.drop_count}/2): {self.prev_convergence:.1%} → {convergence_rate:.1%}")
+
+            # Stop after 2 consecutive drops
+            if self.drop_count >= 2:
+                self.should_stop = True
+                print(f"  → Early stopping: Convergence dropped twice")
+                return True
         else:
-            self.epochs_no_improve += 1
+            # Reset drop count if convergence increased or stayed stable
+            self.drop_count = 0
 
-        # Check patience
-        if self.epochs_no_improve >= self.patience:
-            self.should_stop = True
-            return True
-
+        self.prev_convergence = convergence_rate
         return False
 
     def state_dict(self):
         """Return state for checkpoint saving"""
         return {
-            'best_convergence': self.best_convergence,
-            'epochs_no_improve': self.epochs_no_improve,
+            'prev_convergence': self.prev_convergence,
+            'drop_count': self.drop_count,
             'should_stop': self.should_stop
         }
 
     def load_state_dict(self, state_dict):
         """Load state from checkpoint"""
-        self.best_convergence = state_dict['best_convergence']
-        self.epochs_no_improve = state_dict['epochs_no_improve']
+        self.prev_convergence = state_dict['prev_convergence']
+        self.drop_count = state_dict['drop_count']
         self.should_stop = state_dict['should_stop']
 
 

@@ -1,114 +1,120 @@
 """
-New-LLM Configuration File
+New-LLM 設定ファイル
 
-This is the main configuration file for the project.
-Edit values here to change model architecture, training settings, and data parameters.
+プロジェクトのメイン設定ファイルです。
+モデルアーキテクチャ、訓練設定、データパラメータはここで編集します。
 
-Usage:
+使い方:
     python3 tests/phase2_experiments/test_residual.py --config Residual4Layer
     python3 tests/phase2_experiments/test_residual.py --config Residual2Layer
 """
 
 
 # ============================================================================
-# DEFAULT CONFIGURATION (Residual4Layer - Recommended)
+# デフォルト設定 (Residual4Layer - 推奨)
 # ============================================================================
 
 class ResidualConfig:
     """
-    Base configuration for all Residual Standard architectures.
+    Residual Standard アーキテクチャの基本設定クラス
 
-    To create custom config:
-    1. Create new class inheriting from ResidualConfig
-    2. Override desired parameters
-    3. Use with: --config YourConfigName
+    カスタム設定の作り方:
+    1. ResidualConfigを継承した新しいクラスを作成
+    2. 変更したいパラメータのみ上書き
+    3. --config YourConfigName で使用
     """
 
-    # ========== Model Architecture ==========
+    # ========== モデルアーキテクチャ ==========
     architecture = "residual_standard"
-    layer_structure = [1, 1, 1, 1]  # 4 FNN blocks (recommended)
-    context_dim = 256               # Context vector dimension
-    embed_dim = 256                 # Token embedding dimension
-    hidden_dim = 512                # Hidden dimension (auto-calculated if not set)
-    vocab_size = 50257              # GPT-2 tokenizer vocabulary
-    dropout = 0.1                   # Dropout rate
+    layer_structure = [1, 1, 1, 1]  # 4層のFNNブロック（推奨）
+    context_dim = 256               # 文脈ベクトル次元数
+    embed_dim = 256                 # トークン埋め込み次元数
+    hidden_dim = 512                # 中間層次元数（自動計算される場合あり）
+    vocab_size = 50257              # GPT-2トークナイザーの語彙数
 
-    # ========== CVFP Settings (Do not change unless you know what you're doing) ==========
-    context_update_strategy = "gated"  # Must be "gated" for CVFP
-    use_layer_norm = True
-    use_context_clipping = True
+    # ========== CVFP設定（理解していない場合は変更しないこと） ==========
+    context_update_strategy = "gated"  # CVFPには"gated"が必須
+    use_layer_norm = True              # Layer Normalizationを使用（必須）
+    use_context_clipping = False       # Context Clippingは不要（Layer Normで十分）
 
-    # ========== Phase 1: Fixed-Point Context Learning ==========
-    phase1_max_iterations = 50           # Maximum iterations for fixed-point search
-    phase1_convergence_threshold = 0.02  # MSE threshold for convergence (0.02 = relaxed, 0.01 = strict)
-    phase1_min_converged_ratio = 0.95    # Stop when 95% of tokens converged
+    # ========== DDR (Dimension Diversity Regularization) ==========
+    # 次元別多様性正則化：低活性次元をブーストして次元崩壊を防ぐ
+    use_ddr = True                     # DDRを使用（推奨：True）
+    ddr_momentum = 0.9                 # 次元別活性のEMAモメンタム
+    ddr_boost_weight = 0.1             # 低活性次元へのブースト重み
+    ddr_threshold_ratio = 1.0          # 平均活性の何倍未満をブースト対象とするか
 
-    # LR Schedule (optimized for fast convergence)
-    phase1_lr_warmup = 0.001      # High LR for iterations 1-3 (fast initial convergence)
-    phase1_lr_medium = 0.0005     # Medium LR for iterations 4-10
-    phase1_lr_finetune = 0.0001   # Low LR for iterations 11+ (fine-tuning)
+    # ========== Phase 1: 固有点学習 ==========
+    phase1_max_iterations = 20           # 固有点探索の最大反復回数
+    phase1_convergence_threshold = 0.02  # 収束判定のMSE閾値（0.02=緩い, 0.01=厳格）
+                                         # 意味: 前回iterationとのMSE < 0.02なら収束と判定
+                                         # √0.02 ≈ 0.141 = L2距離の閾値
+    phase1_min_converged_ratio = 0.95    # 全トークンの95%が収束したら停止
+    # Early Stopping: 収束率が2回連続で低下したら停止
 
-    # Batch processing (not implemented yet)
-    phase1_batch_size = 32
+    # LRスケジュール（DDR対応）
+    phase1_lr_warmup = 0.002      # 反復1-3回目: 高めのLR（高速収束）
+    phase1_lr_medium = 0.0005     # 反復4-8回目: 中程度のLR
+    phase1_lr_finetune = 0.0001   # 反復9回目以降: 低いLR（微調整）
 
-    # ========== Phase 2: Token Prediction ==========
-    phase2_learning_rate = 0.0001   # Learning rate for token prediction
-    phase2_epochs = 10              # Number of training epochs
-    phase2_batch_size = 32          # Batch size
-    phase2_gradient_clip = 1.0      # Gradient clipping value
+    # ========== Phase 2: トークン予測 ==========
+    phase2_learning_rate = 0.0001   # トークン予測の学習率
+    phase2_epochs = 10              # 訓練エポック数
+    phase2_batch_size = 32          # バッチサイズ
+    phase2_gradient_clip = 1.0      # 勾配クリッピング値
 
-    # ========== Data ==========
-    max_seq_length = 1024                          # Maximum sequence length
-    dataset_name = "HuggingFaceH4/ultrachat_200k"  # HuggingFace dataset
-    dataset_split = "train_sft"                    # Dataset split to use
-    cache_dir = "./cache"                          # Cache directory
-    num_samples = 10                               # Number of samples to train on
-    train_val_split = 0.8                          # Train/Val split ratio (80/20)
+    # ========== データ ==========
+    max_seq_length = 1024                          # 最大シーケンス長
+    dataset_name = "HuggingFaceH4/ultrachat_200k"  # HuggingFaceデータセット
+    dataset_split = "train_sft"                    # 使用するデータセット分割
+    cache_dir = "./cache"                          # キャッシュディレクトリ
+    num_samples = 10                               # 訓練サンプル数
+    train_val_split = 0.8                          # Train/Val分割比率（80/20）
 
-    # ========== Device ==========
-    device = "cpu"        # "cpu" or "cuda"
-    random_seed = 42      # Random seed for reproducibility
+    # ========== デバイス ==========
+    device = "cpu"        # "cpu" または "cuda"
+    random_seed = 42      # 再現性のためのランダムシード
 
-    # ========== Logging ==========
+    # ========== ログ出力 ==========
     log_every_steps = 1
     save_every_samples = 10
 
 
 # ============================================================================
-# PREDEFINED CONFIGURATIONS
+# 事前定義済み設定
 # ============================================================================
 
 class Residual2Layer(ResidualConfig):
-    """2-layer architecture (minimum viable, fast for testing)"""
+    """2層アーキテクチャ（最小構成、テスト用に高速）"""
     layer_structure = [1, 1]
 
 
 class Residual4Layer(ResidualConfig):
-    """4-layer architecture (recommended for production)"""
+    """4層アーキテクチャ（本番環境推奨）"""
     layer_structure = [1, 1, 1, 1]
 
 
 class Residual8Layer(ResidualConfig):
-    """8-layer architecture (high performance, slower training)"""
+    """8層アーキテクチャ（高性能、訓練は遅い）"""
     layer_structure = [1, 1, 1, 1, 1, 1, 1, 1]
 
 
 class Residual4Layer512Ctx(ResidualConfig):
-    """4-layer with 512-dim context (large context, more expressive)"""
+    """4層・512次元文脈（大きな文脈、より表現力が高い）"""
     layer_structure = [1, 1, 1, 1]
     context_dim = 512
     hidden_dim = 1024
 
 
 # ============================================================================
-# CUSTOM CONFIGURATION EXAMPLE
+# カスタム設定の例
 # ============================================================================
 
-# Uncomment and modify to create your own config:
+# コメントを外して変更すれば、独自の設定を作成できます:
 #
 # class MyCustomConfig(ResidualConfig):
-#     """My custom configuration"""
-#     layer_structure = [2, 2]         # 2 blocks with 2 layers each
-#     context_dim = 384                # Custom context dimension
-#     num_samples = 100                # Train on 100 samples
-#     phase1_lr_warmup = 0.002         # Higher initial LR
+#     """独自の設定例"""
+#     layer_structure = [2, 2]         # 2ブロック、各2層
+#     context_dim = 384                # カスタム文脈次元数
+#     num_samples = 100                # 100サンプルで訓練
+#     phase1_lr_warmup = 0.002         # より高い初期LR

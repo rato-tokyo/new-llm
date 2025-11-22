@@ -81,10 +81,10 @@ def phase1_train(model, token_ids, config, device='cpu'):
     optimizer = torch.optim.Adam(context_params, lr=config.phase1_lr_warmup)
 
     # Early stopping - from config
+    # Stops if convergence >= threshold OR drops twice
     early_stopping = Phase1EarlyStopping(
         convergence_threshold=config.phase1_min_converged_ratio,
-        patience=999,
-        min_delta=0.0
+        min_delta=0.01  # 1% drop threshold
     )
 
     # Token embeddings
@@ -95,16 +95,20 @@ def phase1_train(model, token_ids, config, device='cpu'):
     # Fixed contexts storage
     fixed_contexts = torch.zeros(len(token_ids), model.context_dim).to(device)
 
+    # DDR: Dimension-wise Diversity Regularization
+    if config.use_ddr:
+        ddr_dim_activity = torch.zeros(model.context_dim).to(device)  # 各次元の活性度（EMA）
+
     # Train until convergence
     converged_tokens = torch.zeros(len(token_ids), dtype=torch.bool)
 
     for iteration in range(config.phase1_max_iterations):
         total_loss_value = 0
 
-        # LR Schedule: From config
+        # LR Schedule (unified for DDR)
         if iteration <= 3:
             lr = config.phase1_lr_warmup
-        elif iteration <= 10:
+        elif iteration <= 8:
             lr = config.phase1_lr_medium
         else:
             lr = config.phase1_lr_finetune
@@ -128,7 +132,34 @@ def phase1_train(model, token_ids, config, device='cpu'):
 
             # Loss: Match previous iteration's context (CVFP learning)
             if iteration > 0:
-                loss = torch.nn.functional.mse_loss(context, fixed_contexts[t].unsqueeze(0))
+                target_context = fixed_contexts[t].unsqueeze(0)
+
+                # DDR: Dimension-wise Diversity Regularization
+                # 低活性次元をブーストして次元崩壊を防ぐ
+                if config.use_ddr:
+                    with torch.no_grad():
+                        # Update dimension-wise activity (EMA of absolute values)
+                        ddr_dim_activity = (
+                            config.ddr_momentum * ddr_dim_activity +
+                            (1 - config.ddr_momentum) * torch.abs(target_context.squeeze(0))
+                        )
+
+                        # Calculate boost for low-activity dimensions
+                        mean_activity = ddr_dim_activity.mean()
+                        threshold = mean_activity * config.ddr_threshold_ratio
+
+                        # 活性が閾値未満の次元にブースト適用
+                        boost_mask = ddr_dim_activity < threshold
+                        boost_amount = torch.where(
+                            boost_mask,
+                            (threshold - ddr_dim_activity) / (threshold + 1e-6),
+                            torch.zeros_like(ddr_dim_activity)
+                        )
+
+                    # Apply boost to target (encourage low-activity dimensions)
+                    target_context = target_context + config.ddr_boost_weight * boost_amount.unsqueeze(0)
+
+                loss = torch.nn.functional.mse_loss(context, target_context)
                 total_loss_value += loss.item()
 
                 # Backprop and update weights for each token
@@ -162,7 +193,198 @@ def phase1_train(model, token_ids, config, device='cpu'):
         converged_tokens.fill_(False)
 
     print_flush(f"\nPhase 1 Complete: {converged_tokens.sum()}/{len(token_ids)} tokens converged\n")
+
+    # Automatic fixed-point analysis
+    analyze_fixed_points(fixed_contexts, label="Train")
+
     return fixed_contexts.detach()
+
+
+def phase1_train_batch(model, batch_token_ids, config, device='cpu'):
+    """Phase 1: Fixed-point context learning with batch processing
+
+    Args:
+        model: The model to train
+        batch_token_ids: List of token_ids tensors (variable length)
+        config: Configuration object
+        device: Device to use
+
+    Returns:
+        List of fixed_contexts for each sample
+    """
+    print_flush("\n" + "="*70)
+    print_flush("PHASE 1: Fixed-Point Context Learning (CVFP) - Train (BATCH)")
+    print_flush("="*70)
+
+    model.to(device)
+    model.train()
+
+    # Only train context generation layers
+    context_params = [p for name, p in model.named_parameters() if 'token_output' not in name]
+    optimizer = torch.optim.Adam(context_params, lr=config.phase1_lr_warmup)
+
+    # Early stopping - from config
+    # Stops if convergence >= threshold OR drops twice
+    early_stopping = Phase1EarlyStopping(
+        convergence_threshold=config.phase1_min_converged_ratio,
+        min_delta=0.01  # 1% drop threshold
+    )
+
+    batch_size = len(batch_token_ids)
+    print_flush(f"Batch size: {batch_size} samples")
+
+    # Pad sequences to same length
+    max_len = max(len(ids) for ids in batch_token_ids)
+    print_flush(f"Max sequence length: {max_len} tokens")
+
+    # Prepare batch data
+    batch_embeds = []
+    batch_masks = []  # Track valid positions (not padding)
+
+    for token_ids in batch_token_ids:
+        # Pad to max_len
+        padded_ids = torch.cat([
+            token_ids,
+            torch.zeros(max_len - len(token_ids), dtype=torch.long)
+        ]).to(device)
+
+        # Create mask (1 = valid, 0 = padding)
+        mask = torch.cat([
+            torch.ones(len(token_ids)),
+            torch.zeros(max_len - len(token_ids))
+        ]).bool()
+
+        # Get embeddings
+        with torch.no_grad():
+            embeds = model.token_embedding(padded_ids.unsqueeze(0))
+            embeds = model.embed_norm(embeds).squeeze(0)
+
+        batch_embeds.append(embeds)
+        batch_masks.append(mask)
+
+    # Stack into batch tensors
+    batch_embeds = torch.stack(batch_embeds)  # [batch_size, max_len, embed_dim]
+    batch_masks = torch.stack(batch_masks)    # [batch_size, max_len]
+
+    # Fixed contexts storage for all samples
+    batch_fixed_contexts = torch.zeros(batch_size, max_len, model.context_dim).to(device)
+
+    # LDR: Running mean for target adjustment
+    if config.use_ldr:
+        ldr_running_mean = torch.zeros(model.context_dim).to(device)
+
+    # Convergence tracking for all samples
+    batch_converged = torch.zeros(batch_size, max_len, dtype=torch.bool)
+
+    # Training loop
+    for iteration in range(config.phase1_max_iterations):
+        total_loss_value = 0
+        total_valid_tokens = 0
+
+        # LR Schedule (unified for DDR)
+        if iteration <= 3:
+            lr = config.phase1_lr_warmup
+        elif iteration <= 8:
+            lr = config.phase1_lr_medium
+        else:
+            lr = config.phase1_lr_finetune
+
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
+
+        # Process all sequences in parallel
+        contexts = torch.zeros(batch_size, 1, model.context_dim).to(device)
+
+        for t in range(max_len):
+            # Get current token embeddings for all samples
+            token_embeds_t = batch_embeds[:, t, :]  # [batch_size, embed_dim]
+
+            # Zero gradients
+            if iteration > 0:
+                optimizer.zero_grad()
+
+            # Update contexts for all samples in parallel
+            # _update_context_one_step expects [batch, embed_dim] and [batch, context_dim]
+            contexts = model._update_context_one_step(token_embeds_t, contexts.squeeze(1)).unsqueeze(1)
+
+            # Compute loss only for valid (non-padding) tokens
+            if iteration > 0:
+                # Get valid samples for this position
+                valid_mask = batch_masks[:, t]  # [batch_size]
+
+                if valid_mask.any():
+                    # Compute loss for valid samples
+                    valid_contexts = contexts[valid_mask]
+                    target_contexts = batch_fixed_contexts[valid_mask, t].unsqueeze(1)
+
+                    # LDR: Adjust targets to push away from running mean
+                    if config.use_ldr:
+                        with torch.no_grad():
+                            # Update running mean (EMA) - average across batch
+                            batch_mean = valid_contexts.mean(dim=0).squeeze(0)
+                            ldr_running_mean = (
+                                config.ldr_momentum * ldr_running_mean +
+                                (1 - config.ldr_momentum) * batch_mean
+                            )
+
+                        # Push targets away from mean
+                        deviation = target_contexts.squeeze(1) - ldr_running_mean
+                        deviation_norm = torch.norm(deviation, p=2, dim=-1, keepdim=True)
+                        deviation_unit = deviation / (deviation_norm + 1e-6)
+                        target_contexts = target_contexts + config.ldr_weight * deviation_unit.unsqueeze(1)
+
+                    loss = torch.nn.functional.mse_loss(valid_contexts, target_contexts)
+                    total_loss_value += loss.item() * valid_mask.sum().item()
+                    total_valid_tokens += valid_mask.sum().item()
+
+                    # Backprop and update
+                    loss.backward()
+                    optimizer.step()
+
+                    # Check convergence for valid tokens (use original targets, not LDR-adjusted)
+                    original_targets = batch_fixed_contexts[valid_mask, t].unsqueeze(1)
+                    per_sample_loss = torch.nn.functional.mse_loss(
+                        valid_contexts, original_targets, reduction='none'
+                    ).mean(dim=(1, 2))
+
+                    converged_mask = per_sample_loss < config.phase1_convergence_threshold
+                    batch_converged[valid_mask, t] = converged_mask
+
+            # Save contexts for next iteration
+            batch_fixed_contexts[:, t, :] = contexts.detach().squeeze(1)
+
+            # Carry over to next token (detach to prevent graph growth)
+            contexts = contexts.detach()
+            contexts.requires_grad = True
+
+        # Compute convergence rate (only for valid tokens)
+        valid_tokens_mask = batch_masks.flatten()
+        converged_valid = batch_converged.flatten()[valid_tokens_mask]
+        convergence_rate = converged_valid.float().mean().item()
+
+        if iteration == 0:
+            print_flush(f"Iteration 1/{config.phase1_max_iterations}: Forward pass only (saving contexts)")
+        else:
+            avg_loss = total_loss_value / total_valid_tokens if total_valid_tokens > 0 else 0
+            print_flush(f"Iteration {iteration+1}/{config.phase1_max_iterations}: Loss={avg_loss:.6f}, Converged={convergence_rate*100:.1f}%, LR={lr:.4f}")
+
+            # Early stopping check
+            if early_stopping(convergence_rate):
+                print_flush(f"  → Early stopping: Convergence = {convergence_rate*100:.1f}%")
+                break
+
+        # Reset convergence tracking
+        batch_converged.fill_(False)
+
+    print_flush(f"\nPhase 1 Complete (Batch)\n")
+
+    # Extract fixed contexts for each sample (remove padding)
+    result_contexts = []
+    for i, token_ids in enumerate(batch_token_ids):
+        contexts = batch_fixed_contexts[i, :len(token_ids)].detach()
+        result_contexts.append(contexts)
+
+    return result_contexts
 
 
 def compute_fixed_contexts(model, token_ids, config, device='cpu'):
@@ -212,12 +434,12 @@ def compute_fixed_contexts(model, token_ids, config, device='cpu'):
         convergence_rate = converged_tokens.float().mean().item()
 
         if iteration == 0:
-            print_flush(f"Iteration 1/{max_iters}: Forward pass only (saving contexts)")
+            print_flush(f"Iteration 1/{config.phase1_max_iterations}: Forward pass only (saving contexts)")
         else:
-            print_flush(f"Iteration {iteration+1}/{max_iters}: Loss={loss.item():.6f}, Converged={convergence_rate*100:.1f}%")
+            print_flush(f"Iteration {iteration+1}/{config.phase1_max_iterations}: Loss={loss.item():.6f}, Converged={convergence_rate*100:.1f}%")
 
             # Stop if converged
-            if convergence_rate >= 0.995:
+            if convergence_rate >= config.phase1_min_converged_ratio:
                 print_flush(f"  → Early stopping: Convergence = {convergence_rate*100:.1f}%")
                 break
 
@@ -225,6 +447,10 @@ def compute_fixed_contexts(model, token_ids, config, device='cpu'):
         converged_tokens.fill_(False)
 
     print_flush(f"\nPhase 1 Complete: {converged_tokens.sum()}/{len(token_ids)} tokens converged\n")
+
+    # Automatic fixed-point analysis
+    analyze_fixed_points(fixed_contexts, label="Val")
+
     return fixed_contexts.detach()
 
 
@@ -441,14 +667,19 @@ def main():
     print_flush(f"   Layer structure: {cfg.layer_structure}")
     print_flush(f"   Context dim: {cfg.context_dim}")
     print_flush(f"   Embed dim: {cfg.embed_dim}")
-    print_flush(f"   Hidden dim: {cfg.hidden_dim}")
-    print_flush(f"   Dropout: {cfg.dropout}\n")
+    print_flush(f"   Hidden dim: {cfg.hidden_dim}\n")
 
     print_flush("⚙️  Phase 1 Settings (CVFP):")
     print_flush(f"   Max iterations: {cfg.phase1_max_iterations}")
     print_flush(f"   Convergence threshold: {cfg.phase1_convergence_threshold}")
     print_flush(f"   Min converged ratio: {cfg.phase1_min_converged_ratio}")
-    print_flush(f"   LR schedule: {cfg.phase1_lr_warmup} → {cfg.phase1_lr_medium} → {cfg.phase1_lr_finetune}\n")
+
+    # Display LR schedule and DDR settings
+    print_flush(f"   LR schedule: {cfg.phase1_lr_warmup} → {cfg.phase1_lr_medium} → {cfg.phase1_lr_finetune}")
+    if cfg.use_ddr:
+        print_flush(f"   DDR: boost_weight={cfg.ddr_boost_weight}, threshold_ratio={cfg.ddr_threshold_ratio}\n")
+    else:
+        print_flush("")
 
     print_flush("📊 Data Settings:")
     print_flush(f"   Num samples: {cfg.num_samples}")
@@ -480,8 +711,7 @@ def main():
         embed_dim=cfg.embed_dim,
         context_dim=cfg.context_dim,
         hidden_dim=hidden_dim,
-        layer_structure=cfg.layer_structure,
-        dropout=cfg.dropout
+        layer_structure=cfg.layer_structure
     )
 
     print_flush(f"  Parameters: {model.count_parameters():,}")

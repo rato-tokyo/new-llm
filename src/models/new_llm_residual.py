@@ -34,11 +34,13 @@ class NewLLMResidual(nn.Module):
         context_dim: Context vector dimension
         hidden_dim: Hidden dimension for FNN layers (must be embed_dim + context_dim)
         layer_structure: List specifying FNN layers between context updates
-        dropout: Dropout rate
+        use_can: Enable Cell-wise Activity Normalization (CAN)
+        can_momentum: Momentum for EMA in CAN (default: 0.9)
+        can_eps: Epsilon for numerical stability in CAN (default: 1e-5)
     """
 
     def __init__(self, vocab_size, embed_dim, context_dim, hidden_dim,
-                 layer_structure, dropout=0.1):
+                 layer_structure):
         super().__init__()
 
         # Validate dimensions
@@ -51,7 +53,6 @@ class NewLLMResidual(nn.Module):
         self.context_dim = context_dim
         self.hidden_dim = hidden_dim
         self.layer_structure = layer_structure
-        self.dropout = dropout
 
         # Total number of FNN layers
         self.total_layers = sum(layer_structure)
@@ -74,13 +75,11 @@ class NewLLMResidual(nn.Module):
             input_dim = self.context_dim + self.embed_dim
             layers.append(nn.Linear(input_dim, self.hidden_dim))
             layers.append(nn.ReLU())
-            layers.append(nn.Dropout(dropout))
 
             # Additional layers in block: hidden_dim -> hidden_dim
             for _ in range(num_layers - 1):
                 layers.append(nn.Linear(self.hidden_dim, self.hidden_dim))
                 layers.append(nn.ReLU())
-                layers.append(nn.Dropout(dropout))
 
             self.fnn_blocks.append(nn.Sequential(*layers))
 
@@ -210,7 +209,7 @@ class NewLLMResidual(nn.Module):
 
 
 def create_residual_layerwise(vocab_size, embed_dim, context_dim, hidden_dim,
-                               num_layers=4, dropout=0.1):
+                               num_layers=4):
     """
     Create a pure layer-wise model with residual connections
 
@@ -220,7 +219,6 @@ def create_residual_layerwise(vocab_size, embed_dim, context_dim, hidden_dim,
         context_dim: Context vector dimension
         hidden_dim: Hidden dimension (must be embed_dim + context_dim)
         num_layers: Number of layers (default: 4)
-        dropout: Dropout rate
 
     Returns:
         NewLLMResidual model with layer-wise structure
@@ -231,6 +229,5 @@ def create_residual_layerwise(vocab_size, embed_dim, context_dim, hidden_dim,
         embed_dim=embed_dim,
         context_dim=context_dim,
         hidden_dim=hidden_dim,
-        layer_structure=layer_structure,
-        dropout=dropout
+        layer_structure=layer_structure
     )

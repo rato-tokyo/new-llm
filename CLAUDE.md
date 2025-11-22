@@ -35,6 +35,70 @@ New-LLMは以下の方向性に確定：
 3. ✅ キャッシュシステム（固有点文脈ベクトルの保存）
 4. ✅ 詳細なメトリクスロギング（ステップごとのPPL, Loss, Accuracy）
 
+---
+
+## 🔍 実験結果の完全確認ポリシー - CRITICAL
+
+**⚠️ 実験結果を報告する際は、必ず全ての情報を確認すること**
+
+### 必須確認項目
+
+実験結果を分析・報告する際は、**以下の全項目を必ず確認**：
+
+1. **収束過程**
+   - 全iterationの収束率とLoss
+   - Early stoppingのタイミング
+
+2. **固有点分析（FIXED-POINT ANALYSIS）**
+   - ✅ Global Attractor Detection（L2距離、Cosine類似度）
+   - ✅ Zero Solution Detection（平均ノルム）
+   - ✅ Distribution Statistics（ノルム統計、Pairwise距離）
+   - ✅ **Information Content（Effective Rank、特異値）** ← **絶対に見落とすな**
+
+3. **Train/Val両方**
+   - Trainの結果だけでなく、**Valの結果も必ず確認**
+   - Train/Valの差分を分析
+
+### 絶対禁止事項
+
+❌ **部分的な結果のみで判断する**
+- 例：「L2距離だけ見て終わり」
+- 例：「Trainだけ見てValを見ない」
+- 例：「Effective Rankを見落とす」
+
+❌ **最初の数行だけ見て結論を出す**
+- grep結果が途中で切れていても、完全な結果を取得せず報告
+
+✅ **正しい手順**:
+1. `grep -A 30` で十分な行数を取得
+2. すべてのセクション（1. 2. 3. 4.）を確認
+3. Train/Val両方の結果を比較
+4. 特異値の分布まで確認
+
+### 理由
+
+**Effective Rankの見落としの深刻さ**:
+- Train: Rank 17/256（正常）
+- Val: Rank 1/256（**次元崩壊**）
+- **この差は最重要情報**なのに、見落とすと「問題なし」と誤判断
+
+**特異値の見落としの深刻さ**:
+- 1位と2位の比が1000倍 → **完全に1次元に退化**
+- これを見落とすと根本的な問題を見逃す
+
+### チェックリスト
+
+実験結果報告前に必ず確認：
+
+- [ ] 収束過程の全iterationを確認したか？
+- [ ] 固有点分析の4セクション全て確認したか？
+- [ ] **Effective Rankを確認したか？**
+- [ ] **特異値（Top 5 Singular Values）を確認したか？**
+- [ ] Train/Val両方の結果を比較したか？
+- [ ] グローバルアトラクター警告（⚠️ DEGENERATE）を見落としていないか？
+
+**この原則を守らないと、重大な問題を見落とす**
+
 ### 二段階訓練の詳細
 
 **Phase 1: 文脈ベクトル学習**:
@@ -54,6 +118,122 @@ New-LLMは以下の方向性に確定：
 3. 自分の返答のトークンのみ学習（相手の返答は学習しない）
 4. ChatML形式で発言者を識別
 ```
+
+---
+
+## ⚙️ 正則化ポリシー - CRITICAL
+
+**CVFP訓練における正則化の方針**
+
+### 不要な正則化の削除
+
+CVFP訓練では、固有点の学習において**各次元が重要な情報を保持すべき**です。以下の正則化は不要：
+
+- ❌ **Context Clipping**は削除（`use_context_clipping = False`）
+  - Layer Normalizationが既にベクトルの大きさを正規化している
+  - 冗長な制約を加えるだけ
+
+- ❌ **Dropout**は削除
+  - 各次元がランダムに無効化されると、固有点学習が妨げられる
+  - 各次元が重要な情報を表現するのは問題ない（むしろ望ましい）
+
+### 使用する正則化
+
+1. **Layer Normalization**（`use_layer_norm = True`）
+   - ベクトルの分散を安定化
+   - 学習を安定させる
+
+2. **CAN (Cell-wise Activity Normalization)**（`use_can = True`）
+   - **目的**: 次元崩壊を防ぐ
+   - **方式**: 各次元ごとにEMA (Exponential Moving Average) で統計を追跡し、正規化
+   - **効果**: すべての次元が均等に活性化され、256次元中1-2次元だけに情報が集中する問題を解決
+
+**CAN (Cell-wise Activity Normalization) の詳細**:
+
+**問題**:
+- 4層: Effective Rank 1.32 / 256 (0.5%) - 1-2次元のみ使用
+- 8層: Effective Rank 1.00 / 256 (0.4%) - 完全に1次元に崩壊
+- 254次元がほぼゼロ、すべてのトークンが同じ1-2次元の値に収束
+
+**CANの仕組み**:
+```python
+# 各次元ごとにランニング統計を保持（EMA）
+running_mean[dim] = momentum * running_mean[dim] + (1 - momentum) * current[dim]
+running_var[dim] = momentum * running_var[dim] + (1 - momentum) * var(current[dim])
+
+# 各次元を正規化（平均0、標準偏差1）
+normalized[dim] = (current[dim] - running_mean[dim]) / sqrt(running_var[dim] + eps)
+```
+
+**設定方法**:
+```python
+# config.py
+use_layer_norm = True
+use_context_clipping = False  # 削除
+
+# CAN設定
+use_can = True           # 次元崩壊を防ぐ
+can_momentum = 0.9       # EMAのモメンタム（0.9 = 過去90%、現在10%）
+can_eps = 1e-5           # ゼロ除算防止
+```
+
+**命名**:
+- **CAN**: Cell-wise Activity Normalization（次元別活性正規化）
+- **EMA**: Exponential Moving Average（指数移動平均）
+  - `mean_new = momentum * mean_old + (1 - momentum) * current_value`
+
+**理由**:
+- CVFP訓練は固有点への収束が目的
+- 各次元が重要な情報を保持することは望ましい挙動
+- Dropoutは汎化性能向上のための正則化だが、固有点学習では不要
+- CANにより、すべての次元が均等に情報を保持するよう誘導
+
+3. **LDR (Layer Diversity Regularization)**（`use_ldr = False`）
+   - **目的**: 層崩壊を防ぐ（各層が常に同じようなベクトルを出力する問題）
+   - **方式**: 各層の出力がEMA平均から離れるほど損失が小さくなる
+   - **効果**: 異なるトークンで異なる層出力を生成し、多様性を促進
+
+**LDR (Layer Diversity Regularization) の詳細**:
+
+**問題**:
+- 異なるトークンでも各層が似たようなベクトルを出力
+- 次元崩壊とは別の問題：ベクトル全体が平均に収束
+
+**LDRの仕組み（教師ベクトル修正方式）**:
+```python
+# 訓練ループで出力の指数平均を追跡（EMA）
+running_mean = momentum * running_mean + (1 - momentum) * context
+
+# 教師ベクトルを平均から離す方向に修正
+deviation = target - running_mean
+deviation_unit = deviation / ||deviation||_2
+target_adjusted = target + ldr_weight * deviation_unit
+
+# 通常の固定点損失のみ（教師ベクトルがLDR調整済み）
+loss = mse_loss(context, target_adjusted)
+```
+
+**設定方法**:
+```python
+# config.py
+use_ldr = False          # 層崩壊を防ぐ（デフォルトはオフ）
+ldr_momentum = 0.9       # 出力のEMAモメンタム
+ldr_weight = 0.01        # 教師ベクトル修正の重み
+```
+
+**実装の特徴**:
+- ✅ モデルコードを一切変更しない（訓練ループのみ）
+- ✅ 損失計算が複雑にならない（通常のMSE損失のみ）
+- ✅ デバッグが容易
+
+**命名**:
+- **LDR**: Layer Diversity Regularization（層多様性正則化）
+- **Layer Collapse**: すべてのトークンで同じ層出力が生成される問題
+
+**CANとLDRの違い**:
+- **CAN**: 各次元が均等に活性化されるよう正規化（次元内の多様性）
+- **LDR**: 異なるトークンで異なる出力を促進（トークン間の多様性）
+- CANは次元崩壊、LDRは層崩壊を防ぐ
 
 ---
 
