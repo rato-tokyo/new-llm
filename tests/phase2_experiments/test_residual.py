@@ -434,6 +434,8 @@ def compute_fixed_contexts(model, token_ids, config, device='cpu'):
     converged_tokens = torch.zeros(len(token_ids), dtype=torch.bool)
 
     for iteration in range(config.phase1_max_iterations):
+        total_loss_value = 0.0  # Track total loss across all tokens
+
         # Process entire sequence with context carry-over
         context = torch.zeros(1, model.context_dim).to(device)
 
@@ -447,6 +449,7 @@ def compute_fixed_contexts(model, token_ids, config, device='cpu'):
                 # Check convergence (compare to previous iteration)
                 if iteration > 0:
                     loss = torch.nn.functional.mse_loss(context, fixed_contexts[t].unsqueeze(0))
+                    total_loss_value += loss.item()  # Accumulate loss
                     if loss.item() < config.phase1_convergence_threshold:
                         converged_tokens[t] = True
 
@@ -458,7 +461,8 @@ def compute_fixed_contexts(model, token_ids, config, device='cpu'):
         if iteration == 0:
             print_flush(f"Iteration 1/{config.phase1_max_iterations}: Forward pass only (saving contexts)")
         else:
-            print_flush(f"Iteration {iteration+1}/{config.phase1_max_iterations}: Loss={loss.item():.6f}, Converged={convergence_rate*100:.1f}%")
+            avg_loss = total_loss_value / len(token_ids)
+            print_flush(f"Iteration {iteration+1}/{config.phase1_max_iterations}: Loss={avg_loss:.6f}, Converged={convergence_rate*100:.1f}%")
 
             # Stop if converged
             if convergence_rate >= config.phase1_min_converged_ratio:
