@@ -212,7 +212,7 @@ ddr_dim_activity = (
 
 # ⚠️ CRITICAL: threshold は固定値（全次元の平均ではない！）
 # 各次元の平均活性（EMA）が threshold 未満の次元をブースト
-threshold = ddr_threshold_ratio  # 例: 0.5（固定値）
+threshold = ddr_threshold  # 例: 0.2（固定値）
 
 boost_mask = ddr_dim_activity < threshold
 boost_amount = (threshold - ddr_dim_activity) / (threshold + eps)
@@ -240,10 +240,10 @@ use_ddr = True                  # DDRを使用（推奨）
 ddr_momentum = 0.9              # EMAのモメンタム
 ddr_boost_weight = 0.1          # ブースト重み
 
-# ⚠️ CRITICAL: ddr_threshold_ratio は固定値（全次元の平均ではない）
-ddr_threshold_ratio = 0.5       # 閾値（固定値）
-                                # 0.5 = 各次元の平均活性が0.5未満の次元をブースト（推奨）
-                                # 1.0 = 各次元の平均活性が1.0未満の次元をブースト（広範囲）
+# ⚠️ CRITICAL: ddr_threshold は固定値（全次元の平均ではない）
+ddr_threshold = 0.2             # 閾値（固定値）
+                                # 0.2 = 各次元の平均活性が0.2未満の次元をブースト（推奨）
+                                # 0.3 = 各次元の平均活性が0.3未満の次元をブースト（やや広範囲）
 ```
 
 **具体例**:
@@ -270,8 +270,8 @@ threshold = 0.5
    - 目的: モデルの出力が偏っている次元を特定し、修正
 
 2. **⚠️ thresholdは固定値（頻繁に誤解されるポイント）**:
-   - ✅ 正しい: `threshold = ddr_threshold_ratio`（固定値、例: 0.5）
-   - ❌ 間違い: `threshold = ddr_dim_activity.mean() * ddr_threshold_ratio`（全次元の平均を計算）
+   - ✅ 正しい: `threshold = ddr_threshold`（固定値、例: 0.2）
+   - ❌ 間違い: `threshold = ddr_dim_activity.mean() * ratio`（全次元の平均を計算）
    - 各次元のEMA（長期的な典型値）が threshold（固定値）未満かどうかで判定
    - **全次元の平均を計算することはない**
 

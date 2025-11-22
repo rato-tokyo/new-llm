@@ -152,8 +152,8 @@ def phase1_train(model, token_ids, config, device='cpu'):
 
                         # ⚠️ CRITICAL: threshold is FIXED value, NOT mean of all dimensions
                         # 各次元の平均活性（EMA）が threshold 未満の次元をブースト
-                        # threshold = ddr_threshold_ratio（固定値、例: 0.3）
-                        threshold = config.ddr_threshold_ratio
+                        # threshold = ddr_threshold（固定値、例: 0.2）
+                        threshold = config.ddr_threshold
 
                         # 活性が閾値未満の次元にブースト適用
                         boost_mask = ddr_dim_activity < threshold
@@ -705,7 +705,7 @@ def main():
     # Display LR schedule and DDR settings
     print_flush(f"   LR schedule: {cfg.phase1_lr_warmup} → {cfg.phase1_lr_medium} → {cfg.phase1_lr_finetune}")
     if cfg.use_ddr:
-        print_flush(f"   DDR: boost_weight={cfg.ddr_boost_weight}, threshold_ratio={cfg.ddr_threshold_ratio}\n")
+        print_flush(f"   DDR: boost_weight={cfg.ddr_boost_weight}, threshold={cfg.ddr_threshold}\n")
     else:
         print_flush("")
 
