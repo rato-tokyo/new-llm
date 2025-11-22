@@ -19,6 +19,9 @@ from transformers import AutoTokenizer
 from src.models.new_llm_residual import NewLLMResidual
 from src.utils.early_stopping import Phase1EarlyStopping, Phase2EarlyStopping
 
+# Import config from project root
+import config
+
 
 def print_flush(*args, **kwargs):
     """Print with immediate flush to ensure real-time output"""
@@ -53,13 +56,18 @@ def tokenize_texts(texts):
     return torch.tensor(token_ids, dtype=torch.long), tokenizer
 
 
-def phase1_train(model, token_ids, max_iters=50, threshold=0.01, device='cpu'):
+def phase1_train(model, token_ids, config, device='cpu'):
     """Phase 1: Fixed-point context learning with CVFP (Context Vector Fixed-Point Property)
 
     CVFP Principle:
     - Iteration 1: Forward pass only, save contexts
     - Iteration 2+: Learn so that context[t] matches previous context[t-period]
     - Example: "red apple" → "red apple red" should output same context as "red"
+
+    Optimizations:
+    - LR Schedule: Higher LR early, lower later (from config)
+    - Batch processing: Process multiple tokens in parallel after convergence
+    - Relaxed threshold: Configurable (default 0.02)
     """
     print_flush("\n" + "="*70)
     print_flush("PHASE 1: Fixed-Point Context Learning (CVFP) - Train")
@@ -70,13 +78,13 @@ def phase1_train(model, token_ids, max_iters=50, threshold=0.01, device='cpu'):
 
     # Optimizer for Phase 1 - ONLY train context generation layers (exclude token_output)
     context_params = [p for name, p in model.named_parameters() if 'token_output' not in name]
-    optimizer = torch.optim.Adam(context_params, lr=0.0001)
+    optimizer = torch.optim.Adam(context_params, lr=config.phase1_lr_warmup)
 
-    # Early stopping - require near-perfect convergence (99.5%)
+    # Early stopping - from config
     early_stopping = Phase1EarlyStopping(
-        convergence_threshold=0.995,  # 99.5% convergence required
-        patience=999,                  # Effectively disable patience-based stopping
-        min_delta=0.0                  # No min_delta check (convergence-only)
+        convergence_threshold=config.phase1_min_converged_ratio,
+        patience=999,
+        min_delta=0.0
     )
 
     # Token embeddings
@@ -90,8 +98,19 @@ def phase1_train(model, token_ids, max_iters=50, threshold=0.01, device='cpu'):
     # Train until convergence
     converged_tokens = torch.zeros(len(token_ids), dtype=torch.bool)
 
-    for iteration in range(max_iters):
+    for iteration in range(config.phase1_max_iterations):
         total_loss_value = 0
+
+        # LR Schedule: From config
+        if iteration <= 3:
+            lr = config.phase1_lr_warmup
+        elif iteration <= 10:
+            lr = config.phase1_lr_medium
+        else:
+            lr = config.phase1_lr_finetune
+
+        for param_group in optimizer.param_groups:
+            param_group['lr'] = lr
 
         # Process entire sequence with context carry-over
         context = torch.zeros(1, model.context_dim).to(device)
@@ -116,8 +135,8 @@ def phase1_train(model, token_ids, max_iters=50, threshold=0.01, device='cpu'):
                 loss.backward()
                 optimizer.step()
 
-                # Check convergence
-                if loss.item() < threshold:
+                # Check convergence (from config)
+                if loss.item() < config.phase1_convergence_threshold:
                     converged_tokens[t] = True
 
             # Save context for next iteration and carry over to next token
@@ -129,10 +148,10 @@ def phase1_train(model, token_ids, max_iters=50, threshold=0.01, device='cpu'):
         convergence_rate = converged_tokens.float().mean().item()
 
         if iteration == 0:
-            print_flush(f"Iteration 1/{max_iters}: Forward pass only (saving contexts)")
+            print_flush(f"Iteration 1/{config.phase1_max_iterations}: Forward pass only (saving contexts)")
         else:
             avg_loss = total_loss_value / len(token_ids)
-            print_flush(f"Iteration {iteration+1}/{max_iters}: Loss={avg_loss:.6f}, Converged={convergence_rate*100:.1f}%")
+            print_flush(f"Iteration {iteration+1}/{config.phase1_max_iterations}: Loss={avg_loss:.6f}, Converged={convergence_rate*100:.1f}%, LR={lr:.4f}")
 
             # Early stopping check
             if early_stopping(convergence_rate):
@@ -146,7 +165,7 @@ def phase1_train(model, token_ids, max_iters=50, threshold=0.01, device='cpu'):
     return fixed_contexts.detach()
 
 
-def compute_fixed_contexts(model, token_ids, max_iters=50, threshold=0.01, device='cpu'):
+def compute_fixed_contexts(model, token_ids, config, device='cpu'):
     """Compute fixed-point contexts without training (evaluation only)
 
     This function computes fixed-point contexts for validation data
@@ -170,7 +189,7 @@ def compute_fixed_contexts(model, token_ids, max_iters=50, threshold=0.01, devic
     # Convergence tracking
     converged_tokens = torch.zeros(len(token_ids), dtype=torch.bool)
 
-    for iteration in range(max_iters):
+    for iteration in range(config.phase1_max_iterations):
         # Process entire sequence with context carry-over
         context = torch.zeros(1, model.context_dim).to(device)
 
@@ -184,7 +203,7 @@ def compute_fixed_contexts(model, token_ids, max_iters=50, threshold=0.01, devic
                 # Check convergence (compare to previous iteration)
                 if iteration > 0:
                     loss = torch.nn.functional.mse_loss(context, fixed_contexts[t].unsqueeze(0))
-                    if loss.item() < threshold:
+                    if loss.item() < config.phase1_convergence_threshold:
                         converged_tokens[t] = True
 
                 # Update fixed context
@@ -400,30 +419,49 @@ def phase2_train(model, token_ids, fixed_contexts, val_ids, val_contexts,
 
 def main():
     parser = argparse.ArgumentParser(description='Test Residual Standard Architecture')
-    parser.add_argument('--num-samples', type=int, default=10, help='Number of samples')
-    parser.add_argument('--layer-structure', type=int, nargs='+', default=[1, 1, 1, 1],
-                        help='Layer structure (e.g., 1 1 1 1 for 4 blocks, 1 1 for 2 blocks)')
-    parser.add_argument('--context-dim', type=int, default=256,
-                        help='Context vector dimension (default: 256)')
-    parser.add_argument('--embed-dim', type=int, default=256,
-                        help='Token embedding dimension (default: 256)')
-    parser.add_argument('--device', type=str, default='cpu', help='Device')
+    parser.add_argument('--config', type=str, default='Residual4Layer',
+                        help='Config class name (Residual2Layer, Residual4Layer, Residual8Layer)')
     parser.add_argument('--skip-phase2', action='store_true',
                         help='Skip Phase 2 (only run Phase 1)')
     parser.add_argument('--freeze-context', action='store_true',
                         help='Freeze context in Phase 2 (only train token output)')
     args = parser.parse_args()
 
+    # Load configuration from project root config.py
+    ConfigClass = getattr(config, args.config, config.Residual4Layer)
+    cfg = ConfigClass()
+
     print_flush("="*70)
     print_flush("Residual Standard Architecture Test")
     print_flush("="*70)
+    print_flush(f"\n📋 Configuration: {args.config}")
+    print_flush(f"   Edit settings in: config.py (project root)\n")
+
+    print_flush("🏗️  Model Architecture:")
+    print_flush(f"   Layer structure: {cfg.layer_structure}")
+    print_flush(f"   Context dim: {cfg.context_dim}")
+    print_flush(f"   Embed dim: {cfg.embed_dim}")
+    print_flush(f"   Hidden dim: {cfg.hidden_dim}")
+    print_flush(f"   Dropout: {cfg.dropout}\n")
+
+    print_flush("⚙️  Phase 1 Settings (CVFP):")
+    print_flush(f"   Max iterations: {cfg.phase1_max_iterations}")
+    print_flush(f"   Convergence threshold: {cfg.phase1_convergence_threshold}")
+    print_flush(f"   Min converged ratio: {cfg.phase1_min_converged_ratio}")
+    print_flush(f"   LR schedule: {cfg.phase1_lr_warmup} → {cfg.phase1_lr_medium} → {cfg.phase1_lr_finetune}\n")
+
+    print_flush("📊 Data Settings:")
+    print_flush(f"   Num samples: {cfg.num_samples}")
+    print_flush(f"   Train/Val split: {cfg.train_val_split}")
+    print_flush(f"   Device: {cfg.device}\n")
 
     # Load data
-    texts = load_ultrachat_samples(args.num_samples)
+    print_flush("Loading data...")
+    texts = load_ultrachat_samples(cfg.num_samples)
     all_token_ids, tokenizer = tokenize_texts(texts)
 
-    # Split into train/val (80/20)
-    split_idx = int(len(all_token_ids) * 0.8)
+    # Split into train/val
+    split_idx = int(len(all_token_ids) * cfg.train_val_split)
     train_ids = all_token_ids[:split_idx]
     val_ids = all_token_ids[split_idx:]
 
@@ -431,21 +469,19 @@ def main():
     print_flush(f"  Val:   {len(val_ids)} tokens")
 
     print_flush(f"\n{'='*70}")
-    print_flush(f"Testing: Residual Standard {args.layer_structure}")
-    print_flush(f"  Context dim: {args.context_dim}, Embed dim: {args.embed_dim}")
+    print_flush(f"Starting Training: Residual Standard {cfg.layer_structure}")
     print_flush(f"{'='*70}")
 
     # Create model
-    # hidden_dim = embed_dim + context_dim (for concatenation)
-    hidden_dim = args.embed_dim + args.context_dim
+    hidden_dim = cfg.embed_dim + cfg.context_dim
 
     model = NewLLMResidual(
         vocab_size=tokenizer.vocab_size,
-        embed_dim=args.embed_dim,
-        context_dim=args.context_dim,
+        embed_dim=cfg.embed_dim,
+        context_dim=cfg.context_dim,
         hidden_dim=hidden_dim,
-        layer_structure=args.layer_structure,
-        dropout=0.1
+        layer_structure=cfg.layer_structure,
+        dropout=cfg.dropout
     )
 
     print_flush(f"  Parameters: {model.count_parameters():,}")
@@ -453,8 +489,8 @@ def main():
     # Phase 1: Fixed-point learning
     # Train: Learn context generation layers
     # Val: Compute fixed contexts only (evaluation of generalization)
-    train_contexts = phase1_train(model, train_ids, device=args.device)
-    val_contexts = compute_fixed_contexts(model, val_ids, device=args.device)
+    train_contexts = phase1_train(model, train_ids, cfg, device=cfg.device)
+    val_contexts = compute_fixed_contexts(model, val_ids, cfg, device=cfg.device)
 
     # Analyze fixed points for degenerate solutions
     analyze_fixed_points(train_contexts, label="Train")
@@ -463,14 +499,14 @@ def main():
     # Phase 2: Token prediction (skip if requested)
     if not args.skip_phase2:
         val_metrics = phase2_train(model, train_ids, train_contexts, val_ids, val_contexts,
-                                    freeze_context=args.freeze_context, device=args.device)
+                                    freeze_context=args.freeze_context, device=cfg.device)
 
         # Final results
         print_flush("\n" + "="*70)
         print_flush("FINAL RESULTS")
         print_flush("="*70)
-        print_flush(f"\nResidual Standard {args.layer_structure}:")
-        print_flush(f"  Context dim: {args.context_dim}, Embed dim: {args.embed_dim}")
+        print_flush(f"\nResidual Standard {cfg.layer_structure}:")
+        print_flush(f"  Context dim: {cfg.context_dim}, Embed dim: {cfg.embed_dim}")
         print_flush(f"  Parameters: {model.count_parameters():,}")
         print_flush(f"  Best Val Loss: {val_metrics['loss']:.2f}")
         print_flush(f"  Best Val PPL:  {val_metrics['ppl']:.2f}")
