@@ -217,6 +217,14 @@ def phase1_train(model, token_ids, config, device='cpu'):
 
     print_flush(f"\nPhase 1 Complete: {converged_tokens.sum()}/{len(token_ids)} tokens converged\n")
 
+    # Save model checkpoint
+    checkpoint_path = '/Users/sakajiritomoyoshi/Desktop/git/new-llm/cache/phase1_model.pt'
+    torch.save({
+        'model_state_dict': model.state_dict(),
+        'fixed_contexts': fixed_contexts,
+    }, checkpoint_path)
+    print_flush(f"Model checkpoint saved: {checkpoint_path}\n")
+
     # Automatic fixed-point analysis
     analyze_fixed_points(fixed_contexts, label="Train")
 
