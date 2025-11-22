@@ -14,8 +14,8 @@ An experimental language model that replaces attention mechanisms with **context
 # Install dependencies
 pip install torch tokenizers datasets tqdm
 
-# Run with default configuration (256-dim, 4 layers)
-python3 tests/phase2_experiments/test_residual.py
+# Run with default configuration (16-dim, 2 layers)
+python train.py
 
 # To customize settings, edit config.py:
 # - Model architecture (num_layers, context_dim, embed_dim, etc.)
@@ -177,17 +177,20 @@ See `data/README.md` for detailed examples and format specifications.
 
 ```
 new-llm/
+├── train.py                           # Main training script
 ├── config.py                          # Default configuration
 ├── src/
+│   ├── training/                      # Training logic
+│   │   ├── phase1.py                  # CVFP fixed-point learning
+│   │   └── phase2.py                  # Token prediction
+│   ├── data/                          # Data loading
+│   │   └── loader.py                  # Unified data loader
+│   ├── evaluation/                    # Metrics
+│   │   └── metrics.py                 # Fixed-point analysis
 │   ├── models/
 │   │   └── new_llm_residual.py        # Residual Standard architecture
 │   └── utils/
-│       ├── early_stopping.py          # Phase 1/2 early stopping
-│       └── cache_manager.py           # Fixed-context cache
-├── tests/
-│   ├── phase1_experiments/            # Phase 1 experiments
-│   └── phase2_experiments/            # Phase 2 experiments
-│       └── test_residual.py           # Main experiment script
+│       └── early_stopping.py          # Phase 1/2 early stopping
 ├── data/                              # Custom text data (optional)
 │   ├── README.md                      # Data format guide
 │   ├── example_train.txt              # Example training data

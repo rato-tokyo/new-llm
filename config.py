@@ -61,14 +61,14 @@ class ResidualConfig:
     train_text_dir = "./data/train/"                       # text_dir使用時のディレクトリ
 
     # Validation data source
-    val_data_source = "text_file"                          # "manual", "text_file", "text_dir", or "auto_split"
+    val_data_source = "manual"                             # "manual", "text_file", "text_dir", or "auto_split"
     val_text_file = "./data/example_val.txt"               # text_file使用時のパス
     val_text_dir = "./data/val/"                           # text_dir使用時のディレクトリ
     manual_val_path = "./cache/manual_val_tokens.pt"       # manual使用時のパス
 
     # Common settings
     max_seq_length = 1024                                  # 最大シーケンス長
-    num_samples = 50                                       # 訓練サンプル数（ultrachat使用時）
+    num_samples = 10                                       # 訓練サンプル数（ultrachat使用時）
     train_val_split = 0.8                                  # Train/Val分割比率（auto_split使用時）
 
     # UltraChat specific (train_data_source="ultrachat"の場合)
