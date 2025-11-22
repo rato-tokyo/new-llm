@@ -107,6 +107,15 @@ class Residual8Layer(ResidualConfig):
     layer_structure = [1, 1, 1, 1, 1, 1, 1, 1]
 
 
+class Residual4Layer32Ctx(ResidualConfig):
+    """4層・32次元文脈（極小次元、次元崩壊対策）"""
+    layer_structure = [1, 1, 1, 1]
+    context_dim = 32
+    embed_dim = 32
+    hidden_dim = 64
+    num_samples = 50  # より多くのサンプルで訓練
+
+
 class Residual4Layer64Ctx(ResidualConfig):
     """4層・64次元文脈（最小次元、次元崩壊対策）"""
     layer_structure = [1, 1, 1, 1]
