@@ -107,6 +107,14 @@ class Residual8Layer(ResidualConfig):
     layer_structure = [1, 1, 1, 1, 1, 1, 1, 1]
 
 
+class Residual4Layer64Ctx(ResidualConfig):
+    """4層・64次元文脈（最小次元、次元崩壊対策）"""
+    layer_structure = [1, 1, 1, 1]
+    context_dim = 64
+    embed_dim = 64
+    hidden_dim = 128
+
+
 class Residual4Layer128Ctx(ResidualConfig):
     """4層・128次元文脈（次元削減、次元崩壊対策）"""
     layer_structure = [1, 1, 1, 1]
