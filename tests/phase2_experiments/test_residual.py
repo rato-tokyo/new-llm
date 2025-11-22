@@ -481,8 +481,13 @@ def compute_fixed_contexts(model, token_ids, config, device='cpu'):
     return fixed_contexts.detach()
 
 
-def analyze_fixed_points(contexts, label=""):
+def analyze_fixed_points(contexts, label="", token_ids=None):
     """Analyze fixed-point contexts for degenerate solutions and statistics
+
+    Args:
+        contexts: Fixed-point context vectors
+        label: Label for this analysis (Train/Val)
+        token_ids: Token IDs corresponding to contexts (for singular vector analysis)
 
     Returns:
         effective_rank (float): Effective rank of the context matrix
@@ -559,6 +564,32 @@ def analyze_fixed_points(contexts, label=""):
         print_flush(f"  ⚠️  Low diversity in fixed points")
     else:
         print_flush(f"  ✅ Good diversity")
+
+    # 5. Singular Vector Analysis (if token_ids provided)
+    if token_ids is not None:
+        from transformers import AutoTokenizer
+        tokenizer = AutoTokenizer.from_pretrained("gpt2")
+
+        print_flush(f"\n5. Singular Vector Analysis:")
+        print_flush(f"  Analyzing which tokens contribute to top singular vectors...")
+
+        # Analyze top 2 singular vectors
+        for vec_idx in range(min(2, len(S))):
+            print_flush(f"\n  --- Singular Vector {vec_idx+1} (Value: {S[vec_idx].item():.2f}) ---")
+
+            # Project contexts onto this singular vector
+            projections = contexts @ V[:, vec_idx]  # Shape: [num_tokens]
+
+            # Find tokens with highest projections (absolute value)
+            abs_projections = torch.abs(projections)
+            top_indices = torch.topk(abs_projections, k=min(5, len(projections))).indices
+
+            print_flush(f"  Top 5 tokens contributing to SV{vec_idx+1}:")
+            for rank, idx in enumerate(top_indices):
+                token_id = token_ids[idx].item()
+                token_text = tokenizer.decode([token_id])
+                projection = projections[idx].item()
+                print_flush(f"    {rank+1}. Token {token_id} '{token_text}': proj={projection:.3f}")
 
     print_flush(f"{'='*70}\n")
 
@@ -763,8 +794,8 @@ def main():
     val_contexts = compute_fixed_contexts(model, val_ids, cfg, device=cfg.device)
 
     # Analyze fixed points for degenerate solutions
-    train_effective_rank = analyze_fixed_points(train_contexts, label="Train")
-    val_effective_rank = analyze_fixed_points(val_contexts, label="Val")
+    train_effective_rank = analyze_fixed_points(train_contexts, label="Train", token_ids=train_ids)
+    val_effective_rank = analyze_fixed_points(val_contexts, label="Val", token_ids=val_ids)
 
     # Check if Phase 1 succeeded (minimum Effective Rank requirements)
     MIN_TRAIN_RANK = 50.0  # Minimum 50/256 (20%)
