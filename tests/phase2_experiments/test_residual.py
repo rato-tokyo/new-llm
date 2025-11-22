@@ -159,10 +159,11 @@ def phase1_train(model, token_ids, config, device='cpu'):
                         boost_mask = ddr_dim_activity < threshold
 
                         # 修正ベクトル = (1 / 平均活性) * 係数k * 対象ベクトル
-                        # 平均活性が低いほど修正が強くなる
+                        # 平均活性が低いほど修正が強くなる（最大10倍に制限）
+                        inverse_activity = torch.clamp(1.0 / (ddr_dim_activity + 1e-6), max=10.0)
                         boost_amount = torch.where(
                             boost_mask,
-                            (1.0 / (ddr_dim_activity + 1e-6)) * target_context.squeeze(0),
+                            inverse_activity * target_context.squeeze(0),
                             torch.zeros_like(ddr_dim_activity)
                         )
 
