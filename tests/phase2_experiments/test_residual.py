@@ -98,12 +98,17 @@ def phase1_train(model, token_ids, config, device='cpu'):
     # DDR: Dimension-wise Diversity Regularization
     if config.use_ddr:
         ddr_dim_activity = torch.zeros(model.context_dim).to(device)  # 各次元の活性度（EMA）
+        ddr_boost_count = 0  # ブースト発生回数
 
     # Train until convergence
     converged_tokens = torch.zeros(len(token_ids), dtype=torch.bool)
 
     for iteration in range(config.phase1_max_iterations):
         total_loss_value = 0
+
+        # Reset boost count for this iteration
+        if config.use_ddr:
+            ddr_boost_count = 0
 
         # LR Schedule (unified for DDR)
         if iteration <= 3:
@@ -145,9 +150,10 @@ def phase1_train(model, token_ids, config, device='cpu'):
                             (1 - config.ddr_momentum) * torch.abs(context.squeeze(0))
                         )
 
-                        # Calculate boost for low-activity dimensions
-                        mean_activity = ddr_dim_activity.mean()
-                        threshold = mean_activity * config.ddr_threshold_ratio
+                        # ⚠️ CRITICAL: threshold is FIXED value, NOT mean of all dimensions
+                        # 各次元の平均活性（EMA）が threshold 未満の次元をブースト
+                        # threshold = ddr_threshold_ratio（固定値、例: 0.5）
+                        threshold = config.ddr_threshold_ratio
 
                         # 活性が閾値未満の次元にブースト適用
                         boost_mask = ddr_dim_activity < threshold
@@ -156,6 +162,9 @@ def phase1_train(model, token_ids, config, device='cpu'):
                             (threshold - ddr_dim_activity) / (threshold + 1e-6),
                             torch.zeros_like(ddr_dim_activity)
                         )
+
+                        # ブースト発生回数をカウント
+                        ddr_boost_count += boost_mask.sum().item()
 
                     # Apply boost to target (encourage low-activity dimensions)
                     # 低活性次元を使うように教師ベクトルを調整
@@ -184,7 +193,14 @@ def phase1_train(model, token_ids, config, device='cpu'):
             print_flush(f"Iteration 1/{config.phase1_max_iterations}: Forward pass only (saving contexts)")
         else:
             avg_loss = total_loss_value / len(token_ids)
-            print_flush(f"Iteration {iteration+1}/{config.phase1_max_iterations}: Loss={avg_loss:.6f}, Converged={convergence_rate*100:.1f}%, LR={lr:.4f}")
+            log_msg = f"Iteration {iteration+1}/{config.phase1_max_iterations}: Loss={avg_loss:.6f}, Converged={convergence_rate*100:.1f}%, LR={lr:.4f}"
+
+            # DDR boost count (total dimensions boosted across all tokens)
+            if config.use_ddr:
+                avg_boost_per_token = ddr_boost_count / len(token_ids)
+                log_msg += f", DDR_Boost={avg_boost_per_token:.1f}dims/token"
+
+            print_flush(log_msg)
 
             # Early stopping check
             if early_stopping(convergence_rate):
