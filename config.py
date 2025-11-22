@@ -68,7 +68,7 @@ class ResidualConfig:
 
     # Common settings
     max_seq_length = 1024                                  # 最大シーケンス長
-    num_samples = 20                                       # 訓練サンプル数（ultrachat使用時）
+    num_samples = 50                                       # 訓練サンプル数（ultrachat使用時）
     train_val_split = 0.8                                  # Train/Val分割比率（auto_split使用時）
 
     # UltraChat specific (train_data_source="ultrachat"の場合)
