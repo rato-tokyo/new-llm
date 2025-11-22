@@ -1,121 +1,86 @@
-"""Configuration for UltraChat Dialogue Training
+"""Configuration for UltraChat Dialogue Training - Residual Standard Architecture
 
-This config is specifically designed for:
-- UltraChat dataset
-- Two-phase training (context then tokens)
-- Flexible architecture (easy to change layers and context_dim)
-- Local GPU training (no Colab)
+Unified to Residual Standard architecture with CVFP training.
+All configurations use [1,1,1,...] layer structure.
 """
 
 
-class DialogueConfig:
+class ResidualConfig:
     """
-    Base configuration for dialogue training
+    Base configuration for Residual Standard architecture
 
     Easy to modify:
-    - num_layers: Change number of FNN layers
-    - context_dim: Change context vector size
-    - hidden_dim: Change hidden layer size
+    - layer_structure: List of FNN blocks [1,1,1,1] for 4 layers
+    - context_dim: Context vector dimension
+    - embed_dim: Token embedding dimension
     """
 
-    # ========== Model Architecture (EASY TO CHANGE) ==========
-    architecture = "sequential"  # "sequential" or "layerwise"
-    num_layers = 2           # Number of FNN layers (1, 2, 3, 4, ...)
-    context_dim = 256        # Context vector dimension (128, 256, 512, 1024, ...)
-    hidden_dim = 512         # Hidden dimension (256, 512, 1024, ...)
-
-    # ========== Fixed Parameters ==========
-    vocab_size = 50259       # Vocabulary size (GPT-2 tokenizer)
+    # ========== Model Architecture ==========
+    architecture = "residual_standard"
+    layer_structure = [1, 1, 1, 1]  # 4 layers (4 FNN blocks with 1 layer each)
+    context_dim = 256        # Context vector dimension
     embed_dim = 256          # Token embedding dimension
-    dropout = 0.1            # Dropout rate
+    hidden_dim = 512         # Hidden dimension per FNN block
+    vocab_size = 50257       # GPT-2 tokenizer vocabulary size
+    dropout = 0.1
 
-    # ========== Phase 1: Context Learning ==========
-    phase1_max_samples = 100          # Number of dialogue samples for Phase 1
-    phase1_epochs = 3                 # Number of training epochs for Phase 1
-    phase1_learning_rate = 0.0001     # Learning rate for Phase 1 training
-    phase1_max_iterations = 200       # Max iterations for fixed-point search
-    phase1_warmup_iterations = 100    # Warmup iterations before checking convergence (n)
-    phase1_convergence_threshold = 1e-2  # Convergence threshold (L2 distance) - relaxed from 1e-4
-    phase1_min_converged_ratio = 0.95    # Minimum ratio of converged tokens to proceed
+    # ========== CVFP Settings ==========
+    context_update_strategy = "gated"  # Must be "gated" (not "simple")
+    use_layer_norm = True
+    use_context_clipping = True
+
+    # ========== Phase 1: Fixed-Point Context Learning (CVFP) ==========
+    phase1_max_iterations = 50
+    phase1_convergence_threshold = 0.01  # MSE threshold
+    phase1_learning_rate = 0.0001
+    phase1_min_converged_ratio = 0.95    # 95% tokens must converge
 
     # ========== Phase 2: Token Prediction ==========
-    phase2_batch_size = 1              # Batch size (start with 1 for debugging)
-    phase2_learning_rate = 0.0001      # Learning rate
-    phase2_epochs = 10                 # Number of epochs per sample
-    phase2_gradient_clip = 1.0         # Gradient clipping
+    phase2_learning_rate = 0.0001
+    phase2_epochs = 10
+    phase2_batch_size = 32
+    phase2_gradient_clip = 1.0
 
     # ========== Data ==========
-    max_seq_length = 512     # Maximum sequence length
-    dataset_name = "HuggingFaceH4/ultrachat_200k"  # UltraChat dataset
-    dataset_split = "train_sft"  # Use supervised fine-tuning split
-    cache_dir = "./cache"    # Cache directory for datasets and contexts
+    max_seq_length = 1024
+    dataset_name = "HuggingFaceH4/ultrachat_200k"
+    dataset_split = "train_sft"
+    cache_dir = "./cache"
 
     # ========== Device ==========
-    device = "cuda"          # GPU device
-    random_seed = 42         # Random seed
+    device = "cpu"
+    random_seed = 42
 
     # ========== Logging ==========
-    log_every_steps = 1      # Log metrics every N steps
-    save_every_samples = 10  # Save checkpoint every N samples
+    log_every_steps = 1
+    save_every_samples = 10
 
 
-class TinyDialogueConfig(DialogueConfig):
-    """Tiny model for initial baseline (1 layer, 128 dim)"""
-    num_layers = 1
-    context_dim = 128
-    hidden_dim = 256
-    phase1_max_samples = 1  # Start with 1 sample for initial testing
-    # Inherit phase1_max_iterations=200, phase1_warmup_iterations=100 from parent
-
-
-class Tiny256DialogueConfig(DialogueConfig):
-    """Tiny model with doubled context_dim (1 layer, 256 dim)"""
-    num_layers = 1
-    context_dim = 256  # Doubled from Tiny
-    hidden_dim = 512   # Doubled to match context_dim ratio
-    phase1_max_samples = 1
-    # Inherit phase1_max_iterations=200, phase1_warmup_iterations=100 from parent
-
-
-class SmallDialogueConfig(DialogueConfig):
-    """Small model for quick testing (2 layers, 256 dim)"""
-    num_layers = 2
+class Residual2Layer(ResidualConfig):
+    """2-layer Residual Standard (minimum viable)"""
+    layer_structure = [1, 1]
     context_dim = 256
+    embed_dim = 256
+
+
+class Residual4Layer(ResidualConfig):
+    """4-layer Residual Standard (recommended)"""
+    layer_structure = [1, 1, 1, 1]
+    context_dim = 256
+    embed_dim = 256
+
+
+class Residual8Layer(ResidualConfig):
+    """8-layer Residual Standard (high performance)"""
+    layer_structure = [1, 1, 1, 1, 1, 1, 1, 1]
+    context_dim = 256
+    embed_dim = 256
     hidden_dim = 512
-    phase1_max_samples = 1  # Changed from 10 to 1 for comparison
-    # Inherit phase1_max_iterations=200, phase1_warmup_iterations=100 from parent
 
 
-class Small2LayerSequentialConfig(DialogueConfig):
-    """Architecture A: Sequential FNN (2 layers, 256 dim)"""
-    architecture = "sequential"
-    num_layers = 2
-    context_dim = 256
-    hidden_dim = 256  # Smaller hidden_dim
-    phase1_max_samples = 1
-
-
-class Small2LayerLayerwiseConfig(DialogueConfig):
-    """Architecture B: Layer-wise context update (2 layers, 256 dim)"""
-    architecture = "layerwise"
-    num_layers = 2
-    context_dim = 256
-    hidden_dim = 256  # Smaller hidden_dim
-    phase1_max_samples = 1
-
-
-class MediumDialogueConfig(DialogueConfig):
-    """Medium model for experiments (3 layers)"""
-    num_layers = 3
+class Residual4Layer512Ctx(ResidualConfig):
+    """4-layer with 512-dim context (large context)"""
+    layer_structure = [1, 1, 1, 1]
     context_dim = 512
+    embed_dim = 256
     hidden_dim = 1024
-    phase1_max_samples = 10
-    # Inherit phase1_max_iterations=200, phase1_warmup_iterations=100 from parent
-
-
-class LargeDialogueConfig(DialogueConfig):
-    """Large model for full training"""
-    num_layers = 4
-    context_dim = 512
-    hidden_dim = 1024
-    phase1_max_samples = 1000

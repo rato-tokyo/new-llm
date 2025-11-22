@@ -22,7 +22,6 @@ from pathlib import Path
 sys.path.insert(0, '/Users/sakajiritomoyoshi/Desktop/git/new-llm')
 
 from src.models.new_llm_residual import NewLLMResidual
-from src.models.new_llm_residual_context_only import NewLLMResidualContextOnly
 
 
 def print_flush(*args, **kwargs):

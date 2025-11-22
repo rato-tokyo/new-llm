@@ -21,19 +21,7 @@ import math
 import time
 from tqdm import tqdm
 
-from src.models.new_llm_flexible import NewLLMFlexible
-from src.models.new_llm_sequential import NewLLMSequential
-from src.models.new_llm_layerwise import NewLLMLayerwise
-from src.utils.dialogue_config import (
-    DialogueConfig,
-    TinyDialogueConfig,
-    Tiny256DialogueConfig,
-    SmallDialogueConfig,
-    Small2LayerSequentialConfig,
-    Small2LayerLayerwiseConfig,
-    MediumDialogueConfig,
-    LargeDialogueConfig
-)
+from src.models.new_llm_residual import NewLLMResidual
 from src.data.ultrachat_loader import UltraChatLoader
 import argparse
 
