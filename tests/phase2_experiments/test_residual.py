@@ -96,22 +96,15 @@ def phase1_train(model, token_ids, config, device='cpu'):
     # Fixed contexts storage
     fixed_contexts = torch.zeros(len(token_ids), model.context_dim).to(device)
 
-    # DDR: Dimension-wise Diversity Regularization
-    if config.use_ddr:
-        ddr_dim_activity = torch.ones(model.context_dim).to(device)  # 各次元の活性度（EMA）、初期値=1.0
-        ddr_boost_count = 0  # ブースト発生回数
-
     # Train until convergence
     converged_tokens = torch.zeros(len(token_ids), dtype=torch.bool)
 
     for iteration in range(config.phase1_max_iterations):
         total_loss_value = 0
+        total_cvfp_loss = 0
+        total_dist_loss = 0
 
-        # Reset boost count for this iteration
-        if config.use_ddr:
-            ddr_boost_count = 0
-
-        # LR Schedule (unified for DDR)
+        # LR Schedule
         if iteration <= 3:
             lr = config.phase1_lr_warmup
         elif iteration <= 8:
@@ -125,71 +118,65 @@ def phase1_train(model, token_ids, config, device='cpu'):
         # Process entire sequence with context carry-over
         context = torch.zeros(1, model.context_dim).to(device)
 
-        for t, token_embed in enumerate(token_embeds):
-            # Zero gradients before each token
-            if iteration > 0:
-                optimizer.zero_grad()
+        # Collect all contexts for distribution regularization
+        all_contexts = []
 
+        for t, token_embed in enumerate(token_embeds):
             # Update context one step
             context = model._update_context_one_step(
                 token_embed.unsqueeze(0),
                 context
             )
 
-            # Loss: Match previous iteration's context (CVFP learning)
-            if iteration > 0:
-                target_context = fixed_contexts[t].unsqueeze(0)
-
-                # DDR: Dimension-wise Diversity Regularization
-                # 低活性次元をブーストして次元崩壊を防ぐ
-                if config.use_ddr:
-                    with torch.no_grad():
-                        # Update dimension-wise activity (EMA of model output's absolute values)
-                        # モデルの出力を追跡（教師ではなく、実際の出力の活性を見る）
-                        ddr_dim_activity = (
-                            config.ddr_momentum * ddr_dim_activity +
-                            (1 - config.ddr_momentum) * torch.abs(context.squeeze(0))
-                        )
-
-                        # ⚠️ CRITICAL: threshold is FIXED value, NOT mean of all dimensions
-                        # 各次元の平均活性（EMA）が threshold 未満の次元をブースト
-                        # threshold = ddr_threshold（固定値、例: 0.2）
-                        threshold = config.ddr_threshold
-
-                        # 活性が閾値未満の次元にブースト適用
-                        boost_mask = ddr_dim_activity < threshold
-
-                        # 修正ベクトル = (1 / 平均活性) * 係数k * 対象ベクトル
-                        # 平均活性が低いほど修正が強くなる（最大10倍に制限）
-                        inverse_activity = torch.clamp(1.0 / (ddr_dim_activity + 1e-6), max=10.0)
-                        boost_amount = torch.where(
-                            boost_mask,
-                            inverse_activity * target_context.squeeze(0),
-                            torch.zeros_like(ddr_dim_activity)
-                        )
-
-                        # ブースト発生回数をカウント
-                        ddr_boost_count += boost_mask.sum().item()
-
-                    # Apply boost to target (encourage low-activity dimensions)
-                    # 低活性次元を使うように教師ベクトルを調整
-                    target_context = target_context + config.ddr_boost_weight * boost_amount.unsqueeze(0)
-
-                loss = torch.nn.functional.mse_loss(context, target_context)
-                total_loss_value += loss.item()
-
-                # Backprop and update weights for each token
-                loss.backward()
-                optimizer.step()
-
-                # Check convergence (from config)
-                if loss.item() < config.phase1_convergence_threshold:
-                    converged_tokens[t] = True
+            # Collect contexts for distribution regularization
+            all_contexts.append(context)
 
             # Save context for next iteration and carry over to next token
             fixed_contexts[t] = context.detach().squeeze(0)
             context = context.detach()  # Detach to prevent growing computation graph
             context.requires_grad = True  # Re-enable gradients for next token
+
+        # Compute loss and backprop (after processing all tokens)
+        if iteration > 0:
+            optimizer.zero_grad()
+
+            # Stack all contexts: [num_tokens, context_dim]
+            all_contexts_tensor = torch.cat(all_contexts, dim=0)  # [num_tokens, context_dim]
+
+            # CVFP loss: match previous iteration's contexts
+            cvfp_loss = torch.nn.functional.mse_loss(all_contexts_tensor, fixed_contexts)
+            total_cvfp_loss = cvfp_loss.item()
+
+            # Distribution regularization loss (if enabled)
+            if getattr(config, 'use_distribution_reg', True):
+                # Goal: each dimension (across all tokens) should have mean=0, var=1
+                dim_mean = all_contexts_tensor.mean(dim=0)  # [context_dim]
+                dim_var = all_contexts_tensor.var(dim=0)    # [context_dim]
+
+                # Penalize deviation from N(0,1)
+                mean_penalty = (dim_mean ** 2).mean()
+                var_penalty = ((dim_var - 1.0) ** 2).mean()
+                dist_loss = mean_penalty + var_penalty
+                total_dist_loss = dist_loss.item()
+
+                # Combine losses
+                dist_weight = getattr(config, 'dist_reg_weight', 0.2)
+                total_loss = (1 - dist_weight) * cvfp_loss + dist_weight * dist_loss
+            else:
+                # Pure CVFP (no distribution regularization)
+                total_dist_loss = 0.0
+                total_loss = cvfp_loss
+
+            total_loss_value = total_loss.item()
+
+            # Backprop and update
+            total_loss.backward()
+            optimizer.step()
+
+            # Check convergence for each token
+            with torch.no_grad():
+                token_losses = ((all_contexts_tensor - fixed_contexts) ** 2).mean(dim=1)
+                converged_tokens = token_losses < config.phase1_convergence_threshold
 
         # Compute convergence rate
         convergence_rate = converged_tokens.float().mean().item()
@@ -197,13 +184,9 @@ def phase1_train(model, token_ids, config, device='cpu'):
         if iteration == 0:
             print_flush(f"Iteration 1/{config.phase1_max_iterations}: Forward pass only (saving contexts)")
         else:
-            avg_loss = total_loss_value / len(token_ids)
-            log_msg = f"Iteration {iteration+1}/{config.phase1_max_iterations}: Loss={avg_loss:.6f}, Converged={convergence_rate*100:.1f}%, LR={lr:.4f}"
-
-            # DDR boost count (total dimensions boosted across all tokens)
-            if config.use_ddr:
-                avg_boost_per_token = ddr_boost_count / len(token_ids)
-                log_msg += f", DDR_Boost={avg_boost_per_token:.1f}dims/token"
+            log_msg = f"Iteration {iteration+1}/{config.phase1_max_iterations}: "
+            log_msg += f"Loss={total_loss_value:.6f} (CVFP={total_cvfp_loss:.6f}, Dist={total_dist_loss:.6f}), "
+            log_msg += f"Converged={convergence_rate*100:.1f}%, LR={lr:.4f}"
 
             print_flush(log_msg)
 
@@ -717,26 +700,102 @@ def phase2_train(model, token_ids, fixed_contexts, val_ids, val_contexts,
 
 def main():
     parser = argparse.ArgumentParser(description='Test Residual Standard Architecture')
-    parser.add_argument('--config', type=str, default='Residual4Layer',
-                        help='Config class name (Residual2Layer, Residual4Layer, Residual8Layer)')
+
+    # Model architecture
+    parser.add_argument('--context-dim', type=int, default=None,
+                        help='Context vector dimension (default: 256)')
+    parser.add_argument('--embed-dim', type=int, default=None,
+                        help='Token embedding dimension (default: 256)')
+    parser.add_argument('--hidden-dim', type=int, default=None,
+                        help='Hidden layer dimension (default: 512)')
+    parser.add_argument('--num-layers', type=int, default=None,
+                        help='Number of single-layer blocks (default: 4, creates [1,1,1,1])')
+
+    # Phase 1 settings
+    parser.add_argument('--phase1-max-iter', type=int, default=None,
+                        help='Phase 1 max iterations (default: 10)')
+    parser.add_argument('--phase1-lr-warmup', type=float, default=None,
+                        help='Phase 1 warmup LR (default: 0.002)')
+    parser.add_argument('--phase1-lr-medium', type=float, default=None,
+                        help='Phase 1 medium LR (default: 0.0005)')
+    parser.add_argument('--phase1-lr-finetune', type=float, default=None,
+                        help='Phase 1 finetune LR (default: 0.0001)')
+
+    # Distribution Regularization
+    parser.add_argument('--dist-reg-weight', type=float, default=None,
+                        help='Distribution regularization weight (default: 0.2)')
+    parser.add_argument('--no-dist-reg', action='store_true',
+                        help='Disable distribution regularization')
+
+    # Phase 2 settings
+    parser.add_argument('--phase2-lr', type=float, default=None,
+                        help='Phase 2 learning rate (default: 0.0001)')
+    parser.add_argument('--phase2-epochs', type=int, default=None,
+                        help='Phase 2 epochs (default: 10)')
+    parser.add_argument('--phase2-batch-size', type=int, default=None,
+                        help='Phase 2 batch size (default: 32)')
+
+    # Data settings
+    parser.add_argument('--num-samples', type=int, default=None,
+                        help='Number of training samples (default: 10)')
+    parser.add_argument('--train-val-split', type=float, default=None,
+                        help='Train/Val split ratio (default: 0.8)')
+
+    # Other settings
+    parser.add_argument('--device', type=str, default=None,
+                        help='Device (cpu or cuda, default: cpu)')
     parser.add_argument('--skip-phase2', action='store_true',
                         help='Skip Phase 2 (only run Phase 1)')
     parser.add_argument('--freeze-context', action='store_true',
                         help='Freeze context in Phase 2 (only train token output)')
+
     args = parser.parse_args()
 
-    # Load configuration from project root config.py
-    ConfigClass = getattr(config, args.config, config.Residual4Layer)
-    cfg = ConfigClass()
+    # Load default configuration
+    cfg = config.ResidualConfig()
+
+    # Override with command-line arguments
+    if args.context_dim is not None:
+        cfg.context_dim = args.context_dim
+    if args.embed_dim is not None:
+        cfg.embed_dim = args.embed_dim
+    if args.hidden_dim is not None:
+        cfg.hidden_dim = args.hidden_dim
+    if args.num_layers is not None:
+        cfg.num_layers = args.num_layers
+    if args.phase1_max_iter is not None:
+        cfg.phase1_max_iterations = args.phase1_max_iter
+    if args.phase1_lr_warmup is not None:
+        cfg.phase1_lr_warmup = args.phase1_lr_warmup
+    if args.phase1_lr_medium is not None:
+        cfg.phase1_lr_medium = args.phase1_lr_medium
+    if args.phase1_lr_finetune is not None:
+        cfg.phase1_lr_finetune = args.phase1_lr_finetune
+    if args.dist_reg_weight is not None:
+        cfg.dist_reg_weight = args.dist_reg_weight
+    if args.no_dist_reg:
+        cfg.use_distribution_reg = False
+    if args.phase2_lr is not None:
+        cfg.phase2_learning_rate = args.phase2_lr
+    if args.phase2_epochs is not None:
+        cfg.phase2_epochs = args.phase2_epochs
+    if args.phase2_batch_size is not None:
+        cfg.phase2_batch_size = args.phase2_batch_size
+    if args.num_samples is not None:
+        cfg.num_samples = args.num_samples
+    if args.train_val_split is not None:
+        cfg.train_val_split = args.train_val_split
+    if args.device is not None:
+        cfg.device = args.device
 
     print_flush("="*70)
     print_flush("Residual Standard Architecture Test")
     print_flush("="*70)
-    print_flush(f"\n📋 Configuration: {args.config}")
-    print_flush(f"   Edit settings in: config.py (project root)\n")
+    print_flush(f"\n📋 Configuration: Command-line arguments")
+    print_flush(f"   Edit defaults in: config.py (project root)\n")
 
     print_flush("🏗️  Model Architecture:")
-    print_flush(f"   Layer structure: {cfg.layer_structure}")
+    print_flush(f"   Num layers: {cfg.num_layers} (structure: {[1] * cfg.num_layers})")
     print_flush(f"   Context dim: {cfg.context_dim}")
     print_flush(f"   Embed dim: {cfg.embed_dim}")
     print_flush(f"   Hidden dim: {cfg.hidden_dim}\n")
@@ -746,12 +805,13 @@ def main():
     print_flush(f"   Convergence threshold: {cfg.phase1_convergence_threshold}")
     print_flush(f"   Min converged ratio: {cfg.phase1_min_converged_ratio}")
 
-    # Display LR schedule and DDR settings
+    # Display LR schedule and Distribution Regularization settings
     print_flush(f"   LR schedule: {cfg.phase1_lr_warmup} → {cfg.phase1_lr_medium} → {cfg.phase1_lr_finetune}")
-    if cfg.use_ddr:
-        print_flush(f"   DDR: boost_weight={cfg.ddr_boost_weight}, threshold={cfg.ddr_threshold}\n")
+    if getattr(cfg, 'use_distribution_reg', True):
+        dist_weight = getattr(cfg, 'dist_reg_weight', 0.2)
+        print_flush(f"   Distribution Reg: weight={dist_weight} ({int((1-dist_weight)*100)}% CVFP, {int(dist_weight*100)}% Dist)\n")
     else:
-        print_flush("")
+        print_flush("   Pure CVFP (no distribution regularization)\n")
 
     print_flush("📊 Data Settings:")
     print_flush(f"   Num samples: {cfg.num_samples}")
@@ -779,18 +839,19 @@ def main():
         print_flush(f"  Val:   {len(val_ids)} tokens (auto-split)")
 
     print_flush(f"\n{'='*70}")
-    print_flush(f"Starting Training: Residual Standard {cfg.layer_structure}")
+    print_flush(f"Starting Training: Residual Standard ({cfg.num_layers} layers)")
     print_flush(f"{'='*70}")
 
     # Create model
     hidden_dim = cfg.embed_dim + cfg.context_dim
+    layer_structure = [1] * cfg.num_layers  # Convert num_layers to structure
 
     model = NewLLMResidual(
         vocab_size=tokenizer.vocab_size,
         embed_dim=cfg.embed_dim,
         context_dim=cfg.context_dim,
         hidden_dim=hidden_dim,
-        layer_structure=cfg.layer_structure
+        layer_structure=layer_structure
     )
 
     print_flush(f"  Parameters: {model.count_parameters():,}")
@@ -841,7 +902,7 @@ def main():
         print_flush("\n" + "="*70)
         print_flush("FINAL RESULTS")
         print_flush("="*70)
-        print_flush(f"\nResidual Standard {cfg.layer_structure}:")
+        print_flush(f"\nResidual Standard ({cfg.num_layers} layers):")
         print_flush(f"  Context dim: {cfg.context_dim}, Embed dim: {cfg.embed_dim}")
         print_flush(f"  Parameters: {model.count_parameters():,}")
         print_flush(f"  Best Val Loss: {val_metrics['loss']:.2f}")

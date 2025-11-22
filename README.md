@@ -1,20 +1,12 @@
-# New-LLM: Context Vector Propagation Language Model
+# New-LLM: Context Vector Fixed-Point Property Language Model
 
-An experimental language model that replaces attention mechanisms with **context vector propagation** for **O(1) memory usage**.
+An experimental language model that replaces attention mechanisms with **context vector fixed-point property (CVFP)** for **O(1) memory usage**.
 
-**Powered by Reconstruction Learning** - a self-supervised approach where the context vector learns to compress previous context and current token information.
+**Powered by CVFP Training** - a two-phase learning approach where context vectors converge to fixed points before learning token prediction.
 
 ---
 
 ## 🚀 Quick Start
-
-### Google Colab (Recommended)
-
-**One-line command** to start training:
-
-```python
-!curl -s https://raw.githubusercontent.com/rato-tokyo/new-llm/main/scripts/colab_train_wikitext.sh | bash
-```
 
 ### Local Training
 
@@ -22,23 +14,29 @@ An experimental language model that replaces attention mechanisms with **context
 # Install dependencies
 pip install torch tokenizers datasets tqdm
 
-# Quick test (100 samples, 10 epochs)
-python train.py --max-samples 100 --epochs 10 --batch-size 8 --layers 1 --device cpu
+# Quick test - 16-dim model (次元崩壊テスト)
+python3 tests/phase2_experiments/test_residual.py \
+    --context-dim 16 \
+    --embed-dim 16 \
+    --hidden-dim 32 \
+    --num-samples 10
 
-# Full training on GPU
-python train.py --epochs 30 --batch-size 32 --layers 4 --device cuda
+# Standard model - 256-dim, 4 layers (default)
+python3 tests/phase2_experiments/test_residual.py
 
-# Results are saved to experiments/ directory by default
-# - training_curves.png: Training visualization (overwritten each run)
-# - final_model.pt: Latest model checkpoint (overwritten each run)
-# - experiment_log.txt: Log of all experiments (appended each run)
+# Custom configuration - 3 layers
+python3 tests/phase2_experiments/test_residual.py \
+    --context-dim 128 \
+    --num-layers 3 \
+    --num-samples 50 \
+    --dist-reg-weight 0.2
 ```
 
 ---
 
 ## 🎯 What Makes New-LLM Different?
 
-### O(1) Memory Usage
+### 1. O(1) Memory Usage
 
 | Architecture | Memory Complexity | Max Sequence Length |
 |--------------|-------------------|---------------------|
@@ -47,52 +45,126 @@ python train.py --epochs 30 --batch-size 32 --layers 4 --device cuda
 
 **No attention mechanism, no positional embeddings** - position information emerges naturally from sequential processing (like RNN/LSTM).
 
-See `ARCHITECTURE.md` for technical details.
+### 2. Context Vector Fixed-Point Property (CVFP)
 
-### Reconstruction Learning
+**Core Hypothesis**: After sufficient iterations, context vectors converge to fixed points:
+- `context(n) ≈ context(n+1)` for large n
+- Enables stable, long-term information compression
+- O(1) memory regardless of sequence length
 
-New-LLM uses a unique **dual-loss training approach**:
+### 3. Two-Phase Training
 
-1. **Token Prediction Loss**: Standard next-token prediction (cross-entropy)
-2. **Reconstruction Loss**: Context vector learns to compress `[previous_context + current_token_embedding]`
+**Phase 1: Fixed-Point Context Learning**
+- Learn context generation layers
+- Iterate until contexts converge to fixed points
+- **Critical**: Must achieve high Effective Rank (no dimension collapse)
 
-The context vector acts as an **autoencoder** - compressing 512 dimensions (256 context + 256 token) into 256 dimensions, then reconstructing it back.
+**Phase 2: Token Prediction**
+- Use fixed-point contexts from Phase 1
+- Train token output layer only
+- Standard cross-entropy loss
 
-See `RECONSTRUCTION_LEARNING.md` for details.
+### 4. Distribution Regularization
+
+**Problem**: Context vectors can collapse to low dimensions (Effective Rank 1/16 = 6%)
+
+**Solution**: Constrain each dimension (across all tokens) to follow N(0,1)
+```python
+dim_mean = all_contexts.mean(dim=0)  # [context_dim]
+dim_var = all_contexts.var(dim=0)    # [context_dim]
+dist_loss = (dim_mean ** 2).mean() + ((dim_var - 1.0) ** 2).mean()
+total_loss = 0.8 * cvfp_loss + 0.2 * dist_loss
+```
+
+**Result**: Effective Rank improved from 1.01/16 (6%) to 7.54/16 (47%) - **7.5x improvement**
 
 ---
 
 ## 🏗️ Architecture Overview
 
+### Residual Standard Architecture
+
 ```python
-# Simplified pseudocode
-for token in sequence:
-    # 1. Embed token
-    embedding = embed(token)
+# Simplified pseudocode - Phase 1 (Fixed-Point Learning)
+context = torch.zeros(context_dim)
 
-    # 2. Store reconstruction target
-    reconstruction_target = concat([context, embedding])  # 512 dims
+for iteration in range(max_iterations):
+    for token in sequence:
+        # 1. Update context
+        context_new = model._update_context_one_step(token_embed, context)
 
-    # 3. Process with context
-    hidden = FNN([embedding, context])  # Concatenate and process
+        # 2. Learn to match previous iteration's context (fixed-point)
+        loss = mse_loss(context_new, fixed_contexts[token_idx])
+        loss.backward()
+        optimizer.step()
 
-    # 4. Update context (gated mechanism)
-    forget_gate = sigmoid(W_forget @ hidden)
-    input_gate = sigmoid(W_input @ hidden)
-    context_delta = tanh(W_context @ hidden)
+        # 3. Pass context to next token (but cut gradient)
+        context = context_new.detach()
+        context.requires_grad = True
 
-    context = forget_gate * context + input_gate * context_delta
-    context = LayerNorm(context)  # Normalize for stability
+    # Check convergence
+    if converged_ratio > 0.95:
+        break
 
-    # 5. Predict next token
-    logits = W_output @ hidden
-
-    # 6. Reconstruct (for training)
-    reconstructed = context_decoder(context)  # 256 → 512 dims
-    reconstruction_loss = MSE(reconstructed, reconstruction_target)
+# Phase 2: Token Prediction (using fixed contexts)
+for epoch in range(epochs):
+    logits = model.token_output(context)
+    loss = cross_entropy(logits, target)
 ```
 
-**Key Innovation**: Fixed-size context vector (256 dims) instead of O(n²) attention.
+**Key Innovation**:
+- Fixed-size context vector (16-256 dims) instead of O(n²) attention
+- Distribution regularization prevents dimension collapse
+- Two-phase training ensures stable fixed points before token prediction
+
+---
+
+## 📊 Command-Line Arguments
+
+All settings can be controlled via command-line arguments:
+
+### Model Architecture
+```
+--context-dim INT       Context vector dimension (default: 256)
+--embed-dim INT         Token embedding dimension (default: 256)
+--hidden-dim INT        Hidden layer dimension (default: 512)
+--num-layers INT        Number of single-layer blocks (default: 4)
+                        Creates [1,1,1,1] for 4, [1,1,1] for 3, etc.
+```
+
+### Phase 1 Settings
+```
+--phase1-max-iter INT        Max iterations (default: 10)
+--phase1-lr-warmup FLOAT     Warmup LR (default: 0.002)
+--phase1-lr-medium FLOAT     Medium LR (default: 0.0005)
+--phase1-lr-finetune FLOAT   Finetune LR (default: 0.0001)
+```
+
+### Distribution Regularization
+```
+--dist-reg-weight FLOAT  Regularization weight (default: 0.2)
+--no-dist-reg            Disable distribution regularization
+```
+
+### Phase 2 Settings
+```
+--phase2-lr FLOAT         Learning rate (default: 0.0001)
+--phase2-epochs INT       Epochs (default: 10)
+--phase2-batch-size INT   Batch size (default: 32)
+```
+
+### Data Settings
+```
+--num-samples INT         Number of training samples (default: 10)
+--train-val-split FLOAT   Train/Val split ratio (default: 0.8)
+```
+
+### Other
+```
+--device STR           Device (cpu/cuda, default: cpu)
+--skip-phase2          Skip Phase 2 (only run Phase 1)
+--freeze-context       Freeze context in Phase 2
+```
 
 ---
 
@@ -100,20 +172,24 @@ for token in sequence:
 
 ```
 new-llm/
-├── train.py                           # Pure PyTorch training script
+├── config.py                          # Default configuration
 ├── src/
 │   ├── models/
-│   │   ├── context_vector_llm.py      # Core New-LLM architecture
-│   │   └── transformer_baseline.py    # Transformer comparison model
+│   │   └── new_llm_residual.py        # Residual Standard architecture
 │   └── utils/
-│       └── config.py                  # Model hyperparameters
-├── scripts/
-│   ├── colab_train_wikitext.sh        # One-line Colab training
-│   └── colab_train_ultrachat.sh       # UltraChat dataset training
-├── checkpoints/                       # Trained models (auto-saved)
-├── ARCHITECTURE.md                    # Architecture documentation
-├── RECONSTRUCTION_LEARNING.md         # Reconstruction learning details
-└── CLAUDE.md                          # Development guidelines
+│       ├── early_stopping.py          # Phase 1/2 early stopping
+│       └── cache_manager.py           # Fixed-context cache
+├── tests/
+│   ├── phase1_experiments/            # Phase 1 experiments
+│   └── phase2_experiments/            # Phase 2 experiments
+│       └── test_residual.py           # Main experiment script
+├── docs/
+│   └── experiments/                   # Experiment result reports
+├── cache/                             # Cache (DO NOT DELETE)
+│   ├── tokenizer/                     # Tokenizer cache
+│   └── manual_val_tokens.pt           # Manual validation data
+├── CLAUDE.md                          # Development guidelines
+└── README.md                          # This file
 ```
 
 ---
@@ -121,23 +197,77 @@ new-llm/
 ## 📖 Training Output Example
 
 ```
-Epoch 1/2
-Train: Loss 7.67 | Token 7.34 | Recon 0.33: 100%|████████| 13/13 [00:42<00:00,  3.25s/it]
-Val: Loss 7.09, PPL 1026.57, Acc 2.82%
+======================================================================
+Residual Standard Architecture Test
+======================================================================
 
-Epoch 2/2
-Train: Loss 6.65 | Token 6.57 | Recon 0.08: 100%|████████| 13/13 [00:42<00:00,  3.22s/it]
-Val: Loss 6.38, PPL 567.61, Acc 2.82%
+📋 Configuration: Command-line arguments
+   Edit defaults in: config.py (project root)
 
-Training complete!
-Best checkpoint saved to: test_run/best_model.pt
+🏗️  Model Architecture:
+   Layer structure: [1, 1, 1, 1]
+   Context dim: 16
+   Embed dim: 16
+   Hidden dim: 32
+
+⚙️  Phase 1 Settings (CVFP):
+   Max iterations: 10
+   Convergence threshold: 0.02
+   Min converged ratio: 0.95
+   LR schedule: 0.001 → 0.001 → 0.001
+   Distribution Reg: weight=0.2 (80% CVFP, 20% Dist)
+
+📊 Data Settings:
+   Num samples: 10
+   Train/Val split: 0.8
+   Device: cpu
+
+======================================================================
+PHASE 1: FIXED-POINT CONTEXT LEARNING
+======================================================================
+
+  Iteration 1: Loss=4.110549 (CVFP=4.110549, Dist=0.000000), Converged=0.0%
+  Iteration 2: Loss=0.103548 (CVFP=0.000000, Dist=0.517741), Converged=100.0%
+
+✅ Phase 1 converged in 2 iterations (100.0% converged)
+
+======================================================================
+FIXED-POINT ANALYSIS (Train)
+======================================================================
+
+1. Global Attractor Detection:
+   Average pairwise L2 distance: 4.199
+   Average pairwise cosine similarity: 0.37698
+   Status: ✅ No global attractor (diverse fixed points)
+
+2. Zero Solution Detection:
+   Average norm: 4.000
+   Status: ✅ Non-zero solution
+
+3. Distribution Statistics:
+   Norm range: [3.999978, 3.999982]
+   Norm std: 0.000001
+
+4. Information Content:
+   Effective Rank: 8.33 / 16 (52.0%)
+   Top 5 Singular Values: [156.30, 102.49, 73.90, 42.95, 36.61]
+
+======================================================================
+✅ PHASE 1 SUCCESSFUL
+======================================================================
+
+  Train Effective Rank: 8.33/16 (52%)
+  Val Effective Rank:   7.54/16 (47%)
+
+  Proceeding to Phase 2...
 ```
 
 **Key Metrics**:
-- **Token Loss**: Next-token prediction accuracy
-- **Recon Loss**: Context reconstruction accuracy
-- **PPL**: Perplexity (lower is better)
-- **Acc**: Token prediction accuracy
+- **Converged**: % of tokens converged to fixed points
+- **CVFP Loss**: Fixed-point matching loss
+- **Dist Loss**: Distribution regularization loss
+- **Effective Rank**: Measure of dimensional diversity (higher = better)
+- **L2 Distance**: Diversity of fixed points (higher = no global attractor)
 
 ---
 
@@ -145,10 +275,11 @@ Best checkpoint saved to: test_run/best_model.pt
 
 See `CLAUDE.md` for:
 
-- **Git management policies** (prevent merge conflicts)
-- **Colab experiment best practices** (1-line commands)
-- **Testing policies** (test locally before commit)
-- **Code cleanup rules** (no old code left behind)
+- **CVFP Property** - Core principle (DO NOT DELETE)
+- **Distribution Regularization** - Dimension collapse solution
+- **Phase 1/2 Execution Policy** - When to skip Phase 2
+- **Experiment Result Verification** - Must check all metrics
+- **Code Quality Policies** - DRY principle, file naming, cleanup
 
 ---
 
@@ -158,22 +289,32 @@ See `CLAUDE.md` for:
 
 New-LLM maintains **O(1) memory** regardless of sequence length, unlike Transformers' O(n²).
 
-### 2. Emergent Position Information
+### 2. Dimension Collapse Problem
 
-Position is learned implicitly through sequential processing - no explicit positional embeddings needed.
+**Problem**: Context vectors can collapse to 1-2 effective dimensions
+- Val Effective Rank: 1.01/16 (6%) - Global Attractor
+- All tokens converge to nearly identical vectors
 
-### 3. Self-Supervised Reconstruction Learning
+**Solution**: Distribution Regularization (force each dimension to follow N(0,1))
+- Val Effective Rank: 7.54/16 (47%) - **7.5x improvement**
+- Global Attractor completely eliminated
 
-No external teacher model needed - the model learns to compress its own context vectors.
+### 3. Two-Phase Training Necessity
+
+**Phase 1 must succeed before Phase 2**:
+- Minimum Train Effective Rank: 50/256 (20%)
+- Minimum Val Effective Rank: 20/256 (8%)
+
+Running Phase 2 with failed Phase 1 wastes hours of compute time.
 
 ---
 
 ## 🚀 Future Work
 
-1. **Longer context experiments** - Test O(1) memory advantage with 10k+ token sequences
-2. **Multi-layer scaling** - Experiment with deeper architectures (8-12 layers)
-3. **Comparison with Mamba/RWKV** - Benchmark against other sub-quadratic architectures
-4. **Hybrid models** - Combine context propagation with sparse attention
+1. **Scale to 256-dim models** - Test with full-size context vectors
+2. **Longer sequences** - Validate O(1) memory advantage
+3. **Multi-sample training** - 100+ samples for better generalization
+4. **Phase 2 optimization** - Improve token prediction performance
 
 ---
 
@@ -181,7 +322,7 @@ No external teacher model needed - the model learns to compress its own context 
 
 ```bibtex
 @misc{newllm2025,
-  title={New-LLM: Context Vector Propagation for Language Modeling Without Attention},
+  title={New-LLM: Context Vector Fixed-Point Property for Language Modeling},
   author={New-LLM Project},
   year={2025},
   url={https://github.com/rato-tokyo/new-llm}
@@ -196,4 +337,4 @@ MIT
 
 ---
 
-**Status**: Active research project using pure PyTorch with reconstruction learning.
+**Status**: Active research project - Phase 1 dimension collapse solved via Distribution Regularization (2025-01-22).
