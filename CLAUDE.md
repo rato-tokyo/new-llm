@@ -212,71 +212,49 @@ print_flush(f"   Proceeding to Phase 2...")
 
 ## 🧪 使用方法
 
-### 基本的な実行例
+### 実行方法
 
 ```bash
-# デフォルト設定（256次元、4層）
+# デフォルト設定で実行（256次元、4層）
 python3 tests/phase2_experiments/test_residual.py
-
-# 16次元モデル（次元崩壊テスト）
-python3 tests/phase2_experiments/test_residual.py \
-    --context-dim 16 \
-    --embed-dim 16 \
-    --hidden-dim 32 \
-    --num-samples 10
-
-# 3層モデル
-python3 tests/phase2_experiments/test_residual.py \
-    --num-layers 3
-
-# Distribution Regularizationの重みを変更
-python3 tests/phase2_experiments/test_residual.py \
-    --context-dim 16 \
-    --embed-dim 16 \
-    --hidden-dim 32 \
-    --dist-reg-weight 0.5  # 50% distribution, 50% CVFP
-
-# Phase 1のみ実行
-python3 tests/phase2_experiments/test_residual.py \
-    --context-dim 16 \
-    --embed-dim 16 \
-    --hidden-dim 32 \
-    --skip-phase2
 ```
 
-### すべての引数
+### 設定の変更
 
-```
-モデルアーキテクチャ:
-  --context-dim INT       文脈ベクトル次元数（デフォルト: 256）
-  --embed-dim INT         トークン埋め込み次元数（デフォルト: 256）
-  --hidden-dim INT        中間層次元数（デフォルト: 512）
-  --num-layers INT        単層ブロックの数（デフォルト: 4）
-                          4なら[1,1,1,1], 3なら[1,1,1]を生成
+すべての設定は `config.py` で管理されています。設定を変更する場合は、このファイルを直接編集してください。
 
-Phase 1設定:
-  --phase1-max-iter INT        最大反復回数（デフォルト: 10）
-  --phase1-lr-warmup FLOAT     Warmup LR（デフォルト: 0.002）
-  --phase1-lr-medium FLOAT     Medium LR（デフォルト: 0.0005）
-  --phase1-lr-finetune FLOAT   Finetune LR（デフォルト: 0.0001）
+**主要な設定項目**:
 
-Distribution Regularization:
-  --dist-reg-weight FLOAT  正則化の重み（デフォルト: 0.2）
-  --no-dist-reg            分布正則化を無効化
+```python
+# config.py
 
-Phase 2設定:
-  --phase2-lr FLOAT         学習率（デフォルト: 0.0001）
-  --phase2-epochs INT       エポック数（デフォルト: 10）
-  --phase2-batch-size INT   バッチサイズ（デフォルト: 32）
+# モデルアーキテクチャ
+num_layers = 4          # 単層ブロックの数（4なら[1,1,1,1]）
+context_dim = 256       # 文脈ベクトル次元数
+embed_dim = 256         # トークン埋め込み次元数
+hidden_dim = 512        # 中間層次元数
 
-データ設定:
-  --num-samples INT         訓練サンプル数（デフォルト: 10）
-  --train-val-split FLOAT   Train/Val分割比率（デフォルト: 0.8）
+# Distribution Regularization
+use_distribution_reg = True    # 分布正則化を使用（推奨）
+dist_reg_weight = 0.2          # 正則化の重み（0.2 = 80% CVFP, 20% Dist）
 
-その他:
-  --device STR           デバイス（cpu/cuda、デフォルト: cpu）
-  --skip-phase2          Phase 2をスキップ
-  --freeze-context       Phase 2で文脈を固定
+# Phase 1設定
+phase1_max_iterations = 10     # 最大反復回数
+phase1_lr_warmup = 0.002       # Warmup LR
+phase1_lr_medium = 0.0005      # Medium LR
+phase1_lr_finetune = 0.0001    # Finetune LR
+
+# Phase 2設定
+skip_phase2 = False            # Phase 2をスキップ（Phase 1のみ実行）
+freeze_context = False         # Phase 2で文脈を固定
+phase2_learning_rate = 0.0001  # 学習率
+phase2_epochs = 10             # エポック数
+phase2_batch_size = 32         # バッチサイズ
+
+# データ設定
+num_samples = 10               # 訓練サンプル数
+train_val_split = 0.8          # Train/Val分割比率
+device = "cpu"                 # デバイス（cpu/cuda）
 ```
 
 ---

@@ -14,22 +14,15 @@ An experimental language model that replaces attention mechanisms with **context
 # Install dependencies
 pip install torch tokenizers datasets tqdm
 
-# Quick test - 16-dim model (次元崩壊テスト)
-python3 tests/phase2_experiments/test_residual.py \
-    --context-dim 16 \
-    --embed-dim 16 \
-    --hidden-dim 32 \
-    --num-samples 10
-
-# Standard model - 256-dim, 4 layers (default)
+# Run with default configuration (256-dim, 4 layers)
 python3 tests/phase2_experiments/test_residual.py
 
-# Custom configuration - 3 layers
-python3 tests/phase2_experiments/test_residual.py \
-    --context-dim 128 \
-    --num-layers 3 \
-    --num-samples 50 \
-    --dist-reg-weight 0.2
+# To customize settings, edit config.py:
+# - Model architecture (num_layers, context_dim, embed_dim, etc.)
+# - Phase 1 settings (max_iterations, learning rates, etc.)
+# - Distribution Regularization (weight, enable/disable)
+# - Phase 2 settings (skip_phase2, freeze_context, epochs, etc.)
+# - Data settings (num_samples, train_val_split, etc.)
 ```
 
 ---
@@ -119,52 +112,64 @@ for epoch in range(epochs):
 
 ---
 
-## 📊 Command-Line Arguments
+## 📊 Configuration
 
-All settings can be controlled via command-line arguments:
+All settings are managed in `config.py`. Edit this file to customize:
 
 ### Model Architecture
-```
---context-dim INT       Context vector dimension (default: 256)
---embed-dim INT         Token embedding dimension (default: 256)
---hidden-dim INT        Hidden layer dimension (default: 512)
---num-layers INT        Number of single-layer blocks (default: 4)
-                        Creates [1,1,1,1] for 4, [1,1,1] for 3, etc.
-```
+- `num_layers` - Number of single-layer blocks (default: 4, creates [1,1,1,1])
+- `context_dim` - Context vector dimension (default: 256)
+- `embed_dim` - Token embedding dimension (default: 256)
+- `hidden_dim` - Hidden layer dimension (default: 512)
 
-### Phase 1 Settings
-```
---phase1-max-iter INT        Max iterations (default: 10)
---phase1-lr-warmup FLOAT     Warmup LR (default: 0.002)
---phase1-lr-medium FLOAT     Medium LR (default: 0.0005)
---phase1-lr-finetune FLOAT   Finetune LR (default: 0.0001)
-```
+### Phase 1: Fixed-Point Learning
+- `phase1_max_iterations` - Max iterations (default: 10)
+- `phase1_lr_warmup` - Warmup LR (default: 0.002)
+- `phase1_lr_medium` - Medium LR (default: 0.0005)
+- `phase1_lr_finetune` - Finetune LR (default: 0.0001)
 
 ### Distribution Regularization
-```
---dist-reg-weight FLOAT  Regularization weight (default: 0.2)
---no-dist-reg            Disable distribution regularization
-```
+- `use_distribution_reg` - Enable/disable (default: True)
+- `dist_reg_weight` - Regularization weight (default: 0.2)
 
-### Phase 2 Settings
-```
---phase2-lr FLOAT         Learning rate (default: 0.0001)
---phase2-epochs INT       Epochs (default: 10)
---phase2-batch-size INT   Batch size (default: 32)
-```
+### Phase 2: Token Prediction
+- `skip_phase2` - Skip Phase 2 (default: False)
+- `freeze_context` - Freeze context layers (default: False)
+- `phase2_learning_rate` - Learning rate (default: 0.0001)
+- `phase2_epochs` - Training epochs (default: 10)
+- `phase2_batch_size` - Batch size (default: 32)
 
 ### Data Settings
-```
---num-samples INT         Number of training samples (default: 10)
---train-val-split FLOAT   Train/Val split ratio (default: 0.8)
+
+**Training Data Source**:
+- `train_data_source` - Data source: "ultrachat", "text_file", or "text_dir" (default: "ultrachat")
+- `train_text_file` - Path to single text file (for text_file mode)
+- `train_text_dir` - Path to directory with .txt files (for text_dir mode)
+
+**Validation Data Source**:
+- `val_data_source` - Data source: "manual", "text_file", "text_dir", or "auto_split" (default: "manual")
+- `val_text_file` - Path to single text file (for text_file mode)
+- `val_text_dir` - Path to directory with .txt files (for text_dir mode)
+- `manual_val_path` - Path to pre-tokenized validation data (for manual mode)
+
+**Other**:
+- `num_samples` - Number of training samples for UltraChat (default: 10)
+- `train_val_split` - Train/Val split ratio for auto_split (default: 0.8)
+- `device` - Device to use: "cpu" or "cuda" (default: "cpu")
+
+**Using Custom Text Data**:
+
+Place your text files in `./data/` directory:
+```python
+# config.py
+train_data_source = "text_file"
+train_text_file = "./data/my_train.txt"
+
+val_data_source = "text_file"
+val_text_file = "./data/my_val.txt"
 ```
 
-### Other
-```
---device STR           Device (cpu/cuda, default: cpu)
---skip-phase2          Skip Phase 2 (only run Phase 1)
---freeze-context       Freeze context in Phase 2
-```
+See `data/README.md` for detailed examples and format specifications.
 
 ---
 
@@ -183,6 +188,10 @@ new-llm/
 │   ├── phase1_experiments/            # Phase 1 experiments
 │   └── phase2_experiments/            # Phase 2 experiments
 │       └── test_residual.py           # Main experiment script
+├── data/                              # Custom text data (optional)
+│   ├── README.md                      # Data format guide
+│   ├── example_train.txt              # Example training data
+│   └── example_val.txt                # Example validation data
 ├── docs/
 │   └── experiments/                   # Experiment result reports
 ├── cache/                             # Cache (DO NOT DELETE)

@@ -1,0 +1,8 @@
+The cat sat on the mat.
+This is validation data to test the model.
+
+Artificial intelligence is transforming many industries.
+Machine learning algorithms can find patterns in large datasets.
+
+Neural networks are inspired by biological brains.
+They consist of interconnected nodes that process information.

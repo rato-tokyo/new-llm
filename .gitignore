@@ -10,6 +10,12 @@ experiments/
 # Cache files (HuggingFace datasets, tokenizers, contexts)
 cache/
 
+# User data files (keep README and examples only)
+data/*
+!data/README.md
+!data/example_train.txt
+!data/example_val.txt
+
 # Python
 __pycache__/
 *.py[cod]

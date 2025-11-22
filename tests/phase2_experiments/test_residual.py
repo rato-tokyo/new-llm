@@ -7,11 +7,9 @@ Supports Phase 1 (fixed-point context learning) and Phase 2 (token prediction).
 
 import sys
 import os
-import argparse
 import torch
 import torch.nn as nn
 import numpy as np
-from datasets import load_dataset
 
 # Add project root to path
 sys.path.insert(0, '/Users/sakajiritomoyoshi/Desktop/git/new-llm')
@@ -23,6 +21,13 @@ from src.utils.early_stopping import Phase1EarlyStopping, Phase2EarlyStopping
 # Import config from project root
 import config
 
+# Conditional import for datasets (only needed for UltraChat)
+try:
+    from datasets import load_dataset
+    DATASETS_AVAILABLE = True
+except ImportError:
+    DATASETS_AVAILABLE = False
+
 
 def print_flush(*args, **kwargs):
     """Print with immediate flush to ensure real-time output"""
@@ -30,8 +35,54 @@ def print_flush(*args, **kwargs):
     sys.stdout.flush()
 
 
+def load_text_file(file_path):
+    """Load text from a single file"""
+    print_flush(f"Loading text from: {file_path}")
+
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"Text file not found: {file_path}")
+
+    with open(file_path, 'r', encoding='utf-8') as f:
+        text = f.read()
+
+    # Split by double newlines to get paragraphs, or by single newlines
+    texts = [t.strip() for t in text.split('\n\n') if t.strip()]
+    if not texts:
+        texts = [t.strip() for t in text.split('\n') if t.strip()]
+
+    print_flush(f"  Loaded {len(texts)} text segments")
+    return texts
+
+
+def load_text_directory(dir_path, max_files=None):
+    """Load all text files from a directory"""
+    print_flush(f"Loading text files from: {dir_path}")
+
+    if not os.path.exists(dir_path):
+        raise FileNotFoundError(f"Directory not found: {dir_path}")
+
+    texts = []
+    txt_files = sorted([f for f in os.listdir(dir_path) if f.endswith('.txt')])
+
+    if max_files:
+        txt_files = txt_files[:max_files]
+
+    for filename in txt_files:
+        file_path = os.path.join(dir_path, filename)
+        with open(file_path, 'r', encoding='utf-8') as f:
+            text = f.read().strip()
+            if text:
+                texts.append(text)
+
+    print_flush(f"  Loaded {len(texts)} files")
+    return texts
+
+
 def load_ultrachat_samples(num_samples=10):
     """Load UltraChat samples"""
+    if not DATASETS_AVAILABLE:
+        raise ImportError("datasets module not available. Install with: pip install datasets")
+
     print_flush(f"Loading {num_samples} samples from UltraChat...")
 
     dataset = load_dataset("HuggingFaceH4/ultrachat_200k", split="train_sft")
@@ -43,6 +94,53 @@ def load_ultrachat_samples(num_samples=10):
             texts.append(msg['content'])
 
     return texts
+
+
+def load_train_data(cfg):
+    """Load training data based on config"""
+    if cfg.train_data_source == "ultrachat":
+        return load_ultrachat_samples(cfg.num_samples)
+    elif cfg.train_data_source == "text_file":
+        return load_text_file(cfg.train_text_file)
+    elif cfg.train_data_source == "text_dir":
+        return load_text_directory(cfg.train_text_dir, cfg.num_samples)
+    else:
+        raise ValueError(f"Unknown train_data_source: {cfg.train_data_source}")
+
+
+def load_val_data(cfg, tokenizer):
+    """Load validation data based on config
+
+    Returns:
+        torch.Tensor: Token IDs for validation data
+    """
+    if cfg.val_data_source == "manual":
+        # Load pre-tokenized manual validation data
+        if os.path.exists(cfg.manual_val_path):
+            print_flush(f"Loading manual validation data: {cfg.manual_val_path}")
+            val_ids = torch.load(cfg.manual_val_path)
+            print_flush(f"  Loaded {len(val_ids)} validation tokens")
+            return val_ids
+        else:
+            raise FileNotFoundError(f"Manual validation file not found: {cfg.manual_val_path}")
+
+    elif cfg.val_data_source == "text_file":
+        texts = load_text_file(cfg.val_text_file)
+    elif cfg.val_data_source == "text_dir":
+        texts = load_text_directory(cfg.val_text_dir)
+    elif cfg.val_data_source == "auto_split":
+        # This will be handled by caller (split from training data)
+        return None
+    else:
+        raise ValueError(f"Unknown val_data_source: {cfg.val_data_source}")
+
+    # Tokenize validation texts
+    token_ids = []
+    for text in texts:
+        ids = tokenizer.encode(text, add_special_tokens=False)
+        token_ids.extend(ids)
+
+    return torch.tensor(token_ids, dtype=torch.long)
 
 
 def tokenize_texts(texts):
@@ -104,6 +202,9 @@ def phase1_train(model, token_ids, config, device='cpu'):
         total_cvfp_loss = 0
         total_dist_loss = 0
 
+        # Save previous iteration's contexts for comparison
+        prev_fixed_contexts = fixed_contexts.clone()
+
         # LR Schedule
         if iteration <= 3:
             lr = config.phase1_lr_warmup
@@ -131,8 +232,7 @@ def phase1_train(model, token_ids, config, device='cpu'):
             # Collect contexts for distribution regularization
             all_contexts.append(context)
 
-            # Save context for next iteration and carry over to next token
-            fixed_contexts[t] = context.detach().squeeze(0)
+            # Carry over to next token (no saving yet)
             context = context.detach()  # Detach to prevent growing computation graph
             context.requires_grad = True  # Re-enable gradients for next token
 
@@ -144,7 +244,7 @@ def phase1_train(model, token_ids, config, device='cpu'):
             all_contexts_tensor = torch.cat(all_contexts, dim=0)  # [num_tokens, context_dim]
 
             # CVFP loss: match previous iteration's contexts
-            cvfp_loss = torch.nn.functional.mse_loss(all_contexts_tensor, fixed_contexts)
+            cvfp_loss = torch.nn.functional.mse_loss(all_contexts_tensor, prev_fixed_contexts)
             total_cvfp_loss = cvfp_loss.item()
 
             # Distribution regularization loss (if enabled)
@@ -173,15 +273,21 @@ def phase1_train(model, token_ids, config, device='cpu'):
             total_loss.backward()
             optimizer.step()
 
+            # Save contexts for next iteration
+            fixed_contexts = all_contexts_tensor.detach()
+
             # Check convergence for each token
             with torch.no_grad():
-                token_losses = ((all_contexts_tensor - fixed_contexts) ** 2).mean(dim=1)
+                token_losses = ((all_contexts_tensor - prev_fixed_contexts) ** 2).mean(dim=1)
                 converged_tokens = token_losses < config.phase1_convergence_threshold
 
         # Compute convergence rate
         convergence_rate = converged_tokens.float().mean().item()
 
         if iteration == 0:
+            # Save contexts from first iteration
+            all_contexts_tensor = torch.cat(all_contexts, dim=0)
+            fixed_contexts = all_contexts_tensor.detach()
             print_flush(f"Iteration 1/{config.phase1_max_iterations}: Forward pass only (saving contexts)")
         else:
             log_msg = f"Iteration {iteration+1}/{config.phase1_max_iterations}: "
@@ -428,6 +534,9 @@ def compute_fixed_contexts(model, token_ids, config, device='cpu'):
     for iteration in range(config.phase1_max_iterations):
         total_loss_value = 0.0  # Track total loss across all tokens
 
+        # Save previous iteration's contexts for comparison
+        prev_fixed_contexts = fixed_contexts.clone()
+
         # Process entire sequence with context carry-over
         context = torch.zeros(1, model.context_dim).to(device)
 
@@ -440,12 +549,12 @@ def compute_fixed_contexts(model, token_ids, config, device='cpu'):
 
                 # Check convergence (compare to previous iteration)
                 if iteration > 0:
-                    loss = torch.nn.functional.mse_loss(context, fixed_contexts[t].unsqueeze(0))
+                    loss = torch.nn.functional.mse_loss(context, prev_fixed_contexts[t].unsqueeze(0))
                     total_loss_value += loss.item()  # Accumulate loss
                     if loss.item() < config.phase1_convergence_threshold:
                         converged_tokens[t] = True
 
-                # Update fixed context
+                # Update fixed context for next iteration
                 fixed_contexts[t] = context.squeeze(0)
 
         convergence_rate = converged_tokens.float().mean().item()
@@ -588,7 +697,7 @@ def analyze_fixed_points(contexts, label="", token_ids=None):
 
 
 def phase2_train(model, token_ids, fixed_contexts, val_ids, val_contexts,
-                 num_epochs=50, batch_size=32, freeze_context=False, device='cpu'):
+                 num_epochs, batch_size, freeze_context=False, device='cpu'):
     """Phase 2: Token prediction training with validation"""
     print_flush("\n" + "="*70)
     print_flush("PHASE 2: Token Prediction Training")
@@ -699,100 +808,14 @@ def phase2_train(model, token_ids, fixed_contexts, val_ids, val_contexts,
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Test Residual Standard Architecture')
-
-    # Model architecture
-    parser.add_argument('--context-dim', type=int, default=None,
-                        help='Context vector dimension (default: 256)')
-    parser.add_argument('--embed-dim', type=int, default=None,
-                        help='Token embedding dimension (default: 256)')
-    parser.add_argument('--hidden-dim', type=int, default=None,
-                        help='Hidden layer dimension (default: 512)')
-    parser.add_argument('--num-layers', type=int, default=None,
-                        help='Number of single-layer blocks (default: 4, creates [1,1,1,1])')
-
-    # Phase 1 settings
-    parser.add_argument('--phase1-max-iter', type=int, default=None,
-                        help='Phase 1 max iterations (default: 10)')
-    parser.add_argument('--phase1-lr-warmup', type=float, default=None,
-                        help='Phase 1 warmup LR (default: 0.002)')
-    parser.add_argument('--phase1-lr-medium', type=float, default=None,
-                        help='Phase 1 medium LR (default: 0.0005)')
-    parser.add_argument('--phase1-lr-finetune', type=float, default=None,
-                        help='Phase 1 finetune LR (default: 0.0001)')
-
-    # Distribution Regularization
-    parser.add_argument('--dist-reg-weight', type=float, default=None,
-                        help='Distribution regularization weight (default: 0.2)')
-    parser.add_argument('--no-dist-reg', action='store_true',
-                        help='Disable distribution regularization')
-
-    # Phase 2 settings
-    parser.add_argument('--phase2-lr', type=float, default=None,
-                        help='Phase 2 learning rate (default: 0.0001)')
-    parser.add_argument('--phase2-epochs', type=int, default=None,
-                        help='Phase 2 epochs (default: 10)')
-    parser.add_argument('--phase2-batch-size', type=int, default=None,
-                        help='Phase 2 batch size (default: 32)')
-
-    # Data settings
-    parser.add_argument('--num-samples', type=int, default=None,
-                        help='Number of training samples (default: 10)')
-    parser.add_argument('--train-val-split', type=float, default=None,
-                        help='Train/Val split ratio (default: 0.8)')
-
-    # Other settings
-    parser.add_argument('--device', type=str, default=None,
-                        help='Device (cpu or cuda, default: cpu)')
-    parser.add_argument('--skip-phase2', action='store_true',
-                        help='Skip Phase 2 (only run Phase 1)')
-    parser.add_argument('--freeze-context', action='store_true',
-                        help='Freeze context in Phase 2 (only train token output)')
-
-    args = parser.parse_args()
-
-    # Load default configuration
+    # Load configuration from config.py
     cfg = config.ResidualConfig()
-
-    # Override with command-line arguments
-    if args.context_dim is not None:
-        cfg.context_dim = args.context_dim
-    if args.embed_dim is not None:
-        cfg.embed_dim = args.embed_dim
-    if args.hidden_dim is not None:
-        cfg.hidden_dim = args.hidden_dim
-    if args.num_layers is not None:
-        cfg.num_layers = args.num_layers
-    if args.phase1_max_iter is not None:
-        cfg.phase1_max_iterations = args.phase1_max_iter
-    if args.phase1_lr_warmup is not None:
-        cfg.phase1_lr_warmup = args.phase1_lr_warmup
-    if args.phase1_lr_medium is not None:
-        cfg.phase1_lr_medium = args.phase1_lr_medium
-    if args.phase1_lr_finetune is not None:
-        cfg.phase1_lr_finetune = args.phase1_lr_finetune
-    if args.dist_reg_weight is not None:
-        cfg.dist_reg_weight = args.dist_reg_weight
-    if args.no_dist_reg:
-        cfg.use_distribution_reg = False
-    if args.phase2_lr is not None:
-        cfg.phase2_learning_rate = args.phase2_lr
-    if args.phase2_epochs is not None:
-        cfg.phase2_epochs = args.phase2_epochs
-    if args.phase2_batch_size is not None:
-        cfg.phase2_batch_size = args.phase2_batch_size
-    if args.num_samples is not None:
-        cfg.num_samples = args.num_samples
-    if args.train_val_split is not None:
-        cfg.train_val_split = args.train_val_split
-    if args.device is not None:
-        cfg.device = args.device
 
     print_flush("="*70)
     print_flush("Residual Standard Architecture Test")
     print_flush("="*70)
-    print_flush(f"\n📋 Configuration: Command-line arguments")
-    print_flush(f"   Edit defaults in: config.py (project root)\n")
+    print_flush(f"\n📋 Configuration: config.py")
+    print_flush(f"   Edit settings in: config.py (project root)\n")
 
     print_flush("🏗️  Model Architecture:")
     print_flush(f"   Num layers: {cfg.num_layers} (structure: {[1] * cfg.num_layers})")
@@ -813,30 +836,45 @@ def main():
     else:
         print_flush("   Pure CVFP (no distribution regularization)\n")
 
+    print_flush("⚙️  Phase 2 Settings:")
+    print_flush(f"   Skip Phase 2: {cfg.skip_phase2}")
+    if not cfg.skip_phase2:
+        print_flush(f"   Freeze context: {cfg.freeze_context}")
+        print_flush(f"   Learning rate: {cfg.phase2_learning_rate}")
+        print_flush(f"   Epochs: {cfg.phase2_epochs}")
+        print_flush(f"   Batch size: {cfg.phase2_batch_size}\n")
+    else:
+        print_flush("")
+
     print_flush("📊 Data Settings:")
-    print_flush(f"   Num samples: {cfg.num_samples}")
-    print_flush(f"   Train/Val split: {cfg.train_val_split}")
+    print_flush(f"   Train source: {cfg.train_data_source}")
+    print_flush(f"   Val source: {cfg.val_data_source}")
+    if cfg.train_data_source == "ultrachat":
+        print_flush(f"   Num samples: {cfg.num_samples}")
     print_flush(f"   Device: {cfg.device}\n")
 
-    # Load data
-    print_flush("Loading data...")
-    texts = load_ultrachat_samples(cfg.num_samples)
-    all_token_ids, tokenizer = tokenize_texts(texts)
+    # Load training data
+    print_flush("Loading training data...")
+    train_texts = load_train_data(cfg)
+    all_token_ids, tokenizer = tokenize_texts(train_texts)
+    print_flush(f"  Loaded {len(train_texts)} text segments → {len(all_token_ids)} tokens")
 
-    # Use manual validation data (tokens from training set only)
-    train_ids = all_token_ids
-    manual_val_path = '/Users/sakajiritomoyoshi/Desktop/git/new-llm/cache/manual_val_tokens.pt'
-    if os.path.exists(manual_val_path):
-        val_ids = torch.load(manual_val_path)
-        print_flush(f"  Train: {len(train_ids)} tokens")
-        print_flush(f"  Val:   {len(val_ids)} tokens (manual data, uses training vocab only)")
-    else:
-        # Fallback to split if manual data not found
+    # Load validation data
+    val_ids = load_val_data(cfg, tokenizer)
+
+    if val_ids is None:
+        # auto_split mode: split from training data
+        print_flush("Using auto-split for validation data...")
         split_idx = int(len(all_token_ids) * cfg.train_val_split)
         train_ids = all_token_ids[:split_idx]
         val_ids = all_token_ids[split_idx:]
         print_flush(f"  Train: {len(train_ids)} tokens")
         print_flush(f"  Val:   {len(val_ids)} tokens (auto-split)")
+    else:
+        # Separate validation data loaded
+        train_ids = all_token_ids
+        print_flush(f"  Train: {len(train_ids)} tokens")
+        print_flush(f"  Val:   {len(val_ids)} tokens ({cfg.val_data_source})")
 
     print_flush(f"\n{'='*70}")
     print_flush(f"Starting Training: Residual Standard ({cfg.num_layers} layers)")
@@ -894,9 +932,12 @@ def main():
     print_flush("="*70)
 
     # Phase 2: Token prediction (skip if requested)
-    if not args.skip_phase2:
+    if not cfg.skip_phase2:
         val_metrics = phase2_train(model, train_ids, train_contexts, val_ids, val_contexts,
-                                    freeze_context=args.freeze_context, device=cfg.device)
+                                    num_epochs=cfg.phase2_epochs,
+                                    batch_size=cfg.phase2_batch_size,
+                                    freeze_context=cfg.freeze_context,
+                                    device=cfg.device)
 
         # Final results
         print_flush("\n" + "="*70)
