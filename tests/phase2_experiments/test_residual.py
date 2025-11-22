@@ -6,6 +6,7 @@ Supports Phase 1 (fixed-point context learning) and Phase 2 (token prediction).
 """
 
 import sys
+import os
 import argparse
 import torch
 import torch.nn as nn
@@ -723,13 +724,20 @@ def main():
     texts = load_ultrachat_samples(cfg.num_samples)
     all_token_ids, tokenizer = tokenize_texts(texts)
 
-    # Split into train/val
-    split_idx = int(len(all_token_ids) * cfg.train_val_split)
-    train_ids = all_token_ids[:split_idx]
-    val_ids = all_token_ids[split_idx:]
-
-    print_flush(f"  Train: {len(train_ids)} tokens")
-    print_flush(f"  Val:   {len(val_ids)} tokens")
+    # Use manual validation data (tokens from training set only)
+    train_ids = all_token_ids
+    manual_val_path = '/Users/sakajiritomoyoshi/Desktop/git/new-llm/cache/manual_val_tokens.pt'
+    if os.path.exists(manual_val_path):
+        val_ids = torch.load(manual_val_path)
+        print_flush(f"  Train: {len(train_ids)} tokens")
+        print_flush(f"  Val:   {len(val_ids)} tokens (manual data, uses training vocab only)")
+    else:
+        # Fallback to split if manual data not found
+        split_idx = int(len(all_token_ids) * cfg.train_val_split)
+        train_ids = all_token_ids[:split_idx]
+        val_ids = all_token_ids[split_idx:]
+        print_flush(f"  Train: {len(train_ids)} tokens")
+        print_flush(f"  Val:   {len(val_ids)} tokens (auto-split)")
 
     print_flush(f"\n{'='*70}")
     print_flush(f"Starting Training: Residual Standard {cfg.layer_structure}")
