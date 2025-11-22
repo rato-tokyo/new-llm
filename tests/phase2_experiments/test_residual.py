@@ -455,7 +455,11 @@ def compute_fixed_contexts(model, token_ids, config, device='cpu'):
 
 
 def analyze_fixed_points(contexts, label=""):
-    """Analyze fixed-point contexts for degenerate solutions and statistics"""
+    """Analyze fixed-point contexts for degenerate solutions and statistics
+
+    Returns:
+        effective_rank (float): Effective rank of the context matrix
+    """
     print_flush(f"\n{'='*70}")
     print_flush(f"FIXED-POINT ANALYSIS{' - ' + label if label else ''}")
     print_flush(f"{'='*70}")
@@ -530,6 +534,8 @@ def analyze_fixed_points(contexts, label=""):
         print_flush(f"  ✅ Good diversity")
 
     print_flush(f"{'='*70}\n")
+
+    return effective_rank
 
 
 def phase2_train(model, token_ids, fixed_contexts, val_ids, val_contexts,
@@ -723,8 +729,35 @@ def main():
     val_contexts = compute_fixed_contexts(model, val_ids, cfg, device=cfg.device)
 
     # Analyze fixed points for degenerate solutions
-    analyze_fixed_points(train_contexts, label="Train")
-    analyze_fixed_points(val_contexts, label="Val")
+    train_effective_rank = analyze_fixed_points(train_contexts, label="Train")
+    val_effective_rank = analyze_fixed_points(val_contexts, label="Val")
+
+    # Check if Phase 1 succeeded (minimum Effective Rank requirements)
+    MIN_TRAIN_RANK = 50.0  # Minimum 50/256 (20%)
+    MIN_VAL_RANK = 20.0    # Minimum 20/256 (8%)
+
+    phase1_success = (train_effective_rank >= MIN_TRAIN_RANK and
+                      val_effective_rank >= MIN_VAL_RANK)
+
+    if not phase1_success:
+        print_flush("\n" + "="*70)
+        print_flush("⚠️  PHASE 1 FAILED - DIMENSION COLLAPSE DETECTED")
+        print_flush("="*70)
+        print_flush(f"\n  Train Effective Rank: {train_effective_rank:.2f}/256 (required: >= {MIN_TRAIN_RANK})")
+        print_flush(f"  Val Effective Rank:   {val_effective_rank:.2f}/256 (required: >= {MIN_VAL_RANK})")
+        print_flush(f"\n  ❌ Phase 2 skipped. Fix dimension collapse first.")
+        print_flush(f"  ❌ See CLAUDE.md for Phase 1/2 execution policy.")
+        print_flush("\n" + "="*70)
+        return
+
+    # Phase 1 succeeded
+    print_flush("\n" + "="*70)
+    print_flush("✅ PHASE 1 SUCCESSFUL")
+    print_flush("="*70)
+    print_flush(f"\n  Train Effective Rank: {train_effective_rank:.2f}/256")
+    print_flush(f"  Val Effective Rank:   {val_effective_rank:.2f}/256")
+    print_flush(f"\n  Proceeding to Phase 2...")
+    print_flush("="*70)
 
     # Phase 2: Token prediction (skip if requested)
     if not args.skip_phase2:

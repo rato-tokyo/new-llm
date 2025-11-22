@@ -37,6 +37,52 @@ New-LLMは以下の方向性に確定：
 
 ---
 
+## 🚫 Phase 1未解決時のPhase 2実行禁止ポリシー - CRITICAL
+
+**⚠️ Phase 1で次元崩壊が解決しない限り、Phase 2は実行しない**
+
+### 基本原則
+
+**Phase 1（固有点学習）で以下の条件を満たさない限り、Phase 2（トークン予測）を実行してはならない**:
+
+1. **Train Effective Rank**: 最低でも 50/256 (20%) 以上
+2. **Val Effective Rank**: 最低でも 20/256 (8%) 以上
+3. **次元崩壊の兆候なし**: 特異値の1位と2位の比が10倍未満
+
+### 理由
+
+**Phase 1が失敗している状態でPhase 2を実行しても無意味**:
+- Val Effective Rank 1.08/256 = ほぼ1次元に崩壊
+- この状態で50エポック訓練しても、表現力がない
+- 計算時間の無駄（数時間〜数日）
+- Phase 1の問題を隠蔽してしまう
+
+### 実装ルール
+
+**test_residual.pyでは、Phase 1の結果をチェックしてからPhase 2を実行すること**:
+
+```python
+# Phase 1終了後、Val Effective Rankをチェック
+if val_effective_rank < 20.0:
+    print_flush(f"\n⚠️  WARNING: Val Effective Rank too low ({val_effective_rank:.2f}/256)")
+    print_flush(f"   Phase 2 skipped. Fix dimension collapse first.")
+    return
+
+# Effective Rankが十分な場合のみPhase 2実行
+print_flush(f"\n✅ Phase 1 successful: Val Effective Rank = {val_effective_rank:.2f}/256")
+print_flush(f"   Proceeding to Phase 2...")
+```
+
+### このルールを破った場合
+
+- ❌ 数時間の計算時間を浪費
+- ❌ Phase 1の本質的な問題が隠される
+- ❌ 次元崩壊の原因究明が遅れる
+
+**Phase 1の次元崩壊を解決することが最優先。Phase 2は二の次。**
+
+---
+
 ## 🔍 実験結果の完全確認ポリシー - CRITICAL
 
 **⚠️ 実験結果を報告する際は、必ず全ての情報を確認すること**
