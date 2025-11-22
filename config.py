@@ -42,7 +42,9 @@ class ResidualConfig:
     use_ddr = True                     # DDRを使用（推奨：True）
     ddr_momentum = 0.9                 # 次元別活性のEMAモメンタム
     ddr_boost_weight = 0.1             # 低活性次元へのブースト重み
-    ddr_threshold_ratio = 1.0          # 平均活性の何倍未満をブースト対象とするか
+    ddr_threshold_ratio = 0.5          # 平均活性の何倍未満をブースト対象とするか
+                                       # 0.5 = 平均の50%未満の次元のみブースト（推奨）
+                                       # 1.0 = 平均未満の次元すべてブースト（広範囲）
 
     # ========== Phase 1: 固有点学習 ==========
     phase1_max_iterations = 20           # 固有点探索の最大反復回数

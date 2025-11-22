@@ -138,10 +138,11 @@ def phase1_train(model, token_ids, config, device='cpu'):
                 # 低活性次元をブーストして次元崩壊を防ぐ
                 if config.use_ddr:
                     with torch.no_grad():
-                        # Update dimension-wise activity (EMA of absolute values)
+                        # Update dimension-wise activity (EMA of model output's absolute values)
+                        # モデルの出力を追跡（教師ではなく、実際の出力の活性を見る）
                         ddr_dim_activity = (
                             config.ddr_momentum * ddr_dim_activity +
-                            (1 - config.ddr_momentum) * torch.abs(target_context.squeeze(0))
+                            (1 - config.ddr_momentum) * torch.abs(context.squeeze(0))
                         )
 
                         # Calculate boost for low-activity dimensions
@@ -157,6 +158,7 @@ def phase1_train(model, token_ids, config, device='cpu'):
                         )
 
                     # Apply boost to target (encourage low-activity dimensions)
+                    # 低活性次元を使うように教師ベクトルを調整
                     target_context = target_context + config.ddr_boost_weight * boost_amount.unsqueeze(0)
 
                 loss = torch.nn.functional.mse_loss(context, target_context)
