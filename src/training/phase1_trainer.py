@@ -50,6 +50,10 @@ class Phase1Trainer:
         # Optimizer（訓練時のみ作成）
         self.optimizer = None
 
+        # 最後のCVFPロスとDistロスを記録（ログ出力用）
+        self._last_cvfp_loss = 0.0
+        self._last_dist_loss = 0.0
+
     def train(self, token_ids, device, label="Train"):
         """
         訓練実行（最適化あり）
@@ -125,9 +129,8 @@ class Phase1Trainer:
         for iteration in range(self.max_iterations):
             self.current_iteration = iteration
 
-            # イテレーション開始時の処理
-            if is_training and iteration > 0:
-                self.model.reset_cvfp_state()
+            # イテレーション開始時の処理（CVFP状態はPhase1Trainerで管理）
+            # reset_cvfp_state()は不要（previous_contextsで管理）
 
             # トークンごとの処理
             current_contexts = self._process_tokens(token_embeds, device, is_training)
@@ -194,7 +197,8 @@ class Phase1Trainer:
                 # 訓練モード: 最適化あり
                 context = self._train_one_token(
                     token_embed.unsqueeze(0),
-                    context.detach() if t > 0 else context
+                    context.detach() if t > 0 else context,
+                    token_idx=t
                 )
             else:
                 # 評価モード: 最適化なし
@@ -209,25 +213,57 @@ class Phase1Trainer:
         # 全コンテキストをスタック
         return torch.cat(current_contexts, dim=0)
 
-    def _train_one_token(self, token_embed, context):
+    def _train_one_token(self, token_embed, context, token_idx):
         """
         1トークンの訓練（最適化実行）
 
         Args:
             token_embed: トークン埋め込み [1, embed_dim]
             context: 現在のコンテキスト [1, context_dim]
+            token_idx: トークンインデックス（CVFP損失計算用）
 
         Returns:
             new_context: 更新されたコンテキスト [1, context_dim]
         """
+        import torch.nn.functional as F
+
         # 順伝播
         new_context = self.model._update_context_one_step(token_embed, context)
 
-        # CVFP損失を計算
-        total_loss, loss_dict = self.model.get_total_loss(self.dist_reg_weight)
+        # CVFP損失を計算（前回イテレーションとの比較）
+        if self.current_iteration > 0 and self.previous_contexts is not None:
+            # 同じトークン位置の前回イテレーション出力と比較
+            # previous_contextsはdetachされているので、requires_grad=Trueにする
+            previous_token_context = self.previous_contexts[token_idx:token_idx+1].detach()
+            cvfp_loss = F.mse_loss(new_context, previous_token_context)
+        else:
+            # 初回イテレーションはCVFP損失なし
+            cvfp_loss = torch.tensor(0.0, device=new_context.device, requires_grad=True)
 
-        # CVFP損失が0より大きい場合のみ最適化
-        if loss_dict['cvfp'] > 0:
+        # 分布正則化損失を現在のコンテキストから直接計算（勾配あり）
+        if self.model.use_dist_reg:
+            # N(0, 1)からの逸脱にペナルティ
+            # new_contextは[1, context_dim]なので、次元0で平均・分散を計算
+            context_mean = new_context.mean(dim=-1, keepdim=True)  # [1, 1]
+            context_var = new_context.var(dim=-1, unbiased=False, keepdim=True)  # [1, 1]
+
+            mean_penalty = (context_mean ** 2).mean()
+            var_penalty = ((context_var - 1.0) ** 2).mean()
+            dist_loss = mean_penalty + var_penalty
+        else:
+            dist_loss = torch.tensor(0.0, device=new_context.device, requires_grad=True)
+
+        # 総合損失を計算
+        total_loss = (1 - self.dist_reg_weight) * cvfp_loss + self.dist_reg_weight * dist_loss
+
+        # CVFPロスとDistロスを記録（ログ出力用）
+        cvfp_loss_val = cvfp_loss.item() if isinstance(cvfp_loss, torch.Tensor) else cvfp_loss
+        dist_loss_val = dist_loss.item() if isinstance(dist_loss, torch.Tensor) else dist_loss
+        self._last_cvfp_loss = cvfp_loss_val
+        self._last_dist_loss = dist_loss_val
+
+        # 損失が0より大きい場合のみ最適化
+        if total_loss.item() > 0:
             self.optimizer.zero_grad()
             total_loss.backward()
             self.optimizer.step()
@@ -293,15 +329,15 @@ class Phase1Trainer:
         else:
             convergence_rate = self._get_convergence_rate()
 
-            # 損失を取得
-            cvfp_loss = self.model.get_cvfp_loss()
-            dist_loss = self.model.get_distribution_loss()
+            # 最後のトークンで記録された損失を使用
+            cvfp_loss = self._last_cvfp_loss
+            dist_loss = self._last_dist_loss
 
             self._print_flush(
                 f"Iteration {iteration+1}/{self.max_iterations}: "
                 f"収束={convergence_rate*100:.1f}% | "
-                f"CVFP loss={cvfp_loss.item():.6f} | "
-                f"Dist loss={dist_loss.item():.6f}"
+                f"CVFP loss={cvfp_loss:.6f} | "
+                f"Dist loss={dist_loss:.6f}"
             )
 
     def _print_summary(self):

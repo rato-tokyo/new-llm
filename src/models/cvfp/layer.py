@@ -74,10 +74,8 @@ class CVFPLayer(nn.Module):
             self.register_buffer('running_var', torch.ones(context_dim))
             self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
 
-        # CVFP学習のための前回出力保存
-        if enable_cvfp_learning:
-            self.register_buffer('previous_context', None)
-            self.cvfp_loss = None
+        # CVFP学習はPhase1Trainerで管理されるため、ここでは保存しない
+        # （enable_cvfp_learningフラグは後方互換性のため残すが使用しない）
 
         # 重みの初期化
         self._init_weights()
@@ -130,9 +128,7 @@ class CVFPLayer(nn.Module):
         if self.training and self.use_dist_reg:
             self._update_running_stats(new_context)
 
-        # CVFP学習: 前回出力との差を自動計算（訓練モードのみ）
-        if self.training and self.enable_cvfp_learning:
-            self._update_cvfp_loss(new_context)
+        # CVFP学習はPhase1Trainerで管理（ここでは何もしない）
 
         return new_context, new_token
 
@@ -159,67 +155,47 @@ class CVFPLayer(nn.Module):
             # 更新回数を追跡
             self.num_batches_tracked += 1
 
-    def _update_cvfp_loss(self, new_context):
-        """
-        CVFP損失を自動計算・更新
-
-        前回の出力との差（MSE）を計算し、CVFPレイヤーが
-        固定点に収束するよう学習を促す。
-
-        Args:
-            new_context: 現在の出力コンテキスト [batch, context_dim]
-        """
-        import torch.nn.functional as F
-
-        if self.previous_context is not None:
-            # 前回出力との差をCVFP損失として計算
-            self.cvfp_loss = F.mse_loss(new_context, self.previous_context)
-        else:
-            # 初回は損失なし
-            self.cvfp_loss = torch.tensor(0.0, device=new_context.device)
-
-        # 次回のために現在の出力を保存（勾配は不要）
-        self.previous_context = new_context.detach()
-
     def get_cvfp_loss(self):
         """
         CVFP損失を取得
 
-        Returns:
-            cvfp_loss: CVFP損失（前回出力との差）
-        """
-        if not self.enable_cvfp_learning or self.cvfp_loss is None:
-            # CVFP学習が無効、または初回
-            # デバイスを取得（モデルパラメータから）
-            device = next(self.parameters()).device
-            return torch.tensor(0.0, device=device, requires_grad=False)
+        注: CVFP損失はPhase1Trainerで計算されるため、ここでは常に0を返す。
+        このメソッドは後方互換性のため残している。
 
-        return self.cvfp_loss
+        Returns:
+            cvfp_loss: 常に0.0
+        """
+        device = next(self.parameters()).device
+        return torch.tensor(0.0, device=device, requires_grad=False)
 
     def reset_cvfp_state(self):
-        """CVFP学習状態をリセット（新しいイテレーション開始時）"""
-        if self.enable_cvfp_learning:
-            self.previous_context = None
-            self.cvfp_loss = None
+        """
+        CVFP学習状態をリセット
+
+        注: CVFP状態はPhase1Trainerで管理されるため、ここでは何もしない。
+        このメソッドは後方互換性のため残している。
+        """
+        pass  # 何もしない
 
     def get_distribution_loss(self):
         """
         分布正則化損失を計算
 
-        目標: 各次元がN(0, 1)に従うべき
-        損失 = 平均のペナルティ + 分散のペナルティ
+        注: この実装ではEMA統計（勾配なし）を使用。
+        Phase1Trainerで現在のコンテキストから直接計算する必要がある。
 
         Returns:
-            dist_loss: 分布損失を表すスカラーテンソル
+            dist_loss: 常に0.0（後方互換性のため残す）
         """
         if not self.use_dist_reg:
-            return torch.tensor(0.0, device=self.running_mean.device)
+            return torch.tensor(0.0, device=next(self.parameters()).device)
 
-        # N(0, 1)からの逸脱にペナルティ
-        mean_penalty = (self.running_mean ** 2).mean()
-        var_penalty = ((self.running_var - 1.0) ** 2).mean()
-
-        return mean_penalty + var_penalty
+        # EMA統計からの損失（勾配なし）
+        # これは情報提供のみで、最適化には使用されない
+        with torch.no_grad():
+            mean_penalty = (self.running_mean ** 2).mean()
+            var_penalty = ((self.running_var - 1.0) ** 2).mean()
+            return mean_penalty + var_penalty
 
     def reset_running_stats(self):
         """ランニング統計をリセット（新しい訓練実行時に有用）"""
