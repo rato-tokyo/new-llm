@@ -1,23 +1,25 @@
 """
-Phase 1 Training (Version 2): Clean implementation with CVFPLayer
+Phase 1 Training (Version 3): Token-wise online learning with CVFP
 
 Key improvements:
-1. Distribution regularization handled by model layers
-2. Cleaner training loop
-3. No manual statistics calculation
-4. Better separation of concerns
+1. Token-wise loss computation and backpropagation
+2. True online learning (not batch processing)
+3. Memory efficient (no need to store all contexts)
+4. Layers automatically track previous outputs (enable_cvfp_learning=True)
 """
 
 import torch
-import torch.nn.functional as F
 
 
 def train_phase1(model, token_ids, config, device, is_training=True, label=""):
     """
-    Phase 1: CVFP Fixed-Point Learning (Refactored)
+    Phase 1: CVFP Fixed-Point Learning (Token-wise Online Version)
+
+    各トークン処理後に即座に損失計算・バックプロパゲーションを行う
+    真のオンライン学習実装。
 
     Args:
-        model: The language model (must have get_distribution_loss() method)
+        model: The language model (must have enable_cvfp_learning capability)
         token_ids: Input token IDs [num_tokens]
         config: Configuration object
         device: torch device
@@ -25,7 +27,7 @@ def train_phase1(model, token_ids, config, device, is_training=True, label=""):
         label: Label for logging (e.g., "Train", "Val")
 
     Returns:
-        fixed_contexts: Converged context vectors [num_tokens, context_dim]
+        final_contexts: Converged context vectors [num_tokens, context_dim]
     """
     print_flush(f"\n{'='*70}")
     print_flush(f"PHASE 1: Fixed-Point Context Learning (CVFP){' - ' + label if label else ''}")
@@ -57,14 +59,13 @@ def train_phase1(model, token_ids, config, device, is_training=True, label=""):
     else:
         model.eval()
 
-    # Compute token embeddings
+    # Compute token embeddings (once)
     with torch.no_grad():
         token_embeds = model.token_embedding(token_ids.unsqueeze(0).to(device))
         token_embeds = model.embed_norm(token_embeds).squeeze(0)
 
-    # Initialize storage for fixed contexts
-    fixed_contexts = torch.zeros(len(token_ids), model.context_dim).to(device)
-    converged_tokens = torch.zeros(len(token_ids), dtype=torch.bool).to(device)
+    # Initialize previous contexts for convergence checking
+    prev_contexts = None
 
     # Iterative refinement loop
     for iteration in range(config.phase1_max_iterations):
@@ -80,20 +81,52 @@ def train_phase1(model, token_ids, config, device, is_training=True, label=""):
             for param_group in optimizer.param_groups:
                 param_group['lr'] = lr
 
-        # Forward pass: compute all contexts
-        context = torch.zeros(1, model.context_dim).to(device)
-        all_contexts = []
+            # Reset CVFP state at start of each iteration
+            model.reset_cvfp_state()
+
+        # Token-wise processing
+        context = torch.zeros(1, model.context_dim, device=device)
+        current_contexts = []
+        iteration_cvfp_loss = 0.0
+        iteration_dist_loss = 0.0
+        num_tokens_processed = 0
 
         for t, token_embed in enumerate(token_embeds):
             if is_training:
-                # Training: enable gradients
+                # Forward pass for this token (with gradients)
                 context = model._update_context_one_step(
                     token_embed.unsqueeze(0),
-                    context
+                    context.detach() if t > 0 else context  # 最初のトークン以外は前のトークンからの勾配を切断
                 )
-                all_contexts.append(context)
-                context = context.detach()
-                context.requires_grad = True
+
+                # CVFP loss: レイヤーが自動計算（前回の同じトークン位置との差）
+                # iteration > 0 かつ previous_context が設定されている場合のみ学習
+                if iteration > 0:
+                    cvfp_loss = model.get_cvfp_loss()
+
+                    # CVFP損失が0でない場合のみbackprop（初回イテレーションは0）
+                    if cvfp_loss.item() > 0:
+                        optimizer.zero_grad()
+
+                        # Distribution regularization
+                        if config.use_distribution_reg:
+                            dist_loss = model.get_distribution_loss()
+                            dist_weight = config.dist_reg_weight
+                            total_loss = (1 - dist_weight) * cvfp_loss + dist_weight * dist_loss
+                            iteration_dist_loss += dist_loss.item()
+                        else:
+                            total_loss = cvfp_loss
+
+                        iteration_cvfp_loss += cvfp_loss.item()
+
+                        # Backprop for this token
+                        total_loss.backward()
+                        optimizer.step()
+
+                        num_tokens_processed += 1
+
+                current_contexts.append(context.detach())
+
             else:
                 # Evaluation: no gradients
                 with torch.no_grad():
@@ -101,55 +134,36 @@ def train_phase1(model, token_ids, config, device, is_training=True, label=""):
                         token_embed.unsqueeze(0),
                         context
                     )
-                    all_contexts.append(context.clone())
+                    current_contexts.append(context.clone())
 
         # Stack all contexts
-        all_contexts_tensor = torch.cat(all_contexts, dim=0)
+        current_contexts_tensor = torch.cat(current_contexts, dim=0)
 
-        # Compute loss and update (iteration > 0 only)
-        if iteration > 0:
-            if is_training:
-                optimizer.zero_grad()
-
-            # CVFP loss: match previous iteration's contexts
-            cvfp_loss = F.mse_loss(all_contexts_tensor, fixed_contexts)
-            total_cvfp_loss = cvfp_loss.item()
-
-            # Distribution regularization (automatically calculated by layers)
-            if getattr(config, 'use_distribution_reg', True) and is_training:
-                dist_loss = model.get_distribution_loss()
-                total_dist_loss = dist_loss.item()
-
-                # Combine losses
-                dist_weight = getattr(config, 'dist_reg_weight', 0.2)
-                total_loss = (1 - dist_weight) * cvfp_loss + dist_weight * dist_loss
-            else:
-                total_dist_loss = 0.0
-                total_loss = cvfp_loss
-
-            total_loss_value = total_loss.item()
-
-            # Backprop (training only)
-            if is_training:
-                total_loss.backward()
-                optimizer.step()
-
-            # Check convergence
+        # Check convergence and log (iteration > 0 only)
+        if iteration > 0 and prev_contexts is not None:
             with torch.no_grad():
-                token_losses = ((all_contexts_tensor - fixed_contexts) ** 2).mean(dim=1)
+                token_losses = ((current_contexts_tensor - prev_contexts) ** 2).mean(dim=1)
                 converged_tokens = token_losses < config.phase1_convergence_threshold
 
             # Logging
             convergence_rate = converged_tokens.float().mean().item()
 
-            log_msg = f"Iteration {iteration+1}/{config.phase1_max_iterations}: "
-            if is_training and getattr(config, 'use_distribution_reg', True):
-                log_msg += f"Loss={total_loss_value:.6f} (CVFP={total_cvfp_loss:.6f}, Dist={total_dist_loss:.6f}), "
-            else:
-                log_msg += f"Loss={total_cvfp_loss:.6f}, "
-            log_msg += f"Converged={convergence_rate*100:.1f}%"
             if is_training:
-                log_msg += f", LR={lr:.4f}"
+                avg_cvfp_loss = iteration_cvfp_loss / num_tokens_processed
+                log_msg = f"Iteration {iteration+1}/{config.phase1_max_iterations}: "
+
+                if config.use_distribution_reg:
+                    avg_dist_loss = iteration_dist_loss / num_tokens_processed
+                    avg_total_loss = (1 - config.dist_reg_weight) * avg_cvfp_loss + \
+                                   config.dist_reg_weight * avg_dist_loss
+                    log_msg += f"Loss={avg_total_loss:.6f} (CVFP={avg_cvfp_loss:.6f}, Dist={avg_dist_loss:.6f}), "
+                else:
+                    log_msg += f"Loss={avg_cvfp_loss:.6f}, "
+
+                log_msg += f"Converged={convergence_rate*100:.1f}%, LR={lr:.4f}"
+            else:
+                log_msg = f"Iteration {iteration+1}/{config.phase1_max_iterations}: "
+                log_msg += f"Converged={convergence_rate*100:.1f}%"
 
             print_flush(log_msg)
 
@@ -163,13 +177,14 @@ def train_phase1(model, token_ids, config, device, is_training=True, label=""):
         else:
             # Iteration 0: just save contexts
             print_flush(f"Iteration 1/{config.phase1_max_iterations}: Forward pass only (saving contexts)")
+            converged_tokens = torch.zeros(len(token_ids), dtype=torch.bool, device=device)
 
-        # Update fixed contexts for next iteration (CRITICAL: after loss computation)
-        fixed_contexts = all_contexts_tensor.detach()
+        # Update previous contexts for next iteration
+        prev_contexts = current_contexts_tensor
 
     print_flush(f"\nPhase 1 Complete: {converged_tokens.sum()}/{len(token_ids)} tokens converged\n")
 
-    return fixed_contexts.detach()
+    return current_contexts_tensor
 
 
 class Phase1EarlyStopping:

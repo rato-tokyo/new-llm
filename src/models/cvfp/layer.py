@@ -190,7 +190,9 @@ class CVFPLayer(nn.Module):
         """
         if not self.enable_cvfp_learning or self.cvfp_loss is None:
             # CVFP学習が無効、または初回
-            return torch.tensor(0.0)
+            # デバイスを取得（モデルパラメータから）
+            device = next(self.parameters()).device
+            return torch.tensor(0.0, device=device, requires_grad=False)
 
         return self.cvfp_loss
 

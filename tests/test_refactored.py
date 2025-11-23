@@ -78,7 +78,7 @@ def test_refactored_model():
         use_dist_reg=config.use_distribution_reg,
         ema_momentum=config.ema_momentum,
         layernorm_mix=0.0,  # Disabled
-        enable_cvfp_learning=False  # Phase 1では無効（外部でCVFP損失計算）
+        enable_cvfp_learning=True  # トークンごとのオンライン学習を有効化
     )
     model.to(device)
 
