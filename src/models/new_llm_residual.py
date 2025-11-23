@@ -72,6 +72,13 @@ class NewLLMResidual(nn.Module):
         self.phase1_config = None  # Phase 1設定を保存
         self.current_iteration = 0  # 現在のイテレーション番号
 
+        # 収束判定用の状態
+        self.convergence_threshold = None
+        self.min_converged_ratio = None
+        self.register_buffer('previous_contexts', None)
+        self.num_tokens = 0
+        self.num_converged_tokens = 0
+
         # ========== トークン埋め込み ==========
         self.token_embedding = nn.Embedding(vocab_size, embed_dim)
         self.embed_norm = nn.LayerNorm(embed_dim)
@@ -252,7 +259,7 @@ class NewLLMResidual(nn.Module):
         for block in self.blocks:
             block.reset_cvfp_state()
 
-    def setup_phase1_training(self, context_params, learning_rate, dist_reg_weight):
+    def setup_phase1_training(self, context_params, learning_rate, dist_reg_weight, convergence_threshold, min_converged_ratio):
         """
         Phase 1訓練の初期化（全てをカプセル化）
 
@@ -260,6 +267,8 @@ class NewLLMResidual(nn.Module):
             context_params: 訓練対象パラメータのリスト
             learning_rate: 学習率
             dist_reg_weight: 分布正則化の重み
+            convergence_threshold: 収束判定のMSE閾値
+            min_converged_ratio: 収束率の閾値
         """
         self.reset_running_stats()
         self.current_iteration = 0
@@ -271,14 +280,24 @@ class NewLLMResidual(nn.Module):
         )
         self.dist_reg_weight = dist_reg_weight
 
-    def start_phase1_iteration(self, iteration):
+        # 収束判定パラメータを保存
+        self.convergence_threshold = convergence_threshold
+        self.min_converged_ratio = min_converged_ratio
+        self.previous_contexts = None
+        self.num_tokens = 0
+        self.num_converged_tokens = 0
+
+    def start_phase1_iteration(self, iteration, num_tokens):
         """
         Phase 1の各イテレーション開始時の処理
 
         Args:
             iteration: 現在のイテレーション番号（0-indexed）
+            num_tokens: トークン数
         """
         self.current_iteration = iteration
+        self.num_tokens = num_tokens
+        self.num_converged_tokens = 0
 
         # CVFP状態リセット（iteration 0以降）
         if iteration > 0:
@@ -308,3 +327,49 @@ class NewLLMResidual(nn.Module):
             return loss_dict
 
         return None
+
+    def update_convergence_state(self, current_contexts):
+        """
+        収束状態を更新
+
+        Args:
+            current_contexts: 現在のコンテキストベクトル [num_tokens, context_dim]
+        """
+        if self.current_iteration == 0 or self.previous_contexts is None:
+            # 初回イテレーションは前回コンテキストを保存するのみ
+            self.previous_contexts = current_contexts.detach()
+            self.num_converged_tokens = 0
+            return
+
+        # 前回との差分を計算
+        with torch.no_grad():
+            token_losses = ((current_contexts - self.previous_contexts) ** 2).mean(dim=1)
+            converged_tokens = token_losses < self.convergence_threshold
+            self.num_converged_tokens = converged_tokens.sum().item()
+
+        # 前回コンテキストを更新
+        self.previous_contexts = current_contexts.detach()
+
+    def is_converged(self):
+        """
+        収束判定
+
+        Returns:
+            converged: 収束したかどうか（bool）
+        """
+        if self.current_iteration == 0 or self.num_tokens == 0:
+            return False
+
+        convergence_rate = self.num_converged_tokens / self.num_tokens
+        return convergence_rate >= self.min_converged_ratio
+
+    def get_convergence_rate(self):
+        """
+        現在の収束率を取得
+
+        Returns:
+            convergence_rate: 収束率 (0.0~1.0)
+        """
+        if self.num_tokens == 0:
+            return 0.0
+        return self.num_converged_tokens / self.num_tokens

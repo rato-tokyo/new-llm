@@ -1,9 +1,9 @@
 """
-Phase 1 訓練 (バージョン7): 超シンプル実装 + 固定学習率
+Phase 1 訓練 (バージョン8): 究極にシンプル - モデルが収束判定も担当
 
 主な改善点:
-1. モデルが全ての最適化、状態管理を処理
-2. Phase1はトークン入力と収束判定のみを担当
+1. モデルが全ての最適化、状態管理、収束判定を処理
+2. Phase1はトークン入力とモデルへの収束確認のみ
 3. 学習率は固定（LRスケジュール削除）
 4. 引数で実際の値を明示（一目瞭然）
 5. デフォルト値なし（想定外の処理を防止）
@@ -24,9 +24,10 @@ def train_phase1(
     label
 ):
     """
-    Phase 1: CVFP固定点学習（超シンプル版）
+    Phase 1: CVFP固定点学習（究極シンプル版）
 
-    モデルが全ての訓練ロジックを処理。このスクリプトはトークン入力と収束判定のみ。
+    モデルが全ての訓練ロジック（最適化・収束判定）を処理。
+    このスクリプトはトークン入力とループ制御のみ。
 
     Args:
         model: 言語モデル (enable_cvfp_learning=True必須)
@@ -48,28 +49,32 @@ def train_phase1(
 
     model.to(device)
 
-    # 訓練モードまたは評価モードの設定
+    # 訓練モードの場合のみセットアップ
     if model.training:
-        # Phase 1訓練のセットアップ（モデルが全てを処理）
         context_params = [
             p for name, p in model.named_parameters()
             if 'token_output' not in name and 'token_embedding' not in name
         ]
-        model.setup_phase1_training(context_params, learning_rate, dist_reg_weight)
+        model.setup_phase1_training(
+            context_params,
+            learning_rate,
+            dist_reg_weight,
+            convergence_threshold,
+            min_converged_ratio
+        )
 
     # トークン埋め込みを計算（1回のみ）
     with torch.no_grad():
         token_embeds = model.token_embedding(token_ids.unsqueeze(0).to(device))
         token_embeds = model.embed_norm(token_embeds).squeeze(0)
 
-    # 収束判定用の前回コンテキストを初期化
-    prev_contexts = None
+    num_tokens = len(token_ids)
 
     # 反復改善ループ
     for iteration in range(max_iterations):
-        # イテレーション開始をモデルに通知（状態リセットを処理）
+        # イテレーション開始をモデルに通知
         if model.training:
-            model.start_phase1_iteration(iteration)
+            model.start_phase1_iteration(iteration, num_tokens)
 
         # トークンごとの処理
         context = torch.zeros(1, model.context_dim, device=device)
@@ -94,64 +99,27 @@ def train_phase1(
         # 全コンテキストをスタック
         current_contexts_tensor = torch.cat(current_contexts, dim=0)
 
-        # 収束判定
-        if iteration > 0 and prev_contexts is not None:
-            convergence_rate = check_convergence(
-                current_contexts_tensor,
-                prev_contexts,
-                convergence_threshold,
-                max_iterations,
-                iteration
-            )
+        # モデルに収束状態を更新させる
+        if model.training:
+            model.update_convergence_state(current_contexts_tensor)
 
-            # Early stopping: 収束率が閾値を超えたら停止
-            if convergence_rate >= min_converged_ratio:
+        # ログ出力
+        if iteration == 0:
+            print_flush(f"Iteration 1/{max_iterations}: 順伝播のみ（コンテキスト保存）")
+        else:
+            convergence_rate = model.get_convergence_rate()
+            print_flush(f"Iteration {iteration+1}/{max_iterations}: 収束={convergence_rate*100:.1f}%")
+
+            # Early stopping: モデルに収束判定を委譲
+            if model.is_converged():
                 print_flush(f"  → Early stopping: 収束率 = {convergence_rate*100:.1f}%")
                 break
-        else:
-            # Iteration 0: コンテキストを保存するのみ
-            print_flush(f"Iteration 1/{max_iterations}: 順伝播のみ（コンテキスト保存）")
-
-        # 次のイテレーションのために前回コンテキストを更新
-        prev_contexts = current_contexts_tensor
 
     # 最終サマリー
-    if prev_contexts is not None:
-        with torch.no_grad():
-            token_losses = ((current_contexts_tensor - prev_contexts) ** 2).mean(dim=1)
-            converged_tokens = token_losses < convergence_threshold
-            num_converged = converged_tokens.sum().item()
-    else:
-        num_converged = 0
-
-    print_flush(f"\nPhase 1 完了: {num_converged}/{len(token_ids)} トークンが収束\n")
+    num_converged = model.num_converged_tokens if model.training else 0
+    print_flush(f"\nPhase 1 完了: {num_converged}/{num_tokens} トークンが収束\n")
 
     return current_contexts_tensor
-
-
-def check_convergence(current_contexts, prev_contexts, threshold, max_iterations, iteration):
-    """
-    収束判定とログ出力
-
-    Args:
-        current_contexts: 現在のコンテキスト [num_tokens, context_dim]
-        prev_contexts: 前回のコンテキスト [num_tokens, context_dim]
-        threshold: 収束判定のMSE閾値
-        max_iterations: 最大イテレーション数
-        iteration: イテレーション番号
-
-    Returns:
-        convergence_rate: 収束率 (0.0~1.0)
-    """
-    with torch.no_grad():
-        token_losses = ((current_contexts - prev_contexts) ** 2).mean(dim=1)
-        converged_tokens = token_losses < threshold
-        convergence_rate = converged_tokens.float().mean().item()
-
-    # ログ出力
-    print_flush(f"Iteration {iteration+1}/{max_iterations}: 収束={convergence_rate*100:.1f}%")
-
-    return convergence_rate
 
 
 def print_flush(msg):
