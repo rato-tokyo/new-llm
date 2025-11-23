@@ -12,7 +12,7 @@ project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, project_root)
 
 from src.models.new_llm_residual import NewLLMResidual
-from src.training.phase1 import train_phase1
+from src.training.phase1_trainer import Phase1Trainer
 from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
 
 
@@ -91,18 +91,16 @@ def test_refactored_model():
     print_flush("\n3. Running Phase 1...")
     start_time = time.time()
 
-    contexts = train_phase1(
+    # Create trainer and run training
+    trainer = Phase1Trainer(
         model=model,
-        token_ids=test_token_ids,
-        device=device,
         max_iterations=config.phase1_max_iterations,
         convergence_threshold=config.phase1_convergence_threshold,
         min_converged_ratio=config.phase1_min_converged_ratio,
         learning_rate=config.phase1_learning_rate,
-        dist_reg_weight=config.dist_reg_weight,
-        label="Test",
-        is_training=True
+        dist_reg_weight=config.dist_reg_weight
     )
+    contexts = trainer.train(test_token_ids, device, label="Test")
 
     elapsed = time.time() - start_time
     print_flush(f"   Completed in {elapsed:.2f}s")

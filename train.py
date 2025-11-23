@@ -17,7 +17,7 @@ sys.path.insert(0, project_root)
 from config import ResidualConfig
 from src.models.new_llm_residual import NewLLMResidual
 from src.data.loader import load_data
-from src.training.phase1 import train_phase1
+from src.training.phase1_trainer import Phase1Trainer
 from src.training.phase2 import train_phase2
 from src.evaluation.metrics import analyze_fixed_points
 from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
@@ -89,33 +89,21 @@ def main():
 
     phase1_start = time.time()
 
-    # Train
-    train_contexts = train_phase1(
+    # Create Phase1Trainer
+    trainer = Phase1Trainer(
         model=model,
-        token_ids=train_token_ids,
-        device=device,
         max_iterations=config.phase1_max_iterations,
         convergence_threshold=config.phase1_convergence_threshold,
         min_converged_ratio=config.phase1_min_converged_ratio,
         learning_rate=config.phase1_learning_rate,
-        dist_reg_weight=config.dist_reg_weight,
-        label="Train",
-        is_training=True
+        dist_reg_weight=config.dist_reg_weight
     )
 
+    # Train
+    train_contexts = trainer.train(train_token_ids, device, label="Train")
+
     # Validation
-    val_contexts = train_phase1(
-        model=model,
-        token_ids=val_token_ids,
-        device=device,
-        max_iterations=config.phase1_max_iterations,
-        convergence_threshold=config.phase1_convergence_threshold,
-        min_converged_ratio=config.phase1_min_converged_ratio,
-        learning_rate=config.phase1_learning_rate,
-        dist_reg_weight=config.dist_reg_weight,
-        label="Val",
-        is_training=False
-    )
+    val_contexts = trainer.evaluate(val_token_ids, device, label="Val")
 
     phase1_time = time.time() - phase1_start
     print_flush(f"\nPhase 1 completed in {phase1_time:.1f}s")
