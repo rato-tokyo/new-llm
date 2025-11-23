@@ -11,7 +11,7 @@ Key Improvements:
 
 import torch
 import torch.nn as nn
-from .layers import CVFPBlock
+from .cvfp import CVFPBlock
 
 
 class NewLLMResidual(nn.Module):

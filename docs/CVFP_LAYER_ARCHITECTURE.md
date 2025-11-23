@@ -137,6 +137,28 @@ NewLLMResidual
    - 各レイヤーが完全に自己完結
    - テスト・デバッグが容易
 
+## ファイル構成
+
+CVFPモジュールは独立したディレクトリに整理されています：
+
+```
+src/models/cvfp/
+├── __init__.py      # モジュールエクスポート
+├── layer.py         # CVFPLayer クラス
+└── block.py         # CVFPBlock クラス
+```
+
+### インポート方法
+
+```python
+# 推奨: モジュールから直接インポート
+from src.models.cvfp import CVFPLayer, CVFPBlock
+
+# または個別にインポート
+from src.models.cvfp.layer import CVFPLayer
+from src.models.cvfp.block import CVFPBlock
+```
+
 ## コード例
 
 ### config.py での設定

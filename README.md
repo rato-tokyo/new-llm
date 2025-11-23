@@ -50,7 +50,10 @@ new-llm/
 ├── README.md             # This file
 ├── src/
 │   ├── models/
-│   │   ├── layers.py              # CVFPLayer and CVFPBlock
+│   │   ├── cvfp/
+│   │   │   ├── __init__.py        # CVFP module exports
+│   │   │   ├── layer.py           # CVFPLayer (basic unit)
+│   │   │   └── block.py           # CVFPBlock (multi-layer)
 │   │   └── new_llm_residual.py    # Main model architecture
 │   ├── training/
 │   │   ├── phase1.py              # Fixed-point learning
