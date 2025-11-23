@@ -196,6 +196,42 @@ class NewLLMResidual(nn.Module):
 
         return total_loss / len(self.blocks)  # ブロック間で平均
 
+    def get_total_loss(self, dist_reg_weight=0.2):
+        """
+        CVFP損失と分布正則化損失を統合して取得
+
+        Args:
+            dist_reg_weight: 分布正則化の重み（0.0~1.0）
+
+        Returns:
+            total_loss: 統合損失（勾配あり）
+            loss_dict: 損失の内訳 {'cvfp': float, 'dist': float, 'total': float}
+        """
+        cvfp_loss = self.get_cvfp_loss()
+
+        if self.use_dist_reg:
+            dist_loss = self.get_distribution_loss()
+            total_loss = (1 - dist_reg_weight) * cvfp_loss + dist_reg_weight * dist_loss
+
+            # 損失の内訳（.item()で勾配なしのfloatに変換）
+            with torch.no_grad():
+                loss_dict = {
+                    'cvfp': cvfp_loss.item() if isinstance(cvfp_loss, torch.Tensor) else cvfp_loss,
+                    'dist': dist_loss.item() if isinstance(dist_loss, torch.Tensor) else dist_loss,
+                    'total': total_loss.item() if isinstance(total_loss, torch.Tensor) else total_loss
+                }
+        else:
+            total_loss = cvfp_loss
+
+            with torch.no_grad():
+                loss_dict = {
+                    'cvfp': cvfp_loss.item() if isinstance(cvfp_loss, torch.Tensor) else cvfp_loss,
+                    'dist': 0.0,
+                    'total': total_loss.item() if isinstance(total_loss, torch.Tensor) else total_loss
+                }
+
+        return total_loss, loss_dict
+
     def reset_running_stats(self):
         """全ランニング統計をリセット（新しい訓練実行時用）"""
         for block in self.blocks:
