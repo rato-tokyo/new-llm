@@ -292,7 +292,17 @@ class Phase1Trainer:
             self._print_flush(f"Iteration 1/{self.max_iterations}: 順伝播のみ（コンテキスト保存）")
         else:
             convergence_rate = self._get_convergence_rate()
-            self._print_flush(f"Iteration {iteration+1}/{self.max_iterations}: 収束={convergence_rate*100:.1f}%")
+
+            # 損失を取得
+            cvfp_loss = self.model.get_cvfp_loss()
+            dist_loss = self.model.get_distribution_loss()
+
+            self._print_flush(
+                f"Iteration {iteration+1}/{self.max_iterations}: "
+                f"収束={convergence_rate*100:.1f}% | "
+                f"CVFP loss={cvfp_loss.item():.6f} | "
+                f"Dist loss={dist_loss.item():.6f}"
+            )
 
     def _print_summary(self):
         """最終サマリーを出力"""
