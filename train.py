@@ -82,13 +82,25 @@ def main():
         context_dim=config.context_dim,
         hidden_dim=config.hidden_dim,
         layer_structure=layer_structure,
-        layernorm_mix=1.0  # Enabled to prevent value explosion
+        layernorm_mix=1.0,  # Enabled to prevent value explosion
+        use_pretrained_embeddings=config.use_pretrained_embeddings
     )
     model.to(device)
 
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print_flush(f"\nModel initialized: {total_params:,} parameters")
+
+    # Load checkpoint if available
+    if config.load_checkpoint and os.path.exists(config.checkpoint_path):
+        print_flush(f"\n📥 Loading checkpoint from {config.checkpoint_path}")
+        try:
+            checkpoint = torch.load(config.checkpoint_path, map_location=device)
+            model.load_state_dict(checkpoint['model_state_dict'])
+            print_flush(f"✓ Loaded checkpoint (epoch {checkpoint.get('epoch', 'unknown')})")
+        except Exception as e:
+            print_flush(f"⚠️ Failed to load checkpoint: {e}")
+            print_flush("Starting training from scratch...")
 
     # Load data
     if test_mode:
@@ -109,14 +121,15 @@ def main():
 
     phase1_start = time.time()
 
-    # Create Phase1Trainer
+    # Create Phase1Trainer with orthogonality constraints
     trainer = Phase1Trainer(
         model=model,
         max_iterations=config.phase1_max_iterations,
         convergence_threshold=config.phase1_convergence_threshold,
         min_converged_ratio=config.phase1_min_converged_ratio,
         learning_rate=config.phase1_learning_rate,
-        dist_reg_weight=config.dist_reg_weight
+        dist_reg_weight=config.dist_reg_weight,
+        orthogonality_weight=0.5  # 直交性の重み
     )
 
     # Train
@@ -127,6 +140,27 @@ def main():
 
     phase1_time = time.time() - phase1_start
     print_flush(f"\nPhase 1 completed in {phase1_time:.1f}s")
+
+    # Save checkpoint after Phase 1
+    if config.save_checkpoint:
+        print_flush(f"\n💾 Saving checkpoint to {config.checkpoint_path}")
+        os.makedirs(config.checkpoint_dir, exist_ok=True)
+        try:
+            checkpoint = {
+                'model_state_dict': model.state_dict(),
+                'epoch': 'phase1_complete',
+                'config': {
+                    'num_layers': config.num_layers,
+                    'embed_dim': config.embed_dim,
+                    'context_dim': config.context_dim,
+                    'hidden_dim': config.hidden_dim,
+                    'vocab_size': config.vocab_size
+                }
+            }
+            torch.save(checkpoint, config.checkpoint_path)
+            print_flush(f"✓ Checkpoint saved successfully")
+        except Exception as e:
+            print_flush(f"⚠️ Failed to save checkpoint: {e}")
 
     # Analyze fixed points
     print_flush(f"\n{'='*70}")

@@ -8,6 +8,7 @@ CVFPLayerを使用したクリーンな実装。
 2. 分布正則化はレイヤー内部で自動処理
 3. よりクリーンな順伝播
 4. 関心の分離の改善
+5. GPT-2事前学習済み埋め込みのサポート
 """
 
 import torch
@@ -40,7 +41,8 @@ class NewLLMResidual(nn.Module):
         context_dim,
         hidden_dim,
         layer_structure,
-        layernorm_mix=0.0
+        layernorm_mix=0.0,
+        use_pretrained_embeddings=False
     ):
         super().__init__()
 
@@ -57,10 +59,17 @@ class NewLLMResidual(nn.Module):
         self.context_dim = context_dim
         self.hidden_dim = hidden_dim
         self.layer_structure = layer_structure
+        self.use_pretrained_embeddings = use_pretrained_embeddings
 
 
         # ========== トークン埋め込み ==========
-        self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+        if use_pretrained_embeddings:
+            # GPT-2事前学習済み埋め込みを読み込み
+            self._load_pretrained_embeddings()
+        else:
+            # ランダム初期化
+            self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+
         self.embed_norm = nn.LayerNorm(embed_dim)
 
         # ========== CVFPブロック ==========
@@ -79,8 +88,34 @@ class NewLLMResidual(nn.Module):
         # コンテキストから次のトークンを予測
         self.token_output = nn.Linear(context_dim, vocab_size)
 
-        # 埋め込みの初期化
-        self._init_weights()
+        # 埋め込みの初期化（事前学習済みでない場合のみ）
+        if not use_pretrained_embeddings:
+            self._init_weights()
+
+    def _load_pretrained_embeddings(self):
+        """GPT-2事前学習済み埋め込みを読み込み"""
+        try:
+            from transformers import GPT2Model
+            print("Loading GPT-2 pretrained embeddings...")
+
+            # GPT-2モデルから埋め込み層のみ取得
+            gpt2 = GPT2Model.from_pretrained('gpt2')
+            pretrained_embeddings = gpt2.wte.weight.data  # [vocab_size, 768]
+
+            # 埋め込み層を作成してコピー
+            self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
+            self.token_embedding.weight.data.copy_(pretrained_embeddings)
+
+            # 埋め込みを固定（Phase 1では学習しない）
+            self.token_embedding.weight.requires_grad = False
+
+            print(f"✓ Loaded GPT-2 embeddings: {pretrained_embeddings.shape}")
+
+        except Exception as e:
+            print(f"Warning: Failed to load GPT-2 embeddings: {e}")
+            print("Falling back to random initialization...")
+            self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
+            nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
 
     def _init_weights(self):
         """埋め込み重みを初期化"""

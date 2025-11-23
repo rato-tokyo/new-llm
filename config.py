@@ -18,11 +18,12 @@ class ResidualConfig:
 
     # ========== モデルアーキテクチャ ==========
     architecture = "residual_standard"
-    num_layers = 4                  # 単層ブロックの数（2→4に増やして表現力向上）
-    context_dim = 16                # 文脈ベクトル次元数
-    embed_dim = 16                  # トークン埋め込み次元数
-    hidden_dim = 32                 # 中間層次元数
+    num_layers = 6                  # 単層ブロックの数（最小対話モデル、固定）
+    context_dim = 768               # 文脈ベクトル次元数（GPT-2に合わせて768次元）
+    embed_dim = 768                 # トークン埋め込み次元数（GPT-2事前学習済み: 768次元）
+    hidden_dim = 1536               # 中間層次元数（embed_dim * 2）
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
+    use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
 
     # ========== Diversity Regularization (固定次元割り当て法) ==========
     # 固定次元割り当て + LayerNormによる多様性確保
@@ -85,6 +86,12 @@ class ResidualConfig:
                                        # 0.90: 緩い基準
                                        # 0.98: 厳しい基準
     identity_check_samples = 100       # 恒等写像チェックのサンプル数
+
+    # ========== チェックポイント ==========
+    checkpoint_dir = "./checkpoints"                    # チェックポイント保存ディレクトリ
+    checkpoint_path = "./checkpoints/model_latest.pt"   # 最新モデルのパス
+    load_checkpoint = True                              # 訓練開始時にチェックポイントを読み込む
+    save_checkpoint = True                              # 訓練終了時にチェックポイントを保存
 
     # ========== ログ出力 ==========
     log_every_steps = 1

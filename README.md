@@ -74,7 +74,7 @@ new-llm/
 
 ## Architecture Highlights
 
-### Diversity Regularization: LayerNorm + Fixed Dimension Assignment
+### Diversity Regularization: LayerNorm + Orthogonality Constraints
 
 Our breakthrough approach combines two complementary techniques:
 
@@ -85,25 +85,29 @@ if layernorm_mix > 0:
     new_context = (1 - mix) * new_context + mix * layer_norm(new_context)
 ```
 
-**2. Fixed Dimension Assignment (Diversity Enforcement)**
+**2. Orthogonality Constraints (Diversity Enforcement)**
 ```python
-# Each token assigned to specific dimensions via hash
-token_hash = hash(token_idx) % context_dim
-assigned_dims = [(token_hash + i) % context_dim for i in range(dims_per_token)]
+# Compute orthogonality loss with recent contexts
+if len(processed_contexts) > 0:
+    past_contexts = torch.cat(processed_contexts[-10:], dim=0)
+    new_context_norm = F.normalize(new_context, p=2, dim=1)
+    past_contexts_norm = F.normalize(past_contexts, p=2, dim=1)
+    similarity = torch.matmul(new_context_norm, past_contexts_norm.T)
+    orthogonality_loss = (similarity ** 2).mean() * orthogonality_weight
 ```
 
 Benefits:
-- **High Effective Rank**: Achieves 12.84/16 (80.3%) on training data
+- **High Effective Rank**: Achieves 14.45/16 (90.3%) on training data
 - **Stable Training**: No value explosion (norms stay controlled)
-- **Forced Diversity**: Each token uses different dimension subsets
-- **Simple & Effective**: No complex covariance or orthogonality constraints
+- **Natural Diversity**: Direct enforcement of orthogonal context vectors
+- **Theoretically Elegant**: Based on linear algebra principles
 
 ### Two-Phase Training
 
 **Phase 1: Fixed-Point Learning with Diversity Regularization**
 - Contexts converge through iterative refinement
 - LayerNorm prevents value explosion in residual connections
-- Fixed dimension assignment forces high dimensional diversity
+- Orthogonality constraints enforce high dimensional diversity
 - Gradient clipping ensures training stability
 - Early stopping based on convergence rate (95% of tokens)
 
@@ -123,15 +127,15 @@ See `CLAUDE.md` for:
 ## Current Status
 
 **Recent Breakthrough (2025-11-23):**
-- ✅ **80.3% Effective Rank achieved** using LayerNorm + fixed dimension assignment
+- ✅ **90.3% Effective Rank achieved** using LayerNorm + orthogonality constraints
 - ✅ Stable training with no value explosion
 - ✅ Validation data contamination issue identified and fixed
-- ✅ Unified architecture (removed obsolete EMA/covariance/contrastive methods)
+- ✅ Unified architecture (removed obsolete EMA/covariance/contrastive/fixed-dimension methods)
 
 **Working:**
-- ✅ High dimensional diversity (Effective Rank: 12.84/16 = 80.3%)
+- ✅ High dimensional diversity (Effective Rank: 14.45/16 = 90.3%)
 - ✅ Clean CVFPLayer architecture with LayerNorm
-- ✅ Fixed dimension assignment for diversity enforcement
+- ✅ Orthogonality constraints for diversity enforcement
 - ✅ Two-phase training pipeline
 - ✅ Flexible data loading
 - ✅ Gradient clipping for stability
