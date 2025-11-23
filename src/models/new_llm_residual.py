@@ -64,6 +64,11 @@ class NewLLMResidual(nn.Module):
         self.hidden_dim = hidden_dim
         self.layer_structure = layer_structure
         self.use_dist_reg = use_dist_reg
+        self.enable_cvfp_learning = enable_cvfp_learning
+
+        # オプティマイザーの保存用（Phase 1で設定される）
+        self.phase1_optimizer = None
+        self.dist_reg_weight = 0.2  # デフォルト値
 
         # ========== トークン埋め込み ==========
         self.token_embedding = nn.Embedding(vocab_size, embed_dim)
@@ -114,6 +119,9 @@ class NewLLMResidual(nn.Module):
         # 全ブロックを通して処理
         for block in self.blocks:
             current_context, current_token = block(current_context, current_token)
+
+        # 自動最適化（enable_cvfp_learning=Trueの場合）
+        self.auto_optimize_if_enabled()
 
         if return_token:
             return current_context, current_token
@@ -241,3 +249,42 @@ class NewLLMResidual(nn.Module):
         """全CVFP学習状態をリセット（新しいイテレーション開始時用）"""
         for block in self.blocks:
             block.reset_cvfp_state()
+
+    def set_phase1_optimizer(self, optimizer, dist_reg_weight=0.2):
+        """
+        Phase 1用のoptimizerを設定
+
+        enable_cvfp_learning=Trueの場合、このoptimizerを使用して
+        各レイヤーが自動的にbackward + stepを実行する。
+
+        Args:
+            optimizer: torch.optim.Optimizer インスタンス
+            dist_reg_weight: 分布正則化の重み
+        """
+        self.phase1_optimizer = optimizer
+        self.dist_reg_weight = dist_reg_weight
+
+    def auto_optimize_if_enabled(self):
+        """
+        自動最適化が有効な場合、backward + stepを実行
+
+        enable_cvfp_learning=True かつ phase1_optimizerが設定されている場合、
+        get_total_loss()で取得した損失に対してbackward + stepを実行。
+
+        Returns:
+            loss_dict: 損失の内訳（学習した場合）、None（学習しなかった場合）
+        """
+        if not self.enable_cvfp_learning or self.phase1_optimizer is None or not self.training:
+            return None
+
+        # 統合損失を取得
+        total_loss, loss_dict = self.get_total_loss(self.dist_reg_weight)
+
+        # CVFP損失が0の場合はskip（previous_context未設定）
+        if loss_dict['cvfp'] > 0:
+            self.phase1_optimizer.zero_grad()
+            total_loss.backward()
+            self.phase1_optimizer.step()
+            return loss_dict
+
+        return None

@@ -1,11 +1,11 @@
 """
-Phase 1 Training (Version 3): Token-wise online learning with CVFP
+Phase 1 Training (Version 5): True self-learning implementation
 
 Key improvements:
-1. Token-wise loss computation and backpropagation
-2. True online learning (not batch processing)
-3. Memory efficient (no need to store all contexts)
-4. Layers automatically track previous outputs (enable_cvfp_learning=True)
+1. Model handles all optimization internally
+2. Phase1 only feeds tokens to the model
+3. Dramatically simplified training loop
+4. True separation of concerns
 """
 
 import torch
@@ -13,13 +13,12 @@ import torch
 
 def train_phase1(model, token_ids, config, device, is_training=True, label=""):
     """
-    Phase 1: CVFP Fixed-Point Learning (Token-wise Online Version)
+    Phase 1: CVFP Fixed-Point Learning (True Self-Learning Version)
 
-    各トークン処理後に即座に損失計算・バックプロパゲーションを行う
-    真のオンライン学習実装。
+    モデルが完全に自己学習するため、このスクリプトはトークンを順次入力するだけ。
 
     Args:
-        model: The language model (must have enable_cvfp_learning capability)
+        model: The language model (must have enable_cvfp_learning=True)
         token_ids: Input token IDs [num_tokens]
         config: Configuration object
         device: torch device
@@ -38,8 +37,6 @@ def train_phase1(model, token_ids, config, device, is_training=True, label=""):
     # Setup training or evaluation mode
     if is_training:
         model.train()
-
-        # Reset running statistics at start of training
         model.reset_running_stats()
 
         # Only train context generation layers
@@ -51,7 +48,10 @@ def train_phase1(model, token_ids, config, device, is_training=True, label=""):
             else:
                 param.requires_grad = False
 
+        # Optimizerを作成し、モデルに設定
         optimizer = torch.optim.Adam(context_params, lr=config.phase1_lr_warmup)
+        model.set_phase1_optimizer(optimizer, dist_reg_weight=config.dist_reg_weight)
+
         early_stopping = Phase1EarlyStopping(
             convergence_threshold=config.phase1_min_converged_ratio,
             min_delta=0.01
@@ -87,59 +87,27 @@ def train_phase1(model, token_ids, config, device, is_training=True, label=""):
         # Token-wise processing
         context = torch.zeros(1, model.context_dim, device=device)
         current_contexts = []
-        iteration_cvfp_loss = 0.0
-        iteration_dist_loss = 0.0
-        num_tokens_processed = 0
 
         for t, token_embed in enumerate(token_embeds):
+            # Forward pass (モデルが自動で学習する)
             if is_training:
-                # Forward pass for this token (with gradients)
                 context = model._update_context_one_step(
                     token_embed.unsqueeze(0),
-                    context.detach() if t > 0 else context  # 最初のトークン以外は前のトークンからの勾配を切断
+                    context.detach() if t > 0 else context
                 )
-
-                # CVFP loss: レイヤーが自動計算（前回の同じトークン位置との差）
-                # iteration > 0 かつ previous_context が設定されている場合のみ学習
-                if iteration > 0:
-                    cvfp_loss = model.get_cvfp_loss()
-
-                    # CVFP損失が0でない場合のみbackprop（初回イテレーションは0）
-                    if cvfp_loss.item() > 0:
-                        optimizer.zero_grad()
-
-                        # Distribution regularization
-                        if config.use_distribution_reg:
-                            dist_loss = model.get_distribution_loss()
-                            dist_weight = config.dist_reg_weight
-                            total_loss = (1 - dist_weight) * cvfp_loss + dist_weight * dist_loss
-                            iteration_dist_loss += dist_loss.item()
-                        else:
-                            total_loss = cvfp_loss
-
-                        iteration_cvfp_loss += cvfp_loss.item()
-
-                        # Backprop for this token
-                        total_loss.backward()
-                        optimizer.step()
-
-                        num_tokens_processed += 1
-
-                current_contexts.append(context.detach())
-
             else:
-                # Evaluation: no gradients
                 with torch.no_grad():
                     context = model._update_context_one_step(
                         token_embed.unsqueeze(0),
                         context
                     )
-                    current_contexts.append(context.clone())
+
+            current_contexts.append(context.detach())
 
         # Stack all contexts
         current_contexts_tensor = torch.cat(current_contexts, dim=0)
 
-        # Check convergence and log (iteration > 0 only)
+        # Check convergence and log
         if iteration > 0 and prev_contexts is not None:
             with torch.no_grad():
                 token_losses = ((current_contexts_tensor - prev_contexts) ** 2).mean(dim=1)
@@ -148,22 +116,10 @@ def train_phase1(model, token_ids, config, device, is_training=True, label=""):
             # Logging
             convergence_rate = converged_tokens.float().mean().item()
 
+            log_msg = f"Iteration {iteration+1}/{config.phase1_max_iterations}: "
+            log_msg += f"Converged={convergence_rate*100:.1f}%"
             if is_training:
-                avg_cvfp_loss = iteration_cvfp_loss / num_tokens_processed
-                log_msg = f"Iteration {iteration+1}/{config.phase1_max_iterations}: "
-
-                if config.use_distribution_reg:
-                    avg_dist_loss = iteration_dist_loss / num_tokens_processed
-                    avg_total_loss = (1 - config.dist_reg_weight) * avg_cvfp_loss + \
-                                   config.dist_reg_weight * avg_dist_loss
-                    log_msg += f"Loss={avg_total_loss:.6f} (CVFP={avg_cvfp_loss:.6f}, Dist={avg_dist_loss:.6f}), "
-                else:
-                    log_msg += f"Loss={avg_cvfp_loss:.6f}, "
-
-                log_msg += f"Converged={convergence_rate*100:.1f}%, LR={lr:.4f}"
-            else:
-                log_msg = f"Iteration {iteration+1}/{config.phase1_max_iterations}: "
-                log_msg += f"Converged={convergence_rate*100:.1f}%"
+                log_msg += f", LR={lr:.4f}"
 
             print_flush(log_msg)
 
