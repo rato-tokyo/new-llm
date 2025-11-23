@@ -32,12 +32,12 @@ class Phase1Trainer:
     ):
         """
         Args:
-            model: 言語モデル (enable_cvfp_learning=True必須)
+            model: 言語モデル
             max_iterations: 最大イテレーション数
             convergence_threshold: 収束判定のMSE閾値
             min_converged_ratio: 早期停止の収束率閾値
             learning_rate: 学習率
-            dist_reg_weight: 分布正則化の重み
+            dist_reg_weight: 多様性正則化の重み
         """
         self.model = model
         self.max_iterations = max_iterations
@@ -252,8 +252,7 @@ class Phase1Trainer:
         mask = torch.zeros_like(new_context)
         mask[0, assigned_dims] = 1.0
 
-        # 割り当てられた次元のみを強化、他は抑制
-        masked_context = new_context * mask
+        # 割り当てられた次元以外を抑制
         suppression_loss = (new_context * (1 - mask)).abs().mean()
 
         # ========== 次元間分散最大化 ==========

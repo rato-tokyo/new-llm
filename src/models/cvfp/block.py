@@ -26,8 +26,6 @@ class CVFPBlock(nn.Module):
         context_dim: コンテキストベクトルの次元数
         embed_dim: トークン埋め込みの次元数
         hidden_dim: 各レイヤーの隠れ層次元数
-        use_dist_reg: 分布正則化を有効化
-        ema_momentum: EMAのモメンタム
         layernorm_mix: LayerNorm混合比率
     """
 
@@ -37,10 +35,7 @@ class CVFPBlock(nn.Module):
         context_dim,
         embed_dim,
         hidden_dim,
-        use_dist_reg=True,
-        ema_momentum=0.99,
-        layernorm_mix=0.0,
-        enable_cvfp_learning=False  # CVFP学習を有効化
+        layernorm_mix=0.0
     ):
         super().__init__()
 
@@ -52,10 +47,7 @@ class CVFPBlock(nn.Module):
                 context_dim=context_dim,
                 embed_dim=embed_dim,
                 hidden_dim=hidden_dim,
-                use_dist_reg=use_dist_reg,
-                ema_momentum=ema_momentum,
-                layernorm_mix=layernorm_mix,
-                enable_cvfp_learning=enable_cvfp_learning
+                layernorm_mix=layernorm_mix
             )
             for _ in range(num_layers)
         ])

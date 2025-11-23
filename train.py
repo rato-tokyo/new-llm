@@ -59,7 +59,7 @@ def main():
     print_flush(f"   Layers: {config.num_layers}")
     print_flush(f"   Context dim: {config.context_dim}")
     print_flush(f"   Device: {config.device}")
-    print_flush(f"   Distribution Reg: {config.use_distribution_reg} (weight={config.dist_reg_weight})")
+    print_flush(f"   Diversity weight: {config.dist_reg_weight}")
     if not test_mode:
         print_flush(f"   Data: {config.num_samples} samples from {config.train_data_source}")
 
@@ -82,10 +82,7 @@ def main():
         context_dim=config.context_dim,
         hidden_dim=config.hidden_dim,
         layer_structure=layer_structure,
-        use_dist_reg=config.use_distribution_reg,
-        ema_momentum=config.ema_momentum,
-        layernorm_mix=1.0,  # Enabled to prevent value explosion
-        enable_cvfp_learning=True  # トークンごとのオンライン学習を有効化
+        layernorm_mix=1.0  # Enabled to prevent value explosion
     )
     model.to(device)
 

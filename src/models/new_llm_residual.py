@@ -30,10 +30,7 @@ class NewLLMResidual(nn.Module):
         context_dim: コンテキストベクトルの次元数
         hidden_dim: 隠れ層の次元数（embed_dim + context_dimと等しい必要がある）
         layer_structure: ブロックごとのレイヤー数を指定するリスト
-        use_dist_reg: 分布正則化を有効化 (デフォルト: True)
-        ema_momentum: ランニング統計のEMAモメンタム (デフォルト: 0.99)
         layernorm_mix: LayerNorm混合比率、0.0=無効 (デフォルト: 0.0)
-        enable_cvfp_learning: CVFP自己学習を有効化 (デフォルト: False)
     """
 
     def __init__(
@@ -43,10 +40,7 @@ class NewLLMResidual(nn.Module):
         context_dim,
         hidden_dim,
         layer_structure,
-        use_dist_reg=True,
-        ema_momentum=0.99,
-        layernorm_mix=0.0,
-        enable_cvfp_learning=False
+        layernorm_mix=0.0
     ):
         super().__init__()
 
@@ -63,8 +57,6 @@ class NewLLMResidual(nn.Module):
         self.context_dim = context_dim
         self.hidden_dim = hidden_dim
         self.layer_structure = layer_structure
-        self.use_dist_reg = use_dist_reg
-        self.enable_cvfp_learning = enable_cvfp_learning
 
 
         # ========== トークン埋め込み ==========
@@ -78,10 +70,7 @@ class NewLLMResidual(nn.Module):
                 context_dim=context_dim,
                 embed_dim=embed_dim,
                 hidden_dim=hidden_dim,
-                use_dist_reg=use_dist_reg,
-                ema_momentum=ema_momentum,
-                layernorm_mix=layernorm_mix,
-                enable_cvfp_learning=enable_cvfp_learning
+                layernorm_mix=layernorm_mix
             )
             for num_layers in layer_structure
         ])

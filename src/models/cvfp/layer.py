@@ -11,20 +11,18 @@ import torch.nn as nn
 
 class CVFPLayer(nn.Module):
     """
-    分布追跡機能を内蔵したコンテキスト更新レイヤー（基本単位）
+    コンテキスト更新レイヤー（基本単位）
 
     このレイヤーは以下をカプセル化:
     1. FNN（フィードフォワードニューラルネットワーク）によるコンテキスト更新
     2. トークン埋め込みの統合
     3. Residual接続
-    4. 分布正則化のためのExponential Moving Average (EMA) 統計
+    4. オプションのLayerNorm正規化
 
     Args:
         context_dim: コンテキストベクトルの次元数
         embed_dim: トークン埋め込みの次元数
         hidden_dim: 隠れ層の次元数（context_dim + embed_dimと等しい必要がある）
-        use_dist_reg: 分布正則化を有効化 (デフォルト: True)
-        ema_momentum: EMA統計のモメンタム (デフォルト: 0.99)
         layernorm_mix: LayerNormの混合比率 (0.0 = 無効, 1.0 = 完全適用)
     """
 
@@ -33,10 +31,7 @@ class CVFPLayer(nn.Module):
         context_dim,
         embed_dim,
         hidden_dim,
-        use_dist_reg=True,
-        ema_momentum=0.99,
-        layernorm_mix=0.0,  # デフォルトで無効
-        enable_cvfp_learning=False  # CVFP学習を有効化
+        layernorm_mix=0.0  # デフォルトで無効
     ):
         super().__init__()
 
@@ -51,10 +46,7 @@ class CVFPLayer(nn.Module):
         self.context_dim = context_dim
         self.embed_dim = embed_dim
         self.hidden_dim = hidden_dim
-        self.use_dist_reg = use_dist_reg
-        self.ema_momentum = ema_momentum
         self.layernorm_mix = layernorm_mix
-        self.enable_cvfp_learning = enable_cvfp_learning
 
         # FNN: [context + token] -> [hidden_dim]
         self.fnn = nn.Sequential(
@@ -66,9 +58,6 @@ class CVFPLayer(nn.Module):
         if layernorm_mix > 0:
             self.context_norm = nn.LayerNorm(context_dim)
             self.token_norm = nn.LayerNorm(embed_dim)
-
-        # CVFP学習はPhase1Trainerで管理されるため、ここでは保存しない
-        # （enable_cvfp_learningフラグは後方互換性のため残すが使用しない）
 
         # 重みの初期化
         self._init_weights()
@@ -127,7 +116,5 @@ class CVFPLayer(nn.Module):
             f'context_dim={self.context_dim}, '
             f'embed_dim={self.embed_dim}, '
             f'hidden_dim={self.hidden_dim}, '
-            f'use_dist_reg={self.use_dist_reg}, '
-            f'ema_momentum={self.ema_momentum}, '
             f'layernorm_mix={self.layernorm_mix}'
         )

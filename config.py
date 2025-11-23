@@ -26,14 +26,11 @@ class ResidualConfig:
 
     # ========== Diversity Regularization (固定次元割り当て法) ==========
     # 固定次元割り当て + LayerNormによる多様性確保
-    use_distribution_reg = True        # 多様性正則化を使用（推奨：True）
     dist_reg_weight = 0.99             # 多様性正則化の重み（高く設定して多様性を優先）
                                        # total_loss = (1-w) * cvfp_loss + w * diversity_loss
                                        # 0.5: 50% CVFP, 50% Diversity
                                        # 0.8: 20% CVFP, 80% Diversity
                                        # 0.99: 1% CVFP, 99% Diversity（現在の設定）
-
-    ema_momentum = 0.99                # LayerのEMAパラメータ（後方互換性のため保持）
 
     # ========== Phase 1: 固有点学習 ==========
     phase1_max_iterations = 10           # 固有点探索の最大反復回数
