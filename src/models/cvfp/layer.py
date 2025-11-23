@@ -35,7 +35,8 @@ class CVFPLayer(nn.Module):
         hidden_dim,
         use_dist_reg=True,
         ema_momentum=0.99,
-        layernorm_mix=0.0  # デフォルトで無効
+        layernorm_mix=0.0,  # デフォルトで無効
+        enable_cvfp_learning=False  # CVFP学習を有効化
     ):
         super().__init__()
 
@@ -53,6 +54,7 @@ class CVFPLayer(nn.Module):
         self.use_dist_reg = use_dist_reg
         self.ema_momentum = ema_momentum
         self.layernorm_mix = layernorm_mix
+        self.enable_cvfp_learning = enable_cvfp_learning
 
         # FNN: [context + token] -> [hidden_dim]
         self.fnn = nn.Sequential(
@@ -71,6 +73,11 @@ class CVFPLayer(nn.Module):
             self.register_buffer('running_mean', torch.zeros(context_dim))
             self.register_buffer('running_var', torch.ones(context_dim))
             self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
+
+        # CVFP学習のための前回出力保存
+        if enable_cvfp_learning:
+            self.register_buffer('previous_context', None)
+            self.cvfp_loss = None
 
         # 重みの初期化
         self._init_weights()
@@ -123,6 +130,10 @@ class CVFPLayer(nn.Module):
         if self.training and self.use_dist_reg:
             self._update_running_stats(new_context)
 
+        # CVFP学習: 前回出力との差を自動計算（訓練モードのみ）
+        if self.training and self.enable_cvfp_learning:
+            self._update_cvfp_loss(new_context)
+
         return new_context, new_token
 
     def _update_running_stats(self, context):
@@ -147,6 +158,47 @@ class CVFPLayer(nn.Module):
 
             # 更新回数を追跡
             self.num_batches_tracked += 1
+
+    def _update_cvfp_loss(self, new_context):
+        """
+        CVFP損失を自動計算・更新
+
+        前回の出力との差（MSE）を計算し、CVFPレイヤーが
+        固定点に収束するよう学習を促す。
+
+        Args:
+            new_context: 現在の出力コンテキスト [batch, context_dim]
+        """
+        import torch.nn.functional as F
+
+        if self.previous_context is not None:
+            # 前回出力との差をCVFP損失として計算
+            self.cvfp_loss = F.mse_loss(new_context, self.previous_context)
+        else:
+            # 初回は損失なし
+            self.cvfp_loss = torch.tensor(0.0, device=new_context.device)
+
+        # 次回のために現在の出力を保存（勾配は不要）
+        self.previous_context = new_context.detach()
+
+    def get_cvfp_loss(self):
+        """
+        CVFP損失を取得
+
+        Returns:
+            cvfp_loss: CVFP損失（前回出力との差）
+        """
+        if not self.enable_cvfp_learning or self.cvfp_loss is None:
+            # CVFP学習が無効、または初回
+            return torch.tensor(0.0)
+
+        return self.cvfp_loss
+
+    def reset_cvfp_state(self):
+        """CVFP学習状態をリセット（新しいイテレーション開始時）"""
+        if self.enable_cvfp_learning:
+            self.previous_context = None
+            self.cvfp_loss = None
 
     def get_distribution_loss(self):
         """
