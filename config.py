@@ -73,8 +73,8 @@ class ResidualConfig:
     manual_val_path = "./cache/manual_val_tokens.pt"       # manual使用時のパス
 
     # Common settings
-    max_seq_length = 1024                                  # 最大シーケンス長
-    num_samples = 100                                      # 訓練サンプル数（ultrachat使用時）
+    max_seq_length = 128                                   # 最大シーケンス長（短縮: 高速テスト用）
+    num_samples = 5                                        # 訓練サンプル数（少量: 高速テスト用）
     train_val_split = 0.8                                  # Train/Val分割比率（auto_split使用時）
 
     # UltraChat specific (train_data_source="ultrachat"の場合)
