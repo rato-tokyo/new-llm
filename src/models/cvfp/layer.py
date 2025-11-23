@@ -119,47 +119,7 @@ class CVFPLayer(nn.Module):
             new_context = (1 - mix) * new_context + mix * context_normed
             new_token = (1 - mix) * new_token + mix * token_normed
 
-        # CVFP学習はPhase1Trainerで管理（ここでは何もしない）
-
         return new_context, new_token
-
-    def get_cvfp_loss(self):
-        """
-        CVFP損失を取得
-
-        注: CVFP損失はPhase1Trainerで計算されるため、ここでは常に0を返す。
-        このメソッドは後方互換性のため残している。
-
-        Returns:
-            cvfp_loss: 常に0.0
-        """
-        device = next(self.parameters()).device
-        return torch.tensor(0.0, device=device, requires_grad=False)
-
-    def reset_cvfp_state(self):
-        """
-        CVFP学習状態をリセット
-
-        注: CVFP状態はPhase1Trainerで管理されるため、ここでは何もしない。
-        このメソッドは後方互換性のため残している。
-        """
-        pass  # 何もしない
-
-    def get_distribution_loss(self):
-        """
-        分布正則化損失を計算
-
-        注: 共分散正則化はPhase1Trainerで直接計算されるため、ここでは常に0を返す。
-        このメソッドは後方互換性のため残している。
-
-        Returns:
-            dist_loss: 常に0.0
-        """
-        return torch.tensor(0.0, device=next(self.parameters()).device)
-
-    def reset_running_stats(self):
-        """ランニング統計をリセット（互換性のため残すが何もしない）"""
-        pass
 
     def extra_repr(self):
         """デバッグ用の文字列表現"""

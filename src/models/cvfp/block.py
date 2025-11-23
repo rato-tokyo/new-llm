@@ -76,27 +76,3 @@ class CVFPBlock(nn.Module):
             context, token_embed = layer(context, token_embed)
 
         return context, token_embed
-
-    def get_distribution_loss(self):
-        """全レイヤーからの分布損失を集約"""
-        total_loss = 0.0
-        for layer in self.layers:
-            total_loss += layer.get_distribution_loss()
-        return total_loss / len(self.layers)  # レイヤー間で平均
-
-    def get_cvfp_loss(self):
-        """全レイヤーからのCVFP損失を集約"""
-        total_loss = 0.0
-        for layer in self.layers:
-            total_loss += layer.get_cvfp_loss()
-        return total_loss / len(self.layers)  # レイヤー間で平均
-
-    def reset_running_stats(self):
-        """全レイヤーの統計をリセット"""
-        for layer in self.layers:
-            layer.reset_running_stats()
-
-    def reset_cvfp_state(self):
-        """全レイヤーのCVFP学習状態をリセット"""
-        for layer in self.layers:
-            layer.reset_cvfp_state()
