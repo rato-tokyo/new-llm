@@ -156,7 +156,7 @@ learning_rate = 0.001  # BAD
 # ✅ config.pyから取得
 model = NewLLMResidual(..., ema_momentum=config.ema_momentum)  # GOOD
 threshold = config.identity_mapping_threshold  # GOOD
-learning_rate = config.phase1_lr_warmup  # GOOD
+learning_rate = config.phase1_learning_rate  # GOOD
 ```
 
 **理由**:

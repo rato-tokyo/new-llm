@@ -34,9 +34,7 @@ class MinimalConfig:
     phase1_max_iterations = 5  # Reduced for quick test
     phase1_convergence_threshold = 0.02
     phase1_min_converged_ratio = 0.95
-    phase1_lr_warmup = 0.002
-    phase1_lr_medium = 0.0005
-    phase1_lr_finetune = 0.0001
+    phase1_learning_rate = 0.002  # Fixed learning rate
 
     # Distribution Regularization
     use_distribution_reg = True
@@ -100,7 +98,7 @@ def test_refactored_model():
         max_iterations=config.phase1_max_iterations,
         convergence_threshold=config.phase1_convergence_threshold,
         min_converged_ratio=config.phase1_min_converged_ratio,
-        learning_rate=config.phase1_lr_warmup,
+        learning_rate=config.phase1_learning_rate,
         dist_reg_weight=config.dist_reg_weight,
         label="Test"
     )

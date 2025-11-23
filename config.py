@@ -45,12 +45,12 @@ class ResidualConfig:
                                          # 意味: 前回iterationとのMSE < 0.02なら収束と判定
                                          # √0.02 ≈ 0.141 = L2距離の閾値
     phase1_min_converged_ratio = 0.95    # 全トークンの95%が収束したら停止
-    # Early Stopping: 収束率が2回連続で低下したら停止
 
-    # LRスケジュール
-    phase1_lr_warmup = 0.002      # 反復1-3回目: 高めのLR（高速収束）
-    phase1_lr_medium = 0.0005     # 反復4-8回目: 中程度のLR
-    phase1_lr_finetune = 0.0001   # 反復9回目以降: 低いLR（微調整）
+    # 学習率（固定）
+    phase1_learning_rate = 0.002         # Phase 1の学習率（固定値）
+                                         # 0.002: 推奨（高速収束）
+                                         # 0.001: 安定的
+                                         # 0.0005: 慎重
 
     # ========== Phase 2: トークン予測 ==========
     skip_phase2 = True              # Phase 2をスキップ（Phase 1のみ実行）
