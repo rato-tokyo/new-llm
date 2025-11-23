@@ -47,7 +47,7 @@ class ResidualConfig:
     phase1_lr_finetune = 0.0001   # 反復9回目以降: 低いLR（微調整）
 
     # ========== Phase 2: トークン予測 ==========
-    skip_phase2 = False             # Phase 2をスキップ（Phase 1のみ実行）
+    skip_phase2 = True              # Phase 2をスキップ（Phase 1のみ実行）
     freeze_context = False          # Phase 2で文脈を固定（token_outputのみ学習）
     phase2_learning_rate = 0.0001   # トークン予測の学習率
     phase2_epochs = 10              # 訓練エポック数
@@ -68,7 +68,7 @@ class ResidualConfig:
 
     # Common settings
     max_seq_length = 1024                                  # 最大シーケンス長
-    num_samples = 10                                       # 訓練サンプル数（ultrachat使用時）
+    num_samples = 100                                      # 訓練サンプル数（ultrachat使用時）
     train_val_split = 0.8                                  # Train/Val分割比率（auto_split使用時）
 
     # UltraChat specific (train_data_source="ultrachat"の場合)

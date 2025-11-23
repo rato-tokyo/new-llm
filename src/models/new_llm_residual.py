@@ -1,51 +1,58 @@
-"""New-LLM: Residual Connection Architecture (Standard Version)
+"""New-LLM: Residual Connection Architecture (Refactored Version 2)
 
-This architecture uses ResNet-style residual connections for both context and token vectors.
+Clean implementation using CVFPLayer for better encapsulation.
 
-Key Features:
-1. FNN output is split into _context and _token (256 + 256 = 512)
-2. Residual connections (Addition): context += _context, token += _token
-3. Each layer updates both context and token vectors
-4. Final prediction from updated token vector
-
-Architecture (Standard Version):
-- Layer 1-4: [context, token] → FNN → split → [_context, _token]
-            context += _context
-            token += _token
-- Output: token → next_token prediction
-
-This is fundamentally different from NewLLMGated which uses:
-- LSTM-style gated updates
-- No token vector updates
-- Prediction from hidden state instead of token
+Key Improvements:
+1. Uses CVFPLayer/CVFPBlock from layers.py
+2. Distribution regularization handled internally
+3. Cleaner forward pass
+4. Better separation of concerns
 """
 
 import torch
 import torch.nn as nn
+from .layers import CVFPBlock
 
 
 class NewLLMResidual(nn.Module):
     """
     New-LLM with ResNet-style residual connections
 
+    This version uses CVFPLayer for clean encapsulation of:
+    - Context updates
+    - Token updates
+    - Distribution regularization (EMA-based)
+
     Args:
         vocab_size: Vocabulary size
         embed_dim: Token embedding dimension
         context_dim: Context vector dimension
-        hidden_dim: Hidden dimension for FNN layers (must be embed_dim + context_dim)
-        layer_structure: List specifying FNN layers between context updates
-        use_can: Enable Cell-wise Activity Normalization (CAN)
-        can_momentum: Momentum for EMA in CAN (default: 0.9)
-        can_eps: Epsilon for numerical stability in CAN (default: 1e-5)
+        hidden_dim: Hidden dimension (must be embed_dim + context_dim)
+        layer_structure: List specifying number of layers per block
+        use_dist_reg: Enable distribution regularization (default: True)
+        ema_momentum: EMA momentum for running stats (default: 0.99)
+        layernorm_mix: LayerNorm mixing ratio, 0.0=disabled (default: 0.0)
     """
 
-    def __init__(self, vocab_size, embed_dim, context_dim, hidden_dim,
-                 layer_structure):
+    def __init__(
+        self,
+        vocab_size,
+        embed_dim,
+        context_dim,
+        hidden_dim,
+        layer_structure,
+        use_dist_reg=True,
+        ema_momentum=0.99,
+        layernorm_mix=0.0
+    ):
         super().__init__()
 
         # Validate dimensions
         if hidden_dim != embed_dim + context_dim:
-            raise ValueError(f"hidden_dim ({hidden_dim}) must equal embed_dim ({embed_dim}) + context_dim ({context_dim})")
+            raise ValueError(
+                f"hidden_dim ({hidden_dim}) must equal "
+                f"embed_dim ({embed_dim}) + context_dim ({context_dim})"
+            )
 
         # Store configuration
         self.vocab_size = vocab_size
@@ -53,181 +60,123 @@ class NewLLMResidual(nn.Module):
         self.context_dim = context_dim
         self.hidden_dim = hidden_dim
         self.layer_structure = layer_structure
-
-        # Total number of FNN layers
-        self.total_layers = sum(layer_structure)
-        # Number of context update points
-        self.num_blocks = len(layer_structure)
+        self.use_dist_reg = use_dist_reg
 
         # ========== Token Embedding ==========
-        self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
-        self.embed_norm = nn.LayerNorm(self.embed_dim)
+        self.token_embedding = nn.Embedding(vocab_size, embed_dim)
+        self.embed_norm = nn.LayerNorm(embed_dim)
 
-        # ========== FNN Blocks ==========
-        # Build FNN blocks based on layer_structure
-        self.fnn_blocks = nn.ModuleList()
-
-        for block_idx, num_layers in enumerate(layer_structure):
-            # Each block is a sequential FNN
-            layers = []
-
-            # First layer of block: input is [context + token]
-            input_dim = self.context_dim + self.embed_dim
-            layers.append(nn.Linear(input_dim, self.hidden_dim))
-            layers.append(nn.ReLU())
-
-            # Additional layers in block: hidden_dim -> hidden_dim
-            for _ in range(num_layers - 1):
-                layers.append(nn.Linear(self.hidden_dim, self.hidden_dim))
-                layers.append(nn.ReLU())
-
-            self.fnn_blocks.append(nn.Sequential(*layers))
-
-        # ========== Layer Normalization (after each residual update) ==========
-        self.context_norms = nn.ModuleList()
-        self.token_norms = nn.ModuleList()
-
-        for _ in range(self.num_blocks):
-            self.context_norms.append(nn.LayerNorm(self.context_dim))
-            self.token_norms.append(nn.LayerNorm(self.embed_dim))
+        # ========== CVFP Blocks ==========
+        self.blocks = nn.ModuleList([
+            CVFPBlock(
+                num_layers=num_layers,
+                context_dim=context_dim,
+                embed_dim=embed_dim,
+                hidden_dim=hidden_dim,
+                use_dist_reg=use_dist_reg,
+                ema_momentum=ema_momentum,
+                layernorm_mix=layernorm_mix
+            )
+            for num_layers in layer_structure
+        ])
 
         # ========== Output Head ==========
-        # Predict from context vector (Phase 2 uses fixed contexts)
-        self.token_output = nn.Linear(self.context_dim, self.vocab_size)
+        # Predict next token from context
+        self.token_output = nn.Linear(context_dim, vocab_size)
 
-        # Context reconstruction decoder (autoencoder)
-        target_dim = self.context_dim + self.embed_dim
-        self.context_decoder = nn.Sequential(
-            nn.Linear(self.context_dim, target_dim),
-            nn.ReLU(),
-            nn.Linear(target_dim, target_dim),
-        )
-
-        # Initialize weights
+        # Initialize embeddings
         self._init_weights()
 
     def _init_weights(self):
-        """Initialize weights"""
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.normal_(module.weight, mean=0.0, std=0.02)
-                if module.bias is not None:
-                    nn.init.zeros_(module.bias)
-            elif isinstance(module, nn.Embedding):
-                nn.init.normal_(module.weight, mean=0.0, std=0.02)
+        """Initialize embedding weights"""
+        nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
 
     def _update_context_one_step(self, token_vec, context, return_token=False):
         """
-        Update context and token for one iteration
+        Update context for one token step
 
         Args:
             token_vec: Token vector [batch, embed_dim]
             context: Current context [batch, context_dim]
-            return_token: If True, return updated token vector
+            return_token: If True, also return updated token
 
         Returns:
-            context_new: Updated context [batch, context_dim]
-            token_new: Updated token vector [batch, embed_dim] (if return_token=True)
+            new_context: Updated context [batch, context_dim]
+            new_token: Updated token (if return_token=True)
         """
-        context_temp = context
-        token_temp = token_vec
+        current_context = context
+        current_token = token_vec
 
-        # Process through each FNN block
-        for block_idx in range(self.num_blocks):
-            # FNN input: [context, token]
-            fnn_input = torch.cat([context_temp, token_temp], dim=-1)
-
-            # Process through FNN block
-            y = self.fnn_blocks[block_idx](fnn_input)  # [batch, hidden_dim]
-
-            # Split output into _context and _token
-            _context = y[:, :self.context_dim]  # [batch, context_dim]
-            _token = y[:, self.context_dim:]     # [batch, embed_dim]
-
-            # Residual connections (Addition)
-            context_temp = context_temp + _context
-            token_temp = token_temp + _token
-
-            # Layer normalization
-            context_temp = self.context_norms[block_idx](context_temp)
-            token_temp = self.token_norms[block_idx](token_temp)
+        # Process through all blocks
+        for block in self.blocks:
+            current_context, current_token = block(current_context, current_token)
 
         if return_token:
-            return context_temp, token_temp
-        return context_temp
+            return current_context, current_token
+        return current_context
 
     def forward(self, input_ids, return_context_trajectory=False):
         """
-        Forward pass with residual connections
+        Forward pass through the model
 
         Args:
-            input_ids: Token IDs [batch, seq_len]
-            return_context_trajectory: If True, return all context vectors
+            input_ids: Input token IDs [batch, seq_len]
+            return_context_trajectory: If True, return all intermediate contexts
 
         Returns:
-            logits: Next token predictions [batch, seq_len, vocab_size]
-            context_trajectory: Context vectors [batch, seq_len, context_dim] (if requested)
+            logits: Output logits [batch, seq_len, vocab_size]
+            context_trajectory: (optional) All contexts [batch, seq_len, context_dim]
         """
         batch_size, seq_len = input_ids.shape
-        device = input_ids.device
 
-        # Token embedding
-        token_embeds = self.token_embedding(input_ids)
+        # Get token embeddings
+        token_embeds = self.token_embedding(input_ids)  # [batch, seq_len, embed_dim]
         token_embeds = self.embed_norm(token_embeds)
 
-        # Pre-allocate output tensors
-        logits = torch.zeros(batch_size, seq_len, self.vocab_size, device=device)
+        # Initialize context
+        context = torch.zeros(
+            batch_size, self.context_dim,
+            device=input_ids.device,
+            dtype=token_embeds.dtype
+        )
 
-        if return_context_trajectory:
-            context_trajectory = torch.zeros(batch_size, seq_len, self.context_dim, device=device)
-
-        # Sequential processing
+        # Process sequence
+        contexts = []
         for t in range(seq_len):
-            # Current token
-            current_token = token_embeds[:, t, :]
+            token_vec = token_embeds[:, t, :]  # [batch, embed_dim]
+            context = self._update_context_one_step(token_vec, context)
+            contexts.append(context)
 
-            # Initialize context for this token
-            context = torch.zeros(batch_size, self.context_dim, device=device)
+        # Stack contexts
+        all_contexts = torch.stack(contexts, dim=1)  # [batch, seq_len, context_dim]
 
-            # Update context and token
-            context, token_updated = self._update_context_one_step(current_token, context, return_token=True)
-
-            # Token prediction (from updated token vector)
-            token_logits = self.token_output(token_updated)
-            logits[:, t, :] = token_logits
-
-            if return_context_trajectory:
-                context_trajectory[:, t, :] = context
+        # Predict next tokens
+        logits = self.token_output(all_contexts)  # [batch, seq_len, vocab_size]
 
         if return_context_trajectory:
-            return logits, context_trajectory
+            return logits, all_contexts
         return logits
 
-    def count_parameters(self):
-        """Count total parameters"""
-        return sum(p.numel() for p in self.parameters() if p.requires_grad)
+    def get_distribution_loss(self):
+        """
+        Get aggregated distribution regularization loss from all blocks
 
+        This method provides clean access to internal statistics
+        without exposing implementation details.
 
-def create_residual_layerwise(vocab_size, embed_dim, context_dim, hidden_dim,
-                               num_layers=4):
-    """
-    Create a pure layer-wise model with residual connections
+        Returns:
+            dist_loss: Scalar tensor
+        """
+        if not self.use_dist_reg:
+            return torch.tensor(0.0, device=next(self.parameters()).device)
 
-    Args:
-        vocab_size: Vocabulary size
-        embed_dim: Token embedding dimension
-        context_dim: Context vector dimension
-        hidden_dim: Hidden dimension (must be embed_dim + context_dim)
-        num_layers: Number of layers (default: 4)
+        total_loss = 0.0
+        for block in self.blocks:
+            total_loss += block.get_distribution_loss()
 
-    Returns:
-        NewLLMResidual model with layer-wise structure
-    """
-    layer_structure = [1] * num_layers
-    return NewLLMResidual(
-        vocab_size=vocab_size,
-        embed_dim=embed_dim,
-        context_dim=context_dim,
-        hidden_dim=hidden_dim,
-        layer_structure=layer_structure
-    )
+        return total_loss / len(self.blocks)  # Average across blocks
+
+    def reset_running_stats(self):
+        """Reset all running statistics (for new training runs)"""
+        for block in self.blocks:
+            block.reset_running_stats()

@@ -102,6 +102,10 @@ def analyze_fixed_points(contexts, label="", verbose=True):
     # Compute SVD
     U, S, V = torch.svd(contexts)
 
+    # Actual rank (number of non-zero singular values)
+    # Consider values > 1e-6 as non-zero to account for numerical precision
+    actual_rank = (S > 1e-6).sum().item()
+
     # Effective rank (entropy-based)
     S_normalized = S / S.sum()
     entropy = -(S_normalized * torch.log(S_normalized + 1e-10)).sum()
@@ -109,7 +113,8 @@ def analyze_fixed_points(contexts, label="", verbose=True):
 
     if verbose:
         print_flush("\n4. Information Content:")
-        print_flush(f"  Effective Rank: {effective_rank:.2f} / {context_dim} (max)")
+        print_flush(f"  Actual Rank: {actual_rank} / {context_dim} ({actual_rank/context_dim*100:.1f}%)")
+        print_flush(f"  Effective Rank: {effective_rank:.2f} / {context_dim} ({effective_rank/context_dim*100:.1f}%)")
         print_flush(f"  Top 5 Singular Values: {S[:5].tolist()}")
 
     # Determine quality
@@ -124,6 +129,7 @@ def analyze_fixed_points(contexts, label="", verbose=True):
         print_flush(f"{'='*70}\n")
 
     return {
+        "actual_rank": actual_rank,
         "effective_rank": effective_rank,
         "avg_distance": avg_distance,
         "avg_cosine": avg_cosine,

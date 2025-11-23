@@ -1,11 +1,11 @@
 """
-Phase 1: Context Vector Fixed-Point Property (CVFP) Training
+Phase 1 Training (Version 2): Clean implementation with CVFPLayer
 
-Unified implementation for both training and validation.
-Fixes critical bugs from the old implementation:
-- Proper CVFP iteration logic (compare with previous iteration's final contexts)
-- Correct distribution regularization (unbiased=False for population variance)
-- Single implementation for Train/Val (no code duplication)
+Key improvements:
+1. Distribution regularization handled by model layers
+2. Cleaner training loop
+3. No manual statistics calculation
+4. Better separation of concerns
 """
 
 import torch
@@ -14,12 +14,10 @@ import torch.nn.functional as F
 
 def train_phase1(model, token_ids, config, device, is_training=True, label=""):
     """
-    Phase 1: CVFP Fixed-Point Learning
-
-    Learn context generation parameters so that contexts converge to fixed points.
+    Phase 1: CVFP Fixed-Point Learning (Refactored)
 
     Args:
-        model: The language model
+        model: The language model (must have get_distribution_loss() method)
         token_ids: Input token IDs [num_tokens]
         config: Configuration object
         device: torch device
@@ -38,6 +36,9 @@ def train_phase1(model, token_ids, config, device, is_training=True, label=""):
     # Setup training or evaluation mode
     if is_training:
         model.train()
+
+        # Reset running statistics at start of training
+        model.reset_running_stats()
 
         # Only train context generation layers
         context_params = []
@@ -114,17 +115,9 @@ def train_phase1(model, token_ids, config, device, is_training=True, label=""):
             cvfp_loss = F.mse_loss(all_contexts_tensor, fixed_contexts)
             total_cvfp_loss = cvfp_loss.item()
 
-            # Distribution regularization (if enabled and training)
+            # Distribution regularization (automatically calculated by layers)
             if getattr(config, 'use_distribution_reg', True) and is_training:
-                # Goal: each dimension (across all tokens) follows N(0,1)
-                dim_mean = all_contexts_tensor.mean(dim=0)  # [context_dim]
-                # CRITICAL: Use unbiased=False for population variance
-                dim_var = all_contexts_tensor.var(dim=0, unbiased=False)  # [context_dim]
-
-                # Penalize deviation from N(0,1)
-                mean_penalty = (dim_mean ** 2).mean()
-                var_penalty = ((dim_var - 1.0) ** 2).mean()
-                dist_loss = mean_penalty + var_penalty
+                dist_loss = model.get_distribution_loss()
                 total_dist_loss = dist_loss.item()
 
                 # Combine losses

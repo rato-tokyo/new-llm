@@ -1,0 +1,11 @@
+# Claude Codeが分析から除外するファイル/ディレクトリ
+cache/
+.git/
+checkpoints/
+experiments/
+__pycache__/
+*.pt
+*.arrow
+*.log
+*.pyc
+.DS_Store
