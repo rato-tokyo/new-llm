@@ -100,7 +100,8 @@ def test_refactored_model():
         min_converged_ratio=config.phase1_min_converged_ratio,
         learning_rate=config.phase1_learning_rate,
         dist_reg_weight=config.dist_reg_weight,
-        label="Test"
+        label="Test",
+        is_training=True
     )
 
     elapsed = time.time() - start_time

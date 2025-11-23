@@ -91,14 +91,30 @@ def main():
 
     # Train
     train_contexts = train_phase1(
-        model, train_token_ids, config, device,
-        is_training=True, label="Train"
+        model=model,
+        token_ids=train_token_ids,
+        device=device,
+        max_iterations=config.phase1_max_iterations,
+        convergence_threshold=config.phase1_convergence_threshold,
+        min_converged_ratio=config.phase1_min_converged_ratio,
+        learning_rate=config.phase1_learning_rate,
+        dist_reg_weight=config.dist_reg_weight,
+        label="Train",
+        is_training=True
     )
 
     # Validation
     val_contexts = train_phase1(
-        model, val_token_ids, config, device,
-        is_training=False, label="Val"
+        model=model,
+        token_ids=val_token_ids,
+        device=device,
+        max_iterations=config.phase1_max_iterations,
+        convergence_threshold=config.phase1_convergence_threshold,
+        min_converged_ratio=config.phase1_min_converged_ratio,
+        learning_rate=config.phase1_learning_rate,
+        dist_reg_weight=config.dist_reg_weight,
+        label="Val",
+        is_training=False
     )
 
     phase1_time = time.time() - phase1_start
