@@ -96,9 +96,12 @@ def test_refactored_model():
     contexts = train_phase1(
         model=model,
         token_ids=test_token_ids,
-        config=config,
         device=device,
-        is_training=True,
+        max_iterations=config.phase1_max_iterations,
+        convergence_threshold=config.phase1_convergence_threshold,
+        min_converged_ratio=config.phase1_min_converged_ratio,
+        learning_rate=config.phase1_lr_warmup,
+        dist_reg_weight=config.dist_reg_weight,
         label="Test"
     )
 

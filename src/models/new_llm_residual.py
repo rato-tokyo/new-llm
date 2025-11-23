@@ -66,9 +66,11 @@ class NewLLMResidual(nn.Module):
         self.use_dist_reg = use_dist_reg
         self.enable_cvfp_learning = enable_cvfp_learning
 
-        # オプティマイザーの保存用（Phase 1で設定される）
+        # Phase 1訓練用の内部状態
         self.phase1_optimizer = None
         self.dist_reg_weight = 0.2  # デフォルト値
+        self.phase1_config = None  # Phase 1設定を保存
+        self.current_iteration = 0  # 現在のイテレーション番号
 
         # ========== トークン埋め込み ==========
         self.token_embedding = nn.Embedding(vocab_size, embed_dim)
@@ -250,19 +252,37 @@ class NewLLMResidual(nn.Module):
         for block in self.blocks:
             block.reset_cvfp_state()
 
-    def set_phase1_optimizer(self, optimizer, dist_reg_weight=0.2):
+    def setup_phase1_training(self, context_params, learning_rate, dist_reg_weight):
         """
-        Phase 1用のoptimizerを設定
-
-        enable_cvfp_learning=Trueの場合、このoptimizerを使用して
-        各レイヤーが自動的にbackward + stepを実行する。
+        Phase 1訓練の初期化（全てをカプセル化）
 
         Args:
-            optimizer: torch.optim.Optimizer インスタンス
+            context_params: 訓練対象パラメータのリスト
+            learning_rate: 学習率
             dist_reg_weight: 分布正則化の重み
         """
-        self.phase1_optimizer = optimizer
+        self.reset_running_stats()
+        self.current_iteration = 0
+
+        # Optimizerを作成
+        self.phase1_optimizer = torch.optim.Adam(
+            context_params,
+            lr=learning_rate
+        )
         self.dist_reg_weight = dist_reg_weight
+
+    def start_phase1_iteration(self, iteration):
+        """
+        Phase 1の各イテレーション開始時の処理
+
+        Args:
+            iteration: 現在のイテレーション番号（0-indexed）
+        """
+        self.current_iteration = iteration
+
+        # CVFP状態リセット（iteration 0以降）
+        if iteration > 0:
+            self.reset_cvfp_state()
 
     def auto_optimize_if_enabled(self):
         """
