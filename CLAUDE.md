@@ -127,6 +127,108 @@ torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
 - Model: Architecture and forward pass only
 - Trainer: Training logic, loss, optimization
 
+## Phase 2 Strategy - Multi-Output Architecture
+
+### Design Philosophy
+
+**Two-Phase Training with Parameter Expansion**
+
+#### Phase 1: Context Vector Learning (Current)
+- **Architecture**: Single `token_output` head
+- **Focus**: Pure CVFP learning without token prediction interference
+- **Output**: Trained context generation + one token_output (38.6M params)
+- **Checkpoint**: Save complete model state
+
+#### Phase 2: Token Prediction with Multi-Output
+- **Architecture Expansion**: Convert single output to per-block outputs
+- **Strategy**: Clone trained `token_output` to each of 6 blocks
+- **Benefit**: Start from trained parameters, not random initialization
+- **Training**: Each block's output fine-tunes independently
+
+### Implementation Strategy
+
+```python
+# Phase 1: Train with single output (current)
+model = NewLLMResidual(...)  # Single token_output
+train_phase1(model)
+save_checkpoint(model)
+
+# Phase 2: Expand to multi-output
+phase1_model = load_checkpoint()
+phase2_model = expand_to_multi_output(phase1_model)
+# Each block gets copy of trained token_output
+# Then train all 6 outputs independently
+
+train_phase2(phase2_model)
+```
+
+### Parameter Cloning Details
+
+```python
+def expand_to_multi_output(phase1_model):
+    """
+    Clone trained token_output to each block
+
+    Before: 1 × token_output (38.6M)
+    After:  6 × token_output (231.4M)
+
+    Each clone inherits trained weights as initialization
+    """
+    trained_output = phase1_model.token_output
+
+    block_outputs = [
+        clone_linear(trained_output)
+        for _ in range(num_blocks)
+    ]
+
+    return phase2_model_with_block_outputs
+```
+
+### Why This Approach?
+
+1. **Phase 1 Purity**: Context learning unaffected by token prediction
+2. **Efficient Phase 2**: Start from trained params, faster convergence
+3. **Clean Separation**: Two distinct training objectives
+4. **Checkpoint Reuse**: Phase 1 checkpoint remains valuable
+5. **Parameter Efficiency**: Single output in Phase 1, expand only when needed
+
+### Training Configuration
+
+**Phase 1**:
+- Train: CVFPBlocks + single token_output
+- Freeze: Embeddings (GPT-2 pretrained)
+- Objective: Context convergence + diversity
+
+**Phase 2**:
+- Train: 6 × block_outputs (cloned from Phase 1)
+- Options: Freeze or fine-tune CVFPBlocks
+- Objective: Token prediction from each block's context
+
+### Loss Computation in Phase 2
+
+```python
+# Weighted loss across all blocks
+total_loss = 0
+weights = [0.5, 0.7, 0.8, 0.9, 1.0, 1.2]  # Later blocks more important
+
+for block_idx, block_output in enumerate(block_outputs):
+    logits = block_output(contexts[block_idx])
+    loss = cross_entropy(logits, targets)
+    total_loss += weights[block_idx] * loss
+```
+
+### Advantages Over Alternatives
+
+**vs. Single Output Only**:
+- ✅ Each layer learns token prediction
+- ✅ Richer learning signal
+- ✅ Better intermediate representations
+
+**vs. Multi-Output from Start**:
+- ✅ Phase 1 remains focused on context learning
+- ✅ No interference during CVFP training
+- ✅ Easier debugging and analysis
+
 ## Code Quality Standards
 
 ### Principles

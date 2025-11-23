@@ -48,11 +48,14 @@ class ResidualConfig:
 
     # ========== Phase 2: トークン予測 ==========
     skip_phase2 = True              # Phase 2をスキップ（Phase 1のみ実行）
-    freeze_context = False          # Phase 2で文脈を固定（token_outputのみ学習）
+    freeze_context = True           # Phase 2で文脈を固定（block_outputsのみ学習）
     phase2_learning_rate = 0.0001   # トークン予測の学習率
     phase2_epochs = 10              # 訓練エポック数
     phase2_batch_size = 32          # バッチサイズ
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
+
+    # Multi-output configuration (6 blocks)
+    phase2_block_weights = [0.5, 0.7, 0.8, 0.9, 1.0, 1.2]  # Loss weights per block
 
     # ========== データ ==========
     # Training data source
