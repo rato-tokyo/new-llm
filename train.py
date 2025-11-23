@@ -69,7 +69,8 @@ def main():
         layer_structure=layer_structure,
         use_dist_reg=config.use_distribution_reg,
         ema_momentum=config.ema_momentum,
-        layernorm_mix=0.0  # Disabled
+        layernorm_mix=0.0,  # Disabled
+        enable_cvfp_learning=False  # Phase 1では無効（外部でCVFP損失計算）
     )
     model.to(device)
 

@@ -33,6 +33,7 @@ class NewLLMResidual(nn.Module):
         use_dist_reg: 分布正則化を有効化 (デフォルト: True)
         ema_momentum: ランニング統計のEMAモメンタム (デフォルト: 0.99)
         layernorm_mix: LayerNorm混合比率、0.0=無効 (デフォルト: 0.0)
+        enable_cvfp_learning: CVFP自己学習を有効化 (デフォルト: False)
     """
 
     def __init__(
@@ -44,7 +45,8 @@ class NewLLMResidual(nn.Module):
         layer_structure,
         use_dist_reg=True,
         ema_momentum=0.99,
-        layernorm_mix=0.0
+        layernorm_mix=0.0,
+        enable_cvfp_learning=False
     ):
         super().__init__()
 
@@ -76,7 +78,8 @@ class NewLLMResidual(nn.Module):
                 hidden_dim=hidden_dim,
                 use_dist_reg=use_dist_reg,
                 ema_momentum=ema_momentum,
-                layernorm_mix=layernorm_mix
+                layernorm_mix=layernorm_mix,
+                enable_cvfp_learning=enable_cvfp_learning
             )
             for num_layers in layer_structure
         ])
@@ -177,7 +180,28 @@ class NewLLMResidual(nn.Module):
 
         return total_loss / len(self.blocks)  # ブロック間で平均
 
+    def get_cvfp_loss(self):
+        """
+        全ブロックから集約されたCVFP損失を取得
+
+        CVFP自己学習が有効な場合、各レイヤーが自動的に計算した
+        前回出力との差（MSE）を集約して返す。
+
+        Returns:
+            cvfp_loss: スカラーテンソル
+        """
+        total_loss = 0.0
+        for block in self.blocks:
+            total_loss += block.get_cvfp_loss()
+
+        return total_loss / len(self.blocks)  # ブロック間で平均
+
     def reset_running_stats(self):
         """全ランニング統計をリセット（新しい訓練実行時用）"""
         for block in self.blocks:
             block.reset_running_stats()
+
+    def reset_cvfp_state(self):
+        """全CVFP学習状態をリセット（新しいイテレーション開始時用）"""
+        for block in self.blocks:
+            block.reset_cvfp_state()
