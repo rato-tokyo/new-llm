@@ -2,34 +2,47 @@
 
 ## Distribution Regularization - Critical Design Specification
 
-### Philosophy: Token-wise Normalization
+### Core Requirements - MANDATORY
 
-**IMPORTANT**: Distribution regularization MUST be applied **per-token** (online), not across all tokens (batch).
+**必須仕様（MUST-HAVE)**:
+1. **オンライン学習**: トークンを逐次処理しながら学習（バッチ処理禁止）
+2. **指数移動平均（EMA）**: メモリ効率のため統計はEMAで追跡（O(d)メモリのみ）
+3. **重み更新方式**: 後処理変換ではなく、モデル重みを直接学習
 
-### Why Token-wise?
+### Philosophy: Token-wise Normalization with EMA
 
-1. **Theoretical Correctness**: Each token processes sequentially in a language model
-2. **Online Learning**: Can't wait for all 92,047 tokens to compute statistics
-3. **Prevents Trivial Solutions**: Batch normalization allows identity mapping convergence
-4. **Scalability**: Works with any sequence length
+**IMPORTANT**: Distribution regularization MUST be applied **per-token** (online), using Exponential Moving Average for memory efficiency.
 
-### Implementation Method: Exponential Moving Average (EMA)
+### Why This Design?
 
-Use running statistics updated per token:
+1. **Memory Efficiency**: EMA requires only O(d) memory regardless of sequence length
+2. **Online Learning**: Process tokens sequentially without waiting for full batch
+3. **Weight Learning**: Model learns to output normalized distributions, not just post-process
+4. **Scalability**: Works with sequences of any length without memory explosion
+
+### Implementation Method: EMA-based Weight Learning
+
+**核心的アプローチ**:
 
 ```python
-# For each token t:
-running_mean = momentum * running_mean + (1 - momentum) * context[t].mean()
-running_var = momentum * running_var + (1 - momentum) * context[t].var()
+# 1. EMA統計の追跡（メモリO(d)）
+running_mean = momentum * running_mean + (1 - momentum) * current_context
+running_var = momentum * running_var + (1 - momentum) * current_context.var()
 
-# Penalize deviation from N(0,1)
-dist_loss = (running_mean ** 2) + ((running_var - 1.0) ** 2)
+# 2. 正解データ生成（現在の統計から）
+target = (current_context - running_mean) / sqrt(running_var)
+
+# 3. 重み学習（モデルが正規分布を出力するよう学習）
+loss = MSE(current_context, target.detach())
+loss.backward()
+optimizer.step()
 ```
 
-**Parameters**:
-- Momentum: 0.99 (typical for EMA)
-- Update: Every token during forward pass
-- Scope: Per-dimension statistics across tokens
+**Key Design Points**:
+- **Memory**: O(d) only - dimension size, not sequence length
+- **Online**: Process each token immediately, no batching required
+- **Weight Update**: Model learns to output N(0,1), not just post-process
+- **EMA Momentum**: 0.99 for stability, configurable in config.py
 
 ### Object-Oriented Design for Clean Implementation
 
@@ -206,6 +219,37 @@ def _process_tokens(self, token_embeds, device, is_training):
 1. **ユーザー体験**: 処理中かフリーズか判別できないストレス回避
 2. **デバッグ効率**: 問題箇所の早期特定
 3. **時間管理**: 処理時間の予測可能性
+
+## Validation Data Policy - CRITICAL
+
+**目的**: 検証データが訓練データ外のトークンを含まないことを保証する。
+
+**問題**:
+- 検証データに訓練データにないトークンが含まれると、モデルは未知のトークンに対応できない
+- これにより検証時のEffective Rankが異常に低くなる
+- 正しい評価ができなくなる
+
+**必須ルール**:
+1. **検証データは訓練データのサブセット**: 検証データのすべてのトークンは訓練データに存在しなければならない
+2. **未知トークンの排除**: 訓練データにないトークンを検証データに含めてはいけない
+3. **データ生成時の確認**: データ生成時に必ず重複チェックを実施
+
+**実装例**:
+```python
+# ❌ 悪い例: 独立したランダム生成
+train_tokens = torch.randint(0, 1000, (10,))
+val_tokens = torch.randint(0, 1000, (5,))  # 訓練データにないトークンが含まれる可能性
+
+# ✅ 良い例: 訓練データからサンプリング
+train_tokens = torch.randint(0, 1000, (10,))
+indices = torch.randperm(10)[:5]
+val_tokens = train_tokens[indices]  # すべて訓練データに存在することが保証される
+```
+
+**理由**:
+1. **公正な評価**: モデルが学習したトークンで評価
+2. **Effective Rankの正確性**: 未知トークンによる異常値を防ぐ
+3. **実世界の反映**: 実際の使用では訓練データの分布から評価
 
 ## Context Size Monitoring Policy
 

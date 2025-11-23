@@ -18,32 +18,28 @@ class ResidualConfig:
 
     # ========== モデルアーキテクチャ ==========
     architecture = "residual_standard"
-    num_layers = 2                  # 単層ブロックの数
+    num_layers = 4                  # 単層ブロックの数（2→4に増やして表現力向上）
     context_dim = 16                # 文脈ベクトル次元数
     embed_dim = 16                  # トークン埋め込み次元数
     hidden_dim = 32                 # 中間層次元数
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
 
-    # ========== Distribution Regularization ==========
-    # 分布正則化：各次元の出力が正規分布N(0,1)に近づくよう制約
-    use_distribution_reg = True        # 分布正則化を使用（推奨：True）
-    dist_reg_weight = 0.2              # 分布正則化の重み
-                                       # total_loss = (1-w) * cvfp_loss + w * dist_loss
-                                       # 0.2: 80% CVFP, 20% Dist（推奨）
-                                       # 0.5: 50% CVFP, 50% Dist
-                                       # 0.7: 30% CVFP, 70% Dist
+    # ========== Diversity Regularization (固定次元割り当て法) ==========
+    # 固定次元割り当て + LayerNormによる多様性確保
+    use_distribution_reg = True        # 多様性正則化を使用（推奨：True）
+    dist_reg_weight = 0.99             # 多様性正則化の重み（高く設定して多様性を優先）
+                                       # total_loss = (1-w) * cvfp_loss + w * diversity_loss
+                                       # 0.5: 50% CVFP, 50% Diversity
+                                       # 0.8: 20% CVFP, 80% Diversity
+                                       # 0.99: 1% CVFP, 99% Diversity（現在の設定）
 
-    ema_momentum = 0.99                # EMA（指数移動平均）のモメンタム
-                                       # running_stat = momentum * old + (1-momentum) * new
-                                       # 0.99: 過去を重視（推奨、安定）
-                                       # 0.95: バランス
-                                       # 0.9: 現在を重視（応答性高い）
+    ema_momentum = 0.99                # LayerのEMAパラメータ（後方互換性のため保持）
 
     # ========== Phase 1: 固有点学習 ==========
     phase1_max_iterations = 10           # 固有点探索の最大反復回数
-    phase1_convergence_threshold = 0.02  # 収束判定のMSE閾値（0.02=緩い, 0.01=厳格）
-                                         # 意味: 前回iterationとのMSE < 0.02なら収束と判定
-                                         # √0.02 ≈ 0.141 = L2距離の閾値
+    phase1_convergence_threshold = 0.05  # 収束判定のMSE閾値（0.05=かなり緩い, 0.02=緩い, 0.01=厳格）
+                                         # 意味: 前回iterationとのMSE < 0.05なら収束と判定
+                                         # √0.05 ≈ 0.224 = L2距離の閾値
     phase1_min_converged_ratio = 0.95    # 全トークンの95%が収束したら停止
 
     # 学習率（固定）

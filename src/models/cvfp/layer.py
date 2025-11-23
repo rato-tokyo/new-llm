@@ -67,13 +67,6 @@ class CVFPLayer(nn.Module):
             self.context_norm = nn.LayerNorm(context_dim)
             self.token_norm = nn.LayerNorm(embed_dim)
 
-        # 分布正則化のためのEMA統計
-        if use_dist_reg:
-            # 次元ごとのランニング平均と分散
-            self.register_buffer('running_mean', torch.zeros(context_dim))
-            self.register_buffer('running_var', torch.ones(context_dim))
-            self.register_buffer('num_batches_tracked', torch.tensor(0, dtype=torch.long))
-
         # CVFP学習はPhase1Trainerで管理されるため、ここでは保存しない
         # （enable_cvfp_learningフラグは後方互換性のため残すが使用しない）
 
@@ -84,10 +77,12 @@ class CVFPLayer(nn.Module):
         """レイヤーの重みを初期化"""
         for module in self.modules():
             if isinstance(module, nn.Linear):
-                # 恒等写像を防ぐため、やや大きめに初期化
-                nn.init.normal_(module.weight, mean=0.0, std=0.05)
+                # 恒等写像を防ぎつつ、値の爆発も防ぐバランスの取れた初期化
+                # std=0.1で適度な多様性を維持
+                nn.init.normal_(module.weight, mean=0.0, std=0.1)
                 if module.bias is not None:
-                    nn.init.zeros_(module.bias)
+                    # バイアスも小さなランダム値で初期化（多様性向上）
+                    nn.init.normal_(module.bias, mean=0.0, std=0.01)
 
     def forward(self, context, token_embed):
         """
@@ -124,36 +119,9 @@ class CVFPLayer(nn.Module):
             new_context = (1 - mix) * new_context + mix * context_normed
             new_token = (1 - mix) * new_token + mix * token_normed
 
-        # ランニング統計を更新（訓練モードのみ）
-        if self.training and self.use_dist_reg:
-            self._update_running_stats(new_context)
-
         # CVFP学習はPhase1Trainerで管理（ここでは何もしない）
 
         return new_context, new_token
-
-    def _update_running_stats(self, context):
-        """
-        EMAを使用してランニング平均と分散を更新
-
-        これは訓練モードでの順伝播時に自動的に呼ばれる。
-        クリーンなカプセル化のため、外部の呼び出し元からは隠蔽されている。
-
-        Args:
-            context: 現在のバッチのコンテキスト [batch, context_dim]
-        """
-        with torch.no_grad():
-            # バッチ統計を計算
-            batch_mean = context.mean(dim=0)  # [context_dim]
-            batch_var = context.var(dim=0, unbiased=False)  # [context_dim]
-
-            # EMA更新
-            momentum = self.ema_momentum
-            self.running_mean = momentum * self.running_mean + (1 - momentum) * batch_mean
-            self.running_var = momentum * self.running_var + (1 - momentum) * batch_var
-
-            # 更新回数を追跡
-            self.num_batches_tracked += 1
 
     def get_cvfp_loss(self):
         """
@@ -181,28 +149,17 @@ class CVFPLayer(nn.Module):
         """
         分布正則化損失を計算
 
-        注: この実装ではEMA統計（勾配なし）を使用。
-        Phase1Trainerで現在のコンテキストから直接計算する必要がある。
+        注: 共分散正則化はPhase1Trainerで直接計算されるため、ここでは常に0を返す。
+        このメソッドは後方互換性のため残している。
 
         Returns:
-            dist_loss: 常に0.0（後方互換性のため残す）
+            dist_loss: 常に0.0
         """
-        if not self.use_dist_reg:
-            return torch.tensor(0.0, device=next(self.parameters()).device)
-
-        # EMA統計からの損失（勾配なし）
-        # これは情報提供のみで、最適化には使用されない
-        with torch.no_grad():
-            mean_penalty = (self.running_mean ** 2).mean()
-            var_penalty = ((self.running_var - 1.0) ** 2).mean()
-            return mean_penalty + var_penalty
+        return torch.tensor(0.0, device=next(self.parameters()).device)
 
     def reset_running_stats(self):
-        """ランニング統計をリセット（新しい訓練実行時に有用）"""
-        if self.use_dist_reg:
-            self.running_mean.zero_()
-            self.running_var.fill_(1.0)
-            self.num_batches_tracked.zero_()
+        """ランニング統計をリセット（互換性のため残すが何もしない）"""
+        pass
 
     def extra_repr(self):
         """デバッグ用の文字列表現"""

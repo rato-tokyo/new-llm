@@ -39,7 +39,7 @@ def main():
 
     # Parse arguments
     parser = argparse.ArgumentParser(description='New-LLM Training')
-    parser.add_argument('--test', action='store_true', help='Run quick test with 10 tokens')
+    parser.add_argument('--test', action='store_true', help='Run quick test with 100 tokens')
     args = parser.parse_args()
 
     # Configuration
@@ -49,7 +49,7 @@ def main():
 
     print_flush(f"\n{'='*70}")
     if test_mode:
-        print_flush("New-LLM Quick Test Mode (10 tokens)")
+        print_flush("New-LLM Quick Test Mode (100 tokens)")
     else:
         print_flush("New-LLM Training (Refactored Architecture)")
     print_flush(f"{'='*70}\n")
@@ -84,7 +84,7 @@ def main():
         layer_structure=layer_structure,
         use_dist_reg=config.use_distribution_reg,
         ema_momentum=config.ema_momentum,
-        layernorm_mix=0.0,  # Disabled
+        layernorm_mix=1.0,  # Enabled to prevent value explosion
         enable_cvfp_learning=True  # トークンごとのオンライン学習を有効化
     )
     model.to(device)
@@ -95,9 +95,12 @@ def main():
 
     # Load data
     if test_mode:
-        print_flush("\nGenerating test data (10 tokens)...")
-        train_token_ids = torch.randint(0, 1000, (10,), device=device)
-        val_token_ids = torch.randint(0, 1000, (5,), device=device)
+        print_flush("\nGenerating test data (100 tokens for stability test)...")
+        # 訓練データ: ランダムな100トークン
+        train_token_ids = torch.randint(0, 1000, (100,), device=device)
+        # 検証データ: 訓練データから50トークンをランダムサンプリング（重複なし）
+        indices = torch.randperm(100)[:50]
+        val_token_ids = train_token_ids[indices]
     else:
         print_flush("\nLoading training data...")
         train_token_ids, val_token_ids = load_data(config)

@@ -1,9 +1,14 @@
 """
 Phase 1 Trainer: CVFP固定点学習のトレーナークラス
 
+多様性確保アプローチ:
+- LayerNorm: 値の爆発を防止し、スケールを正規化
+- 固定次元割り当て: 各トークンに固定の次元セットを割り当て
+- 使用頻度追跡: 使用頻度が低い次元を優先的に活性化
+
 責任分離:
 - モデル: アーキテクチャと順伝播のみ
-- Trainer: 訓練ループ、収束判定、状態管理、最適化
+- Trainer: 訓練ループ、収束判定、状態管理、最適化、多様性制約
 """
 
 import torch
@@ -50,9 +55,9 @@ class Phase1Trainer:
         # Optimizer（訓練時のみ作成）
         self.optimizer = None
 
-        # 最後のCVFPロスとDistロスを記録（ログ出力用）
+        # 最後のCVFPロスと多様性ロスを記録（ログ出力用）
         self._last_cvfp_loss = 0.0
-        self._last_dist_loss = 0.0
+        self._last_diversity_loss = 0.0
 
     def train(self, token_ids, device, label="Train"):
         """
@@ -176,6 +181,10 @@ class Phase1Trainer:
         context = torch.zeros(1, self.model.context_dim, device=device)
         current_contexts = []
 
+        # 次元統計のリセット（各イテレーションごとに初期化）
+        if is_training:
+            self._dim_stats = torch.zeros(self.model.context_dim, device=device)
+
         start_time = time.time()
 
         for t, token_embed in enumerate(token_embeds):
@@ -215,12 +224,12 @@ class Phase1Trainer:
 
     def _train_one_token(self, token_embed, context, token_idx):
         """
-        1トークンの訓練（最適化実行）
+        1トークンの訓練（固定次元割り当て + 分散最大化）
 
         Args:
             token_embed: トークン埋め込み [1, embed_dim]
             context: 現在のコンテキスト [1, context_dim]
-            token_idx: トークンインデックス（CVFP損失計算用）
+            token_idx: トークンインデックス
 
         Returns:
             new_context: 更新されたコンテキスト [1, context_dim]
@@ -230,42 +239,65 @@ class Phase1Trainer:
         # 順伝播
         new_context = self.model._update_context_one_step(token_embed, context)
 
-        # CVFP損失を計算（前回イテレーションとの比較）
+        # ========== 固定次元割り当て法 ==========
+        # 各トークンに固定の次元セットを割り当てる
+        context_dim = self.model.context_dim
+        dims_per_token = max(4, context_dim // 4)  # 各トークンが使用する次元数
+
+        # トークンIDのハッシュで使用する次元を決定
+        token_hash = hash(token_idx) % context_dim
+        assigned_dims = [(token_hash + i) % context_dim for i in range(dims_per_token)]
+
+        # 割り当てマスクを作成
+        mask = torch.zeros_like(new_context)
+        mask[0, assigned_dims] = 1.0
+
+        # 割り当てられた次元のみを強化、他は抑制
+        masked_context = new_context * mask
+        suppression_loss = (new_context * (1 - mask)).abs().mean()
+
+        # ========== 次元間分散最大化 ==========
+        if not hasattr(self, '_dim_stats'):
+            # 各次元の使用統計を初期化
+            self._dim_stats = torch.zeros(context_dim, device=new_context.device)
+
+        # 次元の使用頻度を更新
+        with torch.no_grad():
+            self._dim_stats += mask.squeeze(0)
+
+        # 使用頻度が低い次元を優先的に活性化
+        dim_weights = 1.0 / (self._dim_stats + 1.0)  # 使用頻度の逆数
+        weighted_loss = (dim_weights * new_context.abs().squeeze(0)).mean()
+
+        # ========== 値のスケール制御 ==========
+        # 値が爆発しないように制約
+        scale_penalty = torch.relu(new_context.abs() - 5.0).mean()  # 5を超える値にペナルティ
+
+        # CVFP損失を計算
         if self.current_iteration > 0 and self.previous_contexts is not None:
-            # 同じトークン位置の前回イテレーション出力と比較
-            # previous_contextsはdetachされているので、requires_grad=Trueにする
             previous_token_context = self.previous_contexts[token_idx:token_idx+1].detach()
-            cvfp_loss = F.mse_loss(new_context, previous_token_context)
+            # CVFPも正規化して計算（スケール不変）
+            cvfp_loss = F.mse_loss(
+                F.normalize(new_context, p=2, dim=1),
+                F.normalize(previous_token_context, p=2, dim=1)
+            )
         else:
-            # 初回イテレーションはCVFP損失なし
             cvfp_loss = torch.tensor(0.0, device=new_context.device, requires_grad=True)
 
-        # 分布正則化損失を現在のコンテキストから直接計算（勾配あり）
-        if self.model.use_dist_reg:
-            # N(0, 1)からの逸脱にペナルティ
-            # new_contextは[1, context_dim]なので、次元0で平均・分散を計算
-            context_mean = new_context.mean(dim=-1, keepdim=True)  # [1, 1]
-            context_var = new_context.var(dim=-1, unbiased=False, keepdim=True)  # [1, 1]
+        # 総合損失（スケール制御を重視）
+        diversity_loss = suppression_loss + weighted_loss * 0.1 + scale_penalty * 2.0
+        total_loss = (1 - self.dist_reg_weight) * cvfp_loss + self.dist_reg_weight * diversity_loss
 
-            mean_penalty = (context_mean ** 2).mean()
-            var_penalty = ((context_var - 1.0) ** 2).mean()
-            dist_loss = mean_penalty + var_penalty
-        else:
-            dist_loss = torch.tensor(0.0, device=new_context.device, requires_grad=True)
+        # 損失を記録
+        self._last_cvfp_loss = cvfp_loss.item() if isinstance(cvfp_loss, torch.Tensor) else cvfp_loss
+        self._last_diversity_loss = diversity_loss.item() if isinstance(diversity_loss, torch.Tensor) else diversity_loss
 
-        # 総合損失を計算
-        total_loss = (1 - self.dist_reg_weight) * cvfp_loss + self.dist_reg_weight * dist_loss
-
-        # CVFPロスとDistロスを記録（ログ出力用）
-        cvfp_loss_val = cvfp_loss.item() if isinstance(cvfp_loss, torch.Tensor) else cvfp_loss
-        dist_loss_val = dist_loss.item() if isinstance(dist_loss, torch.Tensor) else dist_loss
-        self._last_cvfp_loss = cvfp_loss_val
-        self._last_dist_loss = dist_loss_val
-
-        # 損失が0より大きい場合のみ最適化
-        if total_loss.item() > 0:
+        # 勾配クリッピングを追加
+        if total_loss.item() > 0 and not torch.isnan(total_loss):
             self.optimizer.zero_grad()
             total_loss.backward()
+            # 勾配クリッピング
+            torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0)
             self.optimizer.step()
 
         return new_context
@@ -331,13 +363,13 @@ class Phase1Trainer:
 
             # 最後のトークンで記録された損失を使用
             cvfp_loss = self._last_cvfp_loss
-            dist_loss = self._last_dist_loss
+            diversity_loss = self._last_diversity_loss
 
             self._print_flush(
                 f"Iteration {iteration+1}/{self.max_iterations}: "
                 f"収束={convergence_rate*100:.1f}% | "
-                f"CVFP loss={cvfp_loss:.6f} | "
-                f"Dist loss={dist_loss:.6f}"
+                f"CVFP={cvfp_loss:.6f} | "
+                f"Diversity={diversity_loss:.6f}"
             )
 
     def _print_summary(self):
