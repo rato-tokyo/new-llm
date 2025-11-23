@@ -19,7 +19,11 @@ from src.models.new_llm_residual import NewLLMResidual
 from src.data.loader import load_data
 from src.training.phase1 import train_phase1
 from src.training.phase2 import train_phase2
-from src.evaluation.metrics import analyze_fixed_points
+from src.evaluation.metrics import (
+    analyze_fixed_points,
+    check_identity_mapping,
+    print_identity_mapping_warning
+)
 
 
 def print_flush(msg):
@@ -110,8 +114,24 @@ def main():
     train_metrics = analyze_fixed_points(train_contexts, label="Train")
     val_metrics = analyze_fixed_points(val_contexts, label="Val")
 
+    # Check for identity mapping
+    identity_check = check_identity_mapping(
+        model=model,
+        context_dim=config.context_dim,
+        device=device,
+        num_samples=100,
+        threshold=0.95
+    )
+    is_identity = print_identity_mapping_warning(identity_check)
+
     # Phase 2: Token Prediction
-    if not config.skip_phase2:
+    should_skip_phase2 = config.skip_phase2 or is_identity
+
+    if is_identity:
+        print_flush("\n⚠️  恒等写像が検出されたため、Phase 2をスキップします。")
+        print_flush("    モデルの設定を見直してから再訓練することを推奨します。\n")
+
+    if not should_skip_phase2:
         print_flush(f"\n{'='*70}")
         print_flush("STARTING PHASE 2")
         print_flush(f"{'='*70}\n")

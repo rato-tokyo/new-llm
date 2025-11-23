@@ -13,6 +13,7 @@ sys.path.insert(0, project_root)
 
 from src.models.new_llm_residual import NewLLMResidual
 from src.training.phase1 import train_phase1
+from src.evaluation.metrics import check_identity_mapping, print_identity_mapping_warning
 
 
 def print_flush(msg):
@@ -120,25 +121,19 @@ def test_refactored_model():
     dist_loss = model.get_distribution_loss()
     print_flush(f"\n6. Distribution loss: {dist_loss.item():.6f}")
 
-    # Test identity mapping
-    print_flush("\n7. Testing identity mapping...")
-    model.eval()
-    with torch.no_grad():
-        test_context = torch.randn(1, config.context_dim, device=device)
-        test_token = torch.randn(1, config.embed_dim, device=device)
-
-        output_context = model._update_context_one_step(test_token, test_context)
-
-        similarity = torch.cosine_similarity(test_context, output_context).item()
-        print_flush(f"   Input-output similarity: {similarity:.4f}")
-
-        if similarity > 0.95:
-            print_flush("   ⚠️ WARNING: Still close to identity mapping!")
-        else:
-            print_flush("   ✅ Good: Not an identity mapping")
+    # Test identity mapping with new function
+    print_flush("\n7. Identity mapping check...")
+    identity_check = check_identity_mapping(
+        model=model,
+        context_dim=config.context_dim,
+        device=device,
+        num_samples=50,  # Reduced for quick test
+        threshold=0.95
+    )
+    is_identity = print_identity_mapping_warning(identity_check)
 
     # Test context diversity
-    print_flush("\n8. Testing context diversity...")
+    print_flush("8. Testing context diversity...")
     distances = torch.cdist(contexts, contexts, p=2)
     mask = ~torch.eye(len(contexts), dtype=bool, device=device)
     avg_distance = distances[mask].mean().item()
@@ -158,13 +153,13 @@ def test_refactored_model():
     print_flush(f"   ✓ Model created successfully")
     print_flush(f"   ✓ Phase 1 completed in {elapsed:.2f}s")
     print_flush(f"   ✓ Distribution loss: {dist_loss.item():.6f}")
-    print_flush(f"   ✓ Identity mapping similarity: {similarity:.4f}")
+    print_flush(f"   {'⚠️' if is_identity else '✓'} Identity mapping: {identity_check['avg_similarity']:.4f}")
     print_flush(f"   ✓ Context diversity: {avg_distance:.4f}")
 
     return {
         'contexts': contexts,
         'dist_loss': dist_loss.item(),
-        'similarity': similarity,
+        'identity_check': identity_check,
         'diversity': avg_distance
     }
 

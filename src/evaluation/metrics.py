@@ -196,6 +196,113 @@ def analyze_singular_vectors(contexts, token_ids=None, tokenizer=None, top_k=2, 
     return results
 
 
+def check_identity_mapping(model, context_dim, device, num_samples=100, threshold=0.95):
+    """
+    恒等写像かどうかをチェック
+
+    モデルがコンテキストをほぼそのまま返す（恒等写像）場合、
+    トークン情報を学習していない可能性がある。
+
+    Args:
+        model: NewLLMResidualモデル
+        context_dim: コンテキストの次元数
+        device: デバイス（'cpu' or 'cuda'）
+        num_samples: テストするサンプル数
+        threshold: 恒等写像と判定するコサイン類似度の閾値（デフォルト: 0.95）
+
+    Returns:
+        dict: {
+            'is_identity_mapping': bool,  # 恒等写像かどうか
+            'avg_similarity': float,      # 平均コサイン類似度
+            'max_similarity': float,      # 最大コサイン類似度
+            'min_similarity': float,      # 最小コサイン類似度
+            'samples_above_threshold': int  # 閾値を超えたサンプル数
+        }
+    """
+    model.eval()
+
+    similarities = []
+
+    with torch.no_grad():
+        for _ in range(num_samples):
+            # ランダムなコンテキストとトークンを生成
+            test_context = torch.randn(1, context_dim, device=device)
+            test_token = torch.randn(1, model.embed_dim, device=device)
+
+            # モデルでコンテキストを更新
+            output_context = model._update_context_one_step(test_token, test_context)
+
+            # コサイン類似度を計算
+            similarity = F.cosine_similarity(test_context, output_context, dim=1).item()
+            similarities.append(similarity)
+
+    # 統計計算
+    similarities_tensor = torch.tensor(similarities)
+    avg_similarity = similarities_tensor.mean().item()
+    max_similarity = similarities_tensor.max().item()
+    min_similarity = similarities_tensor.min().item()
+    samples_above = (similarities_tensor > threshold).sum().item()
+
+    # 恒等写像判定
+    is_identity = avg_similarity > threshold
+
+    return {
+        'is_identity_mapping': is_identity,
+        'avg_similarity': avg_similarity,
+        'max_similarity': max_similarity,
+        'min_similarity': min_similarity,
+        'samples_above_threshold': samples_above,
+        'total_samples': num_samples
+    }
+
+
+def print_identity_mapping_warning(check_result):
+    """
+    恒等写像チェック結果を表示し、必要に応じて警告を出す
+
+    Args:
+        check_result: check_identity_mapping() の結果
+
+    Returns:
+        bool: 恒等写像が検出された場合True
+    """
+    print_flush("\n" + "="*70)
+    print_flush("恒等写像チェック (Identity Mapping Check)")
+    print_flush("="*70)
+
+    avg_sim = check_result['avg_similarity']
+    max_sim = check_result['max_similarity']
+    min_sim = check_result['min_similarity']
+    above = check_result['samples_above_threshold']
+    total = check_result['total_samples']
+
+    print_flush(f"コサイン類似度統計 ({total}サンプル):")
+    print_flush(f"  平均: {avg_sim:.4f}")
+    print_flush(f"  最大: {max_sim:.4f}")
+    print_flush(f"  最小: {min_sim:.4f}")
+    print_flush(f"  閾値(0.95)超過: {above}/{total} ({above/total*100:.1f}%)")
+
+    if check_result['is_identity_mapping']:
+        print_flush("\n⚠️  警告: 恒等写像が検出されました！")
+        print_flush("    モデルが入力コンテキストをほぼそのまま返しています。")
+        print_flush("    これは以下を意味する可能性があります:")
+        print_flush("      - トークン情報が無視されている")
+        print_flush("      - 固定点学習が自明な解に収束している")
+        print_flush("      - モデルが有意義な表現を学習していない")
+        print_flush("\n    推奨対応:")
+        print_flush("      1. モデルの初期化を変更（std を大きく）")
+        print_flush("      2. CVFP損失関数を再設計")
+        print_flush("      3. より深いネットワーク構造を試す")
+        print_flush("\n    Phase 2（トークン予測）はスキップすることを推奨します。")
+        print_flush("="*70 + "\n")
+        return True
+    else:
+        print_flush("\n✅ 正常: 恒等写像ではありません")
+        print_flush("    モデルがトークン情報を使用してコンテキストを変換しています。")
+        print_flush("="*70 + "\n")
+        return False
+
+
 def print_flush(msg):
     """Print with immediate flush"""
     print(msg, flush=True)
