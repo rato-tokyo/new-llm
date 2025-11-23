@@ -2,12 +2,17 @@
 New-LLM Training Script (Refactored Version)
 
 Uses the new CVFPLayer-based architecture with clean encapsulation.
+
+Usage:
+    python3 train.py           # Full training with config.py settings
+    python3 train.py --test    # Quick test with 10 tokens only
 """
 
 import os
 import sys
 import torch
 import time
+import argparse
 from tokenizers import Tokenizer
 
 # Add project root to path
@@ -32,12 +37,21 @@ def print_flush(msg):
 def main():
     """Main training function"""
 
+    # Parse arguments
+    parser = argparse.ArgumentParser(description='New-LLM Training')
+    parser.add_argument('--test', action='store_true', help='Run quick test with 10 tokens')
+    args = parser.parse_args()
+
     # Configuration
     config = ResidualConfig()
     device = torch.device(config.device)
+    test_mode = args.test
 
     print_flush(f"\n{'='*70}")
-    print_flush("New-LLM Training (Refactored Architecture)")
+    if test_mode:
+        print_flush("New-LLM Quick Test Mode (10 tokens)")
+    else:
+        print_flush("New-LLM Training (Refactored Architecture)")
     print_flush(f"{'='*70}\n")
 
     print_flush("📋 Configuration:")
@@ -46,7 +60,8 @@ def main():
     print_flush(f"   Context dim: {config.context_dim}")
     print_flush(f"   Device: {config.device}")
     print_flush(f"   Distribution Reg: {config.use_distribution_reg} (weight={config.dist_reg_weight})")
-    print_flush(f"   Data: {config.num_samples} samples from {config.train_data_source}")
+    if not test_mode:
+        print_flush(f"   Data: {config.num_samples} samples from {config.train_data_source}")
 
     # Load tokenizer
     tokenizer_path = os.path.join(config.cache_dir, "tokenizer", "tokenizer.json")
@@ -79,8 +94,13 @@ def main():
     print_flush(f"\nModel initialized: {total_params:,} parameters")
 
     # Load data
-    print_flush("\nLoading training data...")
-    train_token_ids, val_token_ids = load_data(config)
+    if test_mode:
+        print_flush("\nGenerating test data (10 tokens)...")
+        train_token_ids = torch.randint(0, 1000, (10,), device=device)
+        val_token_ids = torch.randint(0, 1000, (5,), device=device)
+    else:
+        print_flush("\nLoading training data...")
+        train_token_ids, val_token_ids = load_data(config)
 
     # Phase 1: Fixed-Point Learning
     print_flush(f"\n{'='*70}")

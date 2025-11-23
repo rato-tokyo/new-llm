@@ -162,10 +162,34 @@ class Phase1Trainer:
         Returns:
             current_contexts: コンテキストベクトル [num_tokens, context_dim]
         """
+        import time
+
+        total_tokens = len(token_embeds)
+
+        # 大量データ警告
+        if total_tokens > 10000:
+            self._print_flush(f"⚠️ Processing {total_tokens:,} tokens - this may take several minutes")
+
         context = torch.zeros(1, self.model.context_dim, device=device)
         current_contexts = []
 
+        start_time = time.time()
+
         for t, token_embed in enumerate(token_embeds):
+            # 進捗表示（100トークンごと）
+            if t > 0 and t % 100 == 0:
+                elapsed = time.time() - start_time
+                tokens_per_sec = t / elapsed if elapsed > 0 else 0
+                remaining_tokens = total_tokens - t
+                eta_seconds = remaining_tokens / tokens_per_sec if tokens_per_sec > 0 else 0
+
+                progress = (t / total_tokens) * 100
+                self._print_flush(
+                    f"  Progress: {t:,}/{total_tokens:,} ({progress:.1f}%) | "
+                    f"Speed: {tokens_per_sec:.1f} tok/s | "
+                    f"ETA: {eta_seconds:.0f}s"
+                )
+
             if is_training:
                 # 訓練モード: 最適化あり
                 context = self._train_one_token(

@@ -4,8 +4,15 @@ Evaluation metrics for New-LLM
 Fixed-point analysis, effective rank calculation, and other metrics.
 """
 
+import sys
 import torch
 import torch.nn.functional as F
+
+
+def print_flush(msg):
+    """Print with immediate flush"""
+    print(msg)
+    sys.stdout.flush()
 
 
 def analyze_fixed_points(contexts, label="", verbose=True):

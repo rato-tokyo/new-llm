@@ -165,6 +165,48 @@ learning_rate = config.phase1_learning_rate  # GOOD
 3. **保守性**: パラメータの一元管理により変更が容易
 4. **可読性**: config.pyを見れば全ての設定が一目瞭然
 
+## Progress Reporting Policy - CRITICAL
+
+**目的**: 長時間処理の進捗を必ず可視化し、フリーズと処理中を区別可能にする。
+
+**必須ルール**:
+1. **トークンごとの進捗表示**: Phase1訓練で全トークンを処理する際、定期的に進捗を出力
+   - 例: `Processing token 1000/92047 (1.1%)...`
+2. **イテレーションごとの進捗**: 各iterationの開始・終了を明示
+   - 例: `Iteration 2/10: 収束=20.0%`
+3. **処理時間の予測**: 可能な限り残り時間を表示
+   - 例: `Estimated remaining: 5m 23s`
+4. **大量データ警告**: 10,000トークン以上の処理開始時に警告
+   - 例: `⚠️ Processing 92,047 tokens - this may take several minutes`
+
+**実装方法**:
+```python
+# Phase1Trainerでの実装例
+def _process_tokens(self, token_embeds, device, is_training):
+    total_tokens = len(token_embeds)
+    if total_tokens > 10000:
+        self._print_flush(f"⚠️ Processing {total_tokens:,} tokens - this may take several minutes")
+
+    for t, token_embed in enumerate(token_embeds):
+        # 100トークンごとに進捗表示
+        if t > 0 and t % 100 == 0:
+            progress = (t / total_tokens) * 100
+            self._print_flush(f"  Progress: {t:,}/{total_tokens:,} ({progress:.1f}%)")
+
+        # 処理実行
+        ...
+```
+
+**禁止事項**:
+- ❌ 長時間（1分以上）の無出力処理
+- ❌ 進捗不明な大量ループ
+- ❌ ユーザーがフリーズと誤解する沈黙
+
+**理由**:
+1. **ユーザー体験**: 処理中かフリーズか判別できないストレス回避
+2. **デバッグ効率**: 問題箇所の早期特定
+3. **時間管理**: 処理時間の予測可能性
+
 ## Context Size Monitoring Policy
 
 **目的**: Claude Codeの会話コンテキストサイズを監視し、適切なタイミングで新しいセッションを開始する。
