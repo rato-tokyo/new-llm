@@ -19,11 +19,8 @@ from src.models.new_llm_residual import NewLLMResidual
 from src.data.loader import load_data
 from src.training.phase1 import train_phase1
 from src.training.phase2 import train_phase2
-from src.evaluation.metrics import (
-    analyze_fixed_points,
-    check_identity_mapping,
-    print_identity_mapping_warning
-)
+from src.evaluation.metrics import analyze_fixed_points
+from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
 
 
 def print_flush(msg):
