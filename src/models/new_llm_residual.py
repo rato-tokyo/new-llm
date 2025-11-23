@@ -1,12 +1,13 @@
-"""New-LLM: Residual Connection Architecture (Refactored Version 2)
+"""
+New-LLM: Residual接続アーキテクチャ（リファクタリング版2）
 
-Clean implementation using CVFPLayer for better encapsulation.
+CVFPLayerを使用したクリーンな実装。
 
-Key Improvements:
-1. Uses CVFPLayer/CVFPBlock from layers.py
-2. Distribution regularization handled internally
-3. Cleaner forward pass
-4. Better separation of concerns
+主な改善点:
+1. CVFPLayer/CVFPBlockを使用（cvfp/モジュールから）
+2. 分布正則化はレイヤー内部で自動処理
+3. よりクリーンな順伝播
+4. 関心の分離の改善
 """
 
 import torch
@@ -16,22 +17,22 @@ from .cvfp import CVFPBlock
 
 class NewLLMResidual(nn.Module):
     """
-    New-LLM with ResNet-style residual connections
+    ResNetスタイルのResidual接続を持つNew-LLM
 
-    This version uses CVFPLayer for clean encapsulation of:
-    - Context updates
-    - Token updates
-    - Distribution regularization (EMA-based)
+    このバージョンはCVFPLayerを使用して以下をクリーンにカプセル化:
+    - コンテキスト更新
+    - トークン更新
+    - 分布正則化（EMAベース）
 
     Args:
-        vocab_size: Vocabulary size
-        embed_dim: Token embedding dimension
-        context_dim: Context vector dimension
-        hidden_dim: Hidden dimension (must be embed_dim + context_dim)
-        layer_structure: List specifying number of layers per block
-        use_dist_reg: Enable distribution regularization (default: True)
-        ema_momentum: EMA momentum for running stats (default: 0.99)
-        layernorm_mix: LayerNorm mixing ratio, 0.0=disabled (default: 0.0)
+        vocab_size: 語彙サイズ
+        embed_dim: トークン埋め込みの次元数
+        context_dim: コンテキストベクトルの次元数
+        hidden_dim: 隠れ層の次元数（embed_dim + context_dimと等しい必要がある）
+        layer_structure: ブロックごとのレイヤー数を指定するリスト
+        use_dist_reg: 分布正則化を有効化 (デフォルト: True)
+        ema_momentum: ランニング統計のEMAモメンタム (デフォルト: 0.99)
+        layernorm_mix: LayerNorm混合比率、0.0=無効 (デフォルト: 0.0)
     """
 
     def __init__(
@@ -47,14 +48,14 @@ class NewLLMResidual(nn.Module):
     ):
         super().__init__()
 
-        # Validate dimensions
+        # 次元の検証
         if hidden_dim != embed_dim + context_dim:
             raise ValueError(
-                f"hidden_dim ({hidden_dim}) must equal "
-                f"embed_dim ({embed_dim}) + context_dim ({context_dim})"
+                f"hidden_dim ({hidden_dim}) は "
+                f"embed_dim ({embed_dim}) + context_dim ({context_dim}) と等しい必要があります"
             )
 
-        # Store configuration
+        # 設定を保存
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.context_dim = context_dim
@@ -62,11 +63,11 @@ class NewLLMResidual(nn.Module):
         self.layer_structure = layer_structure
         self.use_dist_reg = use_dist_reg
 
-        # ========== Token Embedding ==========
+        # ========== トークン埋め込み ==========
         self.token_embedding = nn.Embedding(vocab_size, embed_dim)
         self.embed_norm = nn.LayerNorm(embed_dim)
 
-        # ========== CVFP Blocks ==========
+        # ========== CVFPブロック ==========
         self.blocks = nn.ModuleList([
             CVFPBlock(
                 num_layers=num_layers,
@@ -80,34 +81,34 @@ class NewLLMResidual(nn.Module):
             for num_layers in layer_structure
         ])
 
-        # ========== Output Head ==========
-        # Predict next token from context
+        # ========== 出力ヘッド ==========
+        # コンテキストから次のトークンを予測
         self.token_output = nn.Linear(context_dim, vocab_size)
 
-        # Initialize embeddings
+        # 埋め込みの初期化
         self._init_weights()
 
     def _init_weights(self):
-        """Initialize embedding weights"""
+        """埋め込み重みを初期化"""
         nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
 
     def _update_context_one_step(self, token_vec, context, return_token=False):
         """
-        Update context for one token step
+        1トークンステップのコンテキスト更新
 
         Args:
-            token_vec: Token vector [batch, embed_dim]
-            context: Current context [batch, context_dim]
-            return_token: If True, also return updated token
+            token_vec: トークンベクトル [batch, embed_dim]
+            context: 現在のコンテキスト [batch, context_dim]
+            return_token: Trueの場合、更新されたトークンも返す
 
         Returns:
-            new_context: Updated context [batch, context_dim]
-            new_token: Updated token (if return_token=True)
+            new_context: 更新されたコンテキスト [batch, context_dim]
+            new_token: 更新されたトークン (return_token=Trueの場合)
         """
         current_context = context
         current_token = token_vec
 
-        # Process through all blocks
+        # 全ブロックを通して処理
         for block in self.blocks:
             current_context, current_token = block(current_context, current_token)
 
@@ -117,40 +118,40 @@ class NewLLMResidual(nn.Module):
 
     def forward(self, input_ids, return_context_trajectory=False):
         """
-        Forward pass through the model
+        モデルの順伝播
 
         Args:
-            input_ids: Input token IDs [batch, seq_len]
-            return_context_trajectory: If True, return all intermediate contexts
+            input_ids: 入力トークンID [batch, seq_len]
+            return_context_trajectory: Trueの場合、全中間コンテキストを返す
 
         Returns:
-            logits: Output logits [batch, seq_len, vocab_size]
-            context_trajectory: (optional) All contexts [batch, seq_len, context_dim]
+            logits: 出力ロジット [batch, seq_len, vocab_size]
+            context_trajectory: (オプション) 全コンテキスト [batch, seq_len, context_dim]
         """
         batch_size, seq_len = input_ids.shape
 
-        # Get token embeddings
+        # トークン埋め込みを取得
         token_embeds = self.token_embedding(input_ids)  # [batch, seq_len, embed_dim]
         token_embeds = self.embed_norm(token_embeds)
 
-        # Initialize context
+        # コンテキストを初期化
         context = torch.zeros(
             batch_size, self.context_dim,
             device=input_ids.device,
             dtype=token_embeds.dtype
         )
 
-        # Process sequence
+        # シーケンスを処理
         contexts = []
         for t in range(seq_len):
             token_vec = token_embeds[:, t, :]  # [batch, embed_dim]
             context = self._update_context_one_step(token_vec, context)
             contexts.append(context)
 
-        # Stack contexts
+        # コンテキストをスタック
         all_contexts = torch.stack(contexts, dim=1)  # [batch, seq_len, context_dim]
 
-        # Predict next tokens
+        # 次のトークンを予測
         logits = self.token_output(all_contexts)  # [batch, seq_len, vocab_size]
 
         if return_context_trajectory:
@@ -159,13 +160,13 @@ class NewLLMResidual(nn.Module):
 
     def get_distribution_loss(self):
         """
-        Get aggregated distribution regularization loss from all blocks
+        全ブロックから集約された分布正則化損失を取得
 
-        This method provides clean access to internal statistics
-        without exposing implementation details.
+        このメソッドは実装詳細を公開せずに、
+        内部統計へのクリーンなアクセスを提供します。
 
         Returns:
-            dist_loss: Scalar tensor
+            dist_loss: スカラーテンソル
         """
         if not self.use_dist_reg:
             return torch.tensor(0.0, device=next(self.parameters()).device)
@@ -174,9 +175,9 @@ class NewLLMResidual(nn.Module):
         for block in self.blocks:
             total_loss += block.get_distribution_loss()
 
-        return total_loss / len(self.blocks)  # Average across blocks
+        return total_loss / len(self.blocks)  # ブロック間で平均
 
     def reset_running_stats(self):
-        """Reset all running statistics (for new training runs)"""
+        """全ランニング統計をリセット（新しい訓練実行時用）"""
         for block in self.blocks:
             block.reset_running_stats()
