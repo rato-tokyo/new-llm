@@ -41,6 +41,11 @@ class MinimalConfig:
     # Distribution Regularization
     use_distribution_reg = True
     dist_reg_weight = 0.5  # Increased to 50% for stronger effect
+    ema_momentum = 0.99    # EMA momentum for running statistics
+
+    # Diagnostics
+    identity_mapping_threshold = 0.95
+    identity_check_samples = 50  # Reduced for quick test
 
     # Device
     device = "cpu"
@@ -70,8 +75,8 @@ def test_refactored_model():
         context_dim=config.context_dim,
         hidden_dim=config.hidden_dim,
         layer_structure=layer_structure,
-        use_dist_reg=True,
-        ema_momentum=0.99,
+        use_dist_reg=config.use_distribution_reg,
+        ema_momentum=config.ema_momentum,
         layernorm_mix=0.0  # Disabled
     )
     model.to(device)
@@ -127,8 +132,8 @@ def test_refactored_model():
         model=model,
         context_dim=config.context_dim,
         device=device,
-        num_samples=50,  # Reduced for quick test
-        threshold=0.95
+        num_samples=config.identity_check_samples,
+        threshold=config.identity_mapping_threshold
     )
     is_identity = print_identity_mapping_warning(identity_check)
 

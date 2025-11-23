@@ -68,7 +68,7 @@ def main():
         hidden_dim=config.hidden_dim,
         layer_structure=layer_structure,
         use_dist_reg=config.use_distribution_reg,
-        ema_momentum=0.99,
+        ema_momentum=config.ema_momentum,
         layernorm_mix=0.0  # Disabled
     )
     model.to(device)
@@ -116,8 +116,8 @@ def main():
         model=model,
         context_dim=config.context_dim,
         device=device,
-        num_samples=100,
-        threshold=0.95
+        num_samples=config.identity_check_samples,
+        threshold=config.identity_mapping_threshold
     )
     is_identity = print_identity_mapping_warning(identity_check)
 

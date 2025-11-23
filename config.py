@@ -33,6 +33,12 @@ class ResidualConfig:
                                        # 0.5: 50% CVFP, 50% Dist
                                        # 0.7: 30% CVFP, 70% Dist
 
+    ema_momentum = 0.99                # EMA（指数移動平均）のモメンタム
+                                       # running_stat = momentum * old + (1-momentum) * new
+                                       # 0.99: 過去を重視（推奨、安定）
+                                       # 0.95: バランス
+                                       # 0.9: 現在を重視（応答性高い）
+
     # ========== Phase 1: 固有点学習 ==========
     phase1_max_iterations = 10           # 固有点探索の最大反復回数
     phase1_convergence_threshold = 0.02  # 収束判定のMSE閾値（0.02=緩い, 0.01=厳格）
@@ -79,6 +85,13 @@ class ResidualConfig:
     # ========== デバイス ==========
     device = "cpu"        # "cpu" または "cuda"
     random_seed = 42      # 再現性のためのランダムシード
+
+    # ========== 診断設定 ==========
+    identity_mapping_threshold = 0.95  # 恒等写像検出の閾値（コサイン類似度）
+                                       # 0.95: 推奨（95%以上の類似度で警告）
+                                       # 0.90: 緩い基準
+                                       # 0.98: 厳しい基準
+    identity_check_samples = 100       # 恒等写像チェックのサンプル数
 
     # ========== ログ出力 ==========
     log_every_steps = 1

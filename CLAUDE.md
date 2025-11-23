@@ -128,6 +128,43 @@ class CVFPLayer(nn.Module):
 - ✅ `nn.Module` buffers for persistent state
 - ✅ Automatic train/eval mode handling via `self.training`
 
+## No Hardcoding Policy - Critical
+
+**原則**: ハイパーパラメータやマジックナンバーは絶対にハードコードしない
+
+**禁止事項**:
+- ❌ 学習率、バッチサイズ、エポック数などの訓練パラメータ
+- ❌ モデルアーキテクチャパラメータ（層数、次元数など）
+- ❌ 正則化パラメータ（EMAモメンタム、重みなど）
+- ❌ 閾値や定数（収束判定、早期停止など）
+
+**必須要件**:
+- ✅ 全てのハイパーパラメータは `config.py` で定義
+- ✅ デフォルト値はconfig内でのみ設定
+- ✅ 実験時に簡単に変更可能な構造
+
+**悪い例**:
+```python
+# ❌ ハードコードされたパラメータ
+model = NewLLMResidual(..., ema_momentum=0.99)  # BAD
+threshold = 0.95  # BAD
+learning_rate = 0.001  # BAD
+```
+
+**良い例**:
+```python
+# ✅ config.pyから取得
+model = NewLLMResidual(..., ema_momentum=config.ema_momentum)  # GOOD
+threshold = config.identity_mapping_threshold  # GOOD
+learning_rate = config.phase1_lr_warmup  # GOOD
+```
+
+**理由**:
+1. **実験の柔軟性**: パラメータを変更するたびにコードを編集する必要がない
+2. **再現性**: config.pyを保存すれば実験を完全に再現可能
+3. **保守性**: パラメータの一元管理により変更が容易
+4. **可読性**: config.pyを見れば全ての設定が一目瞭然
+
 ## Context Size Monitoring Policy
 
 **目的**: Claude Codeの会話コンテキストサイズを監視し、適切なタイミングで新しいセッションを開始する。
