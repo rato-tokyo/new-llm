@@ -38,12 +38,12 @@ class ResidualConfig:
 
     # ========== Phase 1: CVFP学習（固定点学習） ==========
     phase1_max_iterations = 10           # 固定点探索の最大反復回数
-    phase1_convergence_threshold = 2.0   # 収束判定のMSE閾値
-                                         # 意味: 前回iterationとのMSE < 2.0なら収束と判定
-                                         # 実測値: 初期MSE≈1.43、収束後MSE≈0.5-1.0
-                                         # 2.0: 適切な閾値（実測値に基づく）
-                                         # 1.0: やや厳格
-                                         # 0.5: 厳格
+    phase1_convergence_threshold = 0.1   # 収束判定のMSE閾値
+                                         # 意味: 前回iterationとのMSE < 0.1なら収束と判定
+                                         # 実測値: 初期MSE≈1.43、学習後MSE≈0.001-0.1
+                                         # 0.1: バランスの取れた閾値
+                                         # 0.05: やや厳格（以前の設定）
+                                         # 0.01: 非常に厳格
     phase1_min_converged_ratio = 0.95    # 早期停止: 全トークンの95%が収束したら停止
 
     # 学習率

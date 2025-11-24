@@ -150,12 +150,12 @@ class Phase1Trainer:
             # トークンごとの処理
             current_contexts = self._process_tokens(token_embeds, device, is_training)
 
-            # 収束状態を更新
-            if is_training:
-                self._update_convergence_state(current_contexts)
+            # 収束状態を更新（訓練・検証両方で実行）
+            # 検証でも固定点への収束を確認する
+            self._update_convergence_state(current_contexts)
 
             # ログ出力
-            self._log_iteration(iteration)
+            self._log_iteration(iteration, is_training)
 
             # Early stopping判定
             if is_training and self._is_converged() and iteration > 0:
@@ -375,23 +375,29 @@ class Phase1Trainer:
         self._print_flush(f"PHASE 1: 固定点コンテキスト学習 (CVFP){' - ' + label if label else ''}")
         self._print_flush(f"{'='*70}")
 
-    def _log_iteration(self, iteration):
+    def _log_iteration(self, iteration, is_training):
         """イテレーションログを出力"""
         if iteration == 0:
             self._print_flush(f"Iteration 1/{self.max_iterations}: 順伝播のみ（コンテキスト保存）")
         else:
             convergence_rate = self._get_convergence_rate()
 
-            # 最後のトークンで記録された損失を使用
-            cvfp_loss = self._last_cvfp_loss
-            diversity_loss = self._last_diversity_loss
-
-            self._print_flush(
-                f"Iteration {iteration+1}/{self.max_iterations}: "
-                f"収束={convergence_rate*100:.1f}% | "
-                f"CVFP={cvfp_loss:.6f} | "
-                f"Diversity={diversity_loss:.6f}"
-            )
+            if is_training:
+                # 訓練時: 損失情報を表示
+                cvfp_loss = self._last_cvfp_loss
+                diversity_loss = self._last_diversity_loss
+                self._print_flush(
+                    f"Iteration {iteration+1}/{self.max_iterations}: "
+                    f"収束={convergence_rate*100:.1f}% | "
+                    f"CVFP={cvfp_loss:.6f} | "
+                    f"Diversity={diversity_loss:.6f}"
+                )
+            else:
+                # 検証時: 収束率のみ表示
+                self._print_flush(
+                    f"Iteration {iteration+1}/{self.max_iterations}: "
+                    f"収束={convergence_rate*100:.1f}%"
+                )
 
     def _print_summary(self):
         """最終サマリーを出力"""
