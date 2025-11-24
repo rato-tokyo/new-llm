@@ -166,6 +166,10 @@ class Phase1Trainer:
                 self._print_flush(f"  → Early stopping: 収束率 = {convergence_rate*100:.1f}%")
                 break
 
+            # GPU MEMORY OPTIMIZATION: イテレーション間でメモリ断片化防止
+            if device.type == 'cuda':
+                torch.cuda.empty_cache()
+
         # 最終サマリー
         self._print_summary()
 
@@ -199,7 +203,8 @@ class Phase1Trainer:
             # 前イテレーションの最終コンテキストを初期値として使用
             context = self.previous_contexts[-1].unsqueeze(0).detach()
 
-        current_contexts = []
+        # MEMORY OPTIMIZATION: 事前確保されたテンソルを使用（append + cat よりメモリ効率的）
+        current_contexts = torch.zeros(total_tokens, self.model.context_dim, device=device)
 
         start_time = time.time()
 
@@ -240,10 +245,11 @@ class Phase1Trainer:
                         context
                     )
 
-            current_contexts.append(context.detach())
+            # 事前確保されたテンソルに直接代入（appendの代わり）
+            current_contexts[t] = context.detach().squeeze(0)
 
-        # 全コンテキストをスタック
-        return torch.cat(current_contexts, dim=0)
+        # すでに正しい形状なので、そのまま返す
+        return current_contexts
 
     def _train_one_token(self, token_embed, context, token_idx):
         """

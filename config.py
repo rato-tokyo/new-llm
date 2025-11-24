@@ -54,7 +54,7 @@ class ResidualConfig:
     skip_phase1 = True              # Phase 1をスキップ（チェックポイントから続行する場合）
     skip_phase2 = False             # Phase 2を実行（実装完了）
     freeze_context = False          # Phase 2で全層を微調整（予測精度向上のため）
-    phase2_learning_rate = 0.0001   # トークン予測の学習率
+    phase2_learning_rate = 0.002    # トークン予測の学習率 (Phase 1と同じ)
     phase2_epochs = 10              # 訓練エポック数
     # NOTE: No batch_size - all tokens processed at once (each token is independent)
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
