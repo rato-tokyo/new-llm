@@ -103,13 +103,18 @@ def objective(trial, config, device, train_token_ids, val_token_ids, trial_times
 
     print_flush(f"\n{'='*70}")
     print_flush(f"Trial {trial.number}: dist_reg_weight = {dist_reg_weight:.3f}")
-    print_flush(f"{'='*70}\n")
+    print_flush(f"{'='*70}")
 
     trial_start_time = time.time()
+    prune_reason = None
 
     try:
         # ========== Phase 1: Fixed-Point Learning ==========
-        print_flush("PHASE 1: Fixed-Point Learning")
+        print_flush("Phase 1: Fixed-Point Learning (suppressed output)...")
+
+        # Suppress Phase1Trainer output by temporarily redirecting stdout
+        import io
+        import contextlib
 
         # Create model
         layer_structure = [1] * config.num_layers
@@ -135,35 +140,46 @@ def objective(trial, config, device, train_token_ids, val_token_ids, trial_times
             ema_momentum=0.99
         )
 
-        # Train
-        train_contexts = trainer.train(train_token_ids, device, label="Train")
-        val_contexts = trainer.evaluate(val_token_ids, device, label="Val")
+        # Train with suppressed output
+        with contextlib.redirect_stdout(io.StringIO()):
+            train_contexts = trainer.train(train_token_ids, device, label="Train")
+            val_contexts = trainer.evaluate(val_token_ids, device, label="Val")
 
-        # Analyze fixed points
-        train_metrics = analyze_fixed_points(train_contexts, label="Train")
-        val_metrics = analyze_fixed_points(val_contexts, label="Val")
+        # Analyze fixed points (suppressed)
+        with contextlib.redirect_stdout(io.StringIO()):
+            train_metrics = analyze_fixed_points(train_contexts, label="Train")
+            val_metrics = analyze_fixed_points(val_contexts, label="Val")
+
+        # Check for identity mapping (suppressed)
+        with contextlib.redirect_stdout(io.StringIO()):
+            identity_check = check_identity_mapping(
+                model=model,
+                context_dim=config.context_dim,
+                device=device,
+                num_samples=config.identity_check_samples,
+                threshold=config.identity_mapping_threshold
+            )
+
+        train_eff_rank_ratio = train_metrics['effective_rank'] / config.context_dim
+
+        print_flush(f"Phase 1 Complete: Eff.Rank={train_eff_rank_ratio*100:.1f}%, Identity={identity_check['avg_similarity']:.3f}")
 
         # Check for identity mapping
-        identity_check = check_identity_mapping(
-            model=model,
-            context_dim=config.context_dim,
-            device=device,
-            num_samples=config.identity_check_samples,
-            threshold=config.identity_mapping_threshold
-        )
-
         if identity_check['is_identity']:
-            print_flush("\n⚠️  Identity mapping detected - pruning trial")
+            prune_reason = f"Identity mapping detected (similarity={identity_check['avg_similarity']:.3f} > {config.identity_mapping_threshold})"
+            print_flush(f"❌ PRUNED: {prune_reason}")
+            trial.set_user_attr("prune_reason", prune_reason)
             raise optuna.TrialPruned()
 
         # Check effective rank
-        train_eff_rank_ratio = train_metrics['effective_rank'] / config.context_dim
         if train_eff_rank_ratio < 0.5:  # Less than 50% effective rank
-            print_flush(f"\n⚠️  Low effective rank ({train_eff_rank_ratio*100:.1f}%) - pruning trial")
+            prune_reason = f"Low effective rank ({train_eff_rank_ratio*100:.1f}% < 50%)"
+            print_flush(f"❌ PRUNED: {prune_reason}")
+            trial.set_user_attr("prune_reason", prune_reason)
             raise optuna.TrialPruned()
 
         # ========== Phase 2: Token Prediction ==========
-        print_flush("\nPHASE 2: Token Prediction")
+        print_flush("Phase 2: Token Prediction (suppressed output)...")
 
         # Expand to Phase 2
         phase2_model = expand_to_phase2(model)
@@ -180,14 +196,15 @@ def objective(trial, config, device, train_token_ids, val_token_ids, trial_times
 
         phase2_config = Phase2Config()
 
-        # Train Phase 2
-        train_phase2_multioutput(
-            phase2_model,
-            train_token_ids,
-            val_token_ids,
-            phase2_config,
-            device
-        )
+        # Train Phase 2 with suppressed output
+        with contextlib.redirect_stdout(io.StringIO()):
+            train_phase2_multioutput(
+                phase2_model,
+                train_token_ids,
+                val_token_ids,
+                phase2_config,
+                device
+            )
 
         # Compute validation perplexity
         val_perplexity = compute_perplexity(phase2_model, val_token_ids, device)
@@ -197,22 +214,18 @@ def objective(trial, config, device, train_token_ids, val_token_ids, trial_times
 
         # Calculate ETA
         avg_trial_time = sum(trial_times) / len(trial_times)
-        completed_trials = len(trial_times)
 
-        print_flush(f"\n{'='*70}")
-        print_flush(f"Trial {trial.number} Complete")
-        print_flush(f"  dist_reg_weight: {dist_reg_weight:.3f}")
-        print_flush(f"  Train Effective Rank: {train_metrics['effective_rank']:.1f}/{config.context_dim} ({train_eff_rank_ratio*100:.1f}%)")
-        print_flush(f"  Val Perplexity: {val_perplexity:.2f}")
-        print_flush(f"  Trial Time: {trial_time:.1f}s")
-        print_flush(f"  Average Trial Time: {avg_trial_time:.1f}s")
-        print_flush(f"{'='*70}\n")
+        print_flush(f"✅ SUCCESS: Val PPL={val_perplexity:.2f}, Time={trial_time:.1f}s")
+        print_flush(f"{'='*70}")
 
         # Report intermediate value for pruning
         trial.report(val_perplexity, step=0)
 
         # Check if trial should be pruned
         if trial.should_prune():
+            prune_reason = "MedianPruner decision"
+            print_flush(f"❌ PRUNED: {prune_reason}")
+            trial.set_user_attr("prune_reason", prune_reason)
             raise optuna.TrialPruned()
 
         return val_perplexity
@@ -220,8 +233,9 @@ def objective(trial, config, device, train_token_ids, val_token_ids, trial_times
     except optuna.TrialPruned:
         raise
     except Exception as e:
-        print_flush(f"\n⚠️  Trial {trial.number} failed with error: {e}")
-        print_flush("Treating as pruned trial\n")
+        prune_reason = f"Exception: {str(e)[:100]}"
+        print_flush(f"❌ PRUNED: {prune_reason}")
+        trial.set_user_attr("prune_reason", prune_reason)
         raise optuna.TrialPruned()
 
 
@@ -303,9 +317,25 @@ def main():
     print_flush(f"{'='*70}\n")
 
     print_flush(f"Total optimization time: {optimization_time/60:.1f} minutes")
-    print_flush(f"Completed trials: {len(study.trials)}")
+    print_flush(f"Completed trials: {len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])}")
     print_flush(f"Pruned trials: {len([t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED])}")
     print_flush(f"Failed trials: {len([t for t in study.trials if t.state == optuna.trial.TrialState.FAIL])}\n")
+
+    # Show pruned trial reasons
+    pruned_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.PRUNED]
+    if pruned_trials:
+        print_flush("Pruned trials summary:")
+        for t in pruned_trials:
+            reason = t.user_attrs.get('prune_reason', 'Unknown')
+            print_flush(f"  Trial {t.number} (drw={t.params['dist_reg_weight']:.3f}): {reason}")
+        print_flush("")
+
+    # Check if we have any successful trials
+    completed_trials = [t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE]
+    if not completed_trials:
+        print_flush("⚠️  No trials completed successfully!")
+        print_flush("All trials were pruned. Consider adjusting the search range or pruning criteria.\n")
+        return
 
     print_flush("Best trial:")
     best_trial = study.best_trial
