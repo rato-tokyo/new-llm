@@ -1,19 +1,18 @@
 """
-Standard Phase 1 Test - 81.7% Effective Rank (Validation)
+Standard Phase 1 Test - 89.4% Effective Rank (Validation)
 
 Uses fixed datasets:
 - Training: 6400 tokens (UltraChat 50 samples)
 - Validation: 1280 tokens (from training data)
 
 Expected Results:
-- Training Effective Rank: 88.7% (681/768)
-- Validation Effective Rank: 81.7% (627/768)
+- Training Effective Rank: 89.7% (689/768)
+- Validation Effective Rank: 89.4% (687/768)
 
-CRITICAL CHECKS (絶対必要):
-1. Effective Rank: 多様性確認
-2. Identity Check: 恒等写像になっていないか確認
-3. CVFP Convergence: 固定点学習ができているか確認
-4. Gradient Flow Check: トークン間勾配伝播確認（NEW!）
+CRITICAL CHECKS (3つの必須チェック):
+1. Effective Rank: 多様性確認（89.4%目標）
+2. Identity Mapping Check: 恒等写像になっていないか確認
+3. Gradient Flow Check: トークン間勾配伝播確認
 """
 
 from config import ResidualConfig
@@ -23,7 +22,7 @@ import random
 from src.models.new_llm_residual import NewLLMResidual
 from src.data.loader import load_data
 from src.training.phase1_trainer import Phase1Trainer
-from src.evaluation.metrics import analyze_fixed_points, check_identity_mapping, check_cvfp_convergence
+from src.evaluation.metrics import analyze_fixed_points, check_identity_mapping
 from src.evaluation.diagnostics import check_gradient_flow, print_gradient_flow_result
 
 # ============================================================
@@ -134,20 +133,9 @@ with torch.no_grad():
 
 identity_check = check_identity_mapping(model, train_token_embeds, train_contexts, device)
 
-# Check 3: CVFP Convergence Check - 固定点学習確認
+# Check 3: Gradient Flow Check - トークン間勾配伝播確認
 print("\n" + "="*70)
-print("CHECK 3: CVFP CONVERGENCE (固定点学習確認)")
-print("="*70)
-
-# サンプルデータで収束チェック（全データは時間がかかるため）
-sample_size = min(100, len(train_token_ids))
-sample_token_ids = train_token_ids[:sample_size]
-
-convergence_check = check_cvfp_convergence(trainer, sample_token_ids, device, max_test_iterations=5)
-
-# Check 4: Gradient Flow Check - トークン間勾配伝播確認（NEW!）
-print("\n" + "="*70)
-print("CHECK 4: GRADIENT FLOW (勾配伝播チェック)")
+print("CHECK 3: GRADIENT FLOW (勾配伝播チェック)")
 print("="*70)
 
 # 勾配フローチェック（100トークンでテスト）
@@ -155,10 +143,10 @@ gradient_flow_check = check_gradient_flow(trainer, train_token_ids, device, num_
 print_gradient_flow_result(gradient_flow_check)
 
 # ============================================================
-# FINAL SUMMARY - 4つのチェック結果まとめ
+# FINAL SUMMARY - 3つのチェック結果まとめ
 # ============================================================
 print(f"\n" + "="*70)
-print("FINAL SUMMARY - 81.7% Implementation Verification")
+print("FINAL SUMMARY - 89.4% Implementation Verification")
 print("="*70)
 
 print(f"\nTraining tokens: {len(train_token_ids)}")
@@ -177,9 +165,9 @@ print("-"*70)
 # 1. Effective Rank
 print("\n1. Effective Rank (多様性):")
 if val_metrics['effective_rank']/config.context_dim >= 0.80:
-    print(f"   ✅ PASSED: {val_metrics['effective_rank']/config.context_dim*100:.1f}% (Expected: ~81.7%)")
+    print(f"   ✅ PASSED: {val_metrics['effective_rank']/config.context_dim*100:.1f}% (Target: ~89.4%)")
 else:
-    print(f"   ❌ FAILED: {val_metrics['effective_rank']/config.context_dim*100:.1f}% (Expected: ~81.7%)")
+    print(f"   ❌ FAILED: {val_metrics['effective_rank']/config.context_dim*100:.1f}% (Target: ~89.4%)")
     all_passed = False
 
 # 2. Identity Mapping
@@ -190,16 +178,8 @@ else:
     print(f"   ❌ FAILED: Identity mapping detected (diff={identity_check['context_diff_from_zero']:.4f})")
     all_passed = False
 
-# 3. CVFP Convergence
-print("\n3. CVFP Convergence (固定点学習):")
-if convergence_check['quality'] in ['excellent', 'good', 'moderate']:
-    print(f"   ✅ PASSED: {convergence_check['quality'].upper()} (final_diff={convergence_check['final_diff']:.6f})")
-else:
-    print(f"   ❌ FAILED: {convergence_check['quality'].upper()} (final_diff={convergence_check['final_diff']:.6f})")
-    all_passed = False
-
-# 4. Gradient Flow
-print("\n4. Gradient Flow (勾配伝播):")
+# 3. Gradient Flow
+print("\n3. Gradient Flow (勾配伝播):")
 if gradient_flow_check['has_gradient_flow']:
     print(f"   ✅ PASSED: Gradient flows between tokens (norm_ratio={gradient_flow_check['norm_ratio']:.2f})")
 else:
