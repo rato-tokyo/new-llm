@@ -237,7 +237,8 @@ class Phase1Trainer:
                     )
 
             # 事前確保されたテンソルに直接代入（appendの代わり）
-            current_contexts[t] = context.detach().squeeze(0)
+            # 注意: detach()を削除 - 収束判定で勾配付きコンテキストが必要
+            current_contexts[t] = context.squeeze(0)
 
         # すでに正しい形状なので、そのまま返す
         return current_contexts
