@@ -83,7 +83,7 @@ def compute_perplexity(model, token_ids, device):
     return perplexity
 
 
-def objective(trial, config, device, train_token_ids, val_token_ids):
+def objective(trial, config, device, train_token_ids, val_token_ids, trial_times):
     """
     Optuna objective function
 
@@ -93,6 +93,7 @@ def objective(trial, config, device, train_token_ids, val_token_ids):
         device: torch device
         train_token_ids: Training token IDs
         val_token_ids: Validation token IDs
+        trial_times: List to track trial execution times
 
     Returns:
         perplexity: float (lower is better)
@@ -192,6 +193,11 @@ def objective(trial, config, device, train_token_ids, val_token_ids):
         val_perplexity = compute_perplexity(phase2_model, val_token_ids, device)
 
         trial_time = time.time() - trial_start_time
+        trial_times.append(trial_time)
+
+        # Calculate ETA
+        avg_trial_time = sum(trial_times) / len(trial_times)
+        completed_trials = len(trial_times)
 
         print_flush(f"\n{'='*70}")
         print_flush(f"Trial {trial.number} Complete")
@@ -199,6 +205,7 @@ def objective(trial, config, device, train_token_ids, val_token_ids):
         print_flush(f"  Train Effective Rank: {train_metrics['effective_rank']:.1f}/{config.context_dim} ({train_eff_rank_ratio*100:.1f}%)")
         print_flush(f"  Val Perplexity: {val_perplexity:.2f}")
         print_flush(f"  Trial Time: {trial_time:.1f}s")
+        print_flush(f"  Average Trial Time: {avg_trial_time:.1f}s")
         print_flush(f"{'='*70}\n")
 
         # Report intermediate value for pruning
@@ -264,11 +271,27 @@ def main():
 
     optimization_start = time.time()
 
+    # Track trial times for ETA calculation
+    trial_times = []
+
+    # Define callback for progress tracking
+    def callback(study, trial):
+        if len(trial_times) > 0:
+            avg_time = sum(trial_times) / len(trial_times)
+            completed = len([t for t in study.trials if t.state == optuna.trial.TrialState.COMPLETE])
+            remaining = args.n_trials - completed
+            eta_seconds = remaining * avg_time
+            eta_minutes = eta_seconds / 60
+
+            print_flush(f"\n📊 Progress: {completed}/{args.n_trials} trials complete")
+            print_flush(f"⏱️  Estimated time remaining: {eta_minutes:.1f} minutes ({eta_seconds:.0f} seconds)\n")
+
     # Run optimization
     study.optimize(
-        lambda trial: objective(trial, config, device, train_token_ids, val_token_ids),
+        lambda trial: objective(trial, config, device, train_token_ids, val_token_ids, trial_times),
         n_trials=args.n_trials,
         timeout=args.timeout,
+        callbacks=[callback],
         show_progress_bar=True
     )
 
