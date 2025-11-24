@@ -13,6 +13,8 @@ import sys
 import torch
 import time
 import argparse
+import random
+import numpy as np
 from tokenizers import Tokenizer
 
 # Add project root to path
@@ -23,6 +25,7 @@ from config import ResidualConfig
 from src.models.new_llm_residual import NewLLMResidual
 from src.data.loader import load_data
 from src.training.phase1_trainer import Phase1Trainer
+from src.training.phase2_trainer import Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
 
@@ -33,8 +36,22 @@ def print_flush(msg):
     sys.stdout.flush()
 
 
+def set_seed(seed=42):
+    """全ての乱数生成器のシードを固定（完全な再現性保証）"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    # 決定的動作を保証
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+
+
 def main():
     """Main training function"""
+
+    # Fix random seed for reproducibility
+    set_seed(42)
 
     # Parse arguments
     parser = argparse.ArgumentParser(description='New-LLM Training')
@@ -46,6 +63,7 @@ def main():
     device = torch.device(config.device)
     test_mode = args.test
 
+    print_flush("\n✅ Random seed fixed: 42 (完全な再現性保証)")
     print_flush(f"\n{'='*70}")
     if test_mode:
         print_flush("New-LLM Quick Test Mode (100 tokens)")
@@ -91,12 +109,16 @@ def main():
     print_flush(f"\nModel initialized: {total_params:,} parameters")
 
     # Load checkpoint if available
+    checkpoint_loaded = False
+    checkpoint_epoch = None
     if config.load_checkpoint and os.path.exists(config.checkpoint_path):
         print_flush(f"\n📥 Loading checkpoint from {config.checkpoint_path}")
         try:
             checkpoint = torch.load(config.checkpoint_path, map_location=device)
             model.load_state_dict(checkpoint['model_state_dict'])
-            print_flush(f"✓ Loaded checkpoint (epoch {checkpoint.get('epoch', 'unknown')})")
+            checkpoint_epoch = checkpoint.get('epoch', 'unknown')
+            checkpoint_loaded = True
+            print_flush(f"✓ Loaded checkpoint (epoch {checkpoint_epoch})")
         except Exception as e:
             print_flush(f"⚠️ Failed to load checkpoint: {e}")
             print_flush("Starting training from scratch...")
@@ -114,70 +136,83 @@ def main():
         train_token_ids, val_token_ids = load_data(config)
 
     # Phase 1: Fixed-Point Learning
-    print_flush(f"\n{'='*70}")
-    print_flush("STARTING PHASE 1")
-    print_flush(f"{'='*70}\n")
+    should_skip_phase1 = config.skip_phase1 and checkpoint_loaded and checkpoint_epoch in ['phase1_complete', 'phase2_complete']
 
-    phase1_start = time.time()
+    if should_skip_phase1:
+        print_flush(f"\n{'='*70}")
+        print_flush("SKIPPING PHASE 1 (Using checkpoint)")
+        print_flush(f"{'='*70}\n")
+        print_flush("✓ Phase 1 already completed, loading from checkpoint")
+        print_flush("  Proceeding directly to Phase 2...\n")
 
-    # Create Phase1Trainer with EMA-based diversity regularization
-    trainer = Phase1Trainer(
-        model=model,
-        max_iterations=config.phase1_max_iterations,
-        convergence_threshold=config.phase1_convergence_threshold,
-        min_converged_ratio=config.phase1_min_converged_ratio,
-        learning_rate=config.phase1_learning_rate,
-        dist_reg_weight=config.dist_reg_weight,
-        ema_momentum=0.99  # EMA係数（指数平均的）
-    )
+        # Skip identity mapping check when using checkpoint
+        is_identity = False
 
-    # Train
-    train_contexts = trainer.train(train_token_ids, device, label="Train")
+    else:
+        print_flush(f"\n{'='*70}")
+        print_flush("STARTING PHASE 1")
+        print_flush(f"{'='*70}\n")
 
-    # Validation
-    val_contexts = trainer.evaluate(val_token_ids, device, label="Val")
+        phase1_start = time.time()
 
-    phase1_time = time.time() - phase1_start
-    print_flush(f"\nPhase 1 completed in {phase1_time:.1f}s")
+        # Create Phase1Trainer with EMA-based diversity regularization
+        trainer = Phase1Trainer(
+            model=model,
+            max_iterations=config.phase1_max_iterations,
+            convergence_threshold=config.phase1_convergence_threshold,
+            min_converged_ratio=config.phase1_min_converged_ratio,
+            learning_rate=config.phase1_learning_rate,
+            dist_reg_weight=config.dist_reg_weight,
+            ema_momentum=0.99  # EMA係数（指数平均的）
+        )
 
-    # Save checkpoint after Phase 1
-    if config.save_checkpoint:
-        print_flush(f"\n💾 Saving checkpoint to {config.checkpoint_path}")
-        os.makedirs(config.checkpoint_dir, exist_ok=True)
-        try:
-            checkpoint = {
-                'model_state_dict': model.state_dict(),
-                'epoch': 'phase1_complete',
-                'config': {
-                    'num_layers': config.num_layers,
-                    'embed_dim': config.embed_dim,
-                    'context_dim': config.context_dim,
-                    'hidden_dim': config.hidden_dim,
-                    'vocab_size': config.vocab_size
+        # Train
+        train_contexts = trainer.train(train_token_ids, device, label="Train")
+
+        # Validation
+        val_contexts = trainer.evaluate(val_token_ids, device, label="Val")
+
+        phase1_time = time.time() - phase1_start
+        print_flush(f"\nPhase 1 completed in {phase1_time:.1f}s")
+
+        # Save checkpoint after Phase 1
+        if config.save_checkpoint:
+            print_flush(f"\n💾 Saving checkpoint to {config.checkpoint_path}")
+            os.makedirs(config.checkpoint_dir, exist_ok=True)
+            try:
+                checkpoint = {
+                    'model_state_dict': model.state_dict(),
+                    'epoch': 'phase1_complete',
+                    'config': {
+                        'num_layers': config.num_layers,
+                        'embed_dim': config.embed_dim,
+                        'context_dim': config.context_dim,
+                        'hidden_dim': config.hidden_dim,
+                        'vocab_size': config.vocab_size
+                    }
                 }
-            }
-            torch.save(checkpoint, config.checkpoint_path)
-            print_flush(f"✓ Checkpoint saved successfully")
-        except Exception as e:
-            print_flush(f"⚠️ Failed to save checkpoint: {e}")
+                torch.save(checkpoint, config.checkpoint_path)
+                print_flush(f"✓ Checkpoint saved successfully")
+            except Exception as e:
+                print_flush(f"⚠️ Failed to save checkpoint: {e}")
 
-    # Analyze fixed points
-    print_flush(f"\n{'='*70}")
-    print_flush("FIXED-POINT ANALYSIS")
-    print_flush(f"{'='*70}\n")
+        # Analyze fixed points
+        print_flush(f"\n{'='*70}")
+        print_flush("FIXED-POINT ANALYSIS")
+        print_flush(f"{'='*70}\n")
 
-    train_metrics = analyze_fixed_points(train_contexts, label="Train")
-    val_metrics = analyze_fixed_points(val_contexts, label="Val")
+        train_metrics = analyze_fixed_points(train_contexts, label="Train")
+        val_metrics = analyze_fixed_points(val_contexts, label="Val")
 
-    # Check for identity mapping
-    identity_check = check_identity_mapping(
-        model=model,
-        context_dim=config.context_dim,
-        device=device,
-        num_samples=config.identity_check_samples,
-        threshold=config.identity_mapping_threshold
-    )
-    is_identity = print_identity_mapping_warning(identity_check)
+        # Check for identity mapping
+        identity_check = check_identity_mapping(
+            model=model,
+            context_dim=config.context_dim,
+            device=device,
+            num_samples=config.identity_check_samples,
+            threshold=config.identity_mapping_threshold
+        )
+        is_identity = print_identity_mapping_warning(identity_check)
 
     # Phase 2: Token Prediction
     should_skip_phase2 = config.skip_phase2 or is_identity
@@ -191,14 +226,42 @@ def main():
         print_flush("STARTING PHASE 2")
         print_flush(f"{'='*70}\n")
 
-        print_flush("⚠️  Phase 2 (multi-output) requires model expansion.")
-        print_flush("    Please use test_phase2_functionality.py for Phase 2 training.")
-        print_flush("    Skipping Phase 2 for now...\n")
+        # Phase 2: Next-Token Prediction
+        phase2_trainer = Phase2Trainer(
+            model=model,
+            learning_rate=config.phase2_learning_rate,
+            freeze_context=config.freeze_context,
+            gradient_clip=config.phase2_gradient_clip
+        )
 
-        # TODO: Implement Phase 2 integration
-        # from src.models.new_llm_phase2 import expand_to_phase2
-        # phase2_model = expand_to_phase2(model)
-        # train_phase2_multioutput(phase2_model, train_token_ids, val_token_ids, config, device)
+        # Train Phase 2
+        phase2_history = phase2_trainer.train_full(
+            train_token_ids=train_token_ids,
+            val_token_ids=val_token_ids,
+            device=device,
+            epochs=config.phase2_epochs
+        )
+
+        # Save checkpoint after Phase 2
+        if config.save_checkpoint:
+            print_flush(f"\n💾 Saving Phase 2 checkpoint to {config.checkpoint_path}")
+            try:
+                checkpoint = {
+                    'model_state_dict': model.state_dict(),
+                    'epoch': 'phase2_complete',
+                    'phase2_history': phase2_history,
+                    'config': {
+                        'num_layers': config.num_layers,
+                        'embed_dim': config.embed_dim,
+                        'context_dim': config.context_dim,
+                        'hidden_dim': config.hidden_dim,
+                        'vocab_size': config.vocab_size
+                    }
+                }
+                torch.save(checkpoint, config.checkpoint_path)
+                print_flush(f"✓ Phase 2 checkpoint saved successfully")
+            except Exception as e:
+                print_flush(f"⚠️ Failed to save Phase 2 checkpoint: {e}")
 
     # Final summary
     print_flush(f"\n{'='*70}")

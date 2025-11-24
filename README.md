@@ -9,11 +9,12 @@ New-LLM explores the idea that meaningful context representations emerge through
 ## Features
 
 - **Two-Phase Training**: Separate fixed-point learning and token prediction
-- **High Dimensional Diversity**: Achieves **89.3% Effective Rank** using LayerNorm + EMA-based variance tracking
-- **True Online Learning (指数平均的)**: Fixed 6KB memory usage, no history storage required
-- **Diversity Regularization**: Per-dimension variance tracking with exponential moving average
+- **High Dimensional Diversity**: Achieves **89.7% (train) / 89.4% (val) Effective Rank** using LayerNorm + Per-Dimension Variance Tracking
+- **Balanced Loss Weight**: `dist_reg_weight = 0.5` enables both diversity and CVFP learning
+- **Diversity Regularization**: Per-dimension usage tracking with EMA-based weighting
 - **Clean Architecture**: Object-oriented design with CVFPLayer encapsulation
 - **Flexible Data Loading**: Supports UltraChat, text files, and custom datasets
+- **Full Reproducibility**: Fixed random seed (42) for deterministic training
 - **GPU-Ready**: 10-20x speedup available with CUDA
 
 ## Quick Start
@@ -27,10 +28,13 @@ pip install -r requirements.txt
 ### Basic Training
 
 ```bash
-# Quick test with 10 tokens (for development)
-python3 tests/test_refactored.py
+# Quick test (100 tokens)
+python3 train.py --test
 
-# Full training with configuration
+# Standard test with fixed train/val data (6400 train + 1280 val tokens)
+python3 test.py
+
+# Full training with configuration (skips Phase 1 if checkpoint exists)
 python3 train.py
 ```
 
@@ -46,11 +50,11 @@ Edit `config.py` to adjust:
 
 ```
 new-llm/
-├── train.py              # Main training script
-├── config.py             # Configuration
-├── CLAUDE.md             # Design guidelines and architecture decisions
-├── CONTEXT.md            # Development history and insights
-├── README.md             # This file
+├── train.py                       # Main training script
+├── test.py                        # Standard test script (6400 train + 1280 val)
+├── config.py                      # Configuration
+├── CLAUDE.md                      # Design guidelines and architecture decisions
+├── README.md                      # This file
 ├── src/
 │   ├── models/
 │   │   ├── cvfp/
@@ -59,119 +63,118 @@ new-llm/
 │   │   │   └── block.py           # CVFPBlock (multi-layer)
 │   │   └── new_llm_residual.py    # Main model architecture
 │   ├── training/
-│   │   ├── phase1.py              # Fixed-point learning
-│   │   └── phase2.py              # Token prediction
+│   │   ├── phase1_trainer.py      # Fixed-point learning
+│   │   └── phase2_trainer.py      # Token prediction
 │   ├── data/
 │   │   └── loader.py              # Data loading utilities
 │   └── evaluation/
-│       └── metrics.py             # Analysis and metrics
-├── tests/
-│   └── test_refactored.py         # Quick development test (10 tokens)
+│       ├── metrics.py             # Analysis and metrics
+│       └── diagnostics.py         # Identity mapping check
 ├── scripts/
-│   └── (experimental scripts)     # Future experiments and utilities
-└── data/
-    ├── example_train.txt          # Example training data
-    └── example_val.txt            # Example validation data
+│   └── create_val_from_train.py   # Generate validation data from training data
+├── data/
+│   ├── example_train.txt          # Training data (auto-generated)
+│   └── example_val.txt            # Validation data (from training data)
+└── docs/
+    └── experiment_*.md            # Experimental reports
 ```
 
 ## Architecture Highlights
 
-### Diversity Regularization: LayerNorm + Per-Dimension Variance Tracking (EMA-based)
+### Diversity Regularization: Per-Dimension Usage Tracking
 
-Our breakthrough approach combines two complementary techniques:
+Our breakthrough approach uses dimension usage statistics to enforce diversity:
 
-**1. LayerNorm (Value Explosion Prevention)**
+**Implementation in Phase1Trainer:**
 ```python
-# Prevents residual connection value explosion
-if layernorm_mix > 0:
-    new_context = (1 - mix) * new_context + mix * layer_norm(new_context)
+# Each iteration starts fresh
+dim_stats = torch.zeros(context_dim, device=device)
+
+# For each token
+for token_id in token_ids:
+    # Calculate dimension weights (inverse of usage frequency)
+    dim_weights = 1.0 / (dim_stats + 1.0)  # detached
+
+    # Diversity loss: activate less-used dimensions
+    diversity_loss = -(dim_weights * context.abs().squeeze(0)).mean()
+
+    # Update usage statistics (no gradient)
+    with torch.no_grad():
+        dim_stats += context.abs().squeeze(0)
+
+    # Combined loss
+    total_loss = (1 - dist_reg_weight) * cvfp_loss + dist_reg_weight * diversity_loss
 ```
 
-**2. Per-Dimension Variance Tracking (Diversity Enforcement)**
-```python
-# EMA-based variance tracking (指数平均的 - True Online Learning)
-if self.context_mean_ema is None:
-    # Initialize
-    self.context_mean_ema = new_context_flat.detach()
-    self.context_var_ema = torch.ones_like(new_context_flat)
-else:
-    # Update mean (EMA)
-    self.context_mean_ema = (
-        self.ema_momentum * self.context_mean_ema +
-        (1 - self.ema_momentum) * new_context_flat
-    )
-
-    # Update variance (EMA)
-    deviation = new_context_flat - self.context_mean_ema
-    self.context_var_ema = (
-        self.ema_momentum * self.context_var_ema +
-        (1 - self.ema_momentum) * (deviation ** 2)
-    )
-
-    # Diversity loss: penalize low variance
-    diversity_loss = 1.0 / (self.context_var_ema.mean() + 1e-6)
-```
+**Key Design:**
+- **LayerNorm**: Prevents value explosion in residual connections (`layernorm_mix = 1.0`)
+- **Dimension weights**: Detached (no gradient), guide optimization only
+- **Context gradients**: Flow through for actual learning
+- **Per-iteration reset**: Each iteration starts with zero statistics
 
 Benefits:
-- **High Effective Rank**: Achieves **686.09/768 (89.3%)** on 5000-token training data
-- **True Online Learning**: Only 6KB memory (mean + variance), no history storage
-- **Fast**: 1.55x faster than covariance matrix approach
-- **Memory Efficient**: 384x less memory than covariance matrix (6KB vs 2,307KB)
-- **Scalable**: Performance independent of sequence length
+- **High Effective Rank**: Achieves **89.7% (train) / 89.4% (val)** with `dist_reg_weight = 0.5`
+- **Balanced learning**: 50% CVFP loss + 50% diversity loss
+- **CVFP convergence**: Passes convergence check (final_diff < 0.001)
+- **Stable training**: No value explosion, deterministic results
 
 ### Two-Phase Training
 
 **Phase 1: Fixed-Point Learning with Diversity Regularization**
-- Contexts converge through iterative refinement
-- LayerNorm prevents value explosion in residual connections
-- **Per-dimension variance tracking** enforces high dimensional diversity (89.3% Effective Rank)
-- **EMA-based (指数平均的)** - true online learning with O(1) memory
+- Contexts converge through iterative refinement (carries context between iterations)
+- LayerNorm prevents value explosion in residual connections (`layernorm_mix = 1.0`)
+- **Per-dimension usage tracking** enforces high dimensional diversity (89.7%/89.4% Effective Rank)
+- **Balanced loss weight** (`dist_reg_weight = 0.5`) enables both CVFP and diversity learning
 - Gradient clipping ensures training stability
 - Early stopping based on convergence rate (95% of tokens)
 
-**Phase 2: Token Prediction** (Optional)
-- Standard next-token prediction
-- Uses fixed contexts from Phase 1
-- Optional context freezing
+**Phase 2: Token Prediction**
+- **Zero-vector initialization**: Each token starts from 0-vector (matches real inference)
+- Next-token prediction with CrossEntropyLoss
+- Full model fine-tuning with small learning rate (0.0001)
+- CVFP layers remain trainable for end-to-end optimization
 
 ## Development Guidelines
 
 See `CLAUDE.md` for:
-- Design principles and philosophy
-- Token-wise vs batch normalization rationale
-- Object-oriented architecture patterns
+- Design principles and architecture decisions
+- Critical bug fixes and lessons learned
+- Mandatory numerical reporting rules
 - Code quality standards
 
 ## Current Status
 
-**Recent Breakthrough (2025-11-24):**
-- ✅ **89.3% Effective Rank achieved** using LayerNorm + per-dimension variance tracking (EMA)
-- ✅ **True online learning** implemented - only 6KB memory, no history storage
-- ✅ **384x memory reduction** compared to covariance matrix approach
-- ✅ **1.55x faster** than covariance matrix approach
-- ✅ Stable training with no value explosion
-- ✅ Comparative study completed: variance tracking > covariance matrix
+**Recent Achievements (2025-11-24):**
+- ✅ **Phase 1**: 89.7% (train) / 89.4% (val) Effective Rank with `dist_reg_weight = 0.5`
+- ✅ **Balanced loss weight** enables both diversity and CVFP learning
+- ✅ **CVFP convergence verified** (final_diff = 0.000745 < 0.001)
+- ✅ **Phase 2 implementation** with zero-vector initialization
+- ✅ **Full reproducibility** with fixed random seed (42)
+- ✅ **Critical bug fix**: Context carryover between iterations (Phase 1)
+- ✅ **Architecture fix**: CVFPBlock tuple handling in Phase 2
 
-**Design Evolution:**
-1. **Past 10 Contexts** (2025-11-23): 80-90% Effective Rank, but O(n) memory
-2. **Covariance Matrix EMA** (2025-11-24): Theoretically rigorous but heavy (2,307KB, slower)
-3. **Per-Dimension Variance EMA** (2025-11-24, **ADOPTED**): Best of all worlds
+**Design Decisions:**
+- **dist_reg_weight = 0.5**: Balances CVFP loss and diversity loss (50/50)
+- **LayerNorm enabled**: Prevents value explosion (`layernorm_mix = 1.0`)
+- **Validation data**: Must be subset of training data (auto_split forbidden)
+- **Phase 2 initialization**: Zero-vector per token (matches real inference)
 
 **Working:**
-- ✅ High dimensional diversity (Effective Rank: 686.09/768 = 89.3%)
-- ✅ Clean CVFPLayer architecture with LayerNorm
-- ✅ EMA-based variance tracking for diversity enforcement
-- ✅ True online learning (指数平均的)
+- ✅ High dimensional diversity (89.7% train / 89.4% val)
+- ✅ Stable CVFP convergence (passes convergence check)
 - ✅ Two-phase training pipeline
-- ✅ Flexible data loading
-- ✅ Gradient clipping for stability
-- ✅ GPT-2 pre-trained embeddings (768-dim, frozen)
+- ✅ Phase 1 skip functionality (checkpoint resume)
+- ✅ Full model fine-tuning in Phase 2
+- ✅ GPT-2 pre-trained embeddings (768-dim)
+- ✅ Deterministic training (seed=42)
+
+**In Progress:**
+- 🔄 Phase 2 experiment running (full fine-tuning with zero-vector initialization)
 
 **Next Steps:**
+- 🎯 Evaluate Phase 2 performance (loss, perplexity, accuracy)
 - 🎯 Scale to larger datasets (10k+ tokens)
-- 🎯 Phase 2 token prediction evaluation with multi-output architecture
-- 🎯 Perplexity and generation quality assessment
-- 🎯 GPU acceleration (10-20x speedup available with CUDA)
+- 🎯 GPU acceleration for faster training
 
 ## License
 

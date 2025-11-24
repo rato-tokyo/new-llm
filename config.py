@@ -5,53 +5,58 @@ New-LLM 設定ファイル
 設定を変更する場合は、このファイルを直接編集してください。
 
 使い方:
-    python3 tests/phase2_experiments/test_residual.py
+    python3 test.py
 """
 
 
 class ResidualConfig:
     """
-    Residual Standard アーキテクチャの設定
+    CVFP (Context Vector Fixed-Point) アーキテクチャの設定
 
     設定を変更する場合は、このファイルを直接編集してください。
     """
 
     # ========== モデルアーキテクチャ ==========
     architecture = "residual_standard"
-    num_layers = 6                  # 単層ブロックの数（最小対話モデル、固定）
-    context_dim = 768               # 文脈ベクトル次元数（GPT-2に合わせて768次元）
+    num_layers = 6                  # CVFPブロック数（6層固定）
+    context_dim = 768               # コンテキストベクトル次元数（GPT-2に合わせて768次元）
     embed_dim = 768                 # トークン埋め込み次元数（GPT-2事前学習済み: 768次元）
     hidden_dim = 1536               # 中間層次元数（embed_dim * 2）
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
 
-    # ========== Diversity Regularization (固定次元割り当て法) ==========
-    # 固定次元割り当て + LayerNormによる多様性確保
-    dist_reg_weight = 0.99             # 多様性正則化の重み（高く設定して多様性を優先）
+    # ========== Diversity Regularization (Per-Dimension Usage Tracking) ==========
+    # LayerNorm + Per-Dimension Variance Tracking (EMA-based) による多様性確保
+    # 実装: 各次元の使用頻度を追跡し、使用頻度が低い次元を優先的に活性化
+    dist_reg_weight = 0.5              # 多様性正則化の重み
                                        # total_loss = (1-w) * cvfp_loss + w * diversity_loss
-                                       # 0.5: 50% CVFP, 50% Diversity
+                                       # 0.5: 50% CVFP, 50% Diversity（実験用設定）
                                        # 0.8: 20% CVFP, 80% Diversity
-                                       # 0.99: 1% CVFP, 99% Diversity（現在の設定）
+                                       # 0.99: 1% CVFP, 99% Diversity（標準設定）
 
-    # ========== Phase 1: 固有点学習 ==========
-    phase1_max_iterations = 10           # 固有点探索の最大反復回数
-    phase1_convergence_threshold = 0.05  # 収束判定のMSE閾値（0.05=かなり緩い, 0.02=緩い, 0.01=厳格）
+    # ========== Phase 1: CVFP学習（固定点学習） ==========
+    phase1_max_iterations = 10           # 固定点探索の最大反復回数
+    phase1_convergence_threshold = 0.05  # 収束判定のMSE閾値
                                          # 意味: 前回iterationとのMSE < 0.05なら収束と判定
                                          # √0.05 ≈ 0.224 = L2距離の閾値
-    phase1_min_converged_ratio = 0.95    # 全トークンの95%が収束したら停止
+                                         # 0.05: 緩い（推奨）
+                                         # 0.02: やや厳格
+                                         # 0.01: 厳格
+    phase1_min_converged_ratio = 0.95    # 早期停止: 全トークンの95%が収束したら停止
 
-    # 学習率（固定）
-    phase1_learning_rate = 0.002         # Phase 1の学習率（固定値）
+    # 学習率
+    phase1_learning_rate = 0.002         # Phase 1の学習率
                                          # 0.002: 推奨（高速収束）
                                          # 0.001: 安定的
                                          # 0.0005: 慎重
 
     # ========== Phase 2: トークン予測 ==========
-    skip_phase2 = True              # Phase 2をスキップ（Phase 1のみ実行）
-    freeze_context = True           # Phase 2で文脈を固定（block_outputsのみ学習）
+    skip_phase1 = True              # Phase 1をスキップ（チェックポイントから続行する場合）
+    skip_phase2 = False             # Phase 2を実行（実装完了）
+    freeze_context = False          # Phase 2で全層を微調整（予測精度向上のため）
     phase2_learning_rate = 0.0001   # トークン予測の学習率
     phase2_epochs = 10              # 訓練エポック数
-    phase2_batch_size = 32          # バッチサイズ
+    # NOTE: No batch_size - all tokens processed at once (each token is independent)
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
 
     # ========== データ ==========
@@ -63,16 +68,16 @@ class ResidualConfig:
     # Validation data source
     # ⚠️ CRITICAL: Must use "text_file" only! auto_split is FORBIDDEN!
     # Validation data must contain ONLY tokens from training data
-    # Generate using: python3 scripts/generate_validation_data.py
+    # Generate using: python3 scripts/create_val_from_train.py
     val_data_source = "text_file"                          # MUST be "text_file" (auto_split is FORBIDDEN)
     val_text_file = "./data/example_val.txt"               # text_file使用時のパス
     val_text_dir = "./data/val/"                           # text_dir使用時のディレクトリ
     manual_val_path = "./cache/manual_val_tokens.pt"       # manual使用時のパス
 
     # Common settings
-    max_seq_length = 128                                   # 最大シーケンス長（短縮: 高速テスト用）
-    num_samples = 50                                       # 訓練サンプル数（5000+トークン用）
-    train_val_split = 0.8                                  # Train/Val分割比率（auto_split使用時）
+    max_seq_length = 128                                   # 最大シーケンス長（高速テスト用に短縮）
+    num_samples = 50                                       # 訓練サンプル数（→ 6400トークン生成）
+    train_val_split = 0.8                                  # Train/Val分割比率（auto_split使用時のみ）
 
     # UltraChat specific (train_data_source="ultrachat"の場合)
     dataset_name = "HuggingFaceH4/ultrachat_200k"          # HuggingFaceデータセット
@@ -81,7 +86,7 @@ class ResidualConfig:
 
     # ========== デバイス ==========
     device = "cpu"        # "cpu" または "cuda"
-    random_seed = 42      # 再現性のためのランダムシード
+    random_seed = 42      # 再現性のためのランダムシード（完全な再現性保証）
 
     # ========== 診断設定 ==========
     identity_mapping_threshold = 0.95  # 恒等写像検出の閾値（コサイン類似度）

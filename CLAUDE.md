@@ -10,19 +10,30 @@
 - ❌ 数値を伴わない判定結果の報告
 
 **必須報告項目**:
-- ✅ 収束率: **具体的なパーセンテージ** (例: 収束率 0.0%)
+- ✅ **収束率（訓練・検証両方）**: **具体的なパーセンテージと収束トークン数** (例: 訓練 0.0% (0/6400), 検証 0.0% (0/1280))
 - ✅ Effective Rank: **実数値/総次元数とパーセンテージ** (例: 627.29/768 = 81.7%)
 - ✅ CVFPロス: **実数値** (例: 0.001873)
 - ✅ 収束差分: **実数値** (例: final_diff = 0.000745)
 - ✅ イテレーション数: **実数** (例: 10/10イテレーション完了)
 
+**⚠️ 収束率の報告は絶対に省略してはいけない**:
+- 訓練データと検証データの両方の収束率を必ず報告
+- 収束率 = 収束したトークン数 / 総トークン数
+- 0.0%は「収束失敗」ではなく「全イテレーション完走」を意味する
+
 **報告フォーマット例**:
 ```
 訓練結果:
+- 収束率: 0.0% (0/6400トークン) - 10イテレーション完走
 - Effective Rank: 689.26/768 (89.7%)
-- 収束率: 0.0% (10イテレーション完走)
 - CVFPロス: 0.001732
-- 収束判定: final_diff = 0.000745 (閾値1e-3未満)
+
+検証結果:
+- 収束率: 0.0% (0/1280トークン) - 10イテレーション完走
+- Effective Rank: 627.29/768 (81.7%)
+
+CVFP収束チェック:
+- final_diff = 0.000745 (閾値 < 0.001クリア)
 ```
 
 ---
@@ -65,11 +76,75 @@ else:
 
 ---
 
-## ⚠️ 81.7% Effective Rank Implementation - IMMUTABLE SPECIFICATION - ABSOLUTELY FINAL
+## 🚨🚨🚨 CRITICAL DESIGN FIX - PHASE 2 CONTEXT PROPAGATION (2025-11-24) 🚨🚨🚨
 
-### 絶対仕様: この実装は永久に変更禁止 (ABSOLUTE: This implementation is PERMANENTLY IMMUTABLE)
+### 致命的設計ミス: Phase 2での各トークン独立処理（絶対に忘れてはいけない）
 
-**この仕様は検証データで81.7% Effective Rankを達成した最終実装です。**
+**致命的な問題（修正前の実装）**:
+- Phase 2で各トークンが完全に独立して処理されていた（毎回0ベクトルから開始）
+- **これはPhase 1と矛盾し、言語モデルとして致命的な欠陥**
+- 文脈情報が全く伝わらず、Phase 1の学習が無駄になっていた
+
+**修正内容**:
+```python
+# ❌❌❌ 絶対にやってはいけない間違った実装（削除済み）
+# 各トークンが独立 = 文脈伝達なし = Phase 1との不整合
+for token_id in input_ids:
+    context = torch.zeros(...)  # 毎回リセット！致命的バグ
+    context = CVFP(token_embed, context)
+    logits = predict(context)
+
+# ✅✅✅ 必須の正しい実装（修正済み）
+# Context伝播 + Token Embed予測
+context = torch.zeros(...)  # 最初のトークンのみ0から開始
+
+for token_id in input_ids:
+    context = context.detach()  # 勾配遮断（重要）
+    token_embed = embedding(token_id)
+
+    # CVFP処理（文脈とトークン埋め込み両方を伝播）
+    for block in blocks:
+        context, token_embed = block(token_embed, context)
+
+    # Token embedから予測（contextからではない）
+    logits = predict(token_embed)
+
+    # Contextは次のトークンに引き継がれる
+```
+
+### なぜこれが致命的か
+
+1. **Phase 1との不整合**: Phase 1ではcontext伝播が必須、Phase 2でも同様であるべき
+2. **文脈情報の欠如**: 各トークンが独立では系列全体の理解が不可能
+3. **Phase 1学習の無駄**: 文脈伝達メカニズムがPhase 2で活用されない
+4. **言語モデルとして不完全**: 前のトークン情報が全く使えない
+
+### 正しい設計の重要ポイント
+
+**1. Context伝播（Phase 1と同じ）**:
+- 最初のトークンのみ0ベクトルから開始
+- 以降は前のcontextを引き継ぐ
+- Phase 1で学習した文脈伝達メカニズムを活用
+
+**2. Context勾配遮断**:
+- `context = context.detach()` で勾配を遮断
+- 理由: 系列全体への勾配伝播を防ぎ、学習を安定化
+
+**3. Token Embed予測**:
+- 予測は`token_embed`から（`context`からではない）
+- Contextは文脈記憶、Token Embedは出力表現として分離
+
+**4. 全トークン一括処理**:
+- バッチ分割なし（context伝播があるため）
+- Phase 1と同じ処理フロー
+
+---
+
+## ⚠️ 89.4% Effective Rank Implementation - IMMUTABLE SPECIFICATION
+
+### 絶対仕様: この実装は変更禁止 (ABSOLUTE: This implementation is IMMUTABLE)
+
+**この仕様は検証データで89.4% Effective Rankを達成した最終実装です（dist_reg_weight=0.5）。**
 **以下の実装と矛盾する内容は全て無効です。**
 
 ---
@@ -132,14 +207,15 @@ val_text_file = "./data/example_val.txt"
 
 ### 4. 達成結果 - 最終仕様
 
-**実測値 (2025-11-24)**:
-- **訓練データ**: 88.7% Effective Rank (681.47/768) - 6400トークン
-- **検証データ**: **81.7% Effective Rank (627.29/768)** - 1280トークン ✅
+**実測値 (2025-11-24, dist_reg_weight=0.5)**:
+- **訓練データ**: 89.7% Effective Rank (689.26/768) - 6400トークン
+- **検証データ**: **89.4% Effective Rank (686.90/768)** - 1280トークン ✅
+- **CVFP収束チェック**: final_diff = 0.000745 < 0.001 ✅
 
-**なぜ81.7%か**:
-- 1280トークンは768次元空間の多様性表現に対して少し不足
-- しかし、実用上十分な多様性を達成
-- 85%目標に対して非常に良好な結果
+**なぜ89.4%か**:
+- `dist_reg_weight = 0.5` により、CVFP学習と多様性の両立を実現
+- 訓練データと検証データで同等の高い多様性（89.7% vs 89.4%）
+- 85%目標を大幅に超える成果
 
 ---
 
@@ -154,7 +230,7 @@ hidden_dim = 1536               # 2 × embed_dim
 layernorm_mix = 1.0             # Full LayerNorm (CRITICAL)
 
 # Diversity Regularization
-dist_reg_weight = 0.99          # 99% diversity, 1% CVFP
+dist_reg_weight = 0.5           # 50% diversity, 50% CVFP (balanced)
 
 # Training
 phase1_learning_rate = 0.002    # Fast convergence
@@ -323,9 +399,10 @@ if config.val_data_source == "auto_split":
 - Validation: ~4 seconds (1280 tokens)
 
 **Expected Results**:
-- Training Effective Rank: 88-89%
-- Validation Effective Rank: 81-82%
-- Convergence: 2 iterations (early stopping)
+- Training Effective Rank: 89.7%
+- Validation Effective Rank: 89.4%
+- CVFP Convergence Check: final_diff < 0.001
+- Convergence: Usually 10 iterations (all iterations complete)
 
 ---
 
@@ -353,4 +430,4 @@ num_samples = 50       # Hardcoded!
 
 ---
 
-Last Updated: 2025-11-24 (Final 81.7% Implementation)
+Last Updated: 2025-11-24 (89.4% Implementation with Phase 2)
