@@ -161,7 +161,14 @@ def objective(trial, config, device, train_token_ids, val_token_ids, trial_times
 
         train_eff_rank_ratio = train_metrics['effective_rank'] / config.context_dim
 
+        # Get iteration info for analysis
+        train_iterations = trainer.current_iteration
+        train_converged = trainer.num_converged_tokens
+        train_total = trainer.num_tokens
+        train_converged_ratio = train_converged / train_total if train_total > 0 else 0
+
         print_flush(f"Phase 1 Complete: Eff.Rank={train_eff_rank_ratio*100:.1f}%, Identity={identity_check['avg_similarity']:.3f}")
+        print_flush(f"  Train: iter={train_iterations}/{config.phase1_max_iterations}, converged={train_converged}/{train_total} ({train_converged_ratio*100:.1f}%)")
 
         # Check for identity mapping (ONLY critical failure - model not learning)
         if identity_check['is_identity']:
@@ -210,8 +217,18 @@ def objective(trial, config, device, train_token_ids, val_token_ids, trial_times
         # Calculate ETA
         avg_trial_time = sum(trial_times) / len(trial_times)
 
+        # Check if max iterations reached (potential indicator of insufficient iterations)
+        iter_status = "MAX" if train_iterations >= config.phase1_max_iterations else f"{train_iterations}"
+
         print_flush(f"✅ SUCCESS: Val PPL={val_perplexity:.2f}, Time={trial_time:.1f}s")
+        print_flush(f"  Iterations: {iter_status}/{config.phase1_max_iterations}, Convergence: {train_converged_ratio*100:.1f}%")
         print_flush(f"{'='*70}")
+
+        # Save iteration info for later analysis
+        trial.set_user_attr("train_iterations", train_iterations)
+        trial.set_user_attr("max_iterations_reached", train_iterations >= config.phase1_max_iterations)
+        trial.set_user_attr("train_converged_ratio", train_converged_ratio)
+        trial.set_user_attr("train_eff_rank_ratio", train_eff_rank_ratio)
 
         # Report value (for tracking only, pruning disabled)
         trial.report(val_perplexity, step=0)
@@ -335,7 +352,12 @@ def main():
     print_flush("Top 5 trials:")
     for i, trial in enumerate(sorted(study.trials, key=lambda t: t.value if t.value else float('inf'))[:5]):
         if trial.value is not None:
-            print_flush(f"  {i+1}. Trial {trial.number}: dist_reg_weight={trial.params['dist_reg_weight']:.3f}, perplexity={trial.value:.2f}")
+            iterations = trial.user_attrs.get('train_iterations', '?')
+            max_reached = trial.user_attrs.get('max_iterations_reached', False)
+            iter_marker = " [MAX]" if max_reached else ""
+            eff_rank = trial.user_attrs.get('train_eff_rank_ratio', 0) * 100
+            print_flush(f"  {i+1}. Trial {trial.number}: drw={trial.params['dist_reg_weight']:.3f}, ppl={trial.value:.2f}, "
+                       f"iter={iterations}/20{iter_marker}, rank={eff_rank:.1f}%")
 
     # Save best config
     best_config_path = os.path.join(project_root, "config_optimized.py")
