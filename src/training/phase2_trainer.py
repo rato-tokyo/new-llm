@@ -94,19 +94,24 @@ class Phase2Trainer:
             avg_loss: Average loss for this epoch
             perplexity: Perplexity metric
         """
+        print(f"  [DEBUG] train_epoch called with {len(token_ids)} tokens")
         self.model.train()
 
         # Input: all tokens except last
         # Target: all tokens except first
         input_ids = token_ids[:-1]  # [seq_len - 1]
         target_ids = token_ids[1:]  # [seq_len - 1]
+        print(f"  [DEBUG] Processing {len(input_ids)} input tokens")
 
         # Initialize context (first token starts from zero)
         context = torch.zeros(1, self.model.context_dim, device=device)
+        print(f"  [DEBUG] Context initialized: {context.shape}")
 
         # Process all tokens with context propagation
         all_logits = []
-        for token_id in input_ids:
+        for i, token_id in enumerate(input_ids):
+            if i % 1000 == 0:
+                print(f"  [DEBUG] Processing token {i}/{len(input_ids)}")
             # Detach context to prevent gradient flow through history
             context = context.detach()
 
@@ -121,9 +126,9 @@ class Phase2Trainer:
             for block in self.model.blocks:
                 if self.freeze_context:
                     with torch.no_grad():
-                        context, token_embed = block(token_embed, context)
+                        context, token_embed = block(context, token_embed)
                 else:
-                    context, token_embed = block(token_embed, context)
+                    context, token_embed = block(context, token_embed)
 
             # Predict next token from token_embed (NOT context)
             logits = self.model.token_output(token_embed)  # [1, vocab_size]
@@ -132,14 +137,20 @@ class Phase2Trainer:
             # Context carries forward to next token
 
         # Stack all logits
+        print(f"  [DEBUG] Stacking {len(all_logits)} logits")
         all_logits = torch.cat(all_logits, dim=0)  # [seq_len - 1, vocab_size]
+        print(f"  [DEBUG] Logits shape: {all_logits.shape}")
 
         # Compute loss
+        print(f"  [DEBUG] Computing loss...")
         self.optimizer.zero_grad()
         loss = self.criterion(all_logits, target_ids)
+        print(f"  [DEBUG] Loss: {loss.item():.4f}")
 
         # Backward pass
+        print(f"  [DEBUG] Running backward pass...")
         loss.backward()
+        print(f"  [DEBUG] Backward complete")
 
         # Gradient clipping
         if self.gradient_clip is not None:
@@ -192,7 +203,7 @@ class Phase2Trainer:
 
                 # Process through CVFP blocks
                 for block in self.model.blocks:
-                    context, token_embed = block(token_embed, context)
+                    context, token_embed = block(context, token_embed)
 
                 # Predict next token from token_embed
                 logits = self.model.token_output(token_embed)  # [1, vocab_size]
@@ -252,15 +263,20 @@ class Phase2Trainer:
         best_val_loss = float('inf')
 
         for epoch in range(1, epochs + 1):
+            print(f"\n[DEBUG] Starting Epoch {epoch}/{epochs}")
             # Train
+            print(f"[DEBUG] Calling train_epoch...")
             train_loss, train_ppl = self.train_epoch(
                 train_token_ids, device
             )
+            print(f"[DEBUG] train_epoch complete: loss={train_loss:.4f}")
 
             # Validate
+            print(f"[DEBUG] Calling evaluate...")
             val_loss, val_ppl, val_acc = self.evaluate(
                 val_token_ids, device
             )
+            print(f"[DEBUG] evaluate complete: loss={val_loss:.4f}")
 
             # Record history
             history['train_loss'].append(train_loss)
