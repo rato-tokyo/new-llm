@@ -147,6 +147,184 @@ def analyze_fixed_points(contexts, label="", verbose=True):
     }
 
 
+def check_identity_mapping(model, token_embeds, contexts, device):
+    """
+    恒等写像チェック: 学習が起きているかを確認
+
+    ランダム初期化モデルと訓練済みモデルの出力を比較し、
+    学習が実際に起きているかを確認。
+
+    Args:
+        model: 訓練済みモデル
+        token_embeds: トークン埋め込み [num_tokens, embed_dim]
+        contexts: 学習されたコンテキスト [num_tokens, context_dim]
+        device: torch device
+
+    Returns:
+        dict: 恒等写像チェック結果
+    """
+    print_flush("\n" + "="*70)
+    print_flush("IDENTITY MAPPING CHECK (恒等写像チェック)")
+    print_flush("="*70 + "\n")
+
+    model.eval()
+
+    # 学習されたコンテキストのノルムを確認
+    learned_norms = torch.norm(contexts, dim=1)
+    avg_learned_norm = learned_norms.mean().item()
+    std_learned_norm = learned_norms.std().item()
+
+    print_flush("1. Learned Context Statistics:")
+    print_flush(f"   Average Norm: {avg_learned_norm:.6f}")
+    print_flush(f"   Std Dev: {std_learned_norm:.6f}")
+
+    # ゼロコンテキストとの差分
+    zero_distance = avg_learned_norm
+
+    if zero_distance < 0.1:
+        print_flush("   ❌ DEGENERATE: Contexts are near zero")
+        print_flush("   → Model is NOT learning meaningful context updates")
+        is_identity = True
+    else:
+        print_flush("   ✅ PASSED: Contexts are non-zero")
+
+        # さらに詳細なチェック：コンテキストの多様性
+        # 全コンテキストが同じ値か確認
+        with torch.no_grad():
+            context_mean = contexts.mean(dim=0)  # [context_dim]
+            deviations = contexts - context_mean.unsqueeze(0)
+            avg_deviation = torch.norm(deviations, dim=1).mean().item()
+
+        print_flush(f"\n2. Context Diversity:")
+        print_flush(f"   Average deviation from mean: {avg_deviation:.6f}")
+
+        if avg_deviation < 0.1:
+            print_flush("   ❌ DEGENERATE: All contexts are identical (global attractor)")
+            is_identity = True
+        else:
+            print_flush("   ✅ PASSED: Contexts are diverse")
+            is_identity = False
+
+    # トークン埋め込みとの類似度（恒等写像確認）
+    # コンテキストとトークン埋め込みの次元が異なる場合の対処
+    if contexts.shape[1] == token_embeds.shape[1]:
+        embed_similarity = F.cosine_similarity(contexts, token_embeds, dim=1).mean().item()
+
+        print_flush(f"\n3. Context vs Token Embedding Similarity:")
+        print_flush(f"   Cosine Similarity: {embed_similarity:.6f}")
+
+        if embed_similarity > 0.95:
+            print_flush("   ⚠️ WARNING: Contexts too similar to token embeddings")
+            print_flush("   → Possible identity mapping (no transformation)")
+        else:
+            print_flush("   ✅ PASSED: Contexts are transformed from embeddings")
+    else:
+        embed_similarity = None
+        print_flush(f"\n3. Context vs Token Embedding Similarity:")
+        print_flush(f"   (Skipped: dimension mismatch {contexts.shape[1]} vs {token_embeds.shape[1]})")
+
+    print_flush("="*70 + "\n")
+
+    return {
+        "context_diff_from_zero": avg_deviation if not is_identity else 0.0,
+        "embed_similarity": embed_similarity,
+        "is_identity": is_identity
+    }
+
+
+def check_cvfp_convergence(trainer, token_ids, device, max_test_iterations=5):
+    """
+    CVFP収束チェック: 固定点学習ができているかを確認
+
+    追加イテレーションを実行し、コンテキストが固定点に収束しているかチェック。
+
+    Args:
+        trainer: Phase1Trainer インスタンス
+        token_ids: 入力トークンID
+        device: torch device
+        max_test_iterations: 追加テストイテレーション数
+
+    Returns:
+        dict: CVFP収束チェック結果
+    """
+    print_flush("\n" + "="*70)
+    print_flush("CVFP CONVERGENCE CHECK (固定点収束チェック)")
+    print_flush("="*70 + "\n")
+
+    model = trainer.model
+    model.eval()
+
+    with torch.no_grad():
+        # トークン埋め込み取得
+        token_embeds = model.token_embedding(token_ids.unsqueeze(0).to(device))
+        token_embeds = model.embed_norm(token_embeds).squeeze(0)
+
+        # 複数イテレーション実行
+        iteration_contexts = []
+
+        for iteration in range(max_test_iterations):
+            iteration_context_list = []
+
+            # CRITICAL FIX: イテレーション間でコンテキストを引き継ぐ
+            if iteration == 0:
+                # 初回のみゼロ初期化
+                context = torch.zeros(1, model.context_dim, device=device)
+            else:
+                # 前イテレーションの最終コンテキストを初期値として使用
+                context = iteration_contexts[-1][-1].unsqueeze(0).detach()
+
+            for token_embed in token_embeds:
+                context = model._update_context_one_step(
+                    token_embed.unsqueeze(0),
+                    context
+                )
+                iteration_context_list.append(context)
+
+            iteration_contexts.append(torch.cat(iteration_context_list, dim=0))
+
+        # イテレーション間の変化を測定
+        convergence_diffs = []
+        for i in range(1, max_test_iterations):
+            diff = torch.norm(
+                iteration_contexts[i] - iteration_contexts[i-1],
+                dim=1
+            ).mean().item()
+            convergence_diffs.append(diff)
+
+    print_flush(f"Testing convergence over {max_test_iterations} iterations:\n")
+
+    for i, diff in enumerate(convergence_diffs):
+        print_flush(f"  Iteration {i+1} → {i+2}: Avg change = {diff:.6f}")
+
+    # 最終イテレーション間の変化
+    final_diff = convergence_diffs[-1] if convergence_diffs else float('inf')
+
+    print_flush(f"\nFinal convergence (iteration {max_test_iterations-1} → {max_test_iterations}):")
+    print_flush(f"  Average change: {final_diff:.6f}")
+
+    if final_diff < 1e-4:
+        print_flush("  ✅ EXCELLENT: Strong fixed-point convergence")
+        convergence_quality = "excellent"
+    elif final_diff < 1e-3:
+        print_flush("  ✅ GOOD: Fixed-point convergence achieved")
+        convergence_quality = "good"
+    elif final_diff < 1e-2:
+        print_flush("  ⚠️ MODERATE: Weak convergence (acceptable)")
+        convergence_quality = "moderate"
+    else:
+        print_flush("  ❌ FAILED: No fixed-point convergence")
+        print_flush("  → Model is NOT learning stable fixed points")
+        convergence_quality = "failed"
+
+    print_flush("="*70 + "\n")
+
+    return {
+        "convergence_diffs": convergence_diffs,
+        "final_diff": final_diff,
+        "quality": convergence_quality
+    }
+
+
 def analyze_singular_vectors(contexts, token_ids=None, tokenizer=None, top_k=2, top_tokens=5):
     """
     Analyze which tokens contribute most to top singular vectors.

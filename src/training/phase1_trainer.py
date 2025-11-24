@@ -31,7 +31,8 @@ class Phase1Trainer:
         min_converged_ratio,
         learning_rate,
         dist_reg_weight,
-        ema_momentum=0.99  # EMA係数（デフォルト: 0.99 = 99%古い値、1%新しい値）
+        ema_momentum=0.99,  # EMA係数（デフォルト: 0.99 = 99%古い値、1%新しい値）
+        context_noise_std=0.01  # コンテキストノイズの標準偏差（汎化性能向上用）
     ):
         """
         Args:
@@ -42,6 +43,7 @@ class Phase1Trainer:
             learning_rate: 学習率
             dist_reg_weight: 多様性正則化の重み
             ema_momentum: EMA係数（0.99推奨）
+            context_noise_std: 訓練時のコンテキストノイズ標準偏差（0でノイズなし）
         """
         self.model = model
         self.max_iterations = max_iterations
@@ -50,6 +52,7 @@ class Phase1Trainer:
         self.learning_rate = learning_rate
         self.dist_reg_weight = dist_reg_weight
         self.ema_momentum = ema_momentum
+        self.context_noise_std = context_noise_std
 
         # 収束判定用の状態（Trainerが管理）
         self.previous_contexts = None
@@ -188,7 +191,14 @@ class Phase1Trainer:
         if total_tokens > 10000:
             self._print_flush(f"⚠️ Processing {total_tokens:,} tokens - this may take several minutes")
 
-        context = torch.zeros(1, self.model.context_dim, device=device)
+        # CRITICAL FIX: イテレーション間でコンテキストを引き継ぐ
+        # 初回イテレーション(previous_contexts=None)の場合のみゼロ初期化
+        if self.previous_contexts is None:
+            context = torch.zeros(1, self.model.context_dim, device=device)
+        else:
+            # 前イテレーションの最終コンテキストを初期値として使用
+            context = self.previous_contexts[-1].unsqueeze(0).detach()
+
         current_contexts = []
 
         start_time = time.time()
@@ -210,9 +220,16 @@ class Phase1Trainer:
 
             if is_training:
                 # 訓練モード: 最適化あり
+                # ノイズを加えて汎化性能を向上（訓練時のみ）
+                if self.context_noise_std > 0 and t > 0:
+                    noise = torch.randn_like(context) * self.context_noise_std
+                    context_with_noise = context + noise
+                else:
+                    context_with_noise = context
+
                 context = self._train_one_token(
                     token_embed.unsqueeze(0),
-                    context.detach() if t > 0 else context,
+                    context_with_noise.detach() if t > 0 else context_with_noise,
                     token_idx=t
                 )
             else:
@@ -270,9 +287,9 @@ class Phase1Trainer:
             # 偏差
             deviation = new_context_flat - old_mean
 
-            # 多様性損失: 分散が低い = 多様性不足 = 高損失
-            # 平均分散の逆数を損失とすることで、分散を高く保つ
-            diversity_loss = 1.0 / (old_var.mean() + 1e-6)
+            # 多様性損失: 偏差を大きくすることで多様性を促進
+            # 89.3%を達成した正しい実装（CLAUDE.md記載）
+            diversity_loss = -torch.norm(deviation, p=2)  # 負の損失で偏差を最大化
 
             # EMA更新（勾配計算後に実行 - torch.no_gradで保護）
             with torch.no_grad():

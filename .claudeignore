@@ -2,7 +2,6 @@
 cache/
 .git/
 checkpoints/
-experiments/
 __pycache__/
 *.pt
 *.arrow

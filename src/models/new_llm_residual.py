@@ -1,37 +1,171 @@
 """
-New-LLM: Residual接続アーキテクチャ（リファクタリング版2）
+New-LLM: Residual Connection Architecture
 
-CVFPLayerを使用したクリーンな実装。
-
-主な改善点:
-1. CVFPLayer/CVFPBlockを使用（cvfp/モジュールから）
-2. 分布正則化はレイヤー内部で自動処理
-3. よりクリーンな順伝播
-4. 関心の分離の改善
-5. GPT-2事前学習済み埋め込みのサポート
+Clean implementation with inline CVFP layers.
+Main features:
+1. Context vector updates with residual connections
+2. LayerNorm for stable training
+3. GPT-2 pretrained embeddings support
 """
 
 import torch
 import torch.nn as nn
-from .cvfp import CVFPBlock
+
+
+class CVFPLayer(nn.Module):
+    """
+    Context Vector Fixed-Point Layer - Basic computation unit
+
+    Encapsulates:
+    1. FNN-based context updates
+    2. Token embedding integration
+    3. Residual connections
+    4. Optional LayerNorm
+
+    Args:
+        context_dim: Context vector dimension
+        embed_dim: Token embedding dimension
+        hidden_dim: Hidden layer dimension (must equal context_dim + embed_dim)
+        layernorm_mix: LayerNorm mixing ratio (0.0 = disabled, 1.0 = full)
+    """
+
+    def __init__(self, context_dim, embed_dim, hidden_dim, layernorm_mix=0.0):
+        super().__init__()
+
+        if hidden_dim != context_dim + embed_dim:
+            raise ValueError(
+                f"hidden_dim ({hidden_dim}) must equal "
+                f"context_dim ({context_dim}) + embed_dim ({embed_dim})"
+            )
+
+        self.context_dim = context_dim
+        self.embed_dim = embed_dim
+        self.hidden_dim = hidden_dim
+        self.layernorm_mix = layernorm_mix
+
+        # FNN: [context + token] -> [hidden_dim]
+        self.fnn = nn.Sequential(
+            nn.Linear(context_dim + embed_dim, hidden_dim),
+            nn.ReLU()
+        )
+
+        # Optional LayerNorm
+        if layernorm_mix > 0:
+            self.context_norm = nn.LayerNorm(context_dim)
+            self.token_norm = nn.LayerNorm(embed_dim)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize layer weights"""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.normal_(module.weight, mean=0.0, std=0.1)
+                if module.bias is not None:
+                    nn.init.normal_(module.bias, mean=0.0, std=0.01)
+
+    def forward(self, context, token_embed):
+        """
+        Forward pass: Update context and token
+
+        Args:
+            context: Current context [batch, context_dim]
+            token_embed: Token embedding [batch, embed_dim]
+
+        Returns:
+            new_context: Updated context [batch, context_dim]
+            new_token: Updated token embedding [batch, embed_dim]
+        """
+        # Concatenate inputs
+        fnn_input = torch.cat([context, token_embed], dim=-1)
+
+        # FNN forward
+        fnn_output = self.fnn(fnn_input)
+
+        # Split output
+        delta_context = fnn_output[:, :self.context_dim]
+        delta_token = fnn_output[:, self.context_dim:]
+
+        # Residual connections
+        new_context = context + delta_context
+        new_token = token_embed + delta_token
+
+        # Optional LayerNorm mixing
+        if self.layernorm_mix > 0:
+            context_normed = self.context_norm(new_context)
+            token_normed = self.token_norm(new_token)
+
+            mix = self.layernorm_mix
+            new_context = (1 - mix) * new_context + mix * context_normed
+            new_token = (1 - mix) * new_token + mix * token_normed
+
+        return new_context, new_token
+
+
+class CVFPBlock(nn.Module):
+    """
+    CVFP Block - Grouping of multiple layers
+
+    Sequentially executes multiple CVFPLayer instances.
+
+    Args:
+        num_layers: Number of CVFP layers in this block
+        context_dim: Context vector dimension
+        embed_dim: Token embedding dimension
+        hidden_dim: Hidden layer dimension
+        layernorm_mix: LayerNorm mixing ratio
+    """
+
+    def __init__(self, num_layers, context_dim, embed_dim, hidden_dim, layernorm_mix=0.0):
+        super().__init__()
+
+        self.num_layers = num_layers
+
+        # Stack of CVFP layers
+        self.layers = nn.ModuleList([
+            CVFPLayer(
+                context_dim=context_dim,
+                embed_dim=embed_dim,
+                hidden_dim=hidden_dim,
+                layernorm_mix=layernorm_mix
+            )
+            for _ in range(num_layers)
+        ])
+
+    def forward(self, context, token_embed):
+        """
+        Execute all layers in the block sequentially
+
+        Args:
+            context: [batch, context_dim]
+            token_embed: [batch, embed_dim]
+
+        Returns:
+            context: Updated context [batch, context_dim]
+            token_embed: Updated token [batch, embed_dim]
+        """
+        for layer in self.layers:
+            context, token_embed = layer(context, token_embed)
+
+        return context, token_embed
 
 
 class NewLLMResidual(nn.Module):
     """
-    ResNetスタイルのResidual接続を持つNew-LLM
+    New-LLM with ResNet-style Residual connections
 
-    このバージョンはCVFPLayerを使用して以下をクリーンにカプセル化:
-    - コンテキスト更新
-    - トークン更新
-    - 分布正則化（EMAベース）
+    Uses CVFPLayer to cleanly encapsulate:
+    - Context updates
+    - Token updates
 
     Args:
-        vocab_size: 語彙サイズ
-        embed_dim: トークン埋め込みの次元数
-        context_dim: コンテキストベクトルの次元数
-        hidden_dim: 隠れ層の次元数（embed_dim + context_dimと等しい必要がある）
-        layer_structure: ブロックごとのレイヤー数を指定するリスト
-        layernorm_mix: LayerNorm混合比率、0.0=無効 (デフォルト: 0.0)
+        vocab_size: Vocabulary size
+        embed_dim: Token embedding dimension
+        context_dim: Context vector dimension
+        hidden_dim: Hidden layer dimension (must equal embed_dim + context_dim)
+        layer_structure: List specifying number of layers per block
+        layernorm_mix: LayerNorm mixing ratio, 0.0=disabled (default: 0.0)
+        use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
     """
 
     def __init__(
@@ -46,14 +180,14 @@ class NewLLMResidual(nn.Module):
     ):
         super().__init__()
 
-        # 次元の検証
+        # Validate dimensions
         if hidden_dim != embed_dim + context_dim:
             raise ValueError(
-                f"hidden_dim ({hidden_dim}) は "
-                f"embed_dim ({embed_dim}) + context_dim ({context_dim}) と等しい必要があります"
+                f"hidden_dim ({hidden_dim}) must equal "
+                f"embed_dim ({embed_dim}) + context_dim ({context_dim})"
             )
 
-        # 設定を保存
+        # Save configuration
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.context_dim = context_dim
@@ -61,18 +195,15 @@ class NewLLMResidual(nn.Module):
         self.layer_structure = layer_structure
         self.use_pretrained_embeddings = use_pretrained_embeddings
 
-
-        # ========== トークン埋め込み ==========
+        # ========== Token Embeddings ==========
         if use_pretrained_embeddings:
-            # GPT-2事前学習済み埋め込みを読み込み
             self._load_pretrained_embeddings()
         else:
-            # ランダム初期化
             self.token_embedding = nn.Embedding(vocab_size, embed_dim)
 
         self.embed_norm = nn.LayerNorm(embed_dim)
 
-        # ========== CVFPブロック ==========
+        # ========== CVFP Blocks ==========
         self.blocks = nn.ModuleList([
             CVFPBlock(
                 num_layers=num_layers,
@@ -84,29 +215,24 @@ class NewLLMResidual(nn.Module):
             for num_layers in layer_structure
         ])
 
-        # ========== 出力ヘッド ==========
-        # コンテキストから次のトークンを予測
+        # ========== Output Head ==========
         self.token_output = nn.Linear(context_dim, vocab_size)
 
-        # 埋め込みの初期化（事前学習済みでない場合のみ）
+        # Initialize embeddings (if not pretrained)
         if not use_pretrained_embeddings:
             self._init_weights()
 
     def _load_pretrained_embeddings(self):
-        """GPT-2事前学習済み埋め込みを読み込み"""
+        """Load GPT-2 pretrained embeddings"""
         try:
             from transformers import GPT2Model
             print("Loading GPT-2 pretrained embeddings...")
 
-            # GPT-2モデルから埋め込み層のみ取得
             gpt2 = GPT2Model.from_pretrained('gpt2')
-            pretrained_embeddings = gpt2.wte.weight.data  # [vocab_size, 768]
+            pretrained_embeddings = gpt2.wte.weight.data
 
-            # 埋め込み層を作成してコピー
             self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
             self.token_embedding.weight.data.copy_(pretrained_embeddings)
-
-            # 埋め込みを固定（Phase 1では学習しない）
             self.token_embedding.weight.requires_grad = False
 
             print(f"✓ Loaded GPT-2 embeddings: {pretrained_embeddings.shape}")
@@ -118,26 +244,26 @@ class NewLLMResidual(nn.Module):
             nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
 
     def _init_weights(self):
-        """埋め込み重みを初期化"""
+        """Initialize embedding weights"""
         nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
 
     def _update_context_one_step(self, token_vec, context, return_token=False):
         """
-        1トークンステップのコンテキスト更新
+        Update context for one token step
 
         Args:
-            token_vec: トークンベクトル [batch, embed_dim]
-            context: 現在のコンテキスト [batch, context_dim]
-            return_token: Trueの場合、更新されたトークンも返す
+            token_vec: Token vector [batch, embed_dim]
+            context: Current context [batch, context_dim]
+            return_token: If True, also return updated token
 
         Returns:
-            new_context: 更新されたコンテキスト [batch, context_dim]
-            new_token: 更新されたトークン (return_token=Trueの場合)
+            new_context: Updated context [batch, context_dim]
+            new_token: Updated token (if return_token=True)
         """
         current_context = context
         current_token = token_vec
 
-        # 全ブロックを通して処理
+        # Process through all blocks
         for block in self.blocks:
             current_context, current_token = block(current_context, current_token)
 
@@ -147,41 +273,41 @@ class NewLLMResidual(nn.Module):
 
     def forward(self, input_ids, return_context_trajectory=False):
         """
-        モデルの順伝播
+        Model forward pass
 
         Args:
-            input_ids: 入力トークンID [batch, seq_len]
-            return_context_trajectory: Trueの場合、全中間コンテキストを返す
+            input_ids: Input token IDs [batch, seq_len]
+            return_context_trajectory: If True, return all intermediate contexts
 
         Returns:
-            logits: 出力ロジット [batch, seq_len, vocab_size]
-            context_trajectory: (オプション) 全コンテキスト [batch, seq_len, context_dim]
+            logits: Output logits [batch, seq_len, vocab_size]
+            context_trajectory: (Optional) All contexts [batch, seq_len, context_dim]
         """
         batch_size, seq_len = input_ids.shape
 
-        # トークン埋め込みを取得
-        token_embeds = self.token_embedding(input_ids)  # [batch, seq_len, embed_dim]
+        # Get token embeddings
+        token_embeds = self.token_embedding(input_ids)
         token_embeds = self.embed_norm(token_embeds)
 
-        # コンテキストを初期化
+        # Initialize context
         context = torch.zeros(
             batch_size, self.context_dim,
             device=input_ids.device,
             dtype=token_embeds.dtype
         )
 
-        # シーケンスを処理
+        # Process sequence
         contexts = []
         for t in range(seq_len):
-            token_vec = token_embeds[:, t, :]  # [batch, embed_dim]
+            token_vec = token_embeds[:, t, :]
             context = self._update_context_one_step(token_vec, context)
             contexts.append(context)
 
-        # コンテキストをスタック
-        all_contexts = torch.stack(contexts, dim=1)  # [batch, seq_len, context_dim]
+        # Stack contexts
+        all_contexts = torch.stack(contexts, dim=1)
 
-        # 次のトークンを予測
-        logits = self.token_output(all_contexts)  # [batch, seq_len, vocab_size]
+        # Predict next token
+        logits = self.token_output(all_contexts)
 
         if return_context_trajectory:
             return logits, all_contexts

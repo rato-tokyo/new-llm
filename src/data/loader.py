@@ -32,11 +32,23 @@ def load_data(config):
 
     print_flush("Loading validation data...")
     if config.val_data_source == "auto_split":
-        # Split from training data
-        split_idx = int(len(train_token_ids) * config.train_val_split)
-        val_token_ids = train_token_ids[split_idx:]
-        train_token_ids = train_token_ids[:split_idx]
-        print_flush(f"  Split {len(train_token_ids) + len(val_token_ids)} tokens into Train/Val")
+        raise ValueError(
+            "❌ CRITICAL ERROR: auto_split is STRICTLY FORBIDDEN for validation data!\n"
+            "\n"
+            "Correct specification:\n"
+            "  - Validation data MUST contain ONLY tokens that appear in training data\n"
+            "  - Use val_data_source='text_file' with manually generated validation text\n"
+            "  - Generate validation data using: python3 scripts/generate_validation_data.py\n"
+            "\n"
+            "Why auto_split is forbidden:\n"
+            "  - It splits training data randomly, creating arbitrary train/val sets\n"
+            "  - Does NOT guarantee validation uses only training vocabulary\n"
+            "  - Violates the fundamental requirement of vocabulary consistency\n"
+            "\n"
+            "Required config.py setting:\n"
+            "  val_data_source = 'text_file'\n"
+            "  val_text_file = './data/example_val.txt'\n"
+        )
     else:
         val_token_ids = load_data_source(
             source_type=config.val_data_source,
@@ -151,10 +163,10 @@ def load_text_file(file_path, config):
     with open(file_path, 'r', encoding='utf-8') as f:
         text = f.read()
 
+    # No truncation for validation data - we want all tokens
     tokens = tokenizer(
         text,
-        max_length=config.max_seq_length,
-        truncation=True,
+        truncation=False,
         return_tensors="pt"
     )
 
