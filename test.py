@@ -145,8 +145,17 @@ sample_token_ids = train_token_ids[:sample_size]
 
 convergence_check = check_cvfp_convergence(trainer, sample_token_ids, device, max_test_iterations=5)
 
+# Check 4: Gradient Flow Check - トークン間勾配伝播確認（NEW!）
+print("\n" + "="*70)
+print("CHECK 4: GRADIENT FLOW (勾配伝播チェック)")
+print("="*70)
+
+# 勾配フローチェック（100トークンでテスト）
+gradient_flow_check = check_gradient_flow(trainer, train_token_ids, device, num_tokens_to_check=100)
+print_gradient_flow_result(gradient_flow_check)
+
 # ============================================================
-# FINAL SUMMARY - 3つのチェック結果まとめ
+# FINAL SUMMARY - 4つのチェック結果まとめ
 # ============================================================
 print(f"\n" + "="*70)
 print("FINAL SUMMARY - 81.7% Implementation Verification")
@@ -187,6 +196,14 @@ if convergence_check['quality'] in ['excellent', 'good', 'moderate']:
     print(f"   ✅ PASSED: {convergence_check['quality'].upper()} (final_diff={convergence_check['final_diff']:.6f})")
 else:
     print(f"   ❌ FAILED: {convergence_check['quality'].upper()} (final_diff={convergence_check['final_diff']:.6f})")
+    all_passed = False
+
+# 4. Gradient Flow
+print("\n4. Gradient Flow (勾配伝播):")
+if gradient_flow_check['has_gradient_flow']:
+    print(f"   ✅ PASSED: Gradient flows between tokens (norm_ratio={gradient_flow_check['norm_ratio']:.2f})")
+else:
+    print(f"   ❌ FAILED: Gradient flow blocked (norm_ratio={gradient_flow_check['norm_ratio']:.2f})")
     all_passed = False
 
 print("\n" + "="*70)
