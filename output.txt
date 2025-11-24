@@ -1,0 +1,986 @@
+
+✅ Random seed fixed: 42 (完全な再現性保証)
+
+======================================================================
+Phase 1 Test: 81.7% Effective Rank (Validation)
+======================================================================
+
+Loading data...
+Loading training data...
+Loading 50 samples from UltraChat...
+tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 137kB/s]
+config.json: 100% 665/665 [00:00<00:00, 4.92MB/s]
+vocab.json: 100% 1.04M/1.04M [00:00<00:00, 1.54MB/s]
+merges.txt: 100% 456k/456k [00:00<00:00, 2.00MB/s]
+tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 1.60MB/s]
+README.md: 3.90kB [00:00, 19.3MB/s]
+data/train_sft-00000-of-00003-a3ecf92756(…): 100% 244M/244M [00:02<00:00, 98.3MB/s]
+data/train_sft-00001-of-00003-0a1804bcb6(…): 100% 244M/244M [00:01<00:00, 126MB/s]
+data/train_sft-00002-of-00003-ee46ed25cf(…): 100% 244M/244M [00:01<00:00, 188MB/s]
+data/test_sft-00000-of-00001-f7dfac4afe5(…): 100% 81.2M/81.2M [00:02<00:00, 28.2MB/s]
+data/train_gen-00000-of-00003-a6c9fb894b(…): 100% 244M/244M [00:01<00:00, 142MB/s]  
+data/train_gen-00001-of-00003-d6a0402e41(…): 100% 243M/243M [00:01<00:00, 205MB/s]
+data/train_gen-00002-of-00003-c0db75b92a(…): 100% 243M/243M [00:01<00:00, 208MB/s]
+data/test_gen-00000-of-00001-3d4cd830914(…): 100% 80.4M/80.4M [00:00<00:00, 92.3MB/s]
+Generating train_sft split: 100% 207865/207865 [00:04<00:00, 51183.86 examples/s]
+Generating test_sft split: 100% 23110/23110 [00:00<00:00, 53697.34 examples/s]
+Generating train_gen split: 100% 256032/256032 [00:05<00:00, 50851.04 examples/s]
+Generating test_gen split: 100% 28304/28304 [00:00<00:00, 71600.08 examples/s]
+  Cached to: ./cache/ultrachat_50samples_128len.pt
+  Loaded 50 text segments → 6400 tokens
+Loading validation data...
+Loading text file: ./data/example_val.txt
+Token indices sequence length is longer than the specified maximum sequence length for this model (1280 > 1024). Running this sequence through the model will result in indexing errors
+  Loaded 1280 tokens
+  Train: 6400 tokens
+  Val:   1280 tokens (text_file)
+Total training tokens: 6400
+Total validation tokens: 1280
+
+✅ Sufficient training tokens for 89.3% target
+
+Creating model...
+2025-11-24 14:17:40.420912: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-11-24 14:17:40.437546: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1763993860.455789    2623 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1763993860.461507    2623 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1763993860.475582    2623 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1763993860.475607    2623 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1763993860.475610    2623 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1763993860.475613    2623 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-11-24 14:17:40.480010: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+config.json: 100% 665/665 [00:00<00:00, 5.65MB/s]
+model.safetensors: 100% 548M/548M [00:03<00:00, 181MB/s]
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Model parameters: 91,429,969
+
+Starting Phase 1 training...
+
+Training with 6400 tokens...
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 (CVFP) - Train
+======================================================================
+  Progress: 100/6,400 (1.6%) | Speed: 242.5 tok/s | ETA: 26s
+  Progress: 200/6,400 (3.1%) | Speed: 262.9 tok/s | ETA: 24s
+  Progress: 300/6,400 (4.7%) | Speed: 268.6 tok/s | ETA: 23s
+  Progress: 400/6,400 (6.2%) | Speed: 271.0 tok/s | ETA: 22s
+  Progress: 500/6,400 (7.8%) | Speed: 276.9 tok/s | ETA: 21s
+  Progress: 600/6,400 (9.4%) | Speed: 281.7 tok/s | ETA: 21s
+  Progress: 700/6,400 (10.9%) | Speed: 287.4 tok/s | ETA: 20s
+  Progress: 800/6,400 (12.5%) | Speed: 289.4 tok/s | ETA: 19s
+  Progress: 900/6,400 (14.1%) | Speed: 291.5 tok/s | ETA: 19s
+  Progress: 1,000/6,400 (15.6%) | Speed: 292.7 tok/s | ETA: 18s
+  Progress: 1,100/6,400 (17.2%) | Speed: 292.3 tok/s | ETA: 18s
+  Progress: 1,200/6,400 (18.8%) | Speed: 292.5 tok/s | ETA: 18s
+  Progress: 1,300/6,400 (20.3%) | Speed: 292.9 tok/s | ETA: 17s
+  Progress: 1,400/6,400 (21.9%) | Speed: 293.7 tok/s | ETA: 17s
+  Progress: 1,500/6,400 (23.4%) | Speed: 294.0 tok/s | ETA: 17s
+  Progress: 1,600/6,400 (25.0%) | Speed: 293.9 tok/s | ETA: 16s
+  Progress: 1,700/6,400 (26.6%) | Speed: 294.4 tok/s | ETA: 16s
+  Progress: 1,800/6,400 (28.1%) | Speed: 296.1 tok/s | ETA: 16s
+  Progress: 1,900/6,400 (29.7%) | Speed: 297.2 tok/s | ETA: 15s
+  Progress: 2,000/6,400 (31.2%) | Speed: 298.2 tok/s | ETA: 15s
+  Progress: 2,100/6,400 (32.8%) | Speed: 299.0 tok/s | ETA: 14s
+  Progress: 2,200/6,400 (34.4%) | Speed: 299.3 tok/s | ETA: 14s
+  Progress: 2,300/6,400 (35.9%) | Speed: 299.5 tok/s | ETA: 14s
+  Progress: 2,400/6,400 (37.5%) | Speed: 299.7 tok/s | ETA: 13s
+  Progress: 2,500/6,400 (39.1%) | Speed: 300.4 tok/s | ETA: 13s
+  Progress: 2,600/6,400 (40.6%) | Speed: 301.3 tok/s | ETA: 13s
+  Progress: 2,700/6,400 (42.2%) | Speed: 301.7 tok/s | ETA: 12s
+  Progress: 2,800/6,400 (43.8%) | Speed: 302.2 tok/s | ETA: 12s
+  Progress: 2,900/6,400 (45.3%) | Speed: 302.9 tok/s | ETA: 12s
+  Progress: 3,000/6,400 (46.9%) | Speed: 303.6 tok/s | ETA: 11s
+  Progress: 3,100/6,400 (48.4%) | Speed: 304.5 tok/s | ETA: 11s
+  Progress: 3,200/6,400 (50.0%) | Speed: 305.4 tok/s | ETA: 10s
+  Progress: 3,300/6,400 (51.6%) | Speed: 306.1 tok/s | ETA: 10s
+  Progress: 3,400/6,400 (53.1%) | Speed: 307.1 tok/s | ETA: 10s
+  Progress: 3,500/6,400 (54.7%) | Speed: 307.5 tok/s | ETA: 9s
+  Progress: 3,600/6,400 (56.2%) | Speed: 308.1 tok/s | ETA: 9s
+  Progress: 3,700/6,400 (57.8%) | Speed: 309.0 tok/s | ETA: 9s
+  Progress: 3,800/6,400 (59.4%) | Speed: 308.9 tok/s | ETA: 8s
+  Progress: 3,900/6,400 (60.9%) | Speed: 309.4 tok/s | ETA: 8s
+  Progress: 4,000/6,400 (62.5%) | Speed: 310.1 tok/s | ETA: 8s
+  Progress: 4,100/6,400 (64.1%) | Speed: 310.8 tok/s | ETA: 7s
+  Progress: 4,200/6,400 (65.6%) | Speed: 311.5 tok/s | ETA: 7s
+  Progress: 4,300/6,400 (67.2%) | Speed: 312.2 tok/s | ETA: 7s
+  Progress: 4,400/6,400 (68.8%) | Speed: 313.0 tok/s | ETA: 6s
+  Progress: 4,500/6,400 (70.3%) | Speed: 313.0 tok/s | ETA: 6s
+  Progress: 4,600/6,400 (71.9%) | Speed: 313.1 tok/s | ETA: 6s
+  Progress: 4,700/6,400 (73.4%) | Speed: 313.3 tok/s | ETA: 5s
+  Progress: 4,800/6,400 (75.0%) | Speed: 313.0 tok/s | ETA: 5s
+  Progress: 4,900/6,400 (76.6%) | Speed: 312.9 tok/s | ETA: 5s
+  Progress: 5,000/6,400 (78.1%) | Speed: 313.5 tok/s | ETA: 4s
+  Progress: 5,100/6,400 (79.7%) | Speed: 314.1 tok/s | ETA: 4s
+  Progress: 5,200/6,400 (81.2%) | Speed: 314.8 tok/s | ETA: 4s
+  Progress: 5,300/6,400 (82.8%) | Speed: 315.4 tok/s | ETA: 3s
+  Progress: 5,400/6,400 (84.4%) | Speed: 316.1 tok/s | ETA: 3s
+  Progress: 5,500/6,400 (85.9%) | Speed: 316.7 tok/s | ETA: 3s
+  Progress: 5,600/6,400 (87.5%) | Speed: 317.2 tok/s | ETA: 3s
+  Progress: 5,700/6,400 (89.1%) | Speed: 317.6 tok/s | ETA: 2s
+  Progress: 5,800/6,400 (90.6%) | Speed: 318.0 tok/s | ETA: 2s
+  Progress: 5,900/6,400 (92.2%) | Speed: 318.5 tok/s | ETA: 2s
+  Progress: 6,000/6,400 (93.8%) | Speed: 319.0 tok/s | ETA: 1s
+  Progress: 6,100/6,400 (95.3%) | Speed: 319.4 tok/s | ETA: 1s
+  Progress: 6,200/6,400 (96.9%) | Speed: 319.8 tok/s | ETA: 1s
+  Progress: 6,300/6,400 (98.4%) | Speed: 320.3 tok/s | ETA: 0s
+Iteration 1/10: 順伝播のみ（コンテキスト保存）
+  Progress: 100/6,400 (1.6%) | Speed: 324.6 tok/s | ETA: 19s
+  Progress: 200/6,400 (3.1%) | Speed: 331.4 tok/s | ETA: 19s
+  Progress: 300/6,400 (4.7%) | Speed: 333.3 tok/s | ETA: 18s
+  Progress: 400/6,400 (6.2%) | Speed: 333.9 tok/s | ETA: 18s
+  Progress: 500/6,400 (7.8%) | Speed: 333.5 tok/s | ETA: 18s
+  Progress: 600/6,400 (9.4%) | Speed: 333.8 tok/s | ETA: 17s
+  Progress: 700/6,400 (10.9%) | Speed: 333.1 tok/s | ETA: 17s
+  Progress: 800/6,400 (12.5%) | Speed: 333.3 tok/s | ETA: 17s
+  Progress: 900/6,400 (14.1%) | Speed: 333.9 tok/s | ETA: 16s
+  Progress: 1,000/6,400 (15.6%) | Speed: 333.8 tok/s | ETA: 16s
+  Progress: 1,100/6,400 (17.2%) | Speed: 333.6 tok/s | ETA: 16s
+  Progress: 1,200/6,400 (18.8%) | Speed: 333.5 tok/s | ETA: 16s
+  Progress: 1,300/6,400 (20.3%) | Speed: 332.9 tok/s | ETA: 15s
+  Progress: 1,400/6,400 (21.9%) | Speed: 332.8 tok/s | ETA: 15s
+  Progress: 1,500/6,400 (23.4%) | Speed: 333.1 tok/s | ETA: 15s
+  Progress: 1,600/6,400 (25.0%) | Speed: 333.1 tok/s | ETA: 14s
+  Progress: 1,700/6,400 (26.6%) | Speed: 332.9 tok/s | ETA: 14s
+  Progress: 1,800/6,400 (28.1%) | Speed: 333.0 tok/s | ETA: 14s
+  Progress: 1,900/6,400 (29.7%) | Speed: 333.4 tok/s | ETA: 13s
+  Progress: 2,000/6,400 (31.2%) | Speed: 332.9 tok/s | ETA: 13s
+  Progress: 2,100/6,400 (32.8%) | Speed: 331.4 tok/s | ETA: 13s
+  Progress: 2,200/6,400 (34.4%) | Speed: 331.1 tok/s | ETA: 13s
+  Progress: 2,300/6,400 (35.9%) | Speed: 331.0 tok/s | ETA: 12s
+  Progress: 2,400/6,400 (37.5%) | Speed: 330.6 tok/s | ETA: 12s
+  Progress: 2,500/6,400 (39.1%) | Speed: 327.9 tok/s | ETA: 12s
+  Progress: 2,600/6,400 (40.6%) | Speed: 327.7 tok/s | ETA: 12s
+  Progress: 2,700/6,400 (42.2%) | Speed: 326.5 tok/s | ETA: 11s
+  Progress: 2,800/6,400 (43.8%) | Speed: 325.3 tok/s | ETA: 11s
+  Progress: 2,900/6,400 (45.3%) | Speed: 324.3 tok/s | ETA: 11s
+  Progress: 3,000/6,400 (46.9%) | Speed: 323.6 tok/s | ETA: 11s
+  Progress: 3,100/6,400 (48.4%) | Speed: 323.8 tok/s | ETA: 10s
+  Progress: 3,200/6,400 (50.0%) | Speed: 324.2 tok/s | ETA: 10s
+  Progress: 3,300/6,400 (51.6%) | Speed: 324.6 tok/s | ETA: 10s
+  Progress: 3,400/6,400 (53.1%) | Speed: 324.9 tok/s | ETA: 9s
+  Progress: 3,500/6,400 (54.7%) | Speed: 325.1 tok/s | ETA: 9s
+  Progress: 3,600/6,400 (56.2%) | Speed: 325.3 tok/s | ETA: 9s
+  Progress: 3,700/6,400 (57.8%) | Speed: 325.5 tok/s | ETA: 8s
+  Progress: 3,800/6,400 (59.4%) | Speed: 325.4 tok/s | ETA: 8s
+  Progress: 3,900/6,400 (60.9%) | Speed: 325.6 tok/s | ETA: 8s
+  Progress: 4,000/6,400 (62.5%) | Speed: 325.8 tok/s | ETA: 7s
+  Progress: 4,100/6,400 (64.1%) | Speed: 326.0 tok/s | ETA: 7s
+  Progress: 4,200/6,400 (65.6%) | Speed: 326.1 tok/s | ETA: 7s
+  Progress: 4,300/6,400 (67.2%) | Speed: 326.4 tok/s | ETA: 6s
+  Progress: 4,400/6,400 (68.8%) | Speed: 326.6 tok/s | ETA: 6s
+  Progress: 4,500/6,400 (70.3%) | Speed: 326.7 tok/s | ETA: 6s
+  Progress: 4,600/6,400 (71.9%) | Speed: 326.7 tok/s | ETA: 6s
+  Progress: 4,700/6,400 (73.4%) | Speed: 326.9 tok/s | ETA: 5s
+  Progress: 4,800/6,400 (75.0%) | Speed: 327.0 tok/s | ETA: 5s
+  Progress: 4,900/6,400 (76.6%) | Speed: 327.0 tok/s | ETA: 5s
+  Progress: 5,000/6,400 (78.1%) | Speed: 327.2 tok/s | ETA: 4s
+  Progress: 5,100/6,400 (79.7%) | Speed: 327.4 tok/s | ETA: 4s
+  Progress: 5,200/6,400 (81.2%) | Speed: 327.6 tok/s | ETA: 4s
+  Progress: 5,300/6,400 (82.8%) | Speed: 327.8 tok/s | ETA: 3s
+  Progress: 5,400/6,400 (84.4%) | Speed: 328.0 tok/s | ETA: 3s
+  Progress: 5,500/6,400 (85.9%) | Speed: 328.2 tok/s | ETA: 3s
+  Progress: 5,600/6,400 (87.5%) | Speed: 328.3 tok/s | ETA: 2s
+  Progress: 5,700/6,400 (89.1%) | Speed: 328.5 tok/s | ETA: 2s
+  Progress: 5,800/6,400 (90.6%) | Speed: 328.5 tok/s | ETA: 2s
+  Progress: 5,900/6,400 (92.2%) | Speed: 328.4 tok/s | ETA: 2s
+  Progress: 6,000/6,400 (93.8%) | Speed: 328.5 tok/s | ETA: 1s
+  Progress: 6,100/6,400 (95.3%) | Speed: 328.6 tok/s | ETA: 1s
+  Progress: 6,200/6,400 (96.9%) | Speed: 328.5 tok/s | ETA: 1s
+  Progress: 6,300/6,400 (98.4%) | Speed: 328.4 tok/s | ETA: 0s
+Iteration 2/10: 収束=0.0% | CVFP=0.002045 | Diversity=-27.244949
+  Progress: 100/6,400 (1.6%) | Speed: 313.8 tok/s | ETA: 20s
+  Progress: 200/6,400 (3.1%) | Speed: 323.5 tok/s | ETA: 19s
+  Progress: 300/6,400 (4.7%) | Speed: 327.0 tok/s | ETA: 19s
+  Progress: 400/6,400 (6.2%) | Speed: 320.2 tok/s | ETA: 19s
+  Progress: 500/6,400 (7.8%) | Speed: 310.4 tok/s | ETA: 19s
+  Progress: 600/6,400 (9.4%) | Speed: 307.9 tok/s | ETA: 19s
+  Progress: 700/6,400 (10.9%) | Speed: 306.8 tok/s | ETA: 19s
+  Progress: 800/6,400 (12.5%) | Speed: 305.8 tok/s | ETA: 18s
+  Progress: 900/6,400 (14.1%) | Speed: 305.7 tok/s | ETA: 18s
+  Progress: 1,000/6,400 (15.6%) | Speed: 306.7 tok/s | ETA: 18s
+  Progress: 1,100/6,400 (17.2%) | Speed: 308.1 tok/s | ETA: 17s
+  Progress: 1,200/6,400 (18.8%) | Speed: 310.1 tok/s | ETA: 17s
+  Progress: 1,300/6,400 (20.3%) | Speed: 311.8 tok/s | ETA: 16s
+  Progress: 1,400/6,400 (21.9%) | Speed: 312.9 tok/s | ETA: 16s
+  Progress: 1,500/6,400 (23.4%) | Speed: 314.0 tok/s | ETA: 16s
+  Progress: 1,600/6,400 (25.0%) | Speed: 315.0 tok/s | ETA: 15s
+  Progress: 1,700/6,400 (26.6%) | Speed: 316.2 tok/s | ETA: 15s
+  Progress: 1,800/6,400 (28.1%) | Speed: 317.0 tok/s | ETA: 15s
+  Progress: 1,900/6,400 (29.7%) | Speed: 318.0 tok/s | ETA: 14s
+  Progress: 2,000/6,400 (31.2%) | Speed: 319.1 tok/s | ETA: 14s
+  Progress: 2,100/6,400 (32.8%) | Speed: 319.3 tok/s | ETA: 13s
+  Progress: 2,200/6,400 (34.4%) | Speed: 320.0 tok/s | ETA: 13s
+  Progress: 2,300/6,400 (35.9%) | Speed: 320.4 tok/s | ETA: 13s
+  Progress: 2,400/6,400 (37.5%) | Speed: 320.8 tok/s | ETA: 12s
+  Progress: 2,500/6,400 (39.1%) | Speed: 321.3 tok/s | ETA: 12s
+  Progress: 2,600/6,400 (40.6%) | Speed: 321.8 tok/s | ETA: 12s
+  Progress: 2,700/6,400 (42.2%) | Speed: 322.4 tok/s | ETA: 11s
+  Progress: 2,800/6,400 (43.8%) | Speed: 322.7 tok/s | ETA: 11s
+  Progress: 2,900/6,400 (45.3%) | Speed: 323.2 tok/s | ETA: 11s
+  Progress: 3,000/6,400 (46.9%) | Speed: 323.5 tok/s | ETA: 11s
+  Progress: 3,100/6,400 (48.4%) | Speed: 323.8 tok/s | ETA: 10s
+  Progress: 3,200/6,400 (50.0%) | Speed: 324.1 tok/s | ETA: 10s
+  Progress: 3,300/6,400 (51.6%) | Speed: 324.4 tok/s | ETA: 10s
+  Progress: 3,400/6,400 (53.1%) | Speed: 324.9 tok/s | ETA: 9s
+  Progress: 3,500/6,400 (54.7%) | Speed: 324.8 tok/s | ETA: 9s
+  Progress: 3,600/6,400 (56.2%) | Speed: 325.1 tok/s | ETA: 9s
+  Progress: 3,700/6,400 (57.8%) | Speed: 325.3 tok/s | ETA: 8s
+  Progress: 3,800/6,400 (59.4%) | Speed: 325.6 tok/s | ETA: 8s
+  Progress: 3,900/6,400 (60.9%) | Speed: 325.7 tok/s | ETA: 8s
+  Progress: 4,000/6,400 (62.5%) | Speed: 325.6 tok/s | ETA: 7s
+  Progress: 4,100/6,400 (64.1%) | Speed: 325.8 tok/s | ETA: 7s
+  Progress: 4,200/6,400 (65.6%) | Speed: 326.0 tok/s | ETA: 7s
+  Progress: 4,300/6,400 (67.2%) | Speed: 326.3 tok/s | ETA: 6s
+  Progress: 4,400/6,400 (68.8%) | Speed: 325.4 tok/s | ETA: 6s
+  Progress: 4,500/6,400 (70.3%) | Speed: 325.4 tok/s | ETA: 6s
+  Progress: 4,600/6,400 (71.9%) | Speed: 325.4 tok/s | ETA: 6s
+  Progress: 4,700/6,400 (73.4%) | Speed: 325.4 tok/s | ETA: 5s
+  Progress: 4,800/6,400 (75.0%) | Speed: 324.5 tok/s | ETA: 5s
+  Progress: 4,900/6,400 (76.6%) | Speed: 324.1 tok/s | ETA: 5s
+  Progress: 5,000/6,400 (78.1%) | Speed: 324.2 tok/s | ETA: 4s
+  Progress: 5,100/6,400 (79.7%) | Speed: 323.8 tok/s | ETA: 4s
+  Progress: 5,200/6,400 (81.2%) | Speed: 323.3 tok/s | ETA: 4s
+  Progress: 5,300/6,400 (82.8%) | Speed: 322.5 tok/s | ETA: 3s
+  Progress: 5,400/6,400 (84.4%) | Speed: 322.3 tok/s | ETA: 3s
+  Progress: 5,500/6,400 (85.9%) | Speed: 322.4 tok/s | ETA: 3s
+  Progress: 5,600/6,400 (87.5%) | Speed: 322.6 tok/s | ETA: 2s
+  Progress: 5,700/6,400 (89.1%) | Speed: 322.7 tok/s | ETA: 2s
+  Progress: 5,800/6,400 (90.6%) | Speed: 322.7 tok/s | ETA: 2s
+  Progress: 5,900/6,400 (92.2%) | Speed: 322.7 tok/s | ETA: 2s
+  Progress: 6,000/6,400 (93.8%) | Speed: 322.8 tok/s | ETA: 1s
+  Progress: 6,100/6,400 (95.3%) | Speed: 323.0 tok/s | ETA: 1s
+  Progress: 6,200/6,400 (96.9%) | Speed: 323.1 tok/s | ETA: 1s
+  Progress: 6,300/6,400 (98.4%) | Speed: 323.3 tok/s | ETA: 0s
+Iteration 3/10: 収束=0.0% | CVFP=0.001969 | Diversity=-27.068785
+  Progress: 100/6,400 (1.6%) | Speed: 332.2 tok/s | ETA: 19s
+  Progress: 200/6,400 (3.1%) | Speed: 333.8 tok/s | ETA: 19s
+  Progress: 300/6,400 (4.7%) | Speed: 334.8 tok/s | ETA: 18s
+  Progress: 400/6,400 (6.2%) | Speed: 334.8 tok/s | ETA: 18s
+  Progress: 500/6,400 (7.8%) | Speed: 333.8 tok/s | ETA: 18s
+  Progress: 600/6,400 (9.4%) | Speed: 334.2 tok/s | ETA: 17s
+  Progress: 700/6,400 (10.9%) | Speed: 334.6 tok/s | ETA: 17s
+  Progress: 800/6,400 (12.5%) | Speed: 335.1 tok/s | ETA: 17s
+  Progress: 900/6,400 (14.1%) | Speed: 334.3 tok/s | ETA: 16s
+  Progress: 1,000/6,400 (15.6%) | Speed: 334.2 tok/s | ETA: 16s
+  Progress: 1,100/6,400 (17.2%) | Speed: 334.1 tok/s | ETA: 16s
+  Progress: 1,200/6,400 (18.8%) | Speed: 333.5 tok/s | ETA: 16s
+  Progress: 1,300/6,400 (20.3%) | Speed: 333.6 tok/s | ETA: 15s
+  Progress: 1,400/6,400 (21.9%) | Speed: 333.8 tok/s | ETA: 15s
+  Progress: 1,500/6,400 (23.4%) | Speed: 333.8 tok/s | ETA: 15s
+  Progress: 1,600/6,400 (25.0%) | Speed: 333.3 tok/s | ETA: 14s
+  Progress: 1,700/6,400 (26.6%) | Speed: 333.3 tok/s | ETA: 14s
+  Progress: 1,800/6,400 (28.1%) | Speed: 333.5 tok/s | ETA: 14s
+  Progress: 1,900/6,400 (29.7%) | Speed: 332.9 tok/s | ETA: 14s
+  Progress: 2,000/6,400 (31.2%) | Speed: 333.0 tok/s | ETA: 13s
+  Progress: 2,100/6,400 (32.8%) | Speed: 333.2 tok/s | ETA: 13s
+  Progress: 2,200/6,400 (34.4%) | Speed: 333.4 tok/s | ETA: 13s
+  Progress: 2,300/6,400 (35.9%) | Speed: 332.2 tok/s | ETA: 12s
+  Progress: 2,400/6,400 (37.5%) | Speed: 330.7 tok/s | ETA: 12s
+  Progress: 2,500/6,400 (39.1%) | Speed: 328.1 tok/s | ETA: 12s
+  Progress: 2,600/6,400 (40.6%) | Speed: 327.5 tok/s | ETA: 12s
+  Progress: 2,700/6,400 (42.2%) | Speed: 327.6 tok/s | ETA: 11s
+  Progress: 2,800/6,400 (43.8%) | Speed: 327.8 tok/s | ETA: 11s
+  Progress: 2,900/6,400 (45.3%) | Speed: 327.4 tok/s | ETA: 11s
+  Progress: 3,000/6,400 (46.9%) | Speed: 326.7 tok/s | ETA: 10s
+  Progress: 3,100/6,400 (48.4%) | Speed: 325.7 tok/s | ETA: 10s
+  Progress: 3,200/6,400 (50.0%) | Speed: 325.0 tok/s | ETA: 10s
+  Progress: 3,300/6,400 (51.6%) | Speed: 324.3 tok/s | ETA: 10s
+  Progress: 3,400/6,400 (53.1%) | Speed: 324.6 tok/s | ETA: 9s
+  Progress: 3,500/6,400 (54.7%) | Speed: 324.9 tok/s | ETA: 9s
+  Progress: 3,600/6,400 (56.2%) | Speed: 325.0 tok/s | ETA: 9s
+  Progress: 3,700/6,400 (57.8%) | Speed: 325.2 tok/s | ETA: 8s
+  Progress: 3,800/6,400 (59.4%) | Speed: 325.3 tok/s | ETA: 8s
+  Progress: 3,900/6,400 (60.9%) | Speed: 325.2 tok/s | ETA: 8s
+  Progress: 4,000/6,400 (62.5%) | Speed: 325.5 tok/s | ETA: 7s
+  Progress: 4,100/6,400 (64.1%) | Speed: 325.8 tok/s | ETA: 7s
+  Progress: 4,200/6,400 (65.6%) | Speed: 326.1 tok/s | ETA: 7s
+  Progress: 4,300/6,400 (67.2%) | Speed: 326.1 tok/s | ETA: 6s
+  Progress: 4,400/6,400 (68.8%) | Speed: 326.3 tok/s | ETA: 6s
+  Progress: 4,500/6,400 (70.3%) | Speed: 326.6 tok/s | ETA: 6s
+  Progress: 4,600/6,400 (71.9%) | Speed: 326.5 tok/s | ETA: 6s
+  Progress: 4,700/6,400 (73.4%) | Speed: 326.6 tok/s | ETA: 5s
+  Progress: 4,800/6,400 (75.0%) | Speed: 326.8 tok/s | ETA: 5s
+  Progress: 4,900/6,400 (76.6%) | Speed: 327.0 tok/s | ETA: 5s
+  Progress: 5,000/6,400 (78.1%) | Speed: 326.9 tok/s | ETA: 4s
+  Progress: 5,100/6,400 (79.7%) | Speed: 327.0 tok/s | ETA: 4s
+  Progress: 5,200/6,400 (81.2%) | Speed: 327.1 tok/s | ETA: 4s
+  Progress: 5,300/6,400 (82.8%) | Speed: 327.2 tok/s | ETA: 3s
+  Progress: 5,400/6,400 (84.4%) | Speed: 327.2 tok/s | ETA: 3s
+  Progress: 5,500/6,400 (85.9%) | Speed: 327.2 tok/s | ETA: 3s
+  Progress: 5,600/6,400 (87.5%) | Speed: 327.1 tok/s | ETA: 2s
+  Progress: 5,700/6,400 (89.1%) | Speed: 327.1 tok/s | ETA: 2s
+  Progress: 5,800/6,400 (90.6%) | Speed: 327.1 tok/s | ETA: 2s
+  Progress: 5,900/6,400 (92.2%) | Speed: 327.2 tok/s | ETA: 2s
+  Progress: 6,000/6,400 (93.8%) | Speed: 327.1 tok/s | ETA: 1s
+  Progress: 6,100/6,400 (95.3%) | Speed: 327.2 tok/s | ETA: 1s
+  Progress: 6,200/6,400 (96.9%) | Speed: 327.3 tok/s | ETA: 1s
+  Progress: 6,300/6,400 (98.4%) | Speed: 327.3 tok/s | ETA: 0s
+Iteration 4/10: 収束=0.0% | CVFP=0.001650 | Diversity=-27.013069
+  Progress: 100/6,400 (1.6%) | Speed: 327.0 tok/s | ETA: 19s
+  Progress: 200/6,400 (3.1%) | Speed: 330.4 tok/s | ETA: 19s
+  Progress: 300/6,400 (4.7%) | Speed: 320.7 tok/s | ETA: 19s
+  Progress: 400/6,400 (6.2%) | Speed: 321.6 tok/s | ETA: 19s
+  Progress: 500/6,400 (7.8%) | Speed: 322.1 tok/s | ETA: 18s
+  Progress: 600/6,400 (9.4%) | Speed: 322.8 tok/s | ETA: 18s
+  Progress: 700/6,400 (10.9%) | Speed: 321.8 tok/s | ETA: 18s
+  Progress: 800/6,400 (12.5%) | Speed: 321.7 tok/s | ETA: 17s
+  Progress: 900/6,400 (14.1%) | Speed: 320.2 tok/s | ETA: 17s
+  Progress: 1,000/6,400 (15.6%) | Speed: 317.6 tok/s | ETA: 17s
+  Progress: 1,100/6,400 (17.2%) | Speed: 315.1 tok/s | ETA: 17s
+  Progress: 1,200/6,400 (18.8%) | Speed: 313.9 tok/s | ETA: 17s
+  Progress: 1,300/6,400 (20.3%) | Speed: 314.5 tok/s | ETA: 16s
+  Progress: 1,400/6,400 (21.9%) | Speed: 315.5 tok/s | ETA: 16s
+  Progress: 1,500/6,400 (23.4%) | Speed: 316.3 tok/s | ETA: 15s
+  Progress: 1,600/6,400 (25.0%) | Speed: 316.9 tok/s | ETA: 15s
+  Progress: 1,700/6,400 (26.6%) | Speed: 317.5 tok/s | ETA: 15s
+  Progress: 1,800/6,400 (28.1%) | Speed: 318.1 tok/s | ETA: 14s
+  Progress: 1,900/6,400 (29.7%) | Speed: 318.6 tok/s | ETA: 14s
+  Progress: 2,000/6,400 (31.2%) | Speed: 319.0 tok/s | ETA: 14s
+  Progress: 2,100/6,400 (32.8%) | Speed: 319.3 tok/s | ETA: 13s
+  Progress: 2,200/6,400 (34.4%) | Speed: 319.7 tok/s | ETA: 13s
+  Progress: 2,300/6,400 (35.9%) | Speed: 320.0 tok/s | ETA: 13s
+  Progress: 2,400/6,400 (37.5%) | Speed: 320.5 tok/s | ETA: 12s
+  Progress: 2,500/6,400 (39.1%) | Speed: 321.1 tok/s | ETA: 12s
+  Progress: 2,600/6,400 (40.6%) | Speed: 321.3 tok/s | ETA: 12s
+  Progress: 2,700/6,400 (42.2%) | Speed: 321.6 tok/s | ETA: 12s
+  Progress: 2,800/6,400 (43.8%) | Speed: 322.0 tok/s | ETA: 11s
+  Progress: 2,900/6,400 (45.3%) | Speed: 322.6 tok/s | ETA: 11s
+  Progress: 3,000/6,400 (46.9%) | Speed: 322.7 tok/s | ETA: 11s
+  Progress: 3,100/6,400 (48.4%) | Speed: 323.1 tok/s | ETA: 10s
+  Progress: 3,200/6,400 (50.0%) | Speed: 323.4 tok/s | ETA: 10s
+  Progress: 3,300/6,400 (51.6%) | Speed: 323.6 tok/s | ETA: 10s
+  Progress: 3,400/6,400 (53.1%) | Speed: 323.7 tok/s | ETA: 9s
+  Progress: 3,500/6,400 (54.7%) | Speed: 324.1 tok/s | ETA: 9s
+  Progress: 3,600/6,400 (56.2%) | Speed: 324.4 tok/s | ETA: 9s
+  Progress: 3,700/6,400 (57.8%) | Speed: 324.5 tok/s | ETA: 8s
+  Progress: 3,800/6,400 (59.4%) | Speed: 324.8 tok/s | ETA: 8s
+  Progress: 3,900/6,400 (60.9%) | Speed: 325.1 tok/s | ETA: 8s
+  Progress: 4,000/6,400 (62.5%) | Speed: 325.3 tok/s | ETA: 7s
+  Progress: 4,100/6,400 (64.1%) | Speed: 325.4 tok/s | ETA: 7s
+  Progress: 4,200/6,400 (65.6%) | Speed: 325.6 tok/s | ETA: 7s
+  Progress: 4,300/6,400 (67.2%) | Speed: 325.8 tok/s | ETA: 6s
+  Progress: 4,400/6,400 (68.8%) | Speed: 325.9 tok/s | ETA: 6s
+  Progress: 4,500/6,400 (70.3%) | Speed: 326.0 tok/s | ETA: 6s
+  Progress: 4,600/6,400 (71.9%) | Speed: 325.6 tok/s | ETA: 6s
+  Progress: 4,700/6,400 (73.4%) | Speed: 325.5 tok/s | ETA: 5s
+  Progress: 4,800/6,400 (75.0%) | Speed: 325.6 tok/s | ETA: 5s
+  Progress: 4,900/6,400 (76.6%) | Speed: 325.8 tok/s | ETA: 5s
+  Progress: 5,000/6,400 (78.1%) | Speed: 325.4 tok/s | ETA: 4s
+  Progress: 5,100/6,400 (79.7%) | Speed: 325.4 tok/s | ETA: 4s
+  Progress: 5,200/6,400 (81.2%) | Speed: 325.4 tok/s | ETA: 4s
+  Progress: 5,300/6,400 (82.8%) | Speed: 325.0 tok/s | ETA: 3s
+  Progress: 5,400/6,400 (84.4%) | Speed: 324.4 tok/s | ETA: 3s
+  Progress: 5,500/6,400 (85.9%) | Speed: 324.0 tok/s | ETA: 3s
+  Progress: 5,600/6,400 (87.5%) | Speed: 323.9 tok/s | ETA: 2s
+  Progress: 5,700/6,400 (89.1%) | Speed: 323.8 tok/s | ETA: 2s
+  Progress: 5,800/6,400 (90.6%) | Speed: 323.9 tok/s | ETA: 2s
+  Progress: 5,900/6,400 (92.2%) | Speed: 324.0 tok/s | ETA: 2s
+  Progress: 6,000/6,400 (93.8%) | Speed: 324.0 tok/s | ETA: 1s
+  Progress: 6,100/6,400 (95.3%) | Speed: 324.0 tok/s | ETA: 1s
+  Progress: 6,200/6,400 (96.9%) | Speed: 324.2 tok/s | ETA: 1s
+  Progress: 6,300/6,400 (98.4%) | Speed: 324.4 tok/s | ETA: 0s
+Iteration 5/10: 収束=0.0% | CVFP=0.001647 | Diversity=-26.975670
+  Progress: 100/6,400 (1.6%) | Speed: 325.4 tok/s | ETA: 19s
+  Progress: 200/6,400 (3.1%) | Speed: 332.1 tok/s | ETA: 19s
+  Progress: 300/6,400 (4.7%) | Speed: 332.3 tok/s | ETA: 18s
+  Progress: 400/6,400 (6.2%) | Speed: 333.7 tok/s | ETA: 18s
+  Progress: 500/6,400 (7.8%) | Speed: 333.8 tok/s | ETA: 18s
+  Progress: 600/6,400 (9.4%) | Speed: 333.6 tok/s | ETA: 17s
+  Progress: 700/6,400 (10.9%) | Speed: 332.9 tok/s | ETA: 17s
+  Progress: 800/6,400 (12.5%) | Speed: 333.0 tok/s | ETA: 17s
+  Progress: 900/6,400 (14.1%) | Speed: 333.3 tok/s | ETA: 17s
+  Progress: 1,000/6,400 (15.6%) | Speed: 332.6 tok/s | ETA: 16s
+  Progress: 1,100/6,400 (17.2%) | Speed: 333.2 tok/s | ETA: 16s
+  Progress: 1,200/6,400 (18.8%) | Speed: 333.6 tok/s | ETA: 16s
+  Progress: 1,300/6,400 (20.3%) | Speed: 333.8 tok/s | ETA: 15s
+  Progress: 1,400/6,400 (21.9%) | Speed: 334.0 tok/s | ETA: 15s
+  Progress: 1,500/6,400 (23.4%) | Speed: 334.1 tok/s | ETA: 15s
+  Progress: 1,600/6,400 (25.0%) | Speed: 334.1 tok/s | ETA: 14s
+  Progress: 1,700/6,400 (26.6%) | Speed: 333.6 tok/s | ETA: 14s
+  Progress: 1,800/6,400 (28.1%) | Speed: 333.9 tok/s | ETA: 14s
+  Progress: 1,900/6,400 (29.7%) | Speed: 334.1 tok/s | ETA: 13s
+  Progress: 2,000/6,400 (31.2%) | Speed: 334.2 tok/s | ETA: 13s
+  Progress: 2,100/6,400 (32.8%) | Speed: 334.2 tok/s | ETA: 13s
+  Progress: 2,200/6,400 (34.4%) | Speed: 334.4 tok/s | ETA: 13s
+  Progress: 2,300/6,400 (35.9%) | Speed: 334.4 tok/s | ETA: 12s
+  Progress: 2,400/6,400 (37.5%) | Speed: 334.3 tok/s | ETA: 12s
+  Progress: 2,500/6,400 (39.1%) | Speed: 334.1 tok/s | ETA: 12s
+  Progress: 2,600/6,400 (40.6%) | Speed: 333.4 tok/s | ETA: 11s
+  Progress: 2,700/6,400 (42.2%) | Speed: 333.3 tok/s | ETA: 11s
+  Progress: 2,800/6,400 (43.8%) | Speed: 332.9 tok/s | ETA: 11s
+  Progress: 2,900/6,400 (45.3%) | Speed: 332.9 tok/s | ETA: 11s
+  Progress: 3,000/6,400 (46.9%) | Speed: 330.9 tok/s | ETA: 10s
+  Progress: 3,100/6,400 (48.4%) | Speed: 330.2 tok/s | ETA: 10s
+  Progress: 3,200/6,400 (50.0%) | Speed: 329.6 tok/s | ETA: 10s
+  Progress: 3,300/6,400 (51.6%) | Speed: 328.6 tok/s | ETA: 9s
+  Progress: 3,400/6,400 (53.1%) | Speed: 327.8 tok/s | ETA: 9s
+  Progress: 3,500/6,400 (54.7%) | Speed: 327.3 tok/s | ETA: 9s
+  Progress: 3,600/6,400 (56.2%) | Speed: 327.4 tok/s | ETA: 9s
+  Progress: 3,700/6,400 (57.8%) | Speed: 327.6 tok/s | ETA: 8s
+  Progress: 3,800/6,400 (59.4%) | Speed: 327.7 tok/s | ETA: 8s
+  Progress: 3,900/6,400 (60.9%) | Speed: 327.8 tok/s | ETA: 8s
+  Progress: 4,000/6,400 (62.5%) | Speed: 328.1 tok/s | ETA: 7s
+  Progress: 4,100/6,400 (64.1%) | Speed: 328.1 tok/s | ETA: 7s
+  Progress: 4,200/6,400 (65.6%) | Speed: 328.4 tok/s | ETA: 7s
+  Progress: 4,300/6,400 (67.2%) | Speed: 328.5 tok/s | ETA: 6s
+  Progress: 4,400/6,400 (68.8%) | Speed: 328.6 tok/s | ETA: 6s
+  Progress: 4,500/6,400 (70.3%) | Speed: 328.8 tok/s | ETA: 6s
+  Progress: 4,600/6,400 (71.9%) | Speed: 329.1 tok/s | ETA: 5s
+  Progress: 4,700/6,400 (73.4%) | Speed: 329.4 tok/s | ETA: 5s
+  Progress: 4,800/6,400 (75.0%) | Speed: 329.3 tok/s | ETA: 5s
+  Progress: 4,900/6,400 (76.6%) | Speed: 329.6 tok/s | ETA: 5s
+  Progress: 5,000/6,400 (78.1%) | Speed: 329.7 tok/s | ETA: 4s
+  Progress: 5,100/6,400 (79.7%) | Speed: 329.9 tok/s | ETA: 4s
+  Progress: 5,200/6,400 (81.2%) | Speed: 329.9 tok/s | ETA: 4s
+  Progress: 5,300/6,400 (82.8%) | Speed: 330.1 tok/s | ETA: 3s
+  Progress: 5,400/6,400 (84.4%) | Speed: 330.3 tok/s | ETA: 3s
+  Progress: 5,500/6,400 (85.9%) | Speed: 330.1 tok/s | ETA: 3s
+  Progress: 5,600/6,400 (87.5%) | Speed: 330.3 tok/s | ETA: 2s
+  Progress: 5,700/6,400 (89.1%) | Speed: 330.4 tok/s | ETA: 2s
+  Progress: 5,800/6,400 (90.6%) | Speed: 330.6 tok/s | ETA: 2s
+  Progress: 5,900/6,400 (92.2%) | Speed: 330.7 tok/s | ETA: 2s
+  Progress: 6,000/6,400 (93.8%) | Speed: 330.8 tok/s | ETA: 1s
+  Progress: 6,100/6,400 (95.3%) | Speed: 331.0 tok/s | ETA: 1s
+  Progress: 6,200/6,400 (96.9%) | Speed: 331.0 tok/s | ETA: 1s
+  Progress: 6,300/6,400 (98.4%) | Speed: 331.0 tok/s | ETA: 0s
+Iteration 6/10: 収束=0.0% | CVFP=0.001692 | Diversity=-27.381308
+  Progress: 100/6,400 (1.6%) | Speed: 327.9 tok/s | ETA: 19s
+  Progress: 200/6,400 (3.1%) | Speed: 327.8 tok/s | ETA: 19s
+  Progress: 300/6,400 (4.7%) | Speed: 329.7 tok/s | ETA: 19s
+  Progress: 400/6,400 (6.2%) | Speed: 330.8 tok/s | ETA: 18s
+  Progress: 500/6,400 (7.8%) | Speed: 327.9 tok/s | ETA: 18s
+  Progress: 600/6,400 (9.4%) | Speed: 327.2 tok/s | ETA: 18s
+  Progress: 700/6,400 (10.9%) | Speed: 328.0 tok/s | ETA: 17s
+  Progress: 800/6,400 (12.5%) | Speed: 328.5 tok/s | ETA: 17s
+  Progress: 900/6,400 (14.1%) | Speed: 328.5 tok/s | ETA: 17s
+  Progress: 1,000/6,400 (15.6%) | Speed: 328.7 tok/s | ETA: 16s
+  Progress: 1,100/6,400 (17.2%) | Speed: 329.4 tok/s | ETA: 16s
+  Progress: 1,200/6,400 (18.8%) | Speed: 327.3 tok/s | ETA: 16s
+  Progress: 1,300/6,400 (20.3%) | Speed: 325.2 tok/s | ETA: 16s
+  Progress: 1,400/6,400 (21.9%) | Speed: 324.3 tok/s | ETA: 15s
+  Progress: 1,500/6,400 (23.4%) | Speed: 321.9 tok/s | ETA: 15s
+  Progress: 1,600/6,400 (25.0%) | Speed: 322.6 tok/s | ETA: 15s
+  Progress: 1,700/6,400 (26.6%) | Speed: 323.3 tok/s | ETA: 15s
+  Progress: 1,800/6,400 (28.1%) | Speed: 324.1 tok/s | ETA: 14s
+  Progress: 1,900/6,400 (29.7%) | Speed: 324.6 tok/s | ETA: 14s
+  Progress: 2,000/6,400 (31.2%) | Speed: 325.4 tok/s | ETA: 14s
+  Progress: 2,100/6,400 (32.8%) | Speed: 326.1 tok/s | ETA: 13s
+  Progress: 2,200/6,400 (34.4%) | Speed: 326.3 tok/s | ETA: 13s
+  Progress: 2,300/6,400 (35.9%) | Speed: 326.9 tok/s | ETA: 13s
+  Progress: 2,400/6,400 (37.5%) | Speed: 327.4 tok/s | ETA: 12s
+  Progress: 2,500/6,400 (39.1%) | Speed: 327.7 tok/s | ETA: 12s
+  Progress: 2,600/6,400 (40.6%) | Speed: 327.6 tok/s | ETA: 12s
+  Progress: 2,700/6,400 (42.2%) | Speed: 327.9 tok/s | ETA: 11s
+  Progress: 2,800/6,400 (43.8%) | Speed: 328.2 tok/s | ETA: 11s
+  Progress: 2,900/6,400 (45.3%) | Speed: 328.5 tok/s | ETA: 11s
+  Progress: 3,000/6,400 (46.9%) | Speed: 328.8 tok/s | ETA: 10s
+  Progress: 3,100/6,400 (48.4%) | Speed: 329.1 tok/s | ETA: 10s
+  Progress: 3,200/6,400 (50.0%) | Speed: 329.3 tok/s | ETA: 10s
+  Progress: 3,300/6,400 (51.6%) | Speed: 329.1 tok/s | ETA: 9s
+  Progress: 3,400/6,400 (53.1%) | Speed: 329.3 tok/s | ETA: 9s
+  Progress: 3,500/6,400 (54.7%) | Speed: 329.5 tok/s | ETA: 9s
+  Progress: 3,600/6,400 (56.2%) | Speed: 329.7 tok/s | ETA: 8s
+  Progress: 3,700/6,400 (57.8%) | Speed: 330.0 tok/s | ETA: 8s
+  Progress: 3,800/6,400 (59.4%) | Speed: 330.1 tok/s | ETA: 8s
+  Progress: 3,900/6,400 (60.9%) | Speed: 330.2 tok/s | ETA: 8s
+  Progress: 4,000/6,400 (62.5%) | Speed: 330.2 tok/s | ETA: 7s
+  Progress: 4,100/6,400 (64.1%) | Speed: 330.4 tok/s | ETA: 7s
+  Progress: 4,200/6,400 (65.6%) | Speed: 330.5 tok/s | ETA: 7s
+  Progress: 4,300/6,400 (67.2%) | Speed: 330.6 tok/s | ETA: 6s
+  Progress: 4,400/6,400 (68.8%) | Speed: 330.7 tok/s | ETA: 6s
+  Progress: 4,500/6,400 (70.3%) | Speed: 330.9 tok/s | ETA: 6s
+  Progress: 4,600/6,400 (71.9%) | Speed: 331.0 tok/s | ETA: 5s
+  Progress: 4,700/6,400 (73.4%) | Speed: 331.0 tok/s | ETA: 5s
+  Progress: 4,800/6,400 (75.0%) | Speed: 331.2 tok/s | ETA: 5s
+  Progress: 4,900/6,400 (76.6%) | Speed: 330.8 tok/s | ETA: 5s
+  Progress: 5,000/6,400 (78.1%) | Speed: 330.5 tok/s | ETA: 4s
+  Progress: 5,100/6,400 (79.7%) | Speed: 330.5 tok/s | ETA: 4s
+  Progress: 5,200/6,400 (81.2%) | Speed: 330.4 tok/s | ETA: 4s
+  Progress: 5,300/6,400 (82.8%) | Speed: 330.5 tok/s | ETA: 3s
+  Progress: 5,400/6,400 (84.4%) | Speed: 330.5 tok/s | ETA: 3s
+  Progress: 5,500/6,400 (85.9%) | Speed: 330.4 tok/s | ETA: 3s
+  Progress: 5,600/6,400 (87.5%) | Speed: 329.9 tok/s | ETA: 2s
+  Progress: 5,700/6,400 (89.1%) | Speed: 329.4 tok/s | ETA: 2s
+  Progress: 5,800/6,400 (90.6%) | Speed: 328.8 tok/s | ETA: 2s
+  Progress: 5,900/6,400 (92.2%) | Speed: 328.5 tok/s | ETA: 2s
+  Progress: 6,000/6,400 (93.8%) | Speed: 328.6 tok/s | ETA: 1s
+  Progress: 6,100/6,400 (95.3%) | Speed: 328.8 tok/s | ETA: 1s
+  Progress: 6,200/6,400 (96.9%) | Speed: 328.9 tok/s | ETA: 1s
+  Progress: 6,300/6,400 (98.4%) | Speed: 329.1 tok/s | ETA: 0s
+Iteration 7/10: 収束=0.0% | CVFP=0.001653 | Diversity=-27.499062
+  Progress: 100/6,400 (1.6%) | Speed: 333.7 tok/s | ETA: 19s
+  Progress: 200/6,400 (3.1%) | Speed: 338.8 tok/s | ETA: 18s
+  Progress: 300/6,400 (4.7%) | Speed: 336.7 tok/s | ETA: 18s
+  Progress: 400/6,400 (6.2%) | Speed: 336.9 tok/s | ETA: 18s
+  Progress: 500/6,400 (7.8%) | Speed: 337.6 tok/s | ETA: 17s
+  Progress: 600/6,400 (9.4%) | Speed: 338.2 tok/s | ETA: 17s
+  Progress: 700/6,400 (10.9%) | Speed: 336.5 tok/s | ETA: 17s
+  Progress: 800/6,400 (12.5%) | Speed: 336.6 tok/s | ETA: 17s
+  Progress: 900/6,400 (14.1%) | Speed: 336.6 tok/s | ETA: 16s
+  Progress: 1,000/6,400 (15.6%) | Speed: 336.5 tok/s | ETA: 16s
+  Progress: 1,100/6,400 (17.2%) | Speed: 336.4 tok/s | ETA: 16s
+  Progress: 1,200/6,400 (18.8%) | Speed: 325.2 tok/s | ETA: 16s
+  Progress: 1,300/6,400 (20.3%) | Speed: 322.3 tok/s | ETA: 16s
+  Progress: 1,400/6,400 (21.9%) | Speed: 323.2 tok/s | ETA: 15s
+  Progress: 1,500/6,400 (23.4%) | Speed: 324.4 tok/s | ETA: 15s
+  Progress: 1,600/6,400 (25.0%) | Speed: 325.3 tok/s | ETA: 15s
+  Progress: 1,700/6,400 (26.6%) | Speed: 325.4 tok/s | ETA: 14s
+  Progress: 1,800/6,400 (28.1%) | Speed: 325.9 tok/s | ETA: 14s
+  Progress: 1,900/6,400 (29.7%) | Speed: 326.6 tok/s | ETA: 14s
+  Progress: 2,000/6,400 (31.2%) | Speed: 327.0 tok/s | ETA: 13s
+  Progress: 2,100/6,400 (32.8%) | Speed: 327.3 tok/s | ETA: 13s
+  Progress: 2,200/6,400 (34.4%) | Speed: 327.3 tok/s | ETA: 13s
+  Progress: 2,300/6,400 (35.9%) | Speed: 327.6 tok/s | ETA: 13s
+  Progress: 2,400/6,400 (37.5%) | Speed: 327.7 tok/s | ETA: 12s
+  Progress: 2,500/6,400 (39.1%) | Speed: 328.1 tok/s | ETA: 12s
+  Progress: 2,600/6,400 (40.6%) | Speed: 328.5 tok/s | ETA: 12s
+  Progress: 2,700/6,400 (42.2%) | Speed: 328.4 tok/s | ETA: 11s
+  Progress: 2,800/6,400 (43.8%) | Speed: 328.7 tok/s | ETA: 11s
+  Progress: 2,900/6,400 (45.3%) | Speed: 327.8 tok/s | ETA: 11s
+  Progress: 3,000/6,400 (46.9%) | Speed: 328.0 tok/s | ETA: 10s
+  Progress: 3,100/6,400 (48.4%) | Speed: 328.1 tok/s | ETA: 10s
+  Progress: 3,200/6,400 (50.0%) | Speed: 328.3 tok/s | ETA: 10s
+  Progress: 3,300/6,400 (51.6%) | Speed: 328.1 tok/s | ETA: 9s
+  Progress: 3,400/6,400 (53.1%) | Speed: 328.1 tok/s | ETA: 9s
+  Progress: 3,500/6,400 (54.7%) | Speed: 327.8 tok/s | ETA: 9s
+  Progress: 3,600/6,400 (56.2%) | Speed: 326.9 tok/s | ETA: 9s
+  Progress: 3,700/6,400 (57.8%) | Speed: 325.4 tok/s | ETA: 8s
+  Progress: 3,800/6,400 (59.4%) | Speed: 325.1 tok/s | ETA: 8s
+  Progress: 3,900/6,400 (60.9%) | Speed: 325.4 tok/s | ETA: 8s
+  Progress: 4,000/6,400 (62.5%) | Speed: 325.6 tok/s | ETA: 7s
+  Progress: 4,100/6,400 (64.1%) | Speed: 325.7 tok/s | ETA: 7s
+  Progress: 4,200/6,400 (65.6%) | Speed: 326.0 tok/s | ETA: 7s
+  Progress: 4,300/6,400 (67.2%) | Speed: 326.3 tok/s | ETA: 6s
+  Progress: 4,400/6,400 (68.8%) | Speed: 326.6 tok/s | ETA: 6s
+  Progress: 4,500/6,400 (70.3%) | Speed: 326.8 tok/s | ETA: 6s
+  Progress: 4,600/6,400 (71.9%) | Speed: 327.0 tok/s | ETA: 6s
+  Progress: 4,700/6,400 (73.4%) | Speed: 327.2 tok/s | ETA: 5s
+  Progress: 4,800/6,400 (75.0%) | Speed: 327.2 tok/s | ETA: 5s
+  Progress: 4,900/6,400 (76.6%) | Speed: 327.4 tok/s | ETA: 5s
+  Progress: 5,000/6,400 (78.1%) | Speed: 327.5 tok/s | ETA: 4s
+  Progress: 5,100/6,400 (79.7%) | Speed: 327.6 tok/s | ETA: 4s
+  Progress: 5,200/6,400 (81.2%) | Speed: 327.6 tok/s | ETA: 4s
+  Progress: 5,300/6,400 (82.8%) | Speed: 327.8 tok/s | ETA: 3s
+  Progress: 5,400/6,400 (84.4%) | Speed: 327.9 tok/s | ETA: 3s
+  Progress: 5,500/6,400 (85.9%) | Speed: 327.9 tok/s | ETA: 3s
+  Progress: 5,600/6,400 (87.5%) | Speed: 328.0 tok/s | ETA: 2s
+  Progress: 5,700/6,400 (89.1%) | Speed: 328.1 tok/s | ETA: 2s
+  Progress: 5,800/6,400 (90.6%) | Speed: 328.2 tok/s | ETA: 2s
+  Progress: 5,900/6,400 (92.2%) | Speed: 328.3 tok/s | ETA: 2s
+  Progress: 6,000/6,400 (93.8%) | Speed: 328.4 tok/s | ETA: 1s
+  Progress: 6,100/6,400 (95.3%) | Speed: 328.5 tok/s | ETA: 1s
+  Progress: 6,200/6,400 (96.9%) | Speed: 328.6 tok/s | ETA: 1s
+  Progress: 6,300/6,400 (98.4%) | Speed: 328.7 tok/s | ETA: 0s
+Iteration 8/10: 収束=0.0% | CVFP=0.001618 | Diversity=-27.680523
+  Progress: 100/6,400 (1.6%) | Speed: 332.7 tok/s | ETA: 19s
+  Progress: 200/6,400 (3.1%) | Speed: 336.5 tok/s | ETA: 18s
+  Progress: 300/6,400 (4.7%) | Speed: 336.0 tok/s | ETA: 18s
+  Progress: 400/6,400 (6.2%) | Speed: 336.7 tok/s | ETA: 18s
+  Progress: 500/6,400 (7.8%) | Speed: 334.5 tok/s | ETA: 18s
+  Progress: 600/6,400 (9.4%) | Speed: 334.1 tok/s | ETA: 17s
+  Progress: 700/6,400 (10.9%) | Speed: 335.0 tok/s | ETA: 17s
+  Progress: 800/6,400 (12.5%) | Speed: 332.6 tok/s | ETA: 17s
+  Progress: 900/6,400 (14.1%) | Speed: 327.4 tok/s | ETA: 17s
+  Progress: 1,000/6,400 (15.6%) | Speed: 321.3 tok/s | ETA: 17s
+  Progress: 1,100/6,400 (17.2%) | Speed: 321.4 tok/s | ETA: 16s
+  Progress: 1,200/6,400 (18.8%) | Speed: 321.5 tok/s | ETA: 16s
+  Progress: 1,300/6,400 (20.3%) | Speed: 317.5 tok/s | ETA: 16s
+  Progress: 1,400/6,400 (21.9%) | Speed: 315.3 tok/s | ETA: 16s
+  Progress: 1,500/6,400 (23.4%) | Speed: 314.1 tok/s | ETA: 16s
+  Progress: 1,600/6,400 (25.0%) | Speed: 312.9 tok/s | ETA: 15s
+  Progress: 1,700/6,400 (26.6%) | Speed: 311.6 tok/s | ETA: 15s
+  Progress: 1,800/6,400 (28.1%) | Speed: 311.1 tok/s | ETA: 15s
+  Progress: 1,900/6,400 (29.7%) | Speed: 312.4 tok/s | ETA: 14s
+  Progress: 2,000/6,400 (31.2%) | Speed: 313.4 tok/s | ETA: 14s
+  Progress: 2,100/6,400 (32.8%) | Speed: 314.1 tok/s | ETA: 14s
+  Progress: 2,200/6,400 (34.4%) | Speed: 315.1 tok/s | ETA: 13s
+  Progress: 2,300/6,400 (35.9%) | Speed: 316.1 tok/s | ETA: 13s
+  Progress: 2,400/6,400 (37.5%) | Speed: 316.8 tok/s | ETA: 13s
+  Progress: 2,500/6,400 (39.1%) | Speed: 317.4 tok/s | ETA: 12s
+  Progress: 2,600/6,400 (40.6%) | Speed: 318.2 tok/s | ETA: 12s
+  Progress: 2,700/6,400 (42.2%) | Speed: 318.8 tok/s | ETA: 12s
+  Progress: 2,800/6,400 (43.8%) | Speed: 319.0 tok/s | ETA: 11s
+  Progress: 2,900/6,400 (45.3%) | Speed: 319.5 tok/s | ETA: 11s
+  Progress: 3,000/6,400 (46.9%) | Speed: 320.1 tok/s | ETA: 11s
+  Progress: 3,100/6,400 (48.4%) | Speed: 320.5 tok/s | ETA: 10s
+  Progress: 3,200/6,400 (50.0%) | Speed: 321.0 tok/s | ETA: 10s
+  Progress: 3,300/6,400 (51.6%) | Speed: 321.6 tok/s | ETA: 10s
+  Progress: 3,400/6,400 (53.1%) | Speed: 321.9 tok/s | ETA: 9s
+  Progress: 3,500/6,400 (54.7%) | Speed: 322.0 tok/s | ETA: 9s
+  Progress: 3,600/6,400 (56.2%) | Speed: 322.4 tok/s | ETA: 9s
+  Progress: 3,700/6,400 (57.8%) | Speed: 322.9 tok/s | ETA: 8s
+  Progress: 3,800/6,400 (59.4%) | Speed: 323.1 tok/s | ETA: 8s
+  Progress: 3,900/6,400 (60.9%) | Speed: 323.0 tok/s | ETA: 8s
+  Progress: 4,000/6,400 (62.5%) | Speed: 323.3 tok/s | ETA: 7s
+  Progress: 4,100/6,400 (64.1%) | Speed: 323.6 tok/s | ETA: 7s
+  Progress: 4,200/6,400 (65.6%) | Speed: 323.7 tok/s | ETA: 7s
+  Progress: 4,300/6,400 (67.2%) | Speed: 323.9 tok/s | ETA: 6s
+  Progress: 4,400/6,400 (68.8%) | Speed: 324.1 tok/s | ETA: 6s
+  Progress: 4,500/6,400 (70.3%) | Speed: 324.3 tok/s | ETA: 6s
+  Progress: 4,600/6,400 (71.9%) | Speed: 324.6 tok/s | ETA: 6s
+  Progress: 4,700/6,400 (73.4%) | Speed: 324.9 tok/s | ETA: 5s
+  Progress: 4,800/6,400 (75.0%) | Speed: 325.1 tok/s | ETA: 5s
+  Progress: 4,900/6,400 (76.6%) | Speed: 325.2 tok/s | ETA: 5s
+  Progress: 5,000/6,400 (78.1%) | Speed: 325.4 tok/s | ETA: 4s
+  Progress: 5,100/6,400 (79.7%) | Speed: 325.6 tok/s | ETA: 4s
+  Progress: 5,200/6,400 (81.2%) | Speed: 325.2 tok/s | ETA: 4s
+  Progress: 5,300/6,400 (82.8%) | Speed: 325.2 tok/s | ETA: 3s
+  Progress: 5,400/6,400 (84.4%) | Speed: 325.3 tok/s | ETA: 3s
+  Progress: 5,500/6,400 (85.9%) | Speed: 325.4 tok/s | ETA: 3s
+  Progress: 5,600/6,400 (87.5%) | Speed: 325.4 tok/s | ETA: 2s
+  Progress: 5,700/6,400 (89.1%) | Speed: 325.3 tok/s | ETA: 2s
+  Progress: 5,800/6,400 (90.6%) | Speed: 325.1 tok/s | ETA: 2s
+  Progress: 5,900/6,400 (92.2%) | Speed: 324.6 tok/s | ETA: 2s
+  Progress: 6,000/6,400 (93.8%) | Speed: 324.2 tok/s | ETA: 1s
+  Progress: 6,100/6,400 (95.3%) | Speed: 323.9 tok/s | ETA: 1s
+  Progress: 6,200/6,400 (96.9%) | Speed: 323.9 tok/s | ETA: 1s
+  Progress: 6,300/6,400 (98.4%) | Speed: 324.0 tok/s | ETA: 0s
+Iteration 9/10: 収束=0.0% | CVFP=0.001624 | Diversity=-27.699125
+  Progress: 100/6,400 (1.6%) | Speed: 330.0 tok/s | ETA: 19s
+  Progress: 200/6,400 (3.1%) | Speed: 328.4 tok/s | ETA: 19s
+  Progress: 300/6,400 (4.7%) | Speed: 330.9 tok/s | ETA: 18s
+  Progress: 400/6,400 (6.2%) | Speed: 332.1 tok/s | ETA: 18s
+  Progress: 500/6,400 (7.8%) | Speed: 332.6 tok/s | ETA: 18s
+  Progress: 600/6,400 (9.4%) | Speed: 333.3 tok/s | ETA: 17s
+  Progress: 700/6,400 (10.9%) | Speed: 332.6 tok/s | ETA: 17s
+  Progress: 800/6,400 (12.5%) | Speed: 331.2 tok/s | ETA: 17s
+  Progress: 900/6,400 (14.1%) | Speed: 330.5 tok/s | ETA: 17s
+  Progress: 1,000/6,400 (15.6%) | Speed: 330.6 tok/s | ETA: 16s
+  Progress: 1,100/6,400 (17.2%) | Speed: 330.6 tok/s | ETA: 16s
+  Progress: 1,200/6,400 (18.8%) | Speed: 330.4 tok/s | ETA: 16s
+  Progress: 1,300/6,400 (20.3%) | Speed: 330.0 tok/s | ETA: 15s
+  Progress: 1,400/6,400 (21.9%) | Speed: 329.5 tok/s | ETA: 15s
+  Progress: 1,500/6,400 (23.4%) | Speed: 329.4 tok/s | ETA: 15s
+  Progress: 1,600/6,400 (25.0%) | Speed: 329.3 tok/s | ETA: 15s
+  Progress: 1,700/6,400 (26.6%) | Speed: 329.4 tok/s | ETA: 14s
+  Progress: 1,800/6,400 (28.1%) | Speed: 329.7 tok/s | ETA: 14s
+  Progress: 1,900/6,400 (29.7%) | Speed: 329.5 tok/s | ETA: 14s
+  Progress: 2,000/6,400 (31.2%) | Speed: 329.5 tok/s | ETA: 13s
+  Progress: 2,100/6,400 (32.8%) | Speed: 329.3 tok/s | ETA: 13s
+  Progress: 2,200/6,400 (34.4%) | Speed: 329.1 tok/s | ETA: 13s
+  Progress: 2,300/6,400 (35.9%) | Speed: 328.6 tok/s | ETA: 12s
+  Progress: 2,400/6,400 (37.5%) | Speed: 328.3 tok/s | ETA: 12s
+  Progress: 2,500/6,400 (39.1%) | Speed: 328.3 tok/s | ETA: 12s
+  Progress: 2,600/6,400 (40.6%) | Speed: 328.3 tok/s | ETA: 12s
+  Progress: 2,700/6,400 (42.2%) | Speed: 328.2 tok/s | ETA: 11s
+  Progress: 2,800/6,400 (43.8%) | Speed: 328.1 tok/s | ETA: 11s
+  Progress: 2,900/6,400 (45.3%) | Speed: 327.9 tok/s | ETA: 11s
+  Progress: 3,000/6,400 (46.9%) | Speed: 327.4 tok/s | ETA: 10s
+  Progress: 3,100/6,400 (48.4%) | Speed: 326.2 tok/s | ETA: 10s
+  Progress: 3,200/6,400 (50.0%) | Speed: 325.9 tok/s | ETA: 10s
+  Progress: 3,300/6,400 (51.6%) | Speed: 325.1 tok/s | ETA: 10s
+  Progress: 3,400/6,400 (53.1%) | Speed: 324.1 tok/s | ETA: 9s
+  Progress: 3,500/6,400 (54.7%) | Speed: 323.9 tok/s | ETA: 9s
+  Progress: 3,600/6,400 (56.2%) | Speed: 323.8 tok/s | ETA: 9s
+  Progress: 3,700/6,400 (57.8%) | Speed: 323.4 tok/s | ETA: 8s
+  Progress: 3,800/6,400 (59.4%) | Speed: 322.7 tok/s | ETA: 8s
+  Progress: 3,900/6,400 (60.9%) | Speed: 321.7 tok/s | ETA: 8s
+  Progress: 4,000/6,400 (62.5%) | Speed: 321.0 tok/s | ETA: 7s
+  Progress: 4,100/6,400 (64.1%) | Speed: 321.2 tok/s | ETA: 7s
+  Progress: 4,200/6,400 (65.6%) | Speed: 321.1 tok/s | ETA: 7s
+  Progress: 4,300/6,400 (67.2%) | Speed: 321.3 tok/s | ETA: 7s
+  Progress: 4,400/6,400 (68.8%) | Speed: 321.4 tok/s | ETA: 6s
+  Progress: 4,500/6,400 (70.3%) | Speed: 321.6 tok/s | ETA: 6s
+  Progress: 4,600/6,400 (71.9%) | Speed: 321.6 tok/s | ETA: 6s
+  Progress: 4,700/6,400 (73.4%) | Speed: 321.7 tok/s | ETA: 5s
+  Progress: 4,800/6,400 (75.0%) | Speed: 321.8 tok/s | ETA: 5s
+  Progress: 4,900/6,400 (76.6%) | Speed: 321.9 tok/s | ETA: 5s
+  Progress: 5,000/6,400 (78.1%) | Speed: 322.1 tok/s | ETA: 4s
+  Progress: 5,100/6,400 (79.7%) | Speed: 322.2 tok/s | ETA: 4s
+  Progress: 5,200/6,400 (81.2%) | Speed: 322.3 tok/s | ETA: 4s
+  Progress: 5,300/6,400 (82.8%) | Speed: 322.5 tok/s | ETA: 3s
+  Progress: 5,400/6,400 (84.4%) | Speed: 322.6 tok/s | ETA: 3s
+  Progress: 5,500/6,400 (85.9%) | Speed: 322.8 tok/s | ETA: 3s
+  Progress: 5,600/6,400 (87.5%) | Speed: 322.9 tok/s | ETA: 2s
+  Progress: 5,700/6,400 (89.1%) | Speed: 323.0 tok/s | ETA: 2s
+  Progress: 5,800/6,400 (90.6%) | Speed: 323.1 tok/s | ETA: 2s
+  Progress: 5,900/6,400 (92.2%) | Speed: 323.1 tok/s | ETA: 2s
+  Progress: 6,000/6,400 (93.8%) | Speed: 323.2 tok/s | ETA: 1s
+  Progress: 6,100/6,400 (95.3%) | Speed: 323.3 tok/s | ETA: 1s
+  Progress: 6,200/6,400 (96.9%) | Speed: 323.3 tok/s | ETA: 1s
+  Progress: 6,300/6,400 (98.4%) | Speed: 323.4 tok/s | ETA: 0s
+Iteration 10/10: 収束=0.0% | CVFP=0.001862 | Diversity=-27.369127
+
+Phase 1 完了: 0/6400 トークンが収束
+
+
+Evaluating on validation data (1280 tokens)...
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 (CVFP) - Val
+======================================================================
+  Progress: 100/1,280 (7.8%) | Speed: 478.3 tok/s | ETA: 2s
+  Progress: 200/1,280 (15.6%) | Speed: 480.3 tok/s | ETA: 2s
+  Progress: 300/1,280 (23.4%) | Speed: 479.3 tok/s | ETA: 2s
+  Progress: 400/1,280 (31.2%) | Speed: 479.4 tok/s | ETA: 2s
+  Progress: 500/1,280 (39.1%) | Speed: 479.8 tok/s | ETA: 2s
+  Progress: 600/1,280 (46.9%) | Speed: 481.8 tok/s | ETA: 1s
+  Progress: 700/1,280 (54.7%) | Speed: 483.2 tok/s | ETA: 1s
+  Progress: 800/1,280 (62.5%) | Speed: 483.3 tok/s | ETA: 1s
+  Progress: 900/1,280 (70.3%) | Speed: 483.5 tok/s | ETA: 1s
+  Progress: 1,000/1,280 (78.1%) | Speed: 484.1 tok/s | ETA: 1s
+  Progress: 1,100/1,280 (85.9%) | Speed: 484.1 tok/s | ETA: 0s
+  Progress: 1,200/1,280 (93.8%) | Speed: 483.9 tok/s | ETA: 0s
+Iteration 1/10: 順伝播のみ（コンテキスト保存）
+  Progress: 100/1,280 (7.8%) | Speed: 443.2 tok/s | ETA: 3s
+  Progress: 200/1,280 (15.6%) | Speed: 449.1 tok/s | ETA: 2s
+  Progress: 300/1,280 (23.4%) | Speed: 454.8 tok/s | ETA: 2s
+  Progress: 400/1,280 (31.2%) | Speed: 457.6 tok/s | ETA: 2s
+  Progress: 500/1,280 (39.1%) | Speed: 458.4 tok/s | ETA: 2s
+  Progress: 600/1,280 (46.9%) | Speed: 461.3 tok/s | ETA: 1s
+  Progress: 700/1,280 (54.7%) | Speed: 461.6 tok/s | ETA: 1s
+  Progress: 800/1,280 (62.5%) | Speed: 463.5 tok/s | ETA: 1s
+  Progress: 900/1,280 (70.3%) | Speed: 466.2 tok/s | ETA: 1s
+  Progress: 1,000/1,280 (78.1%) | Speed: 465.7 tok/s | ETA: 1s
+  Progress: 1,100/1,280 (85.9%) | Speed: 462.5 tok/s | ETA: 0s
+  Progress: 1,200/1,280 (93.8%) | Speed: 461.5 tok/s | ETA: 0s
+Iteration 2/10: 収束=0.0% | CVFP=0.001862 | Diversity=-27.369127
+  Progress: 100/1,280 (7.8%) | Speed: 436.6 tok/s | ETA: 3s
+  Progress: 200/1,280 (15.6%) | Speed: 437.3 tok/s | ETA: 2s
+  Progress: 300/1,280 (23.4%) | Speed: 449.4 tok/s | ETA: 2s
+  Progress: 400/1,280 (31.2%) | Speed: 458.6 tok/s | ETA: 2s
+  Progress: 500/1,280 (39.1%) | Speed: 464.1 tok/s | ETA: 2s
+  Progress: 600/1,280 (46.9%) | Speed: 468.2 tok/s | ETA: 1s
+  Progress: 700/1,280 (54.7%) | Speed: 470.3 tok/s | ETA: 1s
+  Progress: 800/1,280 (62.5%) | Speed: 471.4 tok/s | ETA: 1s
+  Progress: 900/1,280 (70.3%) | Speed: 473.4 tok/s | ETA: 1s
+  Progress: 1,000/1,280 (78.1%) | Speed: 474.9 tok/s | ETA: 1s
+  Progress: 1,100/1,280 (85.9%) | Speed: 476.3 tok/s | ETA: 0s
+  Progress: 1,200/1,280 (93.8%) | Speed: 476.6 tok/s | ETA: 0s
+Iteration 3/10: 収束=0.0% | CVFP=0.001862 | Diversity=-27.369127
+  Progress: 100/1,280 (7.8%) | Speed: 483.3 tok/s | ETA: 2s
+  Progress: 200/1,280 (15.6%) | Speed: 488.9 tok/s | ETA: 2s
+  Progress: 300/1,280 (23.4%) | Speed: 490.2 tok/s | ETA: 2s
+  Progress: 400/1,280 (31.2%) | Speed: 490.2 tok/s | ETA: 2s
+  Progress: 500/1,280 (39.1%) | Speed: 489.6 tok/s | ETA: 2s
+  Progress: 600/1,280 (46.9%) | Speed: 489.8 tok/s | ETA: 1s
+  Progress: 700/1,280 (54.7%) | Speed: 490.0 tok/s | ETA: 1s
+  Progress: 800/1,280 (62.5%) | Speed: 490.6 tok/s | ETA: 1s
+  Progress: 900/1,280 (70.3%) | Speed: 488.8 tok/s | ETA: 1s
+  Progress: 1,000/1,280 (78.1%) | Speed: 487.5 tok/s | ETA: 1s
+  Progress: 1,100/1,280 (85.9%) | Speed: 487.0 tok/s | ETA: 0s
+  Progress: 1,200/1,280 (93.8%) | Speed: 487.0 tok/s | ETA: 0s
+Iteration 4/10: 収束=0.0% | CVFP=0.001862 | Diversity=-27.369127
+  Progress: 100/1,280 (7.8%) | Speed: 483.4 tok/s | ETA: 2s
+  Progress: 200/1,280 (15.6%) | Speed: 479.3 tok/s | ETA: 2s
+  Progress: 300/1,280 (23.4%) | Speed: 480.6 tok/s | ETA: 2s
+  Progress: 400/1,280 (31.2%) | Speed: 481.3 tok/s | ETA: 2s
+  Progress: 500/1,280 (39.1%) | Speed: 481.0 tok/s | ETA: 2s
+  Progress: 600/1,280 (46.9%) | Speed: 480.6 tok/s | ETA: 1s
+  Progress: 700/1,280 (54.7%) | Speed: 478.0 tok/s | ETA: 1s
+  Progress: 800/1,280 (62.5%) | Speed: 478.1 tok/s | ETA: 1s
+  Progress: 900/1,280 (70.3%) | Speed: 478.2 tok/s | ETA: 1s
+  Progress: 1,000/1,280 (78.1%) | Speed: 478.8 tok/s | ETA: 1s
+  Progress: 1,100/1,280 (85.9%) | Speed: 479.2 tok/s | ETA: 0s
+  Progress: 1,200/1,280 (93.8%) | Speed: 479.2 tok/s | ETA: 0s
+Iteration 5/10: 収束=0.0% | CVFP=0.001862 | Diversity=-27.369127
+  Progress: 100/1,280 (7.8%) | Speed: 485.7 tok/s | ETA: 2s
+  Progress: 200/1,280 (15.6%) | Speed: 486.6 tok/s | ETA: 2s
+  Progress: 300/1,280 (23.4%) | Speed: 486.0 tok/s | ETA: 2s
+  Progress: 400/1,280 (31.2%) | Speed: 484.0 tok/s | ETA: 2s
+  Progress: 500/1,280 (39.1%) | Speed: 483.9 tok/s | ETA: 2s
+  Progress: 600/1,280 (46.9%) | Speed: 484.3 tok/s | ETA: 1s
+  Progress: 700/1,280 (54.7%) | Speed: 484.4 tok/s | ETA: 1s
+  Progress: 800/1,280 (62.5%) | Speed: 484.9 tok/s | ETA: 1s
+  Progress: 900/1,280 (70.3%) | Speed: 484.1 tok/s | ETA: 1s
+  Progress: 1,000/1,280 (78.1%) | Speed: 484.8 tok/s | ETA: 1s
+  Progress: 1,100/1,280 (85.9%) | Speed: 485.7 tok/s | ETA: 0s
+  Progress: 1,200/1,280 (93.8%) | Speed: 486.1 tok/s | ETA: 0s
+Iteration 6/10: 収束=0.0% | CVFP=0.001862 | Diversity=-27.369127
+  Progress: 100/1,280 (7.8%) | Speed: 430.1 tok/s | ETA: 3s
+  Progress: 200/1,280 (15.6%) | Speed: 453.6 tok/s | ETA: 2s
+  Progress: 300/1,280 (23.4%) | Speed: 461.1 tok/s | ETA: 2s
+  Progress: 400/1,280 (31.2%) | Speed: 464.7 tok/s | ETA: 2s
+  Progress: 500/1,280 (39.1%) | Speed: 467.7 tok/s | ETA: 2s
+  Progress: 600/1,280 (46.9%) | Speed: 466.9 tok/s | ETA: 1s
+  Progress: 700/1,280 (54.7%) | Speed: 456.1 tok/s | ETA: 1s
+  Progress: 800/1,280 (62.5%) | Speed: 449.5 tok/s | ETA: 1s
+  Progress: 900/1,280 (70.3%) | Speed: 447.9 tok/s | ETA: 1s
+  Progress: 1,000/1,280 (78.1%) | Speed: 445.6 tok/s | ETA: 1s
+  Progress: 1,100/1,280 (85.9%) | Speed: 443.7 tok/s | ETA: 0s
+  Progress: 1,200/1,280 (93.8%) | Speed: 442.5 tok/s | ETA: 0s
+Iteration 7/10: 収束=0.0% | CVFP=0.001862 | Diversity=-27.369127
+  Progress: 100/1,280 (7.8%) | Speed: 438.2 tok/s | ETA: 3s
+  Progress: 200/1,280 (15.6%) | Speed: 443.1 tok/s | ETA: 2s
+  Progress: 300/1,280 (23.4%) | Speed: 454.7 tok/s | ETA: 2s
+  Progress: 400/1,280 (31.2%) | Speed: 461.2 tok/s | ETA: 2s
+  Progress: 500/1,280 (39.1%) | Speed: 463.9 tok/s | ETA: 2s
+  Progress: 600/1,280 (46.9%) | Speed: 467.3 tok/s | ETA: 1s
+  Progress: 700/1,280 (54.7%) | Speed: 468.3 tok/s | ETA: 1s
+  Progress: 800/1,280 (62.5%) | Speed: 470.0 tok/s | ETA: 1s
+  Progress: 900/1,280 (70.3%) | Speed: 472.3 tok/s | ETA: 1s
+  Progress: 1,000/1,280 (78.1%) | Speed: 474.2 tok/s | ETA: 1s
+  Progress: 1,100/1,280 (85.9%) | Speed: 475.7 tok/s | ETA: 0s
+  Progress: 1,200/1,280 (93.8%) | Speed: 476.4 tok/s | ETA: 0s
+Iteration 8/10: 収束=0.0% | CVFP=0.001862 | Diversity=-27.369127
+  Progress: 100/1,280 (7.8%) | Speed: 485.0 tok/s | ETA: 2s
+  Progress: 200/1,280 (15.6%) | Speed: 485.4 tok/s | ETA: 2s
+  Progress: 300/1,280 (23.4%) | Speed: 484.8 tok/s | ETA: 2s
+  Progress: 400/1,280 (31.2%) | Speed: 483.2 tok/s | ETA: 2s
+  Progress: 500/1,280 (39.1%) | Speed: 482.1 tok/s | ETA: 2s
+  Progress: 600/1,280 (46.9%) | Speed: 482.6 tok/s | ETA: 1s
+  Progress: 700/1,280 (54.7%) | Speed: 482.7 tok/s | ETA: 1s
+  Progress: 800/1,280 (62.5%) | Speed: 482.1 tok/s | ETA: 1s
+  Progress: 900/1,280 (70.3%) | Speed: 481.8 tok/s | ETA: 1s
+  Progress: 1,000/1,280 (78.1%) | Speed: 481.0 tok/s | ETA: 1s
+  Progress: 1,100/1,280 (85.9%) | Speed: 481.5 tok/s | ETA: 0s
+  Progress: 1,200/1,280 (93.8%) | Speed: 482.2 tok/s | ETA: 0s
+Iteration 9/10: 収束=0.0% | CVFP=0.001862 | Diversity=-27.369127
+  Progress: 100/1,280 (7.8%) | Speed: 490.5 tok/s | ETA: 2s
+  Progress: 200/1,280 (15.6%) | Speed: 484.4 tok/s | ETA: 2s
+  Progress: 300/1,280 (23.4%) | Speed: 486.8 tok/s | ETA: 2s
+  Progress: 400/1,280 (31.2%) | Speed: 485.9 tok/s | ETA: 2s
+  Progress: 500/1,280 (39.1%) | Speed: 486.8 tok/s | ETA: 2s
+  Progress: 600/1,280 (46.9%) | Speed: 485.6 tok/s | ETA: 1s
+  Progress: 700/1,280 (54.7%) | Speed: 480.2 tok/s | ETA: 1s
+  Progress: 800/1,280 (62.5%) | Speed: 480.8 tok/s | ETA: 1s
+  Progress: 900/1,280 (70.3%) | Speed: 480.5 tok/s | ETA: 1s
+  Progress: 1,000/1,280 (78.1%) | Speed: 478.6 tok/s | ETA: 1s
+  Progress: 1,100/1,280 (85.9%) | Speed: 478.1 tok/s | ETA: 0s
+  Progress: 1,200/1,280 (93.8%) | Speed: 476.5 tok/s | ETA: 0s
+Iteration 10/10: 収束=0.0% | CVFP=0.001862 | Diversity=-27.369127
+
+Phase 1 完了: 0/1280 トークンが収束
+
+
+======================================================================
+CHECK 1: EFFECTIVE RANK (多様性確認)
+======================================================================
+
+TRAINING DATA:
+----------------------------------------------------------------------
+
+
+======================================================================
+FIXED-POINT ANALYSIS - Train
+======================================================================
+
+1. Global Attractor Detection:
+  Avg L2 Distance: 38.188442 (Range: [27.466337, 43.235374])
+  Avg Cosine Sim:  0.049704 (Range: [-0.216993, 0.508854])
+  ✅ Token-specific fixed points
+
+2. Zero Solution Detection:
+  Avg Norm: 27.712795 (Range: [27.712782, 27.712799])
+  ✅ Non-zero contexts
+
+3. Distribution Statistics:
+  Norm - Mean: 27.7128, Median: 27.7128, Std: 0.0000
+  Pairwise Dist - Mean: 38.1884, Median: 38.2588
+  Sparsity: 0.66% of values < 0.01
+
+4. Information Content:
+  Actual Rank: 768 / 768 (100.0%)
+  Effective Rank: 681.33 / 768 (88.7%)
+  Top 5 Singular Values: [523.4927368164062, 279.8174133300781, 230.6613006591797, 198.69456481933594, 186.15142822265625]
+  ✅ Good diversity
+======================================================================
+
+
+======================================================================
+VALIDATION DATA (THIS IS WHAT MATTERS):
+----------------------------------------------------------------------
+
+
+======================================================================
+FIXED-POINT ANALYSIS - Validation
+======================================================================
+
+1. Global Attractor Detection:
+  Avg L2 Distance: 38.223591 (Range: [28.521490, 42.489437])
+  Avg Cosine Sim:  0.047978 (Range: [-0.175361, 0.470393])
+  ✅ Token-specific fixed points
+
+2. Zero Solution Detection:
+  Avg Norm: 27.712793 (Range: [27.712784, 27.712799])
+  ✅ Non-zero contexts
+
+3. Distribution Statistics:
+  Norm - Mean: 27.7128, Median: 27.7128, Std: 0.0000
+  Pairwise Dist - Mean: 38.2236, Median: 38.2907
+  Sparsity: 0.67% of values < 0.01
+
+4. Information Content:
+  Actual Rank: 768 / 768 (100.0%)
+  Effective Rank: 627.20 / 768 (81.7%)
+  Top 5 Singular Values: [230.80307006835938, 127.03713989257812, 105.31822204589844, 93.4509506225586, 90.87598419189453]
+  ✅ Good diversity
+======================================================================
+
+
+======================================================================
+CHECK 2: IDENTITY MAPPING (恒等写像チェック)
+======================================================================
+
+======================================================================
+IDENTITY MAPPING CHECK (恒等写像チェック)
+======================================================================
+
+1. Learned Context Statistics:
+   Average Norm: 27.712795
+   Std Dev: 0.000005
+   ✅ PASSED: Contexts are non-zero
+
+2. Context Diversity:
+   Average deviation from mean: 27.009336
+   ✅ PASSED: Contexts are diverse
+
+3. Context vs Token Embedding Similarity:
+   Cosine Similarity: -0.005144
+   ✅ PASSED: Contexts are transformed from embeddings
+======================================================================
+
+
+======================================================================
+CHECK 3: CVFP CONVERGENCE (固定点学習確認)
+======================================================================
+
+======================================================================
+CVFP CONVERGENCE CHECK (固定点収束チェック)
+======================================================================
+
+Testing convergence over 5 iterations:
+
+  Iteration 1 → 2: Avg change = 33.093487
+  Iteration 2 → 3: Avg change = 32.859669
+  Iteration 3 → 4: Avg change = 32.867321
+  Iteration 4 → 5: Avg change = 32.926109
+
+Final convergence (iteration 4 → 5):
+  Average change: 32.926109
+  ❌ FAILED: No fixed-point convergence
+  → Model is NOT learning stable fixed points
+======================================================================
+
+
+======================================================================
+FINAL SUMMARY - 81.7% Implementation Verification
+======================================================================
+
+Training tokens: 6400
+Train Effective Rank: 681.33/768 (88.7%)
+
+Validation tokens: 1280
+Val Effective Rank: 627.20/768 (81.7%)
+
+----------------------------------------------------------------------
+CRITICAL CHECKS:
+----------------------------------------------------------------------
+
+1. Effective Rank (多様性):
+   ✅ PASSED: 81.7% (Expected: ~81.7%)
+
+2. Identity Mapping (恒等写像):
+   ✅ PASSED: Not identity mapping (diff=27.0093)
+
+3. CVFP Convergence (固定点学習):
+   ❌ FAILED: FAILED (final_diff=32.926109)
+
+======================================================================
+❌ SOME CHECKS FAILED - Implementation may have issues!
+======================================================================
+

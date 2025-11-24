@@ -13,6 +13,7 @@ CRITICAL CHECKS (絶対必要):
 1. Effective Rank: 多様性確認
 2. Identity Check: 恒等写像になっていないか確認
 3. CVFP Convergence: 固定点学習ができているか確認
+4. Gradient Flow Check: トークン間勾配伝播確認（NEW!）
 """
 
 from config import ResidualConfig
@@ -23,6 +24,7 @@ from src.models.new_llm_residual import NewLLMResidual
 from src.data.loader import load_data
 from src.training.phase1_trainer import Phase1Trainer
 from src.evaluation.metrics import analyze_fixed_points, check_identity_mapping, check_cvfp_convergence
+from src.evaluation.diagnostics import check_gradient_flow, print_gradient_flow_result
 
 # ============================================================
 # SEED FIXING - 完全な再現性保証

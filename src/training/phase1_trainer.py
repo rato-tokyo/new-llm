@@ -31,8 +31,7 @@ class Phase1Trainer:
         min_converged_ratio,
         learning_rate,
         dist_reg_weight,
-        ema_momentum=0.99,  # EMA係数（デフォルト: 0.99 = 99%古い値、1%新しい値）
-        context_noise_std=0.01  # コンテキストノイズの標準偏差（汎化性能向上用）
+        ema_momentum=0.99  # EMA係数（デフォルト: 0.99 = 99%古い値、1%新しい値）
     ):
         """
         Args:
@@ -43,7 +42,6 @@ class Phase1Trainer:
             learning_rate: 学習率
             dist_reg_weight: 多様性正則化の重み
             ema_momentum: EMA係数（0.99推奨）
-            context_noise_std: 訓練時のコンテキストノイズ標準偏差（0でノイズなし）
         """
         self.model = model
         self.max_iterations = max_iterations
@@ -52,7 +50,6 @@ class Phase1Trainer:
         self.learning_rate = learning_rate
         self.dist_reg_weight = dist_reg_weight
         self.ema_momentum = ema_momentum
-        self.context_noise_std = context_noise_std
 
         # 収束判定用の状態（Trainerが管理）
         self.previous_contexts = None
@@ -225,16 +222,10 @@ class Phase1Trainer:
 
             if is_training:
                 # 訓練モード: 最適化あり
-                # ノイズを加えて汎化性能を向上（訓練時のみ）
-                if self.context_noise_std > 0 and t > 0:
-                    noise = torch.randn_like(context) * self.context_noise_std
-                    context_with_noise = context + noise
-                else:
-                    context_with_noise = context
-
+                # CRITICAL: トークン間で勾配を伝播させる（detach()なし）
                 context = self._train_one_token(
                     token_embed.unsqueeze(0),
-                    context_with_noise.detach() if t > 0 else context_with_noise,
+                    context,
                     token_idx=t
                 )
             else:
