@@ -23,7 +23,6 @@ from config import ResidualConfig
 from src.models.new_llm_residual import NewLLMResidual
 from src.data.loader import load_data
 from src.training.phase1_trainer import Phase1Trainer
-from src.training.phase2 import train_phase2
 from src.evaluation.metrics import analyze_fixed_points
 from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
 
@@ -121,7 +120,7 @@ def main():
 
     phase1_start = time.time()
 
-    # Create Phase1Trainer with orthogonality constraints
+    # Create Phase1Trainer with EMA-based diversity regularization
     trainer = Phase1Trainer(
         model=model,
         max_iterations=config.phase1_max_iterations,
@@ -129,7 +128,7 @@ def main():
         min_converged_ratio=config.phase1_min_converged_ratio,
         learning_rate=config.phase1_learning_rate,
         dist_reg_weight=config.dist_reg_weight,
-        orthogonality_weight=0.5  # 直交性の重み
+        ema_momentum=0.99  # EMA係数（指数平均的）
     )
 
     # Train
@@ -192,20 +191,14 @@ def main():
         print_flush("STARTING PHASE 2")
         print_flush(f"{'='*70}\n")
 
-        phase2_start = time.time()
+        print_flush("⚠️  Phase 2 (multi-output) requires model expansion.")
+        print_flush("    Please use test_phase2_functionality.py for Phase 2 training.")
+        print_flush("    Skipping Phase 2 for now...\n")
 
-        train_phase2(
-            model=model,
-            train_contexts=train_contexts,
-            train_token_ids=train_token_ids,
-            val_contexts=val_contexts,
-            val_token_ids=val_token_ids,
-            config=config,
-            device=device
-        )
-
-        phase2_time = time.time() - phase2_start
-        print_flush(f"\nPhase 2 completed in {phase2_time:.1f}s")
+        # TODO: Implement Phase 2 integration
+        # from src.models.new_llm_phase2 import expand_to_phase2
+        # phase2_model = expand_to_phase2(model)
+        # train_phase2_multioutput(phase2_model, train_token_ids, val_token_ids, config, device)
 
     # Final summary
     print_flush(f"\n{'='*70}")

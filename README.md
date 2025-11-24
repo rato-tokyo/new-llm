@@ -168,10 +168,10 @@ See `CLAUDE.md` for:
 - ✅ GPT-2 pre-trained embeddings (768-dim, frozen)
 
 **Next Steps:**
-- 🎯 Integrate per-dimension variance tracking into main codebase
 - 🎯 Scale to larger datasets (10k+ tokens)
-- 🎯 Phase 2 token prediction evaluation
+- 🎯 Phase 2 token prediction evaluation with multi-output architecture
 - 🎯 Perplexity and generation quality assessment
+- 🎯 GPU acceleration (10-20x speedup available with CUDA)
 
 ## License
 
