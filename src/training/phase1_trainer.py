@@ -222,10 +222,10 @@ class Phase1Trainer:
 
             if is_training:
                 # 訓練モード: 最適化あり
-                # CRITICAL: トークン間で勾配を伝播させる（detach()なし）
+                # CRITICAL: トークン間でcontextをdetach（gradient flowを遮断）
                 context = self._train_one_token(
                     token_embed.unsqueeze(0),
-                    context,
+                    context.detach(),  # トークン間で勾配遮断
                     token_idx=t
                 )
             else:
@@ -237,8 +237,7 @@ class Phase1Trainer:
                     )
 
             # 事前確保されたテンソルに直接代入（appendの代わり）
-            # 注意: detach()を削除 - 収束判定で勾配付きコンテキストが必要
-            current_contexts[t] = context.squeeze(0)
+            current_contexts[t] = context.squeeze(0).detach()  # 収束判定用にdetach
 
         # すでに正しい形状なので、そのまま返す
         return current_contexts
@@ -260,12 +259,11 @@ class Phase1Trainer:
         new_context = self.model._update_context_one_step(token_embed, context)
 
         # CVFP損失を計算
+        # CRITICAL BUG FIX: 正規化なしのMSE（固定点への収束には実際の値の一致が必要）
+        # F.normalize()を使うと方向だけが一致すればよくなり、ノルムは変化し続ける
         if self.current_iteration > 0 and self.previous_contexts is not None:
             previous_token_context = self.previous_contexts[token_idx:token_idx+1].detach()
-            cvfp_loss = F.mse_loss(
-                F.normalize(new_context, p=2, dim=1),
-                F.normalize(previous_token_context, p=2, dim=1)
-            )
+            cvfp_loss = F.mse_loss(new_context, previous_token_context)
         else:
             cvfp_loss = torch.tensor(0.0, device=new_context.device, requires_grad=True)
 
