@@ -18,7 +18,6 @@ import sys
 import time
 import argparse
 import optuna
-from optuna.pruners import MedianPruner
 from optuna.samplers import TPESampler
 import torch
 
@@ -164,19 +163,15 @@ def objective(trial, config, device, train_token_ids, val_token_ids, trial_times
 
         print_flush(f"Phase 1 Complete: Eff.Rank={train_eff_rank_ratio*100:.1f}%, Identity={identity_check['avg_similarity']:.3f}")
 
-        # Check for identity mapping
+        # Check for identity mapping (ONLY critical failure - model not learning)
         if identity_check['is_identity']:
             prune_reason = f"Identity mapping detected (similarity={identity_check['avg_similarity']:.3f} > {config.identity_mapping_threshold})"
             print_flush(f"❌ PRUNED: {prune_reason}")
             trial.set_user_attr("prune_reason", prune_reason)
             raise optuna.TrialPruned()
 
-        # Check effective rank
-        if train_eff_rank_ratio < 0.5:  # Less than 50% effective rank
-            prune_reason = f"Low effective rank ({train_eff_rank_ratio*100:.1f}% < 50%)"
-            print_flush(f"❌ PRUNED: {prune_reason}")
-            trial.set_user_attr("prune_reason", prune_reason)
-            raise optuna.TrialPruned()
+        # NOTE: Removed Effective Rank check - low rank does not imply poor perplexity
+        # We let Phase 2 perplexity be the final judge of model quality
 
         # ========== Phase 2: Token Prediction ==========
         print_flush("Phase 2: Token Prediction (suppressed output)...")
@@ -218,15 +213,11 @@ def objective(trial, config, device, train_token_ids, val_token_ids, trial_times
         print_flush(f"✅ SUCCESS: Val PPL={val_perplexity:.2f}, Time={trial_time:.1f}s")
         print_flush(f"{'='*70}")
 
-        # Report intermediate value for pruning
+        # Report value (for tracking only, pruning disabled)
         trial.report(val_perplexity, step=0)
 
-        # Check if trial should be pruned
-        if trial.should_prune():
-            prune_reason = "MedianPruner decision"
-            print_flush(f"❌ PRUNED: {prune_reason}")
-            trial.set_user_attr("prune_reason", prune_reason)
-            raise optuna.TrialPruned()
+        # NOTE: MedianPruner check removed - let all trials complete and judge by final PPL
+        # Different dist_reg_weight values may have trade-offs that only PPL can reveal
 
         return val_perplexity
 
@@ -268,11 +259,9 @@ def main():
 
     # Create Optuna study
     sampler = TPESampler(seed=config.random_seed)
-    pruner = MedianPruner(
-        n_startup_trials=5,  # Don't prune first 5 trials
-        n_warmup_steps=0,
-        interval_steps=1
-    )
+    # Pruner disabled - we want to evaluate all trials based on final perplexity
+    # Even trials with low Effective Rank might achieve good perplexity
+    pruner = optuna.pruners.NopPruner()  # No pruning
 
     study = optuna.create_study(
         study_name=args.study_name,
