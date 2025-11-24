@@ -8,11 +8,13 @@ Uses fixed datasets:
 Expected Results:
 - Training Effective Rank: 89.7% (689/768)
 - Validation Effective Rank: 89.4% (687/768)
+- Convergence Rate: >50% (fixed-point learning)
 
-CRITICAL CHECKS (3つの必須チェック):
+CRITICAL CHECKS (4つの必須チェック):
 1. Effective Rank: 多様性確認（89.4%目標）
 2. Identity Mapping Check: 恒等写像になっていないか確認
 3. Gradient Flow Check: トークン間勾配伝播確認
+4. Convergence Rate: 収束率確認（>50%目標）
 """
 
 from config import ResidualConfig
@@ -143,6 +145,27 @@ gradient_flow_check = check_gradient_flow(trainer, train_token_ids, device, num_
 print_gradient_flow_result(gradient_flow_check)
 
 # ============================================================
+# CONVERGENCE CHECK - 収束状況の確認
+# ============================================================
+print("\n" + "="*70)
+print("CONVERGENCE CHECK (収束状況)")
+print("="*70)
+
+# 訓練の収束結果を表示
+print(f"\n訓練収束率: {trainer.num_converged_tokens}/{len(train_token_ids)} = {trainer.num_converged_tokens/len(train_token_ids)*100:.1f}%")
+print(f"収束閾値: {config.phase1_convergence_threshold}")
+print(f"必要収束率: {config.phase1_min_converged_ratio*100:.0f}%")
+
+if trainer.num_converged_tokens == 0:
+    print("\n⚠️  警告: 収束率0% - 固定点学習が機能していません")
+    print("    原因: コンテキスト変化量が閾値より遥かに大きい")
+    print("    対策: 学習率調整またはアーキテクチャの見直しが必要")
+elif trainer.num_converged_tokens/len(train_token_ids) < config.phase1_min_converged_ratio:
+    print(f"\n⚠️  警告: 収束率が低い ({trainer.num_converged_tokens/len(train_token_ids)*100:.1f}% < {config.phase1_min_converged_ratio*100:.0f}%)")
+else:
+    print(f"\n✅ 収束率良好: {trainer.num_converged_tokens/len(train_token_ids)*100:.1f}%")
+
+# ============================================================
 # FINAL SUMMARY - 3つのチェック結果まとめ
 # ============================================================
 print(f"\n" + "="*70)
@@ -184,6 +207,15 @@ if gradient_flow_check['has_gradient_flow']:
     print(f"   ✅ PASSED: Gradient flows between tokens (norm_ratio={gradient_flow_check['norm_ratio']:.2f})")
 else:
     print(f"   ❌ FAILED: Gradient flow blocked (norm_ratio={gradient_flow_check['norm_ratio']:.2f})")
+    all_passed = False
+
+# 4. Convergence Rate (収束率)
+print("\n4. Convergence Rate (収束率):")
+convergence_rate = trainer.num_converged_tokens/len(train_token_ids)
+if convergence_rate > 0.5:  # 50%以上が収束すれば良好とする
+    print(f"   ✅ PASSED: {convergence_rate*100:.1f}% converged")
+else:
+    print(f"   ❌ FAILED: {convergence_rate*100:.1f}% converged (expected >50%)")
     all_passed = False
 
 print("\n" + "="*70)
