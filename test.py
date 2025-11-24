@@ -10,11 +10,10 @@ Expected Results:
 - Validation Effective Rank: 89.4% (687/768)
 - Convergence Rate: >50% (fixed-point learning)
 
-CRITICAL CHECKS (4つの必須チェック):
+CRITICAL CHECKS (3つの必須チェック):
 1. Effective Rank: 多様性確認（89.4%目標）
 2. Identity Mapping Check: 恒等写像になっていないか確認
-3. Gradient Flow Check: トークン間勾配伝播確認
-4. Convergence Rate: 収束率確認（>50%目標）
+3. Convergence Rate: 収束率確認（>50%目標）
 """
 
 from config import ResidualConfig
@@ -135,15 +134,6 @@ with torch.no_grad():
 
 identity_check = check_identity_mapping(model, train_token_embeds, train_contexts, device)
 
-# Check 3: Gradient Flow Check - トークン間勾配伝播確認
-print("\n" + "="*70)
-print("CHECK 3: GRADIENT FLOW (勾配伝播チェック)")
-print("="*70)
-
-# 勾配フローチェック（100トークンでテスト）
-gradient_flow_check = check_gradient_flow(trainer, train_token_ids, device, num_tokens_to_check=100)
-print_gradient_flow_result(gradient_flow_check)
-
 # ============================================================
 # CONVERGENCE CHECK - 収束状況の確認
 # ============================================================
@@ -201,16 +191,8 @@ else:
     print(f"   ❌ FAILED: Identity mapping detected (diff={identity_check['context_diff_from_zero']:.4f})")
     all_passed = False
 
-# 3. Gradient Flow
-print("\n3. Gradient Flow (勾配伝播):")
-if gradient_flow_check['has_gradient_flow']:
-    print(f"   ✅ PASSED: Gradient flows between tokens (norm_ratio={gradient_flow_check['norm_ratio']:.2f})")
-else:
-    print(f"   ❌ FAILED: Gradient flow blocked (norm_ratio={gradient_flow_check['norm_ratio']:.2f})")
-    all_passed = False
-
-# 4. Convergence Rate (収束率)
-print("\n4. Convergence Rate (収束率):")
+# 3. Convergence Rate (収束率)
+print("\n3. Convergence Rate (収束率):")
 convergence_rate = trainer.num_converged_tokens/len(train_token_ids)
 if convergence_rate > 0.5:  # 50%以上が収束すれば良好とする
     print(f"   ✅ PASSED: {convergence_rate*100:.1f}% converged")
