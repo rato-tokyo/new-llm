@@ -54,9 +54,6 @@ class ResidualConfig:
     phase2_batch_size = 32          # バッチサイズ
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
 
-    # Multi-output configuration (6 blocks)
-    phase2_block_weights = [0.5, 0.7, 0.8, 0.9, 1.0, 1.2]  # Loss weights per block
-
     # ========== データ ==========
     # Training data source
     train_data_source = "ultrachat"                        # "ultrachat", "text_file", or "text_dir"

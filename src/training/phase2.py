@@ -69,7 +69,6 @@ def train_phase2_multioutput(phase2_model, train_token_ids, val_token_ids, confi
     print_flush(f"  Batch size: {config.phase2_batch_size}")
     print_flush(f"  Learning rate: {config.phase2_learning_rate}")
     print_flush(f"  Epochs: {config.phase2_epochs}")
-    print_flush(f"  Block output weights: {config.phase2_block_weights}")
 
     best_val_loss = float('inf')
 
@@ -87,11 +86,10 @@ def train_phase2_multioutput(phase2_model, train_token_ids, val_token_ids, confi
             # block_logits: [num_blocks, batch, seq_len, vocab_size]
             block_logits = phase2_model(batch_input_ids, return_all_logits=True)
 
-            # Compute weighted loss across all blocks
+            # Compute loss across all blocks (equal weights)
             total_loss = compute_multiblock_loss(
                 block_logits,
-                batch_target_ids,
-                config.phase2_block_weights
+                batch_target_ids
             )
 
             # Backward pass
@@ -121,8 +119,7 @@ def train_phase2_multioutput(phase2_model, train_token_ids, val_token_ids, confi
                 # Loss
                 total_loss = compute_multiblock_loss(
                     block_logits,
-                    batch_target_ids,
-                    config.phase2_block_weights
+                    batch_target_ids
                 )
                 val_loss += total_loss.item()
                 val_batches += 1
@@ -151,17 +148,16 @@ def train_phase2_multioutput(phase2_model, train_token_ids, val_token_ids, confi
     print_flush(f"  Best validation loss: {best_val_loss:.4f}")
 
 
-def compute_multiblock_loss(block_logits, target_ids, block_weights):
+def compute_multiblock_loss(block_logits, target_ids):
     """
-    Compute weighted loss across all blocks
+    Compute average loss across all blocks (equal weights)
 
     Args:
         block_logits: [num_blocks, batch, seq_len, vocab_size]
         target_ids: [batch, seq_len]
-        block_weights: List of weights for each block
 
     Returns:
-        total_loss: Weighted sum of losses
+        total_loss: Average of losses across all blocks
     """
     num_blocks = block_logits.size(0)
     total_loss = 0
@@ -174,9 +170,10 @@ def compute_multiblock_loss(block_logits, target_ids, block_weights):
         targets_flat = target_ids.reshape(-1)  # [batch*seq_len]
 
         loss = F.cross_entropy(logits_flat, targets_flat)
-        total_loss += block_weights[block_idx] * loss
+        total_loss += loss
 
-    return total_loss
+    # Return average loss across all blocks
+    return total_loss / num_blocks
 
 
 def compute_block_accuracies(block_logits, target_ids):
