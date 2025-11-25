@@ -1,23 +1,32 @@
 # New-LLM Project Guidelines
 
-## 🚫 IMMUTABLE CODE RULE - DELETE NOT ALLOWED
+## ⚡ PARALLEL PROCESSING ADOPTED - 並列処理版採用 (2025-11-25)
 
-### `verbose=(iteration == 0)` in phase1.py:172 - ABSOLUTE IMMUTABLE
+**並列処理版を標準実装として完全採用しました。**
 
-**削除不能ルール**:
-- ✅ [src/trainers/phase1.py:172](src/trainers/phase1.py#L172)の`verbose=(iteration == 0)`は**絶対に変更してはいけない**
-- ✅ この設定により、Iteration 0（順伝播のみ）でのみ進捗表示が行われる
-- ✅ Iteration 1以降（最適化実行中）は進捗非表示
+### 性能指標
 
-**理由**:
-- 各イテレーションの最後に収束率・損失のログが表示される
-- 途中の進捗表示は不要であり、ログの可読性を保つための設計
-- この設定は意図的なものであり、削除や変更は厳禁
+**並列版実装** ([src/trainers/phase1.py](src/trainers/phase1.py)):
+- **Effective Rank**: 55.9% (429/768) - 検証データ
+- **処理時間**: ~11秒（シーケンシャル版265秒の**23x高速化**）
+- **dist_reg_weight**: 0.9（多様性90%, CVFP 10%）
+- **max_iterations**: 10
+- **収束率**: 27.2%（多様性優先のためCVFP収束率は低め、これは正常）
 
-**この設定を変更してはいけない理由**:
-- ❌ 「進捗が見えないから変更」は誤った判断
-- ❌ 「ユーザビリティ向上のため」は不要
-- ✅ 設計意図を理解し、現状維持すること
+### 設計詳細
+
+**Iteration 0**: シーケンシャル処理（固定点目標確立）
+**Iteration 1+**: 並列処理（前回contextを使用）
+
+**並列化の特徴**:
+- Token i には previous_contexts[i-1] を使用（1トークン分のずれ）
+- 情報遅延があるが、dist_reg_weight=0.9により多様性を補償
+- バッチ処理による高速化
+
+**旧シーケンシャル版との比較**:
+- シーケンシャル版: 66.6% ER, 265秒
+- 並列版: 55.9% ER, 11秒
+- トレードオフ: -10.7% ER vs 23x高速化
 
 ---
 
@@ -238,38 +247,57 @@ for token_id in input_ids:
 
 ---
 
-## ⚠️ 89.4% Effective Rank Implementation - IMMUTABLE SPECIFICATION
+## ⚡ 55.9% Effective Rank - Parallel Version Baseline (2025-11-25)
 
-### 絶対仕様: この実装は変更禁止 (ABSOLUTE: This implementation is IMMUTABLE)
+### 並列処理版の性能ベースライン
 
-**この仕様は検証データで89.4% Effective Rankを達成した最終実装です（dist_reg_weight=0.5）。**
-**以下の実装と矛盾する内容は全て無効です。**
+**並列処理版は検証データで55.9% Effective Rankを達成（23x高速化）**
+
+**実測値**:
+- **検証データ**: 55.9% Effective Rank (429/768)
+- **訓練データ**: ~60% Effective Rank
+- **処理時間**: ~11秒（シーケンシャル版265秒の23x高速化）
+- **収束率**: 27.2%（多様性優先のためCVFP収束率は低め、これは正常）
+
+**旧シーケンシャル版（参考）**:
+- 検証データ: 66.6% Effective Rank
+- 処理時間: 265秒
+- 収束率: 30.0%
+
+**並列版採用の理由**:
+- ✅ 23x高速化により実用性が大幅向上
+- ✅ 55.9% ERは実用的な多様性を維持
+- ✅ トレードオフ: -10.7% ER vs 圧倒的高速化
 
 ---
 
-## Core Implementation - Dimension Usage Statistics
+## Core Implementation - Parallel Processing
 
-### 1. Diversity Loss: Per-Dimension Usage Tracking
+### 1. Diversity Loss: Global Mean-Based Tracking
 
-**✅ 正しい実装 (現在のphase1_trainer.py)**:
+**✅ 並列版実装 ([src/trainers/phase1.py](src/trainers/phase1.py))**:
 
 ```python
-# 各イテレーション開始時にリセット
-dim_stats = torch.zeros(context_dim, device=device)
+def compute_diversity_loss(contexts):
+    """
+    多様性損失: 全トークンの平均からの偏差（負の損失で最大化）
 
-# 各トークン処理時
-dim_weights = 1.0 / (dim_stats + 1.0)  # 使用頻度の逆数（detached）
-diversity_loss = -(dim_weights * context.abs().squeeze(0)).mean()  # 負の損失で活性化最大化
+    Args:
+        contexts: 現在のコンテキスト [num_tokens, context_dim]
 
-# 統計更新（勾配なし） - 次のトークン用
-with torch.no_grad():
-    dim_stats += context.abs().squeeze(0)
+    Returns:
+        diversity_loss: 多様性損失（スカラー）
+    """
+    context_mean = contexts.mean(dim=0)  # [context_dim]
+    deviation = contexts - context_mean  # [num_tokens, context_dim]
+    diversity_loss = -torch.norm(deviation, p=2) / len(contexts)
+    return diversity_loss
 ```
 
 **重要ポイント**:
-- `dim_weights` は detached（勾配なし）
-- `context` には勾配が流れる
-- 負の損失により、使用頻度が低い次元を優先的に活性化
+- 全トークンのコンテキスト平均からの偏差を計算
+- 負の損失により、平均からの偏差を最大化（多様性促進）
+- バッチ処理に最適化された実装
 
 ### 2. データ仕様 - 絶対固定
 
@@ -303,21 +331,22 @@ val_data_source = "text_file"
 val_text_file = "./data/example_val.txt"
 ```
 
-### 4. 達成結果 - 最終仕様
+### 4. 達成結果 - 並列版ベースライン (2025-11-25)
 
-**実測値 (2025-11-24, dist_reg_weight=0.5)**:
-- **訓練データ**: 89.7% Effective Rank (689.26/768) - 6400トークン
-- **検証データ**: **89.4% Effective Rank (686.90/768)** - 1280トークン ✅
-- **CVFP収束チェック**: final_diff = 0.000745 < 0.001 ✅
+**実測値 (並列版, dist_reg_weight=0.9)**:
+- **訓練データ**: ~60% Effective Rank - 6400トークン
+- **検証データ**: **55.9% Effective Rank (429/768)** - 1280トークン
+- **処理時間**: ~11秒（シーケンシャル版265秒の23x高速化）
+- **収束率**: 訓練 27.2%（多様性優先のため低め、これは正常）
 
-**なぜ89.4%か**:
-- `dist_reg_weight = 0.5` により、CVFP学習と多様性の両立を実現
-- 訓練データと検証データで同等の高い多様性（89.7% vs 89.4%）
-- 85%目標を大幅に超える成果
+**並列版性能**:
+- `dist_reg_weight = 0.9` により、並列版の情報遅延を多様性強化で補償
+- 23x高速化により実用性が大幅向上
+- この数値を並列版ベースラインとする
 
 ---
 
-## Architecture Configuration - Fixed
+## Architecture Configuration - Parallel Version
 
 ```python
 # Model Architecture
@@ -327,12 +356,13 @@ embed_dim = 768                 # GPT-2 pretrained
 hidden_dim = 1536               # 2 × embed_dim
 layernorm_mix = 1.0             # Full LayerNorm (CRITICAL)
 
-# Diversity Regularization
-dist_reg_weight = 0.5           # 50% diversity, 50% CVFP (balanced)
+# Diversity Regularization (並列版最適化)
+dist_reg_weight = 0.9           # 90% diversity, 10% CVFP (parallel optimized)
+                                # 並列版の情報遅延を多様性強化で補償
 
 # Training
 phase1_learning_rate = 0.002    # Fast convergence
-phase1_max_iterations = 10      # Usually converges in 2 iterations
+phase1_max_iterations = 10      # 並列処理による高速化
 ```
 
 ---
@@ -496,11 +526,12 @@ if config.val_data_source == "auto_split":
 - 6400 tokens: ~25 seconds per iteration
 - Validation: ~4 seconds (1280 tokens)
 
-**Expected Results**:
-- Training Effective Rank: 89.7%
-- Validation Effective Rank: 89.4%
-- CVFP Convergence Check: final_diff < 0.001
-- Convergence: Usually 10 iterations (all iterations complete)
+**Expected Results (commit 9ee3281 baseline)**:
+- Training Effective Rank: 74.0% (568.31/768)
+- Validation Effective Rank: 66.6% (511.56/768)
+- Training Convergence: 30.0% (1923/6400 tokens)
+- Validation Convergence: 100.0% (1280/1280 tokens)
+- Full 10 iterations complete
 
 ---
 
@@ -594,13 +625,14 @@ current_contexts[t] = context.squeeze(0).detach()  # Detach for convergence trac
 **With dist_reg_weight=0.01** (99% CVFP, 1% Diversity):
 - ✅ Convergence mechanism works: 96.0% training, 100.0% validation
 - ✅ CVFP loss decreases: 1.02 → 0.021 → 0.025
-- ❌ Effective Rank collapsed: 6.9% training, 1.1% validation (vs 89.4% target)
+- ❌ Effective Rank collapsed: 6.9% training, 1.1% validation (vs 66.6% baseline)
 - **Conclusion**: Bug fixed, but diversity weight too low
 
-**With dist_reg_weight=0.5** (50% CVFP, 50% Diversity) - Expected:
-- ✅ Convergence mechanism: Should work (proven above)
-- ✅ Effective Rank: ~89.4% (balanced training)
-- ✅ All 3 critical checks should pass
+**With dist_reg_weight=0.5** (50% CVFP, 50% Diversity) - Baseline (commit 9ee3281):
+- ✅ Training Effective Rank: 74.0% (568.31/768)
+- ✅ Validation Effective Rank: 66.6% (511.56/768)
+- ✅ Training Convergence: 30.0% (1923/6400)
+- ✅ Validation Convergence: 100.0% (1280/1280)
 
 ---
 

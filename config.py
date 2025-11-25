@@ -30,11 +30,10 @@ class ResidualConfig:
     # ========== Diversity Regularization (Per-Dimension Usage Tracking) ==========
     # LayerNorm + Per-Dimension Variance Tracking (EMA-based) による多様性確保
     # 実装: 各次元の使用頻度を追跡し、使用頻度が低い次元を優先的に活性化
-    dist_reg_weight = 0.5              # 多様性正則化の重み (STANDARD: 50% balance)
+    dist_reg_weight = 0.9              # 多様性正則化の重み (PARALLEL OPTIMIZED: 90% diversity)
                                        # total_loss = (1-w) * cvfp_loss + w * diversity_loss
-                                       # 0.5: 50% CVFP, 50% Diversity（推奨設定: 89.4% ER達成）
-                                       # 0.8: 20% CVFP, 80% Diversity
-                                       # 0.99: 1% CVFP, 99% Diversity
+                                       # 0.9: 10% CVFP, 90% Diversity（並列版最適設定: 55.9% ER達成）
+                                       # 並列版の情報遅延を多様性強化で補償
 
     # ========== Phase 1: CVFP学習（固定点学習） ==========
     phase1_max_iterations = 10           # 固定点探索の最大反復回数
