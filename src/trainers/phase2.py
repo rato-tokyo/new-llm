@@ -3,10 +3,11 @@ Phase 2 Trainer: Next-Token Prediction with Context Propagation
 
 Trains the prediction head to predict next tokens using contexts learned in Phase 1.
 
-Key Design (Updated 2025-11-24):
+Key Design (Updated 2025-11-25):
 - Context propagation: Context carries forward between tokens (like Phase 1)
 - First token starts from zero-vector, subsequent tokens use previous context
-- Token embed used for prediction (not context)
+- Concatenated context + token_embed used for prediction (both information utilized)
+- Context provides文脈information, token_embed provides local representation
 - Context gradient detached to prevent backprop through context history
 - This ensures Phase 1 and Phase 2 consistency
 """
@@ -130,8 +131,9 @@ class Phase2Trainer:
                 else:
                     context, token_embed = block(context, token_embed)
 
-            # Predict next token from token_embed (NOT context)
-            logits = self.model.token_output(token_embed)  # [1, vocab_size]
+            # Predict next token from concatenated context + token_embed
+            combined = torch.cat([context, token_embed], dim=-1)  # [1, context_dim + embed_dim]
+            logits = self.model.token_output(combined)  # [1, vocab_size]
             all_logits.append(logits)
 
             # Context carries forward to next token
@@ -205,8 +207,9 @@ class Phase2Trainer:
                 for block in self.model.blocks:
                     context, token_embed = block(context, token_embed)
 
-                # Predict next token from token_embed
-                logits = self.model.token_output(token_embed)  # [1, vocab_size]
+                # Predict next token from concatenated context + token_embed
+                combined = torch.cat([context, token_embed], dim=-1)  # [1, context_dim + embed_dim]
+                logits = self.model.token_output(combined)  # [1, vocab_size]
                 all_logits.append(logits)
 
             # Stack all logits

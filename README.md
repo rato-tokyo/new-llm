@@ -128,6 +128,8 @@ total_loss = (1 - dist_reg_weight) * cvfp_loss + dist_reg_weight * diversity_los
 
 **Phase 2: Token Prediction**
 - Context propagation across tokens (matches Phase 1 behavior)
+- Prediction from concatenated context + token embeddings (both utilized)
+- Context provides文脈information, token_embed provides local representation
 - Next-token prediction with CrossEntropyLoss
 - Full model fine-tuning with small learning rate (0.002)
 - CVFP layers remain trainable for end-to-end optimization

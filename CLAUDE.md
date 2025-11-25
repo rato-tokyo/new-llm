@@ -213,8 +213,9 @@ for token_id in input_ids:
     for block in blocks:
         context, token_embed = block(token_embed, context)
 
-    # Token embedから予測（contextからではない）
-    logits = predict(token_embed)
+    # Context + Token embedの連結から予測（両方の情報を活用）
+    combined = torch.cat([context, token_embed], dim=-1)
+    logits = predict(combined)
 
     # Contextは次のトークンに引き継がれる
 ```
@@ -237,9 +238,9 @@ for token_id in input_ids:
 - `context = context.detach()` で勾配を遮断
 - 理由: 系列全体への勾配伝播を防ぎ、学習を安定化
 
-**3. Token Embed予測**:
-- 予測は`token_embed`から（`context`からではない）
-- Contextは文脈記憶、Token Embedは出力表現として分離
+**3. Context + Token Embed連結予測**:
+- 予測は`torch.cat([context, token_embed], dim=-1)`から
+- Contextは文脈情報、Token Embedは局所表現として両方を活用
 
 **4. 全トークン一括処理**:
 - バッチ分割なし（context伝播があるため）

@@ -216,7 +216,8 @@ class LLM(nn.Module):
         ])
 
         # ========== Output Head ==========
-        self.token_output = nn.Linear(context_dim, vocab_size)
+        # Prediction from concatenated context + token_embed
+        self.token_output = nn.Linear(context_dim + embed_dim, vocab_size)
 
         # Initialize embeddings (if not pretrained)
         if not use_pretrained_embeddings:
