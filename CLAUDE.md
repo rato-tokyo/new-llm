@@ -344,6 +344,51 @@ val_text_file = "./data/example_val.txt"
 - 23x高速化により実用性が大幅向上
 - この数値を並列版ベースラインとする
 
+### 5. 検証データ収束性チェック - Validation Convergence Check
+
+**検証データの収束率は訓練時に計算されない**（1回の順伝播のみ）。
+代わりに、学習済みモデルでの収束性を以下のスクリプトで確認：
+
+```bash
+python3 check_val_convergence.py --num_trials 10
+```
+
+**動作**:
+1. 学習済みモデルをロード
+2. 検証データを複数回順伝播（デフォルト: 10回）
+3. 各試行でCVFP損失（前回との差分MSE）を計算
+4. 損失の推移を表示し、減少傾向を自動判定
+
+**出力例**:
+```
+Trial  1/10: CVFP Loss = N/A (baseline, no previous context)
+Trial  2/10: CVFP Loss = 0.245123
+Trial  3/10: CVFP Loss = 0.183456
+Trial  4/10: CVFP Loss = 0.142789
+...
+Trial 10/10: CVFP Loss = 0.098234
+
+Statistics:
+  - Initial Loss (Trial 2): 0.245123
+  - Final Loss (Trial 10): 0.098234
+  - Reduction: -59.93%
+  - Slope (linear fit): -0.018234
+
+Verdict:
+  ✅ CONVERGING: Loss is decreasing - model is converging on validation data
+```
+
+**判定基準**:
+- ✅ CONVERGING: 損失が明確に減少（slope < -0.001）
+- ✅ CONVERGED: 損失が安定（|slope| < 0.001 かつ std < 0.01）
+- ❌ DIVERGING: 損失が増加（slope > 0.001）
+- ⚠️ UNSTABLE: 損失が不安定（上記以外）
+
+**使用場面**:
+- 訓練完了後に検証データでの収束性を確認
+- モデルの固定点学習が汎化しているかを検証
+- 異なるチェックポイントの比較
+
 ---
 
 ## Architecture Configuration - Parallel Version
