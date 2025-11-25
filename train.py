@@ -24,8 +24,8 @@ sys.path.insert(0, project_root)
 from config import ResidualConfig
 from src.models.llm import LLM
 from src.data.loader import load_data
-from src.trainers.phase1_trainer import Phase1Trainer
-from src.trainers.phase2_trainer import Phase2Trainer
+from src.trainers.phase1 import phase1_train
+from src.trainers.phase2 import Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
 
@@ -155,22 +155,42 @@ def main():
 
         phase1_start = time.time()
 
-        # Create Phase1Trainer with EMA-based diversity regularization
-        trainer = Phase1Trainer(
+        # Phase 1: CVFP Learning with parallel processing
+        train_contexts = phase1_train(
             model=model,
+            token_ids=train_token_ids,
+            device=device,
+            learning_rate=config.phase1_learning_rate,
             max_iterations=config.phase1_max_iterations,
             convergence_threshold=config.phase1_convergence_threshold,
-            min_converged_ratio=config.phase1_min_converged_ratio,
-            learning_rate=config.phase1_learning_rate,
             dist_reg_weight=config.dist_reg_weight,
-            ema_momentum=0.99  # EMA係数（指数平均的）
+            min_converged_ratio=config.phase1_min_converged_ratio,
+            label="Train"
         )
 
-        # Train
-        train_contexts = trainer.train(train_token_ids, device, label="Train")
+        # Validation: Use forward_all_tokens_sequential for evaluation
+        print_flush("\n" + "="*70)
+        print_flush("Evaluating on validation data...")
+        print_flush("="*70 + "\n")
 
-        # Validation
-        val_contexts = trainer.evaluate(val_token_ids, device, label="Val")
+        from src.trainers.phase1 import forward_all_tokens_sequential
+
+        # Prepare validation token embeddings
+        val_token_embeds = model.token_embedding(val_token_ids.unsqueeze(0).to(device))
+        if isinstance(val_token_embeds, tuple):
+            val_token_embeds = val_token_embeds[0]
+        val_token_embeds = model.embed_norm(val_token_embeds).squeeze(0)
+
+        # Single forward pass (no training)
+        model.eval()
+        with torch.no_grad():
+            val_contexts = forward_all_tokens_sequential(
+                model=model,
+                token_embeds=val_token_embeds,
+                previous_contexts=None,
+                device=device
+            )
+        model.train()
 
         phase1_time = time.time() - phase1_start
         print_flush(f"\nPhase 1 completed in {phase1_time:.1f}s")
@@ -231,7 +251,8 @@ def main():
             model=model,
             learning_rate=config.phase2_learning_rate,
             freeze_context=config.freeze_context,
-            gradient_clip=config.phase2_gradient_clip
+            gradient_clip=config.phase2_gradient_clip,
+            context_stability_weight=config.phase2_context_stability_weight
         )
 
         # Train Phase 2

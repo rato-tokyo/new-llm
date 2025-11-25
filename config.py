@@ -59,6 +59,8 @@ class ResidualConfig:
     phase2_epochs = 10              # 訓練エポック数
     # NOTE: No batch_size - all tokens processed at once (each token is independent)
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
+    phase2_context_stability_weight = 1.0  # 文脈安定性損失の重み（予測損失と同等）
+                                    # Phase 2開始時の文脈ベクトルを固定する制約
 
     # ========== データ ==========
     # ⚠️ UltraChat専用設定 (高速化により大規模データセットに対応)

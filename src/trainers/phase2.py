@@ -33,13 +33,19 @@ class Phase2Trainer:
         self,
         model,
         learning_rate=0.0001,
-        freeze_context=True,
-        gradient_clip=1.0
+        freeze_context=False,
+        gradient_clip=1.0,
+        context_stability_weight=1.0
     ):
         self.model = model
         self.learning_rate = learning_rate
         self.freeze_context = freeze_context
         self.gradient_clip = gradient_clip
+        self.context_stability_weight = context_stability_weight
+
+        # Phase 2用: token_outputを有効化（Phase 1ではゼロ＋無効化されている）
+        self.model.token_output.weight.requires_grad = True
+        self.model.token_output.bias.requires_grad = True
 
         # Freeze CVFP layers if requested
         if freeze_context:
@@ -49,6 +55,7 @@ class Phase2Trainer:
             trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
             total_params = sum(p.numel() for p in model.parameters())
             print(f"✓ Full model fine-tuning: {trainable_params:,}/{total_params:,} parameters trainable")
+            print(f"✓ Context stability weight: {context_stability_weight}")
 
         # Optimizer (only trainable parameters)
         self.optimizer = torch.optim.Adam(
@@ -58,6 +65,10 @@ class Phase2Trainer:
 
         # Loss function
         self.criterion = nn.CrossEntropyLoss(reduction='mean')
+
+        # Target contexts for stability (initialized in train_full)
+        self.target_contexts_train = None
+        self.target_contexts_val = None
 
     def _freeze_cvfp_layers(self):
         """Freeze CVFP layers (keep only prediction head trainable)"""
@@ -77,6 +88,49 @@ class Phase2Trainer:
         trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
         total_params = sum(p.numel() for p in self.model.parameters())
         print(f"✓ CVFP layers frozen: {trainable_params:,}/{total_params:,} parameters trainable (prediction head only)")
+
+    def initialize_target_contexts(self, token_ids, device, is_training=True):
+        """
+        Phase 2開始時に文脈ベクトルの教師データを生成
+
+        Args:
+            token_ids: Token IDs [seq_len]
+            device: Device to use
+            is_training: Whether this is training data
+
+        Returns:
+            target_contexts: Target context vectors [seq_len, context_dim]
+        """
+        self.model.eval()
+
+        with torch.no_grad():
+            # トークン埋め込み
+            token_embeds = self.model.token_embedding(token_ids.unsqueeze(0).to(device))
+            token_embeds = self.model.embed_norm(token_embeds).squeeze(0)
+
+            # 文脈伝播（Phase 1と同じ）
+            context = torch.zeros(1, self.model.context_dim, device=device)
+            target_contexts = []
+
+            for token_embed in token_embeds:
+                for block in self.model.blocks:
+                    context, token_embed_out = block(token_embed.unsqueeze(0), context)
+                target_contexts.append(context.squeeze(0))
+
+            target_contexts = torch.stack(target_contexts)  # [seq_len, context_dim]
+
+        # 保存
+        if is_training:
+            self.target_contexts_train = target_contexts
+        else:
+            self.target_contexts_val = target_contexts
+
+        self.model.train()
+
+        label = "Training" if is_training else "Validation"
+        print(f"✓ {label} target contexts initialized: {target_contexts.shape}")
+
+        return target_contexts
 
     def train_epoch(self, token_ids, device):
         """
@@ -110,6 +164,7 @@ class Phase2Trainer:
 
         # Process all tokens with context propagation
         all_logits = []
+        all_contexts = []
         for i, token_id in enumerate(input_ids):
             if i % 1000 == 0:
                 print(f"  [DEBUG] Processing token {i}/{len(input_ids)}")
@@ -131,6 +186,9 @@ class Phase2Trainer:
                 else:
                     context, token_embed = block(context, token_embed)
 
+            # 文脈ベクトルを記録
+            all_contexts.append(context.squeeze(0))
+
             # Predict next token from concatenated context + token_embed
             combined = torch.cat([context, token_embed], dim=-1)  # [1, context_dim + embed_dim]
             logits = self.model.token_output(combined)  # [1, vocab_size]
@@ -138,20 +196,37 @@ class Phase2Trainer:
 
             # Context carries forward to next token
 
-        # Stack all logits
+        # Stack all logits and contexts
         print(f"  [DEBUG] Stacking {len(all_logits)} logits")
         all_logits = torch.cat(all_logits, dim=0)  # [seq_len - 1, vocab_size]
+        all_contexts = torch.stack(all_contexts)  # [seq_len - 1, context_dim]
         print(f"  [DEBUG] Logits shape: {all_logits.shape}")
+        print(f"  [DEBUG] Contexts shape: {all_contexts.shape}")
 
-        # Compute loss
-        print(f"  [DEBUG] Computing loss...")
+        # Compute losses
+        print(f"  [DEBUG] Computing losses...")
         self.optimizer.zero_grad()
-        loss = self.criterion(all_logits, target_ids)
-        print(f"  [DEBUG] Loss: {loss.item():.4f}")
+
+        # 1. Prediction loss
+        prediction_loss = self.criterion(all_logits, target_ids)
+
+        # 2. Context stability loss (文脈ベクトル固定)
+        if self.target_contexts_train is not None:
+            target_contexts_input = self.target_contexts_train[:-1]  # 最後を除く
+            context_stability_loss = F.mse_loss(all_contexts, target_contexts_input)
+        else:
+            context_stability_loss = torch.tensor(0.0, device=device)
+
+        # Total loss
+        total_loss = prediction_loss + self.context_stability_weight * context_stability_loss
+
+        print(f"  [DEBUG] Prediction Loss: {prediction_loss.item():.4f}")
+        print(f"  [DEBUG] Context Stability Loss: {context_stability_loss.item():.6f}")
+        print(f"  [DEBUG] Total Loss: {total_loss.item():.4f}")
 
         # Backward pass
         print(f"  [DEBUG] Running backward pass...")
-        loss.backward()
+        total_loss.backward()
         print(f"  [DEBUG] Backward complete")
 
         # Gradient clipping
@@ -164,10 +239,11 @@ class Phase2Trainer:
         self.optimizer.step()
 
         # Calculate metrics
-        avg_loss = loss.item()
+        avg_loss = prediction_loss.item()
         perplexity = torch.exp(torch.tensor(avg_loss)).item()
+        context_loss = context_stability_loss.item()
 
-        return avg_loss, perplexity
+        return avg_loss, perplexity, context_loss
 
     def evaluate(self, token_ids, device):
         """
@@ -251,13 +327,22 @@ class Phase2Trainer:
         print(f"Epochs: {epochs}")
         print(f"Learning rate: {self.learning_rate}")
         print(f"Context frozen: {self.freeze_context}")
+        print(f"Context stability weight: {self.context_stability_weight}")
         print(f"✓ Context propagates forward (like Phase 1)")
-        print(f"✓ Prediction from token_embed (not context)")
+        print(f"✓ Prediction from concatenated context + token_embed")
+        print(f"✓ Context vectors fixed to Phase 2 start values")
         print(f"✓ Context gradient detached (no backprop through history)\n")
+
+        # Initialize target contexts (Phase 2開始時の文脈ベクトル)
+        print(f"Initializing target contexts...")
+        self.initialize_target_contexts(train_token_ids, device, is_training=True)
+        self.initialize_target_contexts(val_token_ids, device, is_training=False)
+        print()
 
         history = {
             'train_loss': [],
             'train_ppl': [],
+            'train_context_loss': [],
             'val_loss': [],
             'val_ppl': [],
             'val_acc': []
@@ -269,10 +354,10 @@ class Phase2Trainer:
             print(f"\n[DEBUG] Starting Epoch {epoch}/{epochs}")
             # Train
             print(f"[DEBUG] Calling train_epoch...")
-            train_loss, train_ppl = self.train_epoch(
+            train_loss, train_ppl, train_context_loss = self.train_epoch(
                 train_token_ids, device
             )
-            print(f"[DEBUG] train_epoch complete: loss={train_loss:.4f}")
+            print(f"[DEBUG] train_epoch complete: loss={train_loss:.4f}, context_loss={train_context_loss:.6f}")
 
             # Validate
             print(f"[DEBUG] Calling evaluate...")
@@ -284,13 +369,14 @@ class Phase2Trainer:
             # Record history
             history['train_loss'].append(train_loss)
             history['train_ppl'].append(train_ppl)
+            history['train_context_loss'].append(train_context_loss)
             history['val_loss'].append(val_loss)
             history['val_ppl'].append(val_ppl)
             history['val_acc'].append(val_acc)
 
             # Print progress
             print(f"Epoch {epoch}/{epochs}:")
-            print(f"  Train Loss: {train_loss:.4f} | Train PPL: {train_ppl:.2f}")
+            print(f"  Train Loss: {train_loss:.4f} | Train PPL: {train_ppl:.2f} | Context Loss: {train_context_loss:.6f}")
             print(f"  Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f} | Val Acc: {val_acc*100:.2f}%")
 
             # Track best model

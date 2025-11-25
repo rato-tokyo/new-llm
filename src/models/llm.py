@@ -219,6 +219,14 @@ class LLM(nn.Module):
         # Prediction from concatenated context + token_embed
         self.token_output = nn.Linear(context_dim + embed_dim, vocab_size)
 
+        # Phase 1用: ゼロ初期化 + 勾配無効化
+        # Phase 2開始時に有効化される
+        with torch.no_grad():
+            self.token_output.weight.fill_(0)
+            self.token_output.bias.fill_(0)
+        self.token_output.weight.requires_grad = False
+        self.token_output.bias.requires_grad = False
+
         # Initialize embeddings (if not pretrained)
         if not use_pretrained_embeddings:
             self._init_weights()
