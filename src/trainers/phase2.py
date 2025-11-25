@@ -22,7 +22,7 @@ class Phase2Trainer:
     Phase 2 Trainer for next-token prediction
 
     Args:
-        model: NewLLMResidual model with prediction head
+        model: LLM model with prediction head
         learning_rate: Learning rate for optimizer
         freeze_context: If True, freeze CVFP layers (only train prediction head)
         gradient_clip: Gradient clipping value (None = no clipping)

@@ -4,6 +4,6 @@ Unified to Residual Standard architecture with CVFP (Context Vector Fixed-Point)
 All other architectures (Sequential, Layerwise, Flexible) have been deprecated.
 """
 
-from .new_llm_residual import NewLLMResidual
+from .llm import LLM
 
-__all__ = ['NewLLMResidual']
+__all__ = ['LLM']

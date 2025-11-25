@@ -150,7 +150,7 @@ class CVFPBlock(nn.Module):
         return context, token_embed
 
 
-class NewLLMResidual(nn.Module):
+class LLM(nn.Module):
     """
     New-LLM with ResNet-style Residual connections
 

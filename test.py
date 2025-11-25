@@ -20,9 +20,9 @@ from config import ResidualConfig
 import torch
 import numpy as np
 import random
-from src.models.new_llm_residual import NewLLMResidual
+from src.models.llm import LLM
 from src.data.loader import load_data
-from src.training.phase1_trainer import Phase1Trainer
+from src.trainers.phase1 import Phase1Trainer
 from src.evaluation.metrics import analyze_fixed_points, check_identity_mapping
 from src.evaluation.diagnostics import check_gradient_flow, print_gradient_flow_result
 
@@ -70,7 +70,7 @@ else:
 # Create model
 print("\nCreating model...")
 layer_structure = [1] * config.num_layers
-model = NewLLMResidual(
+model = LLM(
     vocab_size=config.vocab_size,
     embed_dim=config.embed_dim,
     context_dim=config.context_dim,

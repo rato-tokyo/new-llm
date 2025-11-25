@@ -1,5 +1,26 @@
 # New-LLM Project Guidelines
 
+## 🚫 IMMUTABLE CODE RULE - DELETE NOT ALLOWED
+
+### `verbose=(iteration == 0)` in phase1.py:172 - ABSOLUTE IMMUTABLE
+
+**削除不能ルール**:
+- ✅ [src/trainers/phase1.py:172](src/trainers/phase1.py#L172)の`verbose=(iteration == 0)`は**絶対に変更してはいけない**
+- ✅ この設定により、Iteration 0（順伝播のみ）でのみ進捗表示が行われる
+- ✅ Iteration 1以降（最適化実行中）は進捗非表示
+
+**理由**:
+- 各イテレーションの最後に収束率・損失のログが表示される
+- 途中の進捗表示は不要であり、ログの可読性を保つための設計
+- この設定は意図的なものであり、削除や変更は厳禁
+
+**この設定を変更してはいけない理由**:
+- ❌ 「進捗が見えないから変更」は誤った判断
+- ❌ 「ユーザビリティ向上のため」は不要
+- ✅ 設計意図を理解し、現状維持すること
+
+---
+
 ## 📊 MANDATORY: 数値報告ルール - 具体的な数値での報告義務
 
 ### 絶対遵守: すべての実験結果は具体的な数値で報告する
@@ -35,6 +56,83 @@
 CVFP収束チェック:
 - final_diff = 0.000745 (閾値 < 0.001クリア)
 ```
+
+---
+
+## 🚨🚨🚨 CRITICAL DESIGN FIX - FIXED-POINT TARGET PRESERVATION (2025-11-25) 🚨🚨🚨
+
+### 致命的設計ミス: 固定点目標の上書き（絶対に忘れてはいけない）
+
+**致命的な問題**:
+- `Network.update_convergence()`が毎イテレーション`previous_contexts`を上書き
+- CVFP損失が「固定点への収束」ではなく「前回との差分」を学習
+- **これは固定点学習の定義に完全に反する**
+
+**間違った動作フロー**:
+```
+Iteration 0: contexts_0 を出力 → previous_contexts = contexts_0
+Iteration 1: contexts_1 を出力 → CVFP損失 = MSE(contexts_1, contexts_0)
+             previous_contexts = contexts_1 に上書き ← ⚠️ 致命的バグ
+Iteration 2: contexts_2 を出力 → CVFP損失 = MSE(contexts_2, contexts_1) ← 目標が変わっている！
+             previous_contexts = contexts_2 に上書き
+```
+
+**正しい修正**:
+```python
+# Phase1Trainer (src/trainers/phase1.py)
+
+# ❌❌❌ 絶対にやってはいけない間違った実装（削除済み）
+# Networkのprevious_contextsを直接Optimizerに渡す = 毎回更新される
+self.cvfp_optimizer.start_new_iteration(
+    iteration,
+    self.network.previous_contexts  # これは毎回更新されてしまう！
+)
+
+# ✅✅✅ 必須の正しい実装（修正済み）
+# Iteration 0の出力を固定保存
+target_contexts = None
+
+for iteration in range(self.max_iterations):
+    if is_training and iteration > 0:
+        self.cvfp_optimizer.start_new_iteration(
+            iteration,
+            target_contexts  # 固定された目標を渡す
+        )
+
+    contexts = self.network.forward_all(...)
+
+    # Iteration 0の出力を保存（以降は変更しない）
+    if iteration == 0:
+        target_contexts = contexts.detach().clone()
+
+    # 収束状態を更新（収束判定専用 - これは毎回更新してよい）
+    self.network.update_convergence(contexts)
+```
+
+**正しい動作フロー**:
+```
+Iteration 0: contexts_0 を出力 → target_contexts = contexts_0（固定保存）
+Iteration 1: contexts_1 を出力 → CVFP損失 = MSE(contexts_1, target_contexts) ← 固定点と比較
+Iteration 2: contexts_2 を出力 → CVFP損失 = MSE(contexts_2, target_contexts) ← 同じ目標！
+Iteration 3: contexts_3 を出力 → CVFP損失 = MSE(contexts_3, target_contexts) ← 同じ目標！
+```
+
+**なぜこれが致命的か**:
+1. **Fixed-Point = 固定点**: f(x) = x となる点への収束が目標
+2. **目標が動く = 固定点ではない**: 毎回目標が変わると収束判定が無意味
+3. **Moving Target問題**: 常に1ステップ前との差分最小化になり、固定点学習ではない
+4. **CVFP損失の本質的破壊**: 固定点への距離ではなく、差分最小化になる
+
+**二度と同じ間違いをしないために**:
+- ⚠️ **Iteration 0の出力を固定保存**し、以降は変更しない
+- ⚠️ `Network.previous_contexts`は収束判定専用（毎回更新してよい）
+- ⚠️ CVFP損失計算には**固定されたtarget_contexts**を使用
+- ⚠️ 「前回との差分」≠「固定点への収束」を理解する
+
+**責任分離**:
+- `Phase1Trainer`: 固定点目標（`target_contexts`）の保存と管理
+- `Network`: 収束判定用の前回値（`previous_contexts`）の管理
+- `Optimizer`: 固定された目標との損失計算
 
 ---
 
@@ -421,6 +519,152 @@ num_samples = 50       # Hardcoded!
 
 ---
 
+## 🐛 CRITICAL BUG FIX HISTORY - November 24, 2025
+
+### Bug #1: F.normalize() in CVFP Loss Calculation (src/training/phase1_trainer.py)
+
+**Problem**:
+- Location: [phase1_trainer.py:265-267](src/training/phase1_trainer.py#L265-L267)
+- CVFP loss used `F.normalize()` on both `new_context` and `previous_context`
+- This only enforces **cosine similarity** (direction), not **value equality**
+- Fixed points require `f(x) = x` (exact values), not just same direction
+
+**Symptoms**:
+- 0% convergence rate despite 10 iterations
+- MSE ~32-33 (vs threshold 0.1 = 300x larger)
+- CVFP loss increasing instead of decreasing
+
+**Root Cause**:
+```python
+# ❌ WRONG: Normalization prevents value convergence
+cvfp_loss = F.mse_loss(
+    F.normalize(new_context, p=2, dim=1),      # Only matches direction
+    F.normalize(previous_context, p=2, dim=1)  # Norms can still diverge
+)
+```
+
+**Fix**:
+```python
+# ✅ CORRECT: Raw MSE for exact value matching
+cvfp_loss = F.mse_loss(new_context, previous_token_context)
+```
+
+**Affected File**: [src/training/phase1_trainer.py:267](src/training/phase1_trainer.py#L267)
+
+---
+
+### Bug #2: Missing context.detach() Between Tokens (src/training/phase1_trainer.py)
+
+**Problem**:
+- Location: [phase1_trainer.py:226-240](src/training/phase1_trainer.py#L226-L240)
+- Context passed between tokens without `detach()`
+- Gradient graph reused across token sequence
+- RuntimeError: "Trying to backward through the graph a second time"
+
+**Root Cause**:
+```python
+# ❌ WRONG: Gradient graph carries over
+context = self._train_one_token(
+    token_embed.unsqueeze(0),
+    context,  # No detach - gradient accumulates across tokens
+    token_idx=t
+)
+current_contexts[t] = context.squeeze(0)  # No detach for convergence check
+```
+
+**Fix**:
+```python
+# ✅ CORRECT: Detach between tokens
+context = self._train_one_token(
+    token_embed.unsqueeze(0),
+    context.detach(),  # Break gradient flow between tokens
+    token_idx=t
+)
+current_contexts[t] = context.squeeze(0).detach()  # Detach for convergence tracking
+```
+
+**Affected Lines**:
+- [phase1_trainer.py:228](src/training/phase1_trainer.py#L228) - Training token processing
+- [phase1_trainer.py:240](src/training/phase1_trainer.py#L240) - Convergence tracking
+
+---
+
+### Verification Results (After Fixes)
+
+**With dist_reg_weight=0.01** (99% CVFP, 1% Diversity):
+- ✅ Convergence mechanism works: 96.0% training, 100.0% validation
+- ✅ CVFP loss decreases: 1.02 → 0.021 → 0.025
+- ❌ Effective Rank collapsed: 6.9% training, 1.1% validation (vs 89.4% target)
+- **Conclusion**: Bug fixed, but diversity weight too low
+
+**With dist_reg_weight=0.5** (50% CVFP, 50% Diversity) - Expected:
+- ✅ Convergence mechanism: Should work (proven above)
+- ✅ Effective Rank: ~89.4% (balanced training)
+- ✅ All 3 critical checks should pass
+
+---
+
+## 📐 NEW-LLM Detailed Architecture Specification
+
+### Core Components
+
+**1. CVFPLayer (Context Vector Fixed-Point Layer)**
+- Location: [src/models/new_llm_residual.py:15-102](src/models/new_llm_residual.py#L15-L102)
+- Input: `context [batch, context_dim]`, `token_embed [batch, embed_dim]`
+- Output: `new_context [batch, context_dim]`, `new_token [batch, embed_dim]`
+- Architecture:
+  - FNN: `[context + token] → [hidden_dim]` with ReLU
+  - Split: `hidden_dim → delta_context + delta_token`
+  - Residual: `new_context = context + delta_context`
+  - LayerNorm: Optional mixing with `layernorm_mix` parameter
+
+**2. CVFPBlock (Multiple Layers)**
+- Location: [src/models/new_llm_residual.py:105-150](src/models/new_llm_residual.py#L105-L150)
+- Sequential execution of `num_layers` CVFPLayer instances
+- Passes context and token through all layers
+
+**3. NewLLMResidual (Main Model)**
+- Location: [src/models/new_llm_residual.py:153-314](src/models/new_llm_residual.py#L153-L314)
+- Token Embedding: GPT-2 pretrained (768-dim, frozen)
+- CVFP Blocks: 6 blocks (configurable via `layer_structure`)
+- Output Head: Linear layer `context_dim → vocab_size`
+
+**4. Phase1Trainer (CVFP Fixed-Point Learning)**
+- Location: [src/training/phase1_trainer.py](src/training/phase1_trainer.py)
+- Training loop: Iterative refinement until convergence
+- Loss function:
+  - CVFP Loss: `MSE(context_t, context_{t-1})` - **NO normalization**
+  - Diversity Loss: EMA-based per-dimension variance tracking
+  - Total: `(1-w) * cvfp_loss + w * diversity_loss`
+- Convergence: MSE < threshold (0.1) for 95% of tokens
+- Early stopping: When 95% converged (training only)
+
+### Key Design Decisions
+
+**Dimension Constraints**:
+- `hidden_dim = context_dim + embed_dim` (MANDATORY)
+- Default: `context_dim=768, embed_dim=768, hidden_dim=1536`
+- Reason: FNN output must split into delta_context + delta_token
+
+**Context Carryover** (CRITICAL):
+- Between iterations: `context = previous_contexts[-1]` (NOT zero reset)
+- Between tokens: `context = context.detach()` (gradient isolation)
+- Reason: Fixed-point learning requires continuity
+
+**Gradient Management**:
+- Token embeddings: Frozen (GPT-2 pretrained)
+- Context params: Trained (all CVFP layers)
+- Between tokens: Detached (prevent cross-token gradients)
+- Reason: Stable training with efficient gradient flow
+
+**Diversity Regularization**:
+- Method: Per-dimension variance tracking with EMA
+- Implementation: Negative L2 norm of deviation from mean
+- Memory: O(context_dim) - 6KB for 768-dim
+- Reason: Encourage usage of all dimensions
+
+---
+
 ## Context Size Monitoring Policy
 
 **Claude Codeコンテキスト管理**:
@@ -430,4 +674,4 @@ num_samples = 50       # Hardcoded!
 
 ---
 
-Last Updated: 2025-11-24 (89.4% Implementation with Phase 2)
+Last Updated: 2025-11-24 (Bug Fixes + Architecture Documentation)

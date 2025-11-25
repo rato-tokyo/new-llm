@@ -22,10 +22,10 @@ project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_root)
 
 from config import ResidualConfig
-from src.models.new_llm_residual import NewLLMResidual
+from src.models.llm import LLM
 from src.data.loader import load_data
-from src.training.phase1_trainer import Phase1Trainer
-from src.training.phase2_trainer import Phase2Trainer
+from src.trainers.phase1_trainer import Phase1Trainer
+from src.trainers.phase2_trainer import Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
 
@@ -93,7 +93,7 @@ def main():
 
     # Create model with refactored architecture
     layer_structure = [1] * config.num_layers
-    model = NewLLMResidual(
+    model = LLM(
         vocab_size=config.vocab_size,
         embed_dim=config.embed_dim,
         context_dim=config.context_dim,
