@@ -61,29 +61,30 @@ class ResidualConfig:
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
 
     # ========== データ ==========
+    # ⚠️ UltraChat専用設定 (高速化により大規模データセットに対応)
+    # データ生成: cd ../new-llm-data && python3 generate_ultrachat_data.py --num_samples 50 --max_seq_length 128
+
     # Training data source
-    train_data_source = "ultrachat"                        # "ultrachat", "text_file", or "text_dir"
-    train_text_file = "./data/example_train.txt"           # text_file使用時のパス
-    train_text_dir = "./data/train/"                       # text_dir使用時のディレクトリ
+    train_data_source = "ultrachat"                        # UltraChat専用（キャッシュ使用で高速）
 
     # Validation data source
     # ⚠️ CRITICAL: Must use "text_file" only! auto_split is FORBIDDEN!
     # Validation data must contain ONLY tokens from training data
-    # Generate using: python3 scripts/create_val_from_train.py
+    # 自動生成: データ生成スクリプトが自動的に作成（訓練データの最後20%）
     val_data_source = "text_file"                          # MUST be "text_file" (auto_split is FORBIDDEN)
-    val_text_file = "./data/example_val.txt"               # text_file使用時のパス
-    val_text_dir = "./data/val/"                           # text_dir使用時のディレクトリ
-    manual_val_path = "./cache/manual_val_tokens.pt"       # manual使用時のパス
+    val_text_file = "./data/ultrachat_50samples_val.txt"   # 自動生成される検証データ
 
-    # Common settings
-    max_seq_length = 128                                   # 最大シーケンス長（高速テスト用に短縮）
-    num_samples = 50                                       # 訓練サンプル数（→ 6400トークン生成）
-    train_val_split = 0.8                                  # Train/Val分割比率（auto_split使用時のみ）
-
-    # UltraChat specific (train_data_source="ultrachat"の場合)
+    # UltraChat settings
+    max_seq_length = 128                                   # 最大シーケンス長
+    num_samples = 50                                       # 訓練サンプル数（→ ~6400トークン）
     dataset_name = "HuggingFaceH4/ultrachat_200k"          # HuggingFaceデータセット
     dataset_split = "train_sft"                            # 使用するデータセット分割
     cache_dir = "./cache"                                  # キャッシュディレクトリ
+
+    # 推奨データセットサイズ（並列処理版の高速化により可能）
+    # - テスト: num_samples=50, max_seq_length=128 (~6400トークン, ~11秒)
+    # - 小規模: num_samples=200, max_seq_length=256 (~25000トークン, ~40秒)
+    # - 中規模: num_samples=1000, max_seq_length=512 (~128000トークン, ~3分)
 
     # ========== デバイス ==========
     device = "cuda" if torch.cuda.is_available() else "cpu"  # 自動GPU検出
