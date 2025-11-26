@@ -1,8 +1,12 @@
 """
 Phase 1 Trainer: CVFP固定点学習（並列処理版）
 
-Iteration 0: シーケンシャル処理（固定点目標確立）
+Iteration 0: シーケンシャル処理（学習なし、previous_contextsを初期化）
 Iteration 1+: 並列処理（前回contextを使用、23x高速化）
+
+CVFP理論: CVFP損失 = MSE(contexts, previous_contexts)
+  - 前回のコンテキストと比較して固定点への収束を学習
+  - previous_contextsは毎イテレーション更新
 
 設定: dist_reg_weight=0.9（並列版最適化: 55.9% ER達成）
 """
@@ -60,20 +64,18 @@ def phase1_train(
         token_embeds = model.token_embedding(token_ids.unsqueeze(0).to(device))
         token_embeds = model.embed_norm(token_embeds).squeeze(0)  # [num_tokens, embed_dim]
 
-    # Iteration 0の出力を保存（固定点目標）
-    target_contexts = None
+    # 前回のコンテキスト（CVFP損失計算用）
     previous_contexts = None
 
     # イテレーションループ
     for iteration in range(max_iterations):
         start_time = time.time()
 
-        # Iteration 0: シーケンシャル（必須）
+        # Iteration 0: シーケンシャル（必須）- 学習なし
         if iteration == 0:
             contexts = forward_all_tokens_sequential(
                 model, token_embeds, None, device
             )
-            target_contexts = contexts.detach().clone()
             previous_contexts = contexts.detach()
             elapsed = time.time() - start_time
             print_flush(f"Iteration 1/{max_iterations}: 順伝播のみ（シーケンシャル） [{elapsed:.2f}s]")
@@ -85,7 +87,8 @@ def phase1_train(
         )
 
         # 結合損失による最適化（CVFP + Diversity）
-        cvfp_loss = compute_cvfp_loss(contexts, target_contexts)
+        # CVFP理論: 前回のコンテキストと比較（固定点への収束）
+        cvfp_loss = compute_cvfp_loss(contexts, previous_contexts)
         diversity_loss = compute_diversity_loss(contexts)
 
         # 重み付き結合損失（並列版最適: dwr=0.9）

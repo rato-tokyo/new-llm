@@ -84,31 +84,35 @@ Next Token Prediction
 **プロセス**:
 
 1. **Iteration 0（シーケンシャル処理）**:
-   - 目的: 固定点目標を確立
    - コンテキストをゼロから開始し、全トークンを順次処理
-   - 出力を `target_contexts` として保存（**この値は以降不変**）
+   - 出力を `previous_contexts` として保存
+   - **学習なし**（順伝播のみ）
 
 2. **Iteration 1～10（並列処理）**:
    - 目的: 固定点への収束（23倍高速化）
    - Token i には `previous_contexts[i-1]` を使用（1トークン分のずれ）
    - 全トークンをバッチ処理で並列計算
+   - CVFP損失で学習し、`previous_contexts`を更新
 
 **損失関数**:
 
 ```python
-# CVFP損失: 固定点目標への収束
-cvfp_loss = MSE(contexts, target_contexts)
+# CVFP損失: 前回のコンテキストとの差（固定点への収束）
+cvfp_loss = MSE(contexts, previous_contexts)
 
 # 多様性損失: 全トークンの平均からの偏差を最大化
 diversity_loss = -‖contexts - mean(contexts)‖₂ / num_tokens
 
 # 総合損失（並列版最適設定: dist_reg_weight=0.9）
 total_loss = 0.1 * cvfp_loss + 0.9 * diversity_loss
+
+# 更新
+previous_contexts = contexts.detach()
 ```
 
 **重要ポイント**:
-- ❌ **絶対禁止**: `target_contexts` を更新してはいけない
-  - これは固定点学習の定義を破壊する致命的バグになる
+- ✅ **CVFP損失は前回のコンテキストと比較**: 固定点 = 変化がなくなる点
+- ✅ **previous_contextsは毎イテレーション更新**: これが正しい実装
 - ✅ **必須**: イテレーション間でコンテキストを引き継ぐ
   - `context = previous_contexts[-1]` （ゼロリセット禁止）
 

@@ -1,15 +1,23 @@
-remote: Enumerating objects: 9, done.
-remote: Counting objects: 100% (9/9), done.
-remote: Compressing objects: 100% (1/1), done.
-remote: Total 5 (delta 4), reused 5 (delta 4), pack-reused 0 (from 0)
-Unpacking objects: 100% (5/5), 1.67 KiB | 1.67 MiB/s, done.
+remote: Enumerating objects: 32, done.
+remote: Counting objects: 100% (32/32), done.
+remote: Compressing objects: 100% (6/6), done.
+Unpacking objects: 100% (18/18), 10.48 KiB | 1.50 MiB/s, done.
+remote: Total 18 (delta 14), reused 16 (delta 12), pack-reused 0 (from 0)
 From https://github.com/rato-tokyo/new-llm
  * branch            main       -> FETCH_HEAD
-   45ad87b..af9747f  main       -> origin/main
-Updating 45ad87b..af9747f
+   af9747f..74c929d  main       -> origin/main
+Updating af9747f..74c929d
 Fast-forward
- src/trainers/phase2.py | 107 ++++++++++++++++++++++++++++++++++---------------
- 1 file changed, 75 insertions(+), 32 deletions(-)
+ CLAUDE.md                                 | 129 +++++++-----
+ colab.py                                  |   5 +-
+ colab_output.txt                          | 183 ++++++++---------
+ config.py                                 |   8 +-
+ importants/NEW-LLM_ALGORITHM_SUMMARY.md   |  60 ++++--
+ importants/phase2-context-fixed-design.md | 318 +++++++++++-------------------
+ src/models/llm.py                         |  44 +----
+ src/trainers/phase2.py                    | 179 ++++++++---------
+ train.py                                  |   3 +-
+ 9 files changed, 416 insertions(+), 513 deletions(-)
 
 ======================================================================
 New-LLM Training for Google Colab
@@ -27,19 +35,19 @@ New-LLM Training for Google Colab
    Diversity weight: 0.9
    Phase 2 epochs: 10
    Early stopping patience: 3
-   Context stability weight: 1.0
+   Context-Fixed Learning: context_out = C*[i] (complete fixing)
 
 📦 Creating model...
-2025-11-26 02:46:30.754309: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
-2025-11-26 02:46:30.772127: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+2025-11-26 03:39:06.771151: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-11-26 03:39:06.789173: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
 WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-E0000 00:00:1764125190.793341    9154 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
-E0000 00:00:1764125190.799823    9154 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
-W0000 00:00:1764125190.816137    9154 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764125190.816167    9154 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764125190.816170    9154 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764125190.816173    9154 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-2025-11-26 02:46:30.821083: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+E0000 00:00:1764128346.810873   22056 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764128346.817509   22056 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764128346.834101   22056 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764128346.834128   22056 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764128346.834131   22056 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764128346.834133   22056 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-11-26 03:39:06.839041: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
 To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
 Loading GPT-2 pretrained embeddings...
 ✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
@@ -60,8 +68,8 @@ PHASE 1: 固定点コンテキスト学習 (CVFP)
 ======================================================================
 PHASE 1: 固定点コンテキスト学習 (CVFP) - Train
 ======================================================================
-Iteration 1/10: 順伝播のみ（シーケンシャル） [10.87s]
-Iteration 2/10: 収束=100.0% | Total=-0.339547 | CVFP=0.000247 | Div=-0.377301 | Time=0.96s
+Iteration 1/10: 順伝播のみ（シーケンシャル） [10.78s]
+Iteration 2/10: 収束=100.0% | Total=-0.339547 | CVFP=0.000247 | Div=-0.377301 | Time=0.97s
   → Early stopping: 収束率 = 100.0%
 
 Phase 1 完了: 5119/5120 トークンが収束
@@ -72,7 +80,7 @@ Evaluating on validation data...
 ======================================================================
 
 
-⏱️  Phase 1 completed in 14.0s
+⏱️  Phase 1 completed in 13.8s
 💾 Checkpoint saved: ./checkpoints/model_latest.pt
 
 ======================================================================
@@ -151,142 +159,52 @@ PHASE 2: トークン予測学習
 ======================================================================
 
 ✓ Full model fine-tuning: 91,429,969/130,027,345 parameters trainable
-✓ Context stability weight: 1.0
+✓ Context-Fixed Learning: context_out replaced with C*[i] (complete fixing)
 
 ======================================================================
 PHASE 2: Next-Token Prediction Training
-         (Context Propagation + Token Embed Prediction)
+         (Context-Fixed Learning)
 ======================================================================
 
 Training tokens: 5,120
 Validation tokens: 1,280
 Epochs: 10
 Learning rate: 0.002
-Context frozen: False
-Context stability weight: 1.0
+CVFP layers frozen: False
 Early stopping patience: 3
-✓ Context propagates forward (like Phase 1)
-✓ Prediction from concatenated context + token_embed
-✓ Context vectors fixed to Phase 2 start values
-✓ Context gradient detached (no backprop through history)
+✓ Stage 1: Initialize fixed contexts C* from training data
+✓ Stage 2: Train with context_out = C*[i] (complete fixing)
+✓ Prediction from concatenated C*[i] + token_out
+✓ Gradients flow through token_out only
 
-Initializing target contexts...
+Stage 1: Initializing fixed contexts C*...
 ✓ Training target contexts initialized: torch.Size([5120, 768])
 ✓ Validation target contexts initialized: torch.Size([1280, 768])
 
-  [DEBUG] train_epoch called with 5120 tokens
-  [DEBUG] Processing 5119 input tokens
-  [DEBUG] Context initialized: torch.Size([1, 768])
-  [DEBUG] Processing token 0/5119
-  [DEBUG] Processing token 1000/5119
-  [DEBUG] Processing token 2000/5119
-  [DEBUG] Processing token 3000/5119
-  [DEBUG] Processing token 4000/5119
-  [DEBUG] Processing token 5000/5119
-  [DEBUG] Stacking 5119 logits
-  [DEBUG] Logits shape: torch.Size([5119, 50257])
-  [DEBUG] Contexts shape: torch.Size([5119, 768])
-  [DEBUG] Computing losses...
-  [DEBUG] Prediction Loss: 10.8249
-  [DEBUG] Context Stability Loss: 0.000000
-  [DEBUG] Total Loss: 10.8249
-  [DEBUG] Running backward pass...
-  [DEBUG] Backward complete
+Stage 2: Training with fixed contexts...
 Epoch 1/10:
-  Train Loss: 10.8249 | Train PPL: 50257.02 | Context Loss: 0.000000
+  Train Loss: 10.8249 | Train PPL: 50257.02
   Val Loss: 10.0619 | Val PPL: 23433.53 | Val Acc: 6.10%
   ✓ New best validation loss: 10.0619
 
-  [DEBUG] train_epoch called with 5120 tokens
-  [DEBUG] Processing 5119 input tokens
-  [DEBUG] Context initialized: torch.Size([1, 768])
-  [DEBUG] Processing token 0/5119
-  [DEBUG] Processing token 1000/5119
-  [DEBUG] Processing token 2000/5119
-  [DEBUG] Processing token 3000/5119
-  [DEBUG] Processing token 4000/5119
-  [DEBUG] Processing token 5000/5119
-  [DEBUG] Stacking 5119 logits
-  [DEBUG] Logits shape: torch.Size([5119, 50257])
-  [DEBUG] Contexts shape: torch.Size([5119, 768])
-  [DEBUG] Computing losses...
-  [DEBUG] Prediction Loss: 8.7021
-  [DEBUG] Context Stability Loss: 0.000000
-  [DEBUG] Total Loss: 8.7021
-  [DEBUG] Running backward pass...
-  [DEBUG] Backward complete
 Epoch 2/10:
-  Train Loss: 8.7021 | Train PPL: 6015.60 | Context Loss: 0.000000
-  Val Loss: 8.9343 | Val PPL: 7588.03 | Val Acc: 3.60%
-  ✓ New best validation loss: 8.9343
+  Train Loss: 8.7021 | Train PPL: 6015.60
+  Val Loss: 8.7521 | Val PPL: 6324.23 | Val Acc: 6.57%
+  ✓ New best validation loss: 8.7521
 
-  [DEBUG] train_epoch called with 5120 tokens
-  [DEBUG] Processing 5119 input tokens
-  [DEBUG] Context initialized: torch.Size([1, 768])
-  [DEBUG] Processing token 0/5119
-  [DEBUG] Processing token 1000/5119
-  [DEBUG] Processing token 2000/5119
-  [DEBUG] Processing token 3000/5119
-  [DEBUG] Processing token 4000/5119
-  [DEBUG] Processing token 5000/5119
-  [DEBUG] Stacking 5119 logits
-  [DEBUG] Logits shape: torch.Size([5119, 50257])
-  [DEBUG] Contexts shape: torch.Size([5119, 768])
-  [DEBUG] Computing losses...
-  [DEBUG] Prediction Loss: 6.6216
-  [DEBUG] Context Stability Loss: 1.384851
-  [DEBUG] Total Loss: 8.0065
-  [DEBUG] Running backward pass...
-  [DEBUG] Backward complete
 Epoch 3/10:
-  Train Loss: 6.6216 | Train PPL: 751.18 | Context Loss: 1.384851
-  Val Loss: 9.6222 | Val PPL: 15096.83 | Val Acc: 5.71%
+  Train Loss: 6.0365 | Train PPL: 418.43
+  Val Loss: 8.8179 | Val PPL: 6753.88 | Val Acc: 7.35%
   ⚠️ No improvement (1/3)
 
-  [DEBUG] train_epoch called with 5120 tokens
-  [DEBUG] Processing 5119 input tokens
-  [DEBUG] Context initialized: torch.Size([1, 768])
-  [DEBUG] Processing token 0/5119
-  [DEBUG] Processing token 1000/5119
-  [DEBUG] Processing token 2000/5119
-  [DEBUG] Processing token 3000/5119
-  [DEBUG] Processing token 4000/5119
-  [DEBUG] Processing token 5000/5119
-  [DEBUG] Stacking 5119 logits
-  [DEBUG] Logits shape: torch.Size([5119, 50257])
-  [DEBUG] Contexts shape: torch.Size([5119, 768])
-  [DEBUG] Computing losses...
-  [DEBUG] Prediction Loss: 6.1629
-  [DEBUG] Context Stability Loss: 1.402942
-  [DEBUG] Total Loss: 7.5658
-  [DEBUG] Running backward pass...
-  [DEBUG] Backward complete
 Epoch 4/10:
-  Train Loss: 6.1629 | Train PPL: 474.80 | Context Loss: 1.402942
-  Val Loss: 10.5347 | Val PPL: 37599.04 | Val Acc: 5.94%
+  Train Loss: 4.8225 | Train PPL: 124.27
+  Val Loss: 9.0996 | Val PPL: 8951.81 | Val Acc: 7.66%
   ⚠️ No improvement (2/3)
 
-  [DEBUG] train_epoch called with 5120 tokens
-  [DEBUG] Processing 5119 input tokens
-  [DEBUG] Context initialized: torch.Size([1, 768])
-  [DEBUG] Processing token 0/5119
-  [DEBUG] Processing token 1000/5119
-  [DEBUG] Processing token 2000/5119
-  [DEBUG] Processing token 3000/5119
-  [DEBUG] Processing token 4000/5119
-  [DEBUG] Processing token 5000/5119
-  [DEBUG] Stacking 5119 logits
-  [DEBUG] Logits shape: torch.Size([5119, 50257])
-  [DEBUG] Contexts shape: torch.Size([5119, 768])
-  [DEBUG] Computing losses...
-  [DEBUG] Prediction Loss: 6.1310
-  [DEBUG] Context Stability Loss: 1.356824
-  [DEBUG] Total Loss: 7.4878
-  [DEBUG] Running backward pass...
-  [DEBUG] Backward complete
 Epoch 5/10:
-  Train Loss: 6.1310 | Train PPL: 459.90 | Context Loss: 1.356824
-  Val Loss: 10.7181 | Val PPL: 45165.52 | Val Acc: 8.91%
+  Train Loss: 4.0901 | Train PPL: 59.75
+  Val Loss: 9.2718 | Val PPL: 10633.47 | Val Acc: 9.54%
   ⚠️ No improvement (3/3)
 
 ⛔ Early stopping triggered at epoch 5
@@ -296,13 +214,13 @@ Phase 2 Training Complete
 ======================================================================
 
 Best epoch: 2
-Best validation loss: 8.9343
-Best validation PPL: 7588.03
-Best validation accuracy: 3.60%
+Best validation loss: 8.7521
+Best validation PPL: 6324.23
+Best validation accuracy: 6.57%
 Early stopped at epoch: 5
 
 
-⏱️  Phase 2 completed in 277.8s
+⏱️  Phase 2 completed in 275.6s
 💾 Final checkpoint saved: ./checkpoints/model_latest.pt
 
 
@@ -313,20 +231,20 @@ Early stopped at epoch: 5
 [PHASE 1: Context Learning (CVFP)]
   Effective Rank (Train): 88.3% (678.15/768)
   Effective Rank (Val):   79.8% (612.52/768)
-  Time: 14.0s
+  Time: 13.8s
   Status: ✅ PASSED
 
 [PHASE 2: Token Prediction]
-  Best Val PPL:    7588.03 (Epoch 2)
-  Best Val Acc:    3.60%
-  Final Val PPL:   45165.52
-  Final Val Acc:   8.91%
+  Best Val PPL:    6324.23 (Epoch 2)
+  Best Val Acc:    6.57%
+  Final Val PPL:   10633.47
+  Final Val Acc:   9.54%
   Epochs Run:      5/10
-  Time: 277.8s
+  Time: 275.6s
   Status: ⚠️  EARLY STOPPED at epoch 5
 
 ----------------------------------------------------------------------
-  TOTAL TIME: 302.2s
+  TOTAL TIME: 299.9s
 ======================================================================
 
 📉 Epoch-by-Epoch Progress:
@@ -334,10 +252,10 @@ Early stopped at epoch: 5
  Epoch |  Train PPL |    Val PPL |  Val Acc
 --------------------------------------------------
      1 |   50257.02 |   23433.53 |    6.10%
-     2 |    6015.60 |    7588.03 |    3.60% ⭐
-     3 |     751.18 |   15096.83 |    5.71%
-     4 |     474.80 |   37599.04 |    5.94%
-     5 |     459.90 |   45165.52 |    8.91%
+     2 |    6015.60 |    6324.23 |    6.57% ⭐
+     3 |     418.43 |    6753.88 |    7.35%
+     4 |     124.27 |    8951.81 |    7.66%
+     5 |      59.75 |   10633.47 |    9.54%
 --------------------------------------------------
 
 ✅ Training complete!

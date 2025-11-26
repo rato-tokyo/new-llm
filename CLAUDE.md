@@ -68,80 +68,43 @@ CVFP収束チェック:
 
 ---
 
-## 🚨🚨🚨 CRITICAL DESIGN FIX - FIXED-POINT TARGET PRESERVATION (2025-11-25) 🚨🚨🚨
+## 🚨🚨🚨 CRITICAL DESIGN - CVFP FIXED-POINT LEARNING (2025-11-26 修正) 🚨🚨🚨
 
-### 致命的設計ミス: 固定点目標の上書き（絶対に忘れてはいけない）
+### CVFP理論: 固定点学習の正しい実装
 
-**致命的な問題**:
-- `Network.update_convergence()`が毎イテレーション`previous_contexts`を上書き
-- CVFP損失が「固定点への収束」ではなく「前回との差分」を学習
-- **これは固定点学習の定義に完全に反する**
+**固定点学習の定義**: `f(x) = x` となる点に収束させる
 
-**間違った動作フロー**:
+これは「同じ入力を繰り返し処理したとき、出力が変化しなくなる」ことを意味する。
+
+**正しい実装（CVFP理論に基づく）**:
 ```
-Iteration 0: contexts_0 を出力 → previous_contexts = contexts_0
-Iteration 1: contexts_1 を出力 → CVFP損失 = MSE(contexts_1, contexts_0)
-             previous_contexts = contexts_1 に上書き ← ⚠️ 致命的バグ
-Iteration 2: contexts_2 を出力 → CVFP損失 = MSE(contexts_2, contexts_1) ← 目標が変わっている！
-             previous_contexts = contexts_2 に上書き
+Iteration 0: contexts_0 を出力 → previous_contexts = contexts_0（学習なし）
+Iteration 1: contexts_1 を出力 → CVFP損失 = MSE(contexts_1, previous_contexts)
+             previous_contexts = contexts_1 に更新
+Iteration 2: contexts_2 を出力 → CVFP損失 = MSE(contexts_2, previous_contexts)
+             previous_contexts = contexts_2 に更新
+...
 ```
 
-**正しい修正**:
+**重要ポイント**:
+- ✅ CVFP損失は**前回のコンテキスト（previous_contexts）**と比較
+- ✅ previous_contextsは**毎イテレーション更新**してよい
+- ✅ 収束判定も前回との差で行う
+- ❌ ~~Iteration 0を固定目標として保存~~ ← これは間違い
+
+**なぜ前回との比較が正しいか**:
+1. 固定点 = 変化がなくなる点
+2. `MSE(current, previous) → 0` は「出力が安定した」ことを意味する
+3. これが固定点 `f(x) = x` の定義に合致する
+
+**正しいコード（phase1.py）**:
 ```python
-# Phase1Trainer (src/trainers/phase1.py)
+# CVFP損失: 前回のコンテキストと比較（固定点への収束）
+cvfp_loss = compute_cvfp_loss(contexts, previous_contexts)
 
-# ❌❌❌ 絶対にやってはいけない間違った実装（削除済み）
-# Networkのprevious_contextsを直接Optimizerに渡す = 毎回更新される
-self.cvfp_optimizer.start_new_iteration(
-    iteration,
-    self.network.previous_contexts  # これは毎回更新されてしまう！
-)
-
-# ✅✅✅ 必須の正しい実装（修正済み）
-# Iteration 0の出力を固定保存
-target_contexts = None
-
-for iteration in range(self.max_iterations):
-    if is_training and iteration > 0:
-        self.cvfp_optimizer.start_new_iteration(
-            iteration,
-            target_contexts  # 固定された目標を渡す
-        )
-
-    contexts = self.network.forward_all(...)
-
-    # Iteration 0の出力を保存（以降は変更しない）
-    if iteration == 0:
-        target_contexts = contexts.detach().clone()
-
-    # 収束状態を更新（収束判定専用 - これは毎回更新してよい）
-    self.network.update_convergence(contexts)
+# 更新
+previous_contexts = contexts.detach()
 ```
-
-**正しい動作フロー**:
-```
-Iteration 0: contexts_0 を出力 → target_contexts = contexts_0（固定保存）
-Iteration 1: contexts_1 を出力 → CVFP損失 = MSE(contexts_1, target_contexts) ← 固定点と比較
-Iteration 2: contexts_2 を出力 → CVFP損失 = MSE(contexts_2, target_contexts) ← 同じ目標！
-Iteration 3: contexts_3 を出力 → CVFP損失 = MSE(contexts_3, target_contexts) ← 同じ目標！
-```
-
-**なぜこれが致命的か**:
-1. **Fixed-Point = 固定点**: f(x) = x となる点への収束が目標
-2. **目標が動く = 固定点ではない**: 毎回目標が変わると収束判定が無意味
-3. **Moving Target問題**: 常に1ステップ前との差分最小化になり、固定点学習ではない
-4. **CVFP損失の本質的破壊**: 固定点への距離ではなく、差分最小化になる
-
-**二度と同じ間違いをしないために**:
-- ⚠️ **Iteration 0の出力を固定保存**し、以降は変更しない
-- ⚠️ `Network.previous_contexts`は収束判定専用（毎回更新してよい）
-- ⚠️ CVFP損失計算には**固定されたtarget_contexts**を使用
-- ⚠️ 「前回との差分」≠「固定点への収束」を理解する
-
-**責任分離**:
-- `Phase1Trainer`: 固定点目標（`target_contexts`）の保存と管理
-- `Network`: 収束判定用の前回値（`previous_contexts`）の管理
-- `Optimizer`: 固定された目標との損失計算
 
 ---
 
