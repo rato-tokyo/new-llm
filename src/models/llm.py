@@ -1,58 +1,50 @@
 """
-New-LLM: Residual Connection Architecture
+New-LLM: Separated Context/Token Architecture
 
-Clean implementation with inline CVFP layers.
+分離アーキテクチャ:
+1. ContextBlock: 文脈処理専用（Phase 1で学習、Phase 2でfreeze）
+2. TokenBlock: トークン処理専用（Phase 2で学習）
+
 Main features:
-1. Context vector updates with residual connections
-2. LayerNorm for stable training
-3. GPT-2 pretrained embeddings support
+1. Context vector updates with residual connections (ContextBlock)
+2. Token prediction with residual connections (TokenBlock)
+3. LayerNorm for stable training
+4. GPT-2 pretrained embeddings support
 """
 
 import torch
 import torch.nn as nn
 
 
-class CVFPLayer(nn.Module):
+class ContextLayer(nn.Module):
     """
-    Context Vector Fixed-Point Layer - Basic computation unit
+    Context Layer - 文脈処理専用レイヤー
 
-    Encapsulates:
-    1. FNN-based context updates
-    2. Token embedding integration
-    3. Residual connections
-    4. Optional LayerNorm
+    入力: [context, token_embed]
+    出力: context_out（contextのみ、tokenは出力しない）
 
     Args:
         context_dim: Context vector dimension
         embed_dim: Token embedding dimension
-        hidden_dim: Hidden layer dimension (must equal context_dim + embed_dim)
         layernorm_mix: LayerNorm mixing ratio (0.0 = disabled, 1.0 = full)
     """
 
-    def __init__(self, context_dim, embed_dim, hidden_dim, layernorm_mix=0.0):
+    def __init__(self, context_dim, embed_dim, layernorm_mix=0.0):
         super().__init__()
-
-        if hidden_dim != context_dim + embed_dim:
-            raise ValueError(
-                f"hidden_dim ({hidden_dim}) must equal "
-                f"context_dim ({context_dim}) + embed_dim ({embed_dim})"
-            )
 
         self.context_dim = context_dim
         self.embed_dim = embed_dim
-        self.hidden_dim = hidden_dim
         self.layernorm_mix = layernorm_mix
 
-        # FNN: [context + token] -> [hidden_dim]
+        # FNN: [context + token] -> context_dim
         self.fnn = nn.Sequential(
-            nn.Linear(context_dim + embed_dim, hidden_dim),
+            nn.Linear(context_dim + embed_dim, context_dim),
             nn.ReLU()
         )
 
         # Optional LayerNorm
         if layernorm_mix > 0:
             self.context_norm = nn.LayerNorm(context_dim)
-            self.token_norm = nn.LayerNorm(embed_dim)
 
         self._init_weights()
 
@@ -66,67 +58,125 @@ class CVFPLayer(nn.Module):
 
     def forward(self, context, token_embed):
         """
-        Forward pass: Update context and token
+        Forward pass: Update context only
 
         Args:
             context: Current context [batch, context_dim]
-            token_embed: Token embedding [batch, embed_dim]
+            token_embed: Token embedding [batch, embed_dim] (入力のみ)
 
         Returns:
             new_context: Updated context [batch, context_dim]
-            new_token: Updated token embedding [batch, embed_dim]
         """
         # Concatenate inputs
         fnn_input = torch.cat([context, token_embed], dim=-1)
 
-        # FNN forward
-        fnn_output = self.fnn(fnn_input)
+        # FNN forward -> delta_context
+        delta_context = self.fnn(fnn_input)
 
-        # Split output
-        delta_context = fnn_output[:, :self.context_dim]
-        delta_token = fnn_output[:, self.context_dim:]
-
-        # Residual connections
+        # Residual connection
         new_context = context + delta_context
-        new_token = token_embed + delta_token
 
         # Optional LayerNorm mixing
         if self.layernorm_mix > 0:
             context_normed = self.context_norm(new_context)
-            token_normed = self.token_norm(new_token)
-
             mix = self.layernorm_mix
             new_context = (1 - mix) * new_context + mix * context_normed
-            new_token = (1 - mix) * new_token + mix * token_normed
 
-        return new_context, new_token
+        return new_context
 
 
-class CVFPBlock(nn.Module):
+class TokenLayer(nn.Module):
     """
-    CVFP Block - Grouping of multiple layers
+    Token Layer - トークン処理専用レイヤー
 
-    Sequentially executes multiple CVFPLayer instances.
+    入力: [context, token]
+    出力: token_out（tokenのみ更新、contextは参照のみ）
 
     Args:
-        num_layers: Number of CVFP layers in this block
         context_dim: Context vector dimension
         embed_dim: Token embedding dimension
-        hidden_dim: Hidden layer dimension
+        layernorm_mix: LayerNorm mixing ratio (0.0 = disabled, 1.0 = full)
+    """
+
+    def __init__(self, context_dim, embed_dim, layernorm_mix=0.0):
+        super().__init__()
+
+        self.context_dim = context_dim
+        self.embed_dim = embed_dim
+        self.layernorm_mix = layernorm_mix
+
+        # FNN: [context + token] -> embed_dim
+        self.fnn = nn.Sequential(
+            nn.Linear(context_dim + embed_dim, embed_dim),
+            nn.ReLU()
+        )
+
+        # Optional LayerNorm
+        if layernorm_mix > 0:
+            self.token_norm = nn.LayerNorm(embed_dim)
+
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize layer weights"""
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.normal_(module.weight, mean=0.0, std=0.1)
+                if module.bias is not None:
+                    nn.init.normal_(module.bias, mean=0.0, std=0.01)
+
+    def forward(self, context, token):
+        """
+        Forward pass: Update token only
+
+        Args:
+            context: Context vector [batch, context_dim] (参照のみ)
+            token: Current token [batch, embed_dim]
+
+        Returns:
+            new_token: Updated token [batch, embed_dim]
+        """
+        # Concatenate inputs
+        fnn_input = torch.cat([context, token], dim=-1)
+
+        # FNN forward -> delta_token
+        delta_token = self.fnn(fnn_input)
+
+        # Residual connection
+        new_token = token + delta_token
+
+        # Optional LayerNorm mixing
+        if self.layernorm_mix > 0:
+            token_normed = self.token_norm(new_token)
+            mix = self.layernorm_mix
+            new_token = (1 - mix) * new_token + mix * token_normed
+
+        return new_token
+
+
+class ContextBlock(nn.Module):
+    """
+    Context Block - 文脈処理ブロック（複数レイヤー）
+
+    Phase 1で学習、Phase 2でfreeze
+
+    Args:
+        num_layers: Number of context layers
+        context_dim: Context vector dimension
+        embed_dim: Token embedding dimension
         layernorm_mix: LayerNorm mixing ratio
     """
 
-    def __init__(self, num_layers, context_dim, embed_dim, hidden_dim, layernorm_mix=0.0):
+    def __init__(self, num_layers, context_dim, embed_dim, layernorm_mix=0.0):
         super().__init__()
 
         self.num_layers = num_layers
 
-        # Stack of CVFP layers
+        # Stack of Context layers
         self.layers = nn.ModuleList([
-            CVFPLayer(
+            ContextLayer(
                 context_dim=context_dim,
                 embed_dim=embed_dim,
-                hidden_dim=hidden_dim,
                 layernorm_mix=layernorm_mix
             )
             for _ in range(num_layers)
@@ -134,36 +184,133 @@ class CVFPBlock(nn.Module):
 
     def forward(self, context, token_embed):
         """
-        Execute all layers in the block sequentially
+        Execute all context layers sequentially
 
         Args:
             context: [batch, context_dim]
-            token_embed: [batch, embed_dim]
+            token_embed: [batch, embed_dim] (参照のみ、更新されない)
 
         Returns:
             context: Updated context [batch, context_dim]
-            token_embed: Updated token [batch, embed_dim]
         """
         for layer in self.layers:
-            context, token_embed = layer(context, token_embed)
+            context = layer(context, token_embed)
 
-        return context, token_embed
+        return context
+
+    def forward_with_intermediates(self, context, token_embed):
+        """
+        Execute all context layers and return intermediate outputs (E案用)
+
+        各レイヤーの出力を返す。TokenBlockの各レイヤーが対応する
+        ContextBlockレイヤーの出力を参照するために使用。
+
+        Args:
+            context: [batch, context_dim] (初期コンテキスト)
+            token_embed: [batch, embed_dim] (参照のみ、更新されない)
+
+        Returns:
+            outputs: List of context outputs [context_1, context_2, ..., context_N]
+                     len(outputs) == num_layers
+        """
+        outputs = []
+        for layer in self.layers:
+            context = layer(context, token_embed)
+            outputs.append(context)
+        return outputs
+
+
+class TokenBlock(nn.Module):
+    """
+    Token Block - トークン処理ブロック（複数レイヤー）
+
+    Phase 2で学習
+
+    Args:
+        num_layers: Number of token layers
+        context_dim: Context vector dimension
+        embed_dim: Token embedding dimension
+        layernorm_mix: LayerNorm mixing ratio
+    """
+
+    def __init__(self, num_layers, context_dim, embed_dim, layernorm_mix=0.0):
+        super().__init__()
+
+        self.num_layers = num_layers
+
+        # Stack of Token layers
+        self.layers = nn.ModuleList([
+            TokenLayer(
+                context_dim=context_dim,
+                embed_dim=embed_dim,
+                layernorm_mix=layernorm_mix
+            )
+            for _ in range(num_layers)
+        ])
+
+    def forward(self, context, token):
+        """
+        Execute all token layers sequentially (A案: 全レイヤーで同じcontext)
+
+        Args:
+            context: [batch, context_dim] (参照のみ、更新されない)
+            token: [batch, embed_dim]
+
+        Returns:
+            token: Updated token [batch, embed_dim]
+        """
+        for layer in self.layers:
+            token = layer(context, token)
+
+        return token
+
+    def forward_with_contexts(self, context_list, token):
+        """
+        Execute all token layers with layer-specific contexts (E案用)
+
+        各レイヤーが対応するContextBlockレイヤーの出力を使用する。
+        TokenBlock Layer i は context_list[i] を参照。
+
+        Args:
+            context_list: List of context outputs from ContextBlock
+                          [context_1, context_2, ..., context_N]
+                          len(context_list) == num_layers
+            token: [batch, embed_dim] (初期トークン = token_embed)
+
+        Returns:
+            token: Updated token [batch, embed_dim]
+
+        Raises:
+            ValueError: if len(context_list) != num_layers
+        """
+        if len(context_list) != self.num_layers:
+            raise ValueError(
+                f"context_list length ({len(context_list)}) must equal "
+                f"num_layers ({self.num_layers})"
+            )
+
+        for i, layer in enumerate(self.layers):
+            token = layer(context_list[i], token)
+
+        return token
 
 
 class LLM(nn.Module):
     """
-    New-LLM with ResNet-style Residual connections
+    New-LLM with Separated Context/Token Architecture (E案)
 
-    Uses CVFPLayer to cleanly encapsulate:
-    - Context updates
-    - Token updates
+    分離アーキテクチャ:
+    - ContextBlock: 文脈処理専用（Phase 1で学習、Phase 2でfreeze）
+    - TokenBlock: トークン処理専用（Phase 2で学習）
+
+    E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
 
     Args:
         vocab_size: Vocabulary size
         embed_dim: Token embedding dimension
         context_dim: Context vector dimension
-        hidden_dim: Hidden layer dimension (must equal embed_dim + context_dim)
-        layer_structure: List specifying number of layers per block
+        context_layers: Number of layers in ContextBlock
+        token_layers: Number of layers in TokenBlock (must equal context_layers)
         layernorm_mix: LayerNorm mixing ratio, 0.0=disabled (default: 0.0)
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
     """
@@ -173,27 +320,26 @@ class LLM(nn.Module):
         vocab_size,
         embed_dim,
         context_dim,
-        hidden_dim,
-        layer_structure,
+        context_layers=3,
+        token_layers=3,
         layernorm_mix=0.0,
-        use_pretrained_embeddings=False
+        use_pretrained_embeddings=True
     ):
         super().__init__()
 
-        # Validate dimensions
-        if hidden_dim != embed_dim + context_dim:
+        # Validate layer counts match (E案 requirement)
+        if context_layers != token_layers:
             raise ValueError(
-                f"hidden_dim ({hidden_dim}) must equal "
-                f"embed_dim ({embed_dim}) + context_dim ({context_dim})"
+                f"E案 requires context_layers ({context_layers}) == token_layers ({token_layers})"
             )
 
         # Save configuration
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.context_dim = context_dim
-        self.hidden_dim = hidden_dim
-        self.layer_structure = layer_structure
-        self.use_pretrained_embeddings = use_pretrained_embeddings
+        self.context_layers = context_layers
+        self.token_layers = token_layers
+        self.use_separated_architecture = True  # Always true now
 
         # ========== Token Embeddings ==========
         if use_pretrained_embeddings:
@@ -203,24 +349,29 @@ class LLM(nn.Module):
 
         self.embed_norm = nn.LayerNorm(embed_dim)
 
-        # ========== CVFP Blocks ==========
-        self.blocks = nn.ModuleList([
-            CVFPBlock(
-                num_layers=num_layers,
-                context_dim=context_dim,
-                embed_dim=embed_dim,
-                hidden_dim=hidden_dim,
-                layernorm_mix=layernorm_mix
-            )
-            for num_layers in layer_structure
-        ])
+        # ========== Separated Architecture ==========
+        print(f"Using E案 architecture: ContextBlock({context_layers} layers) + TokenBlock({token_layers} layers)")
+
+        # ContextBlock: 文脈処理専用
+        self.context_block = ContextBlock(
+            num_layers=context_layers,
+            context_dim=context_dim,
+            embed_dim=embed_dim,
+            layernorm_mix=layernorm_mix
+        )
+
+        # TokenBlock: トークン処理専用
+        self.token_block = TokenBlock(
+            num_layers=token_layers,
+            context_dim=context_dim,
+            embed_dim=embed_dim,
+            layernorm_mix=layernorm_mix
+        )
 
         # ========== Output Head ==========
-        # Prediction from concatenated context + token_embed
-        self.token_output = nn.Linear(context_dim + embed_dim, vocab_size)
+        self.token_output = nn.Linear(embed_dim, vocab_size)
 
         # Phase 1用: ゼロ初期化 + 勾配無効化
-        # Phase 2開始時に有効化される
         with torch.no_grad():
             self.token_output.weight.fill_(0)
             self.token_output.bias.fill_(0)
@@ -256,28 +407,69 @@ class LLM(nn.Module):
         """Initialize embedding weights"""
         nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
 
-    def _update_context_one_step(self, token_vec, context, return_token=False):
+    def forward_context(self, context, token_embed):
         """
-        Update context for one token step
+        ContextBlock forward pass (Phase 1用)
 
-        Used by diagnostics.py for identity mapping check.
+        Args:
+            context: [batch, context_dim]
+            token_embed: [batch, embed_dim]
+
+        Returns:
+            new_context: [batch, context_dim]
+        """
+        return self.context_block(context, token_embed)
+
+    def forward_context_with_intermediates(self, context, token_embed):
+        """
+        ContextBlock forward pass with intermediate outputs (E案用)
+
+        Args:
+            context: [batch, context_dim] (初期コンテキスト)
+            token_embed: [batch, embed_dim]
+
+        Returns:
+            context_outputs: List of context outputs [context_1, ..., context_N]
+        """
+        return self.context_block.forward_with_intermediates(context, token_embed)
+
+    def forward_token_e(self, context_list, token_embed):
+        """
+        TokenBlock forward pass with layer-specific contexts (E案用)
+
+        TokenBlock Layer i は context_list[i] を参照する。
+
+        Args:
+            context_list: List of context outputs from ContextBlock
+                          [context_1, context_2, ..., context_N]
+            token_embed: [batch, embed_dim]
+
+        Returns:
+            token_out: [batch, embed_dim]
+        """
+        return self.token_block.forward_with_contexts(context_list, token_embed)
+
+    def freeze_context_block(self):
+        """ContextBlockのパラメータをfreezeする（Phase 2用）"""
+        for param in self.context_block.parameters():
+            param.requires_grad = False
+        print("✓ ContextBlock frozen")
+
+    def unfreeze_token_output(self):
+        """token_output層の勾配を有効化する（Phase 2用）"""
+        self.token_output.weight.requires_grad = True
+        self.token_output.bias.requires_grad = True
+        print("✓ token_output layer unfrozen")
+
+    def _update_context_one_step(self, token_vec, context):
+        """
+        Update context for one token step (診断用)
 
         Args:
             token_vec: Token vector [batch, embed_dim]
             context: Current context [batch, context_dim]
-            return_token: If True, also return updated token
 
         Returns:
             new_context: Updated context [batch, context_dim]
-            new_token: Updated token (if return_token=True)
         """
-        current_context = context
-        current_token = token_vec
-
-        # Process through all blocks
-        for block in self.blocks:
-            current_context, current_token = block(current_context, current_token)
-
-        if return_token:
-            return current_context, current_token
-        return current_context
+        return self.context_block(context, token_vec)

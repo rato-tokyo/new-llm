@@ -146,103 +146,149 @@ else:
 
 ---
 
-## 🚨🚨🚨 CRITICAL DESIGN - PHASE 2 CONTEXT-FIXED LEARNING (2025-11-26) 🚨🚨🚨
+## 🚨🚨🚨 CRITICAL DESIGN - 分離アーキテクチャ E案 (2025-11-26) 🚨🚨🚨
 
-### Phase 2: Context-Fixed Token Prediction（完全固定方式）
+### 分離アーキテクチャの概要（E案 - レイヤー対応版）
 
-**Phase 2は2段階処理で実行される**:
+ContextBlockとTokenBlockを**物理的に分離**し、**TokenBlock Layer i が ContextBlock Layer i の出力を参照**する。
 
-#### Stage 1: 初期化（パラメータ更新なし）
-- Phase 2開始時に1回だけ実行
-- 訓練データの全トークンを処理し、固定文脈ベクトルC*を生成
-- **C*は以降絶対に変更しない**
+```
+ContextBlock (Phase 1で学習、Phase 2でfreeze):
+  Layer 1: [context_0, token_embed] → context_1
+  Layer 2: [context_1, token_embed] → context_2
+  Layer 3: [context_2, token_embed] → context_3 (= C*)
 
-```python
-# Stage 1: 固定文脈C*の生成
-with torch.no_grad():
-    context = torch.zeros(...)
-    C_star = []  # 固定文脈ベクトル
-    for token_id in token_ids:
-        token_embed = get_embedding(token_id)
-        context, token_out = cvfp_block(context, token_embed)
-        C_star.append(context)  # C*[i]として保存
+TokenBlock (Phase 2で学習):
+  Layer 1: [context_1, token_embed] → token_1
+  Layer 2: [context_2, token_1]     → token_2
+  Layer 3: [context_3, token_2]     → token_3 (= token_out)
 ```
 
-#### Stage 2: 学習（パラメータ更新あり）
-- 入力: `[C*[i-1], token_embed[i]]` - 固定文脈を使用
-- 出力: `[context_out, token_out]` - CVFPブロックの出力
-- **context_outはC*[i]で完全に置換**（MSE制約ではなく値そのもの）
-- 予測: `logits = Linear(concat(C*[i], token_out))`
+**重要**: TokenBlock Layer i は ContextBlock Layer i の出力を参照する
+
+### 比較表
+
+| 案 | TokenBlockへのcontext入力 | 特徴 |
+|----|--------------------------|------|
+| **A案（旧実装）** | 全レイヤーで同じ context_3 (C*) | シンプル |
+| **D案** | TokenBlock内でcontextも残差更新 | 表現力高いが、C*が変質 |
+| **E案（採用）** | Layer i で ContextBlock Layer i の出力 | 段階的文脈、C*維持 |
+
+### E案の利点
+
+1. **段階的な文脈情報**: 浅いレイヤーでは浅い文脈、深いレイヤーでは深い文脈を使用
+2. **C*の保持**: ContextBlockはfrozenなので、Phase 1で学習した文脈表現が維持される
+3. **Transformerとの類似性**: 各レイヤーで異なる深さの表現を参照
+4. **物理的分離維持**: ContextBlockとTokenBlockは別の重み行列のまま
+
+### Phase 1: ContextBlock学習（固定点学習）
+
+- **学習対象**: ContextBlockのみ
+- **TokenBlock**: 未使用
+- **損失**: CVFP損失 + 多様性損失
 
 ```python
-# Stage 2: Context-Fixed Learning
-for i, token_id in enumerate(input_ids):
-    # 入力: 固定文脈C*[i-1]（i=0の場合はゼロベクトル）
-    input_context = C_star[i-1] if i > 0 else torch.zeros(...)
+# Phase 1の処理フロー
+for token_id in token_ids:
+    token_embed = get_embedding(token_id)
+    context = context_block(context, token_embed)  # ContextBlockのみ使用
+```
 
-    # CVFPブロック処理
-    context_out, token_out = cvfp_block(input_context, token_embed)
+### Phase 2: TokenBlock学習（E案 - トークン予測）
 
-    # CRITICAL: context_outは使わず、C*[i]で完全置換
-    fixed_context = C_star[i].detach()
+- **ContextBlock**: frozen（重み固定）
+- **TokenBlock**: 学習
+- **token_output**: 学習
+- **損失**: CrossEntropy（次トークン予測）のみ
+- **E案**: TokenBlock Layer i は ContextBlock Layer i の出力を入力として受け取る
 
-    # 予測: 固定文脈 + token_out
-    combined = torch.cat([fixed_context, token_out], dim=-1)
-    logits = token_output(combined)
+```python
+# Phase 2の処理フロー（E案）
+for token_id in token_ids:
+    token_embed = get_embedding(token_id)
 
-    # 損失は予測損失のみ（context_stability_lossは不要）
+    # Step 1: ContextBlock（frozen）- 各レイヤーの出力を保存
+    with torch.no_grad():
+        context_outputs = []  # [context_1, context_2, context_3]
+        context = context_in
+        for layer in context_block.layers:
+            context = layer(context, token_embed)
+            context_outputs.append(context)
+
+    # Step 2: TokenBlock（学習）- 対応するレイヤーのcontextを使用
+    token = token_embed
+    for i, layer in enumerate(token_block.layers):
+        token = layer(context_outputs[i], token)  # Layer i の context を使用
+
+    # Step 3: 予測
+    logits = token_output(token)
     loss = CrossEntropy(logits, target)
 ```
 
-### 記号定義
+### E案の実装メソッド
+
+```python
+# ContextBlock
+def forward_with_intermediates(self, context, token_embed):
+    """各レイヤーの出力を返す"""
+    outputs = []
+    for layer in self.layers:
+        context = layer(context, token_embed)
+        outputs.append(context)
+    return outputs  # [context_1, context_2, ..., context_N]
+
+# TokenBlock
+def forward_with_contexts(self, context_list, token):
+    """各レイヤーが対応するcontextを使用"""
+    for i, layer in enumerate(self.layers):
+        token = layer(context_list[i], token)
+    return token
+```
+
+### 記号定義（E案）
 
 | 記号 | 意味 |
 |------|------|
-| `C*[i]` | **固定目標文脈** - Stage 1で計算した、トークンiを処理した後の文脈ベクトル（不変） |
-| `context_out` | **学習時の出力文脈** - Stage 2でCVFPブロックが出力する文脈（**使用しない**） |
-| `token_out` | **学習時の出力トークン** - Stage 2でCVFPブロックが出力するトークン表現（予測に使用） |
+| `context_i` | ContextBlock Layer i の出力 |
+| `context_N` | 最終レイヤー出力 = C* |
+| `token_out` | TokenBlock（学習）の最終出力、予測に使用 |
 
-### 勾配フロー
+### 勾配フロー（E案）
 
 ```
-入力: [C*[i-1], token_embed[i]]
+入力: [context_0, token_embed]
          ↓
-    CVFPブロック
-         ↓
-出力: [context_out, token_out]
-         ↓
-    context_outは破棄、C*[i]を使用
-         ↓
-    combined = [C*[i], token_out]
-         ↓
-    logits = token_output(combined)
-         ↓
-    loss = CrossEntropy(logits, target)
+    ContextBlock Layer 1（frozen）→ context_1
+         ↓                              ↓
+    ContextBlock Layer 2（frozen）→ context_2  →  TokenBlock Layer 1（学習）→ token_1
+         ↓                              ↓                                        ↓
+    ContextBlock Layer 3（frozen）→ context_3  →  TokenBlock Layer 2（学習）→ token_2
+                                        ↓                                        ↓
+                                   TokenBlock Layer 3（学習）→ token_3
+                                                                  ↓
+                                                         token_output（学習）
+                                                                  ↓
+                                                    logits → CrossEntropy
 ```
 
 **勾配の流れ**:
-- ✅ `token_out` → CVFPブロック（更新される）
-- ✅ `token_output`層（更新される）
-- ❌ `context_out` → CVFPブロック（勾配なし - 未使用のため）
-- ❌ `C*[i]` → CVFPブロック（勾配なし - detachのため）
+- ❌ `context_i` → ContextBlock（frozen、勾配なし）
+- ✅ `token_i` → TokenBlock（学習）
+- ✅ `token_output`層（学習）
 
-### 重要な設計変更（2025-11-26）
+### 設定パラメータ
 
-- ❌ **旧設計（v1.0）**: MSE制約による「緩い」固定
-  ```python
-  context_stability_loss = MSE(context_out, C_star[i])  # 緩い制約
-  ```
-- ✅ **新設計（v2.0）**: context_outをC*[i]で完全置換（完全固定）
-  ```python
-  fixed_context = C_star[i].detach()  # 完全固定
-  combined = torch.cat([fixed_context, token_out], dim=-1)
-  ```
+```python
+# config.py
+use_separated_architecture = True  # 分離アーキテクチャを使用
+context_layers = 3                 # ContextBlockのレイヤー数
+token_layers = 3                   # TokenBlockのレイヤー数（context_layersと同じ必須）
+```
 
-### なぜ完全固定が必要か
+### 制約条件
 
-1. **Phase 1の保護**: Phase 1で学習した文脈表現を確実に保護
-2. **明確な役割分離**: context部分の学習を制限し、token_out部分に集中
-3. **安定した学習**: 文脈が固定されているため、予測タスクに集中できる
+- `context_layers == token_layers` が**必須**（レイヤー数が一致していないと対応できない）
+- 現在の設定: `context_layers = 3`, `token_layers = 3` → OK
 
 ---
 

@@ -1,5 +1,7 @@
 """
-Phase 1 Trainer: CVFP固定点学習（並列処理版）
+Phase 1 Trainer: CVFP固定点学習（分離アーキテクチャ版）
+
+ContextBlockのみを学習（TokenBlockは未使用）
 
 Iteration 0: シーケンシャル処理（学習なし、previous_contextsを初期化）
 Iteration 1+: 並列処理（前回contextを使用、23x高速化）
@@ -29,7 +31,11 @@ def phase1_train(
     label="Train"
 ):
     """
-    Phase 1訓練: CVFP固定点学習（並列版）
+    Phase 1訓練: CVFP固定点学習（ContextBlockのみ）
+
+    分離アーキテクチャ:
+    - ContextBlockのみを学習
+    - TokenBlockは未使用（Phase 2で学習）
 
     Args:
         model: LLMモデル
@@ -49,14 +55,19 @@ def phase1_train(
     num_tokens = len(token_ids)
 
     print_flush(f"\n{'='*70}")
-    print_flush(f"PHASE 1: 固定点コンテキスト学習 (CVFP) - {label}")
+    print_flush(f"PHASE 1: 固定点コンテキスト学習 (ContextBlock) - {label}")
     print_flush(f"{'='*70}")
 
-    # Optimizer設定
-    context_params = [
-        p for name, p in model.named_parameters()
-        if 'token_output' not in name and 'token_embedding' not in name
-    ]
+    # Optimizer設定: ContextBlockのパラメータのみ
+    if model.use_separated_architecture:
+        context_params = list(model.context_block.parameters())
+        print_flush(f"Training ContextBlock only ({sum(p.numel() for p in context_params)} parameters)")
+    else:
+        # Legacy: token_outputとtoken_embedding以外
+        context_params = [
+            p for name, p in model.named_parameters()
+            if 'token_output' not in name and 'token_embedding' not in name
+        ]
     optimizer = torch.optim.Adam(context_params, lr=learning_rate)
 
     # トークン埋め込みを計算（1回のみ）
@@ -137,6 +148,8 @@ def forward_all_tokens_sequential(model, token_embeds, previous_contexts, device
     """
     全トークンを順次処理（シーケンシャル版）
 
+    分離アーキテクチャ: ContextBlockのみ使用（TokenBlockは未使用）
+
     Args:
         model: LLMモデル
         token_embeds: トークン埋め込み [num_tokens, embed_dim]
@@ -156,10 +169,14 @@ def forward_all_tokens_sequential(model, token_embeds, previous_contexts, device
     context_list = []
     for t, token_embed in enumerate(token_embeds):
         token_embed_current = token_embed.unsqueeze(0)
-        # CVFPブロックを通過
-        for block in model.blocks:
-            # CRITICAL: 引数順序は (context, token_embed) - llm.pyの定義に合わせる
-            context, token_embed_current = block(context, token_embed_current)
+
+        # ContextBlockを通過（TokenBlockは使用しない）
+        if model.use_separated_architecture:
+            context = model.context_block(context, token_embed_current)
+        else:
+            # Legacy: CVFPブロックを通過
+            for block in model.blocks:
+                context, token_embed_current = block(context, token_embed_current)
 
         context_list.append(context.squeeze(0))
 
@@ -172,6 +189,8 @@ def forward_all_tokens_sequential(model, token_embeds, previous_contexts, device
 def forward_all_tokens_parallel(model, token_embeds, previous_contexts, device):
     """
     全トークンを並列処理（前回contextを使用）
+
+    分離アーキテクチャ: ContextBlockのみ使用（TokenBlockは未使用）
 
     並列化により23x高速化達成（265秒 → 11秒）
     1トークン分のcontext遅延により情報の若干の遅れがあるが、
@@ -198,13 +217,15 @@ def forward_all_tokens_parallel(model, token_embeds, previous_contexts, device):
         # Token 0: 最後のトークンのcontextを使用（イテレーション引継ぎ）
         contexts_for_batch[0] = previous_contexts[-1].detach()
 
-    # 全トークンを並列処理（バッチ処理）
-    current_contexts = contexts_for_batch
-    current_tokens = token_embeds
-
-    # 全ブロックを通過
-    for block in model.blocks:
-        current_contexts, current_tokens = block(current_contexts, current_tokens)
+    # ContextBlockを通過（TokenBlockは使用しない）
+    if model.use_separated_architecture:
+        current_contexts = model.context_block(contexts_for_batch, token_embeds)
+    else:
+        # Legacy: 全CVFPブロックを通過
+        current_contexts = contexts_for_batch
+        current_tokens = token_embeds
+        for block in model.blocks:
+            current_contexts, current_tokens = block(current_contexts, current_tokens)
 
     return current_contexts
 

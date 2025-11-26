@@ -28,33 +28,63 @@ c_{t+1} = c_t + FNN(concat(c_t, token_embed))
 
 ---
 
-## 📐 モデルアーキテクチャ
+## 📐 モデルアーキテクチャ（分離アーキテクチャ E案 - レイヤー対応版）
 
-### 1. CVFPLayer（基本計算ユニット）
+### アーキテクチャ概要
+
+ContextBlockとTokenBlockを**物理的に分離**し、**TokenBlock Layer i が ContextBlock Layer i の出力を参照**する。
 
 ```
-Input: context [768-dim] + token_embed [768-dim]
+ContextBlock (Phase 1で学習、Phase 2でfreeze):
+  Layer 1: [context_0, token_embed] → context_1
+  Layer 2: [context_1, token_embed] → context_2
+  Layer 3: [context_2, token_embed] → context_3 (= C*)
+
+TokenBlock (Phase 2で学習):
+  Layer 1: [context_1, token_embed] → token_1
+  Layer 2: [context_2, token_1]     → token_2
+  Layer 3: [context_3, token_2]     → token_3 (= token_out)
+```
+
+**重要**: TokenBlock Layer i は ContextBlock Layer i の出力を参照する
+
+### 比較表
+
+| 案 | TokenBlockへのcontext入力 | 特徴 |
+|----|--------------------------|------|
+| **A案（旧実装）** | 全レイヤーで同じ context_3 (C*) | シンプル |
+| **D案** | TokenBlock内でcontextも残差更新 | 表現力高いが、C*が変質 |
+| **E案（採用）** | Layer i で ContextBlock Layer i の出力 | 段階的文脈、C*維持 |
+
+### 1. ContextLayer（文脈処理専用）
+
+```
+Input: context [768-dim] + token_embed [768-dim] (入力のみ)
        ↓
-FNN: [1536-dim hidden layer with ReLU]
+FNN: Linear(context_dim + embed_dim → context_dim) + ReLU
        ↓
-Split: → delta_context [768-dim] + delta_token [768-dim]
+delta_context [768-dim]
        ↓
 Residual: new_context = context + delta_context
-          new_token = token_embed + delta_token
        ↓
-Optional: LayerNorm (layernorm_mix=1.0 で全適用)
+Output: new_context [768-dim] (contextのみ出力)
 ```
 
-**重要な制約**:
-- `hidden_dim = context_dim + embed_dim` (1536 = 768 + 768) **必須**
-- この制約により、FNN出力を正確に分割可能
+### 2. TokenLayer（トークン処理専用）
 
-### 2. CVFPBlock（複数層のグルーピング）
+```
+Input: context_i [768-dim] (ContextBlock Layer i の出力) + token [768-dim]
+       ↓
+FNN: Linear(context_dim + embed_dim → embed_dim) + ReLU
+       ↓
+delta_token [768-dim]
+       ↓
+Residual: new_token = token + delta_token
+       ↓
+Output: new_token [768-dim] (tokenのみ出力)
+```
 
-- 6個のCVFPLayerを順次実行
-- 各層で文脈とトークン埋め込みを更新
-
-### 3. LLMモデル全体構造
+### 3. LLMモデル全体構造（E案）
 
 ```
 Token IDs
@@ -63,15 +93,36 @@ Token Embedding (GPT-2 pretrained, frozen)
     ↓ [embedding normalized]
 Context = zero-vector (初期化)
     ↓
-┌─────────────────────────┐
-│  CVFPBlock × 6 layers   │
-│  (Context propagation)  │
-└─────────────────────────┘
-    ↓
-Output Head: Linear(context_dim + embed_dim → vocab_size)
+┌────────────────────────────────────────────────────────────────────┐
+│  ContextBlock (Phase 1で学習、Phase 2でfreeze)                      │
+│    Layer 1: context_0 + token_embed → context_1 ─────┐             │
+│    Layer 2: context_1 + token_embed → context_2 ────┐│             │
+│    Layer 3: context_2 + token_embed → context_3 ───┐││             │
+└────────────────────────────────────────────────────┼┼┼─────────────┘
+                                                     │││
+┌────────────────────────────────────────────────────┼┼┼─────────────┐
+│  TokenBlock (Phase 2で学習)                        │││             │
+│    Layer 1: context_1 + token_embed → token_1  ←───┘││             │
+│    Layer 2: context_2 + token_1     → token_2  ←────┘│             │
+│    Layer 3: context_3 + token_2     → token_3  ←─────┘             │
+└────────────────────────────────────────────────────────────────────┘
+    ↓ token_3 (= token_out)
+Output Head: Linear(embed_dim → vocab_size)
     ↓
 Next Token Prediction
 ```
+
+### E案の利点
+
+1. **段階的な文脈情報**: 浅いレイヤーでは浅い文脈、深いレイヤーでは深い文脈を使用
+2. **C*の保持**: ContextBlockはfrozenなので、Phase 1で学習した文脈表現が維持される
+3. **Transformerとの類似性**: 各レイヤーで異なる深さの表現を参照
+4. **物理的分離維持**: ContextBlockとTokenBlockは別の重み行列のまま
+
+### 制約条件
+
+- `context_layers == token_layers` が**必須**（レイヤー数が一致していないと対応できない）
+- 現在の設定: `context_layers = 3`, `token_layers = 3` → OK
 
 ---
 
@@ -121,55 +172,70 @@ previous_contexts = contexts.detach()
 - 処理時間: 約11秒（シーケンシャル版265秒の23倍高速）
 - 収束率: 27.2%（多様性優先のため低めだが正常）
 
-### Phase 2: Next-Token Prediction（トークン予測）- Context-Fixed Learning
+### Phase 2: Next-Token Prediction（トークン予測）- E案
 
 **目的**: Phase 1で学習した文脈表現を使用して次トークン予測
 
-**2段階処理**:
+#### E案の特徴
 
-#### Stage 1: 初期化（パラメータ更新なし）
-- Phase 2開始時に1回だけ実行
-- 訓練データの全トークンを処理し、固定文脈ベクトルC*を生成
-- **C*は以降絶対に変更しない**
+- **ContextBlock**: frozen（重み固定）
+- **TokenBlock**: 学習
+- **token_output**: 学習
+- **損失**: CrossEntropy（次トークン予測）のみ
+- **E案**: TokenBlock Layer i は ContextBlock Layer i の出力を参照
 
-```python
-# 固定文脈C*の生成
-C*[0] = CVFPブロック(token_embed[0], zero_vector).context_out
-C*[1] = CVFPブロック(token_embed[1], C*[0]).context_out
-...
-```
+**なぜ`context_i`が保証されるか**:
+- ContextBlockの重みがfrozenされている
+- 同じ入力 = 同じ出力（決定的な関数）
+- C*の事前計算は**不要**
+- context_stability_lossも**不要**
 
-#### Stage 2: 学習（パラメータ更新あり）
-- 入力: `[C*[i-1], token_embed[i]]` - 固定文脈を使用
-- 出力: `[context_out, token_out]` - CVFPブロックの出力
-- **context_outはC*[i]で完全に置換**（MSE制約ではなく値そのもの）
-- 予測: `logits = Linear(concat(C*[i], token_out))`
+#### 処理フロー（E案）
 
 ```python
-for i in range(num_tokens):
-    # 入力: 固定文脈C*[i-1]
-    input_context = C_star[i-1] if i > 0 else zero_vector
+# Phase 2の訓練ループ（E案）
+context = torch.zeros(...)  # 初期コンテキスト
 
-    # CVFPブロック処理
-    context_out, token_out = cvfp_block(input_context, token_embed[i])
+for token_id in token_ids:
+    token_embed = get_embedding(token_id)
 
-    # context_outは使わず、C*[i]で完全置換
-    combined = concat(C_star[i], token_out)
-    logits = Linear(combined)
+    # Step 1: ContextBlock（frozen）- 各レイヤーの出力を取得
+    with torch.no_grad():
+        context_outputs = context_block.forward_with_intermediates(context, token_embed)
+        # context_outputs = [context_1, context_2, context_3]
 
-    # 損失は予測損失のみ
-    loss = CrossEntropy(logits, target[i+1])
+    # Step 2: TokenBlock（学習）- 対応するレイヤーのcontextを使用
+    token_out = token_block.forward_with_contexts(context_outputs, token_embed)
+
+    # Step 3: 予測
+    logits = token_output(token_out)
+    loss = CrossEntropy(logits, target)
+
+    # Step 4: コンテキスト更新（最終レイヤーの出力を使用）
+    context = context_outputs[-1].detach()
 ```
 
-**勾配フロー**:
-- ✅ token_out経由でCVFPブロックが更新される
-- ❌ context_out経由の勾配は流れない（完全固定のため）
-- ✅ token_outputは新規学習
+**勾配フロー（E案）**:
+```
+入力: [context_0, token_embed]
+         ↓
+    ContextBlock Layer 1（frozen）→ context_1
+         ↓                              ↓
+    ContextBlock Layer 2（frozen）→ context_2  →  TokenBlock Layer 1（学習）→ token_1
+         ↓                              ↓                                        ↓
+    ContextBlock Layer 3（frozen）→ context_3  →  TokenBlock Layer 2（学習）→ token_2
+                                        ↓                                        ↓
+                                   TokenBlock Layer 3（学習）→ token_3
+                                                                  ↓
+                                                         token_output（学習）
+                                                                  ↓
+                                                    logits → CrossEntropy
+```
 
-**重要な設計変更（2025-11-26）**:
-- ❌ **旧設計（v1.0）**: MSE制約による「緩い」固定
-- ✅ **新設計（v2.0）**: context_outをC*[i]で完全置換（完全固定）
-- **理由**: Phase 1で学習した文脈表現を確実に保護するため
+**勾配の流れ**:
+- ❌ `context_i` → ContextBlock（frozen、勾配なし）
+- ✅ `token_i` → TokenBlock（学習）
+- ✅ `token_output`層（学習）
 
 ---
 
@@ -358,14 +424,41 @@ for token in tokens:
 
 ## 📝 相談時の重要情報
 
-- **アーキテクチャ**: 6層CVFPブロック、768次元、GPT-2事前学習埋め込み
+- **アーキテクチャ**: E案 - 分離アーキテクチャ（ContextBlock 3層 + TokenBlock 3層、レイヤー対応版）
+- **次元**: context_dim=768, embed_dim=768（GPT-2事前学習埋め込み）
 - **並列版性能**: 55.9% ER、11秒処理時間、23倍高速化
 - **最重要設定**: dist_reg_weight=0.9（多様性優先）
 - **データ規模**: 訓練6400トークン、検証1280トークン
 - **再現性**: 乱数シード固定により完全な再現性保証
+- **E案の特徴**: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+### 設定パラメータ
+
+```python
+# config.py
+use_separated_architecture = True  # 分離アーキテクチャを使用
+context_layers = 3                 # ContextBlockのレイヤー数
+token_layers = 3                   # TokenBlockのレイヤー数（context_layersと同じ必須）
+```
+
+### E案の実装メソッド
+
+```python
+# ContextBlock
+forward_with_intermediates(context, token_embed)  # 各レイヤーの出力を返す
+
+# TokenBlock
+forward_with_contexts(context_list, token)  # 各レイヤーが対応するcontextを使用
+
+# LLM
+forward_context_with_intermediates(context, token_embed)  # E案用ContextBlock呼び出し
+forward_token_e(context_list, token_embed)  # E案用TokenBlock呼び出し
+```
 
 ---
 
 **作成日**: 2025-11-26
+**E案採用**: 2025-11-26
+**分離アーキテクチャ採用**: 2025-11-26
 **並列処理版**: 完全採用（2025-11-25）
 **主要ファイル**: src/models/llm.py, src/trainers/phase1.py, src/trainers/phase2.py

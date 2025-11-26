@@ -66,15 +66,14 @@ print(f"Total validation tokens: {len(val_token_ids)}")
 
 # Create model
 print("\nCreating model...")
-layer_structure = [1] * config.num_layers
 model = LLM(
     vocab_size=config.vocab_size,
     embed_dim=config.embed_dim,
     context_dim=config.context_dim,
-    hidden_dim=config.hidden_dim,
-    layer_structure=layer_structure,
-    layernorm_mix=1.0,
-    use_pretrained_embeddings=True
+    context_layers=config.context_layers,
+    token_layers=config.token_layers,
+    layernorm_mix=config.layernorm_mix,
+    use_pretrained_embeddings=config.use_pretrained_embeddings
 )
 model.to(device)
 

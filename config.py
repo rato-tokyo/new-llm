@@ -20,12 +20,20 @@ class ResidualConfig:
 
     # ========== モデルアーキテクチャ ==========
     architecture = "residual_standard"
-    num_layers = 6                  # CVFPブロック数（6層固定）
+    num_layers = 3                  # CVFPブロック数（レガシー用、分離アーキテクチャでは使用しない）
     context_dim = 768               # コンテキストベクトル次元数（GPT-2に合わせて768次元）
     embed_dim = 768                 # トークン埋め込み次元数（GPT-2事前学習済み: 768次元）
-    hidden_dim = 1536               # 中間層次元数（embed_dim * 2）
+    hidden_dim = 1536               # 中間層次元数（レガシー用、分離アーキテクチャでは使用しない）
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
+
+    # ========== 分離アーキテクチャ（A案） ==========
+    # ContextBlock: Phase 1で学習、Phase 2でfreeze
+    # TokenBlock: Phase 2で学習
+    use_separated_architecture = True  # True: 分離アーキテクチャ, False: レガシーCVFP
+    context_layers = 3                 # ContextBlockのレイヤー数
+    token_layers = 3                   # TokenBlockのレイヤー数
+    layernorm_mix = 0.0                # LayerNormの混合比率（0.0=無効, 1.0=完全）
 
     # ========== Diversity Regularization (Per-Dimension Usage Tracking) ==========
     # LayerNorm + Per-Dimension Variance Tracking (EMA-based) による多様性確保
@@ -51,19 +59,20 @@ class ResidualConfig:
                                          # 0.001: 安定的
                                          # 0.0005: 慎重
 
-    # ========== Phase 2: トークン予測（Context-Fixed Learning） ==========
+    # ========== Phase 2: トークン予測（分離アーキテクチャ） ==========
+    # 分離アーキテクチャ: ContextBlock(frozen) + TokenBlock(学習)
+    # - ContextBlockがfreezeされているため、context_out = C*が自動的に保証
+    # - C*の事前計算不要、context_stability_loss不要
     skip_phase1 = False             # Phase 1を実行（Colab実験用）
     skip_phase2 = False             # Phase 2を実行（実装完了）
-    freeze_context = False          # Phase 2でCVFP層も微調整（token_out経由で勾配が流れる）
     phase2_learning_rate = 0.002    # トークン予測の学習率 (Phase 1と同じ)
     phase2_epochs = 10              # 訓練エポック数
-    phase2_patience = 3             # Early stopping patience
-    phase2_batch_size = 2048         # ミニバッチサイズ（GPUメモリ節約のため）
-                                    # 512: 推奨（~4GB VRAM削減）
+    phase2_patience = 2             # Early stopping patience
+    phase2_batch_size = 512         # ミニバッチサイズ（分離アーキテクチャは逐次処理のため小さめ）
+                                    # 512: 推奨
                                     # 256: メモリ不足時
-                                    # 1024: 高速化重視
+                                    # 1024: メモリに余裕がある場合
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
-    # Context-Fixed Learning: context_out = C*[i] に完全固定（MSE制約ではない）
 
     # ========== データ ==========
     # ⚠️ UltraChat専用設定 (高速化により大規模データセットに対応)

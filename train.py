@@ -91,15 +91,14 @@ def main():
         os.makedirs(tokenizer_dir, exist_ok=True)
         gpt2_tokenizer.save_pretrained(tokenizer_dir)
 
-    # Create model with refactored architecture
-    layer_structure = [1] * config.num_layers
+    # Create model with E案 architecture
     model = LLM(
         vocab_size=config.vocab_size,
         embed_dim=config.embed_dim,
         context_dim=config.context_dim,
-        hidden_dim=config.hidden_dim,
-        layer_structure=layer_structure,
-        layernorm_mix=1.0,  # Enabled to prevent value explosion
+        context_layers=config.context_layers,
+        token_layers=config.token_layers,
+        layernorm_mix=config.layernorm_mix,
         use_pretrained_embeddings=config.use_pretrained_embeddings
     )
     model.to(device)
@@ -204,10 +203,10 @@ def main():
                     'model_state_dict': model.state_dict(),
                     'epoch': 'phase1_complete',
                     'config': {
-                        'num_layers': config.num_layers,
+                        'context_layers': config.context_layers,
+                        'token_layers': config.token_layers,
                         'embed_dim': config.embed_dim,
                         'context_dim': config.context_dim,
-                        'hidden_dim': config.hidden_dim,
                         'vocab_size': config.vocab_size
                     }
                 }
@@ -250,7 +249,6 @@ def main():
         phase2_trainer = Phase2Trainer(
             model=model,
             learning_rate=config.phase2_learning_rate,
-            freeze_context=config.freeze_context,
             gradient_clip=config.phase2_gradient_clip
         )
 
@@ -271,10 +269,10 @@ def main():
                     'epoch': 'phase2_complete',
                     'phase2_history': phase2_history,
                     'config': {
-                        'num_layers': config.num_layers,
+                        'context_layers': config.context_layers,
+                        'token_layers': config.token_layers,
                         'embed_dim': config.embed_dim,
                         'context_dim': config.context_dim,
-                        'hidden_dim': config.hidden_dim,
                         'vocab_size': config.vocab_size
                     }
                 }
