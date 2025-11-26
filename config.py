@@ -19,21 +19,12 @@ class ResidualConfig:
     """
 
     # ========== モデルアーキテクチャ ==========
-    architecture = "residual_standard"
-    num_layers = 6                  # CVFPブロック数（レガシー用、分離アーキテクチャでは使用しない）
+    num_layers = 6                  # ContextBlock と TokenBlock の両方のレイヤー数
     context_dim = 768               # コンテキストベクトル次元数（GPT-2に合わせて768次元）
     embed_dim = 768                 # トークン埋め込み次元数（GPT-2事前学習済み: 768次元）
-    hidden_dim = 1536               # 中間層次元数（レガシー用、分離アーキテクチャでは使用しない）
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
-
-    # ========== 分離アーキテクチャ（E案） ==========
-    # ContextBlock: Phase 1で学習、Phase 2でfreeze
-    # TokenBlock: Phase 2で学習
     # LayerNorm: 常に有効（数値安定性のため必須）
-    use_separated_architecture = True  # True: 分離アーキテクチャ, False: レガシーCVFP
-    context_layers = 3                 # ContextBlockのレイヤー数
-    token_layers = 3                   # TokenBlockのレイヤー数
 
     # ========== Diversity Regularization (Per-Dimension Usage Tracking) ==========
     # LayerNorm + Per-Dimension Variance Tracking (EMA-based) による多様性確保

@@ -287,8 +287,7 @@ class LLM(nn.Module):
         vocab_size: Vocabulary size
         embed_dim: Token embedding dimension
         context_dim: Context vector dimension
-        context_layers: Number of layers in ContextBlock
-        token_layers: Number of layers in TokenBlock (must equal context_layers)
+        num_layers: Number of layers in both ContextBlock and TokenBlock
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
     """
 
@@ -297,24 +296,16 @@ class LLM(nn.Module):
         vocab_size,
         embed_dim,
         context_dim,
-        context_layers=3,
-        token_layers=3,
+        num_layers=6,
         use_pretrained_embeddings=True
     ):
         super().__init__()
-
-        # Validate layer counts match (E案 requirement)
-        if context_layers != token_layers:
-            raise ValueError(
-                f"E案 requires context_layers ({context_layers}) == token_layers ({token_layers})"
-            )
 
         # Save configuration
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.context_dim = context_dim
-        self.context_layers = context_layers
-        self.token_layers = token_layers
+        self.num_layers = num_layers
         self.use_separated_architecture = True  # Always true now
 
         # ========== Token Embeddings ==========
@@ -326,18 +317,18 @@ class LLM(nn.Module):
         self.embed_norm = nn.LayerNorm(embed_dim)
 
         # ========== Separated Architecture ==========
-        print(f"Using E案 architecture: ContextBlock({context_layers} layers) + TokenBlock({token_layers} layers)")
+        print(f"Using E案 architecture: ContextBlock({num_layers} layers) + TokenBlock({num_layers} layers)")
 
         # ContextBlock: 文脈処理専用
         self.context_block = ContextBlock(
-            num_layers=context_layers,
+            num_layers=num_layers,
             context_dim=context_dim,
             embed_dim=embed_dim
         )
 
         # TokenBlock: トークン処理専用
         self.token_block = TokenBlock(
-            num_layers=token_layers,
+            num_layers=num_layers,
             context_dim=context_dim,
             embed_dim=embed_dim
         )

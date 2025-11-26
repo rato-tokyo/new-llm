@@ -38,8 +38,7 @@ def load_checkpoint(checkpoint_path, config, device):
         vocab_size=config.vocab_size,
         embed_dim=config.embed_dim,
         context_dim=config.context_dim,
-        context_layers=config.context_layers,
-        token_layers=config.token_layers,
+        num_layers=config.num_layers,
         use_pretrained_embeddings=True
     )
 

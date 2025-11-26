@@ -55,7 +55,7 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description='New-LLM Colab Training')
     parser.add_argument('--epochs', type=int, default=10, help='Phase 2 epochs')
-    parser.add_argument('--patience', type=int, default=3, help='Early stopping patience')
+    parser.add_argument('--patience', type=int, default=None, help='Early stopping patience (default: config.phase2_patience)')
     parser.add_argument('--skip-phase1', action='store_true', help='Skip Phase 1 (use checkpoint)')
     parser.add_argument('--no-cache', action='store_true', help='Regenerate data cache')
     args = parser.parse_args()
@@ -87,15 +87,17 @@ def main():
         print_flush(f"   GPU: {torch.cuda.get_device_name(0)}")
         print_flush(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
+    # コマンドライン引数がNoneの場合はconfigの値を使用
+    patience = args.patience if args.patience is not None else config.phase2_patience
+
     print_flush(f"\n📋 Configuration:")
     print_flush(f"   Architecture: E案 (Separated ContextBlock + TokenBlock)")
-    print_flush(f"   Context layers: {config.context_layers}")
-    print_flush(f"   Token layers: {config.token_layers}")
+    print_flush(f"   Num layers: {config.num_layers}")
     print_flush(f"   Context dim: {config.context_dim}")
     print_flush(f"   Embed dim: {config.embed_dim}")
     print_flush(f"   Diversity weight: {config.dist_reg_weight}")
     print_flush(f"   Phase 2 epochs: {args.epochs}")
-    print_flush(f"   Early stopping patience: {args.patience}")
+    print_flush(f"   Early stopping patience: {patience}")
 
     # 結果を格納する変数
     total_start_time = time.time()
@@ -127,8 +129,7 @@ def main():
         vocab_size=config.vocab_size,
         embed_dim=config.embed_dim,
         context_dim=config.context_dim,
-        context_layers=config.context_layers,
-        token_layers=config.token_layers,
+        num_layers=config.num_layers,
         use_pretrained_embeddings=config.use_pretrained_embeddings
     )
     model.to(device)
@@ -326,7 +327,7 @@ def main():
         val_token_ids=val_token_ids,
         device=device,
         epochs=args.epochs,
-        patience=args.patience,
+        patience=patience,
         batch_size=config.phase2_batch_size
     )
 
