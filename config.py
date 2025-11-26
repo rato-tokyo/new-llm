@@ -27,13 +27,13 @@ class ResidualConfig:
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
 
-    # ========== 分離アーキテクチャ（A案） ==========
+    # ========== 分離アーキテクチャ（E案） ==========
     # ContextBlock: Phase 1で学習、Phase 2でfreeze
     # TokenBlock: Phase 2で学習
+    # LayerNorm: 常に有効（数値安定性のため必須）
     use_separated_architecture = True  # True: 分離アーキテクチャ, False: レガシーCVFP
     context_layers = 3                 # ContextBlockのレイヤー数
     token_layers = 3                   # TokenBlockのレイヤー数
-    layernorm_mix = 0.0                # LayerNormの混合比率（0.0=無効, 1.0=完全）
 
     # ========== Diversity Regularization (Per-Dimension Usage Tracking) ==========
     # LayerNorm + Per-Dimension Variance Tracking (EMA-based) による多様性確保

@@ -33,15 +33,13 @@ def load_checkpoint(checkpoint_path, config, device):
     """
     print(f"\nLoading checkpoint: {checkpoint_path}")
 
-    # モデル作成
-    layer_structure = [1] * config.num_layers
+    # モデル作成（E案アーキテクチャ）
     model = LLM(
         vocab_size=config.vocab_size,
         embed_dim=config.embed_dim,
         context_dim=config.context_dim,
-        hidden_dim=config.hidden_dim,
-        layer_structure=layer_structure,
-        layernorm_mix=1.0,
+        context_layers=config.context_layers,
+        token_layers=config.token_layers,
         use_pretrained_embeddings=True
     )
 

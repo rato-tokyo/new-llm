@@ -72,7 +72,6 @@ model = LLM(
     context_dim=config.context_dim,
     context_layers=config.context_layers,
     token_layers=config.token_layers,
-    layernorm_mix=config.layernorm_mix,
     use_pretrained_embeddings=config.use_pretrained_embeddings
 )
 model.to(device)

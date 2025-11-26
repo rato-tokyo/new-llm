@@ -186,7 +186,7 @@ def forward_all_tokens_sequential(model, token_embeds, previous_contexts, device
     return contexts
 
 
-def forward_all_tokens_parallel(model, token_embeds, previous_contexts, device):
+def forward_all_tokens_parallel(model, token_embeds, previous_contexts, device, batch_size=8192):
     """
     全トークンを並列処理（前回contextを使用）
 
@@ -196,11 +196,14 @@ def forward_all_tokens_parallel(model, token_embeds, previous_contexts, device):
     1トークン分のcontext遅延により情報の若干の遅れがあるが、
     dist_reg_weight=0.9により多様性を維持（55.9% ER達成）
 
+    大規模データセット対応: バッチ分割処理でメモリオーバーフロー防止
+
     Args:
         model: LLMモデル
         token_embeds: トークン埋め込み [num_tokens, embed_dim]
         previous_contexts: 前回イテレーションの全context [num_tokens, context_dim]
         device: torch device
+        batch_size: バッチサイズ（デフォルト: 8192）
 
     Returns:
         contexts: [num_tokens, context_dim]
@@ -217,15 +220,34 @@ def forward_all_tokens_parallel(model, token_embeds, previous_contexts, device):
         # Token 0: 最後のトークンのcontextを使用（イテレーション引継ぎ）
         contexts_for_batch[0] = previous_contexts[-1].detach()
 
-    # ContextBlockを通過（TokenBlockは使用しない）
-    if model.use_separated_architecture:
-        current_contexts = model.context_block(contexts_for_batch, token_embeds)
+    # 大規模データセット: バッチ分割処理（メモリオーバーフロー防止）
+    if num_tokens > batch_size:
+        all_contexts = []
+        for start_idx in range(0, num_tokens, batch_size):
+            end_idx = min(start_idx + batch_size, num_tokens)
+            batch_contexts = contexts_for_batch[start_idx:end_idx]
+            batch_embeds = token_embeds[start_idx:end_idx]
+
+            if model.use_separated_architecture:
+                batch_output = model.context_block(batch_contexts, batch_embeds)
+            else:
+                batch_output = batch_contexts
+                batch_tokens = batch_embeds
+                for block in model.blocks:
+                    batch_output, batch_tokens = block(batch_output, batch_tokens)
+
+            all_contexts.append(batch_output)
+
+        current_contexts = torch.cat(all_contexts, dim=0)
     else:
-        # Legacy: 全CVFPブロックを通過
-        current_contexts = contexts_for_batch
-        current_tokens = token_embeds
-        for block in model.blocks:
-            current_contexts, current_tokens = block(current_contexts, current_tokens)
+        # 小規模データセット: 一括処理
+        if model.use_separated_architecture:
+            current_contexts = model.context_block(contexts_for_batch, token_embeds)
+        else:
+            current_contexts = contexts_for_batch
+            current_tokens = token_embeds
+            for block in model.blocks:
+                current_contexts, current_tokens = block(current_contexts, current_tokens)
 
     return current_contexts
 

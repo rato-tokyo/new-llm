@@ -26,15 +26,13 @@ class ContextLayer(nn.Module):
     Args:
         context_dim: Context vector dimension
         embed_dim: Token embedding dimension
-        layernorm_mix: LayerNorm mixing ratio (0.0 = disabled, 1.0 = full)
     """
 
-    def __init__(self, context_dim, embed_dim, layernorm_mix=0.0):
+    def __init__(self, context_dim, embed_dim):
         super().__init__()
 
         self.context_dim = context_dim
         self.embed_dim = embed_dim
-        self.layernorm_mix = layernorm_mix
 
         # FNN: [context + token] -> context_dim
         self.fnn = nn.Sequential(
@@ -42,9 +40,8 @@ class ContextLayer(nn.Module):
             nn.ReLU()
         )
 
-        # Optional LayerNorm
-        if layernorm_mix > 0:
-            self.context_norm = nn.LayerNorm(context_dim)
+        # LayerNorm（必須：数値安定性のため）
+        self.context_norm = nn.LayerNorm(context_dim)
 
         self._init_weights()
 
@@ -73,14 +70,8 @@ class ContextLayer(nn.Module):
         # FNN forward -> delta_context
         delta_context = self.fnn(fnn_input)
 
-        # Residual connection
-        new_context = context + delta_context
-
-        # Optional LayerNorm mixing
-        if self.layernorm_mix > 0:
-            context_normed = self.context_norm(new_context)
-            mix = self.layernorm_mix
-            new_context = (1 - mix) * new_context + mix * context_normed
+        # Residual connection + LayerNorm
+        new_context = self.context_norm(context + delta_context)
 
         return new_context
 
@@ -95,15 +86,13 @@ class TokenLayer(nn.Module):
     Args:
         context_dim: Context vector dimension
         embed_dim: Token embedding dimension
-        layernorm_mix: LayerNorm mixing ratio (0.0 = disabled, 1.0 = full)
     """
 
-    def __init__(self, context_dim, embed_dim, layernorm_mix=0.0):
+    def __init__(self, context_dim, embed_dim):
         super().__init__()
 
         self.context_dim = context_dim
         self.embed_dim = embed_dim
-        self.layernorm_mix = layernorm_mix
 
         # FNN: [context + token] -> embed_dim
         self.fnn = nn.Sequential(
@@ -111,9 +100,8 @@ class TokenLayer(nn.Module):
             nn.ReLU()
         )
 
-        # Optional LayerNorm
-        if layernorm_mix > 0:
-            self.token_norm = nn.LayerNorm(embed_dim)
+        # LayerNorm（必須：数値安定性のため）
+        self.token_norm = nn.LayerNorm(embed_dim)
 
         self._init_weights()
 
@@ -142,14 +130,8 @@ class TokenLayer(nn.Module):
         # FNN forward -> delta_token
         delta_token = self.fnn(fnn_input)
 
-        # Residual connection
-        new_token = token + delta_token
-
-        # Optional LayerNorm mixing
-        if self.layernorm_mix > 0:
-            token_normed = self.token_norm(new_token)
-            mix = self.layernorm_mix
-            new_token = (1 - mix) * new_token + mix * token_normed
+        # Residual connection + LayerNorm
+        new_token = self.token_norm(token + delta_token)
 
         return new_token
 
@@ -164,10 +146,9 @@ class ContextBlock(nn.Module):
         num_layers: Number of context layers
         context_dim: Context vector dimension
         embed_dim: Token embedding dimension
-        layernorm_mix: LayerNorm mixing ratio
     """
 
-    def __init__(self, num_layers, context_dim, embed_dim, layernorm_mix=0.0):
+    def __init__(self, num_layers, context_dim, embed_dim):
         super().__init__()
 
         self.num_layers = num_layers
@@ -176,8 +157,7 @@ class ContextBlock(nn.Module):
         self.layers = nn.ModuleList([
             ContextLayer(
                 context_dim=context_dim,
-                embed_dim=embed_dim,
-                layernorm_mix=layernorm_mix
+                embed_dim=embed_dim
             )
             for _ in range(num_layers)
         ])
@@ -230,10 +210,9 @@ class TokenBlock(nn.Module):
         num_layers: Number of token layers
         context_dim: Context vector dimension
         embed_dim: Token embedding dimension
-        layernorm_mix: LayerNorm mixing ratio
     """
 
-    def __init__(self, num_layers, context_dim, embed_dim, layernorm_mix=0.0):
+    def __init__(self, num_layers, context_dim, embed_dim):
         super().__init__()
 
         self.num_layers = num_layers
@@ -242,8 +221,7 @@ class TokenBlock(nn.Module):
         self.layers = nn.ModuleList([
             TokenLayer(
                 context_dim=context_dim,
-                embed_dim=embed_dim,
-                layernorm_mix=layernorm_mix
+                embed_dim=embed_dim
             )
             for _ in range(num_layers)
         ])
@@ -311,7 +289,6 @@ class LLM(nn.Module):
         context_dim: Context vector dimension
         context_layers: Number of layers in ContextBlock
         token_layers: Number of layers in TokenBlock (must equal context_layers)
-        layernorm_mix: LayerNorm mixing ratio, 0.0=disabled (default: 0.0)
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
     """
 
@@ -322,7 +299,6 @@ class LLM(nn.Module):
         context_dim,
         context_layers=3,
         token_layers=3,
-        layernorm_mix=0.0,
         use_pretrained_embeddings=True
     ):
         super().__init__()
@@ -356,16 +332,14 @@ class LLM(nn.Module):
         self.context_block = ContextBlock(
             num_layers=context_layers,
             context_dim=context_dim,
-            embed_dim=embed_dim,
-            layernorm_mix=layernorm_mix
+            embed_dim=embed_dim
         )
 
         # TokenBlock: トークン処理専用
         self.token_block = TokenBlock(
             num_layers=token_layers,
             context_dim=context_dim,
-            embed_dim=embed_dim,
-            layernorm_mix=layernorm_mix
+            embed_dim=embed_dim
         )
 
         # ========== Output Head ==========
