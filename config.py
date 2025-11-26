@@ -20,7 +20,7 @@ class ResidualConfig:
 
     # ========== モデルアーキテクチャ ==========
     architecture = "residual_standard"
-    num_layers = 3                  # CVFPブロック数（6層固定）
+    num_layers = 6                  # CVFPブロック数（6層固定）
     context_dim = 768               # コンテキストベクトル次元数（GPT-2に合わせて768次元）
     embed_dim = 768                 # トークン埋め込み次元数（GPT-2事前学習済み: 768次元）
     hidden_dim = 1536               # 中間層次元数（embed_dim * 2）
@@ -36,7 +36,7 @@ class ResidualConfig:
                                        # 並列版の情報遅延を多様性強化で補償
 
     # ========== Phase 1: CVFP学習（固定点学習） ==========
-    phase1_max_iterations = 20           # 固定点探索の最大反復回数
+    phase1_max_iterations = 30           # 固定点探索の最大反復回数
     phase1_convergence_threshold = 0.03   # 収束判定のMSE閾値
                                          # 意味: 前回iterationとのMSE < 0.1なら収束と判定
                                          # 実測値: 初期MSE≈1.43、学習後MSE≈0.001-0.1
