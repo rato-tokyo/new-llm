@@ -52,7 +52,7 @@ class ResidualConfig:
                                          # 0.0005: 慎重
 
     # ========== Phase 2: トークン予測（Context-Fixed Learning） ==========
-    skip_phase1 = True              # Phase 1をスキップ（チェックポイントから続行する場合）
+    skip_phase1 = False             # Phase 1を実行（Colab実験用）
     skip_phase2 = False             # Phase 2を実行（実装完了）
     freeze_context = False          # Phase 2でCVFP層も微調整（token_out経由で勾配が流れる）
     phase2_learning_rate = 0.002    # トークン予測の学習率 (Phase 1と同じ)

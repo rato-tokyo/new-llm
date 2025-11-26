@@ -209,18 +209,18 @@ def forward_all_tokens_parallel(model, token_embeds, previous_contexts, device):
     return current_contexts
 
 
-def compute_cvfp_loss(contexts, target_contexts):
+def compute_cvfp_loss(contexts, previous_contexts):
     """
-    CVFP損失: 固定点目標とのMSE
+    CVFP損失: 前回のコンテキストとのMSE（固定点への収束）
 
     Args:
         contexts: 現在のコンテキスト [num_tokens, context_dim]
-        target_contexts: 固定点目標（Iteration 0の出力） [num_tokens, context_dim]
+        previous_contexts: 前回イテレーションのコンテキスト [num_tokens, context_dim]
 
     Returns:
         cvfp_loss: MSE損失（スカラー）
     """
-    return F.mse_loss(contexts, target_contexts)
+    return F.mse_loss(contexts, previous_contexts)
 
 
 def compute_diversity_loss(contexts):
