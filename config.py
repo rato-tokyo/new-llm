@@ -65,7 +65,7 @@ class ResidualConfig:
     phase2_learning_rate = 0.002    # トークン予測の学習率 (Phase 1と同じ)
     phase2_epochs = 10              # 訓練エポック数
     phase2_patience = 2             # Early stopping patience
-    phase2_batch_size = 8192         # ミニバッチサイズ（分離アーキテクチャは逐次処理のため小さめ）
+    phase2_batch_size = 16000         # ミニバッチサイズ（分離アーキテクチャは逐次処理のため小さめ）
                                     # 512: 推奨
                                     # 256: メモリ不足時
                                     # 1024: メモリに余裕がある場合
@@ -117,3 +117,18 @@ class ResidualConfig:
     # ========== ログ出力 ==========
     log_every_steps = 1
     save_every_samples = 10
+
+    # ========== ディスクオフロード設定（全データ訓練用） ==========
+    # 使用方法: train_full_ultrachat.py を実行
+    use_disk_offload = False                            # ディスクオフロードモード有効化
+    disk_offload_dir = "/mnt/nvme/cvfp"                 # NVMeマウントポイント
+    disk_offload_chunk_size = 1_000_000                 # チャンクサイズ（トークン数）
+    full_ultrachat_samples = 200_000                    # 全サンプル数（UltraChat 200k）
+    use_bf16 = True                                     # bf16精度を使用（メモリ50%削減）
+
+    # ストレージ見積もり（bf16, 6層）:
+    # - トークン埋め込みキャッシュ: 39GB
+    # - 最終レイヤーcontext×2（ダブルバッファ）: 78GB
+    # - トークンID: 0.2GB
+    # - チェックポイント: ~0.5GB
+    # - 合計: ~120GB
