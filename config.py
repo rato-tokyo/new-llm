@@ -37,7 +37,7 @@ class ResidualConfig:
 
     # ========== Phase 1: CVFP学習（固定点学習） ==========
     phase1_max_iterations = 10           # 固定点探索の最大反復回数
-    phase1_convergence_threshold = 0.1   # 収束判定のMSE閾値
+    phase1_convergence_threshold = 0.03   # 収束判定のMSE閾値
                                          # 意味: 前回iterationとのMSE < 0.1なら収束と判定
                                          # 実測値: 初期MSE≈1.43、学習後MSE≈0.001-0.1
                                          # 0.1: バランスの取れた閾値
