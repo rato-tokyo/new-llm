@@ -260,6 +260,8 @@ class LLM(nn.Module):
         """
         Update context for one token step
 
+        Used by diagnostics.py for identity mapping check.
+
         Args:
             token_vec: Token vector [batch, embed_dim]
             context: Current context [batch, context_dim]
@@ -279,45 +281,3 @@ class LLM(nn.Module):
         if return_token:
             return current_context, current_token
         return current_context
-
-    def forward(self, input_ids, return_context_trajectory=False):
-        """
-        Model forward pass
-
-        Args:
-            input_ids: Input token IDs [batch, seq_len]
-            return_context_trajectory: If True, return all intermediate contexts
-
-        Returns:
-            logits: Output logits [batch, seq_len, vocab_size]
-            context_trajectory: (Optional) All contexts [batch, seq_len, context_dim]
-        """
-        batch_size, seq_len = input_ids.shape
-
-        # Get token embeddings
-        token_embeds = self.token_embedding(input_ids)
-        token_embeds = self.embed_norm(token_embeds)
-
-        # Initialize context
-        context = torch.zeros(
-            batch_size, self.context_dim,
-            device=input_ids.device,
-            dtype=token_embeds.dtype
-        )
-
-        # Process sequence
-        contexts = []
-        for t in range(seq_len):
-            token_vec = token_embeds[:, t, :]
-            context = self._update_context_one_step(token_vec, context)
-            contexts.append(context)
-
-        # Stack contexts
-        all_contexts = torch.stack(contexts, dim=1)
-
-        # Predict next token
-        logits = self.token_output(all_contexts)
-
-        if return_context_trajectory:
-            return logits, all_contexts
-        return logits
