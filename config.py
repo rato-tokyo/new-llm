@@ -20,7 +20,7 @@ class ResidualConfig:
 
     # ========== モデルアーキテクチャ ==========
     architecture = "residual_standard"
-    num_layers = 6                  # CVFPブロック数（6層固定）
+    num_layers = 3                  # CVFPブロック数（6層固定）
     context_dim = 768               # コンテキストベクトル次元数（GPT-2に合わせて768次元）
     embed_dim = 768                 # トークン埋め込み次元数（GPT-2事前学習済み: 768次元）
     hidden_dim = 1536               # 中間層次元数（embed_dim * 2）

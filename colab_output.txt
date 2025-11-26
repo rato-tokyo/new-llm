@@ -1,23 +1,15 @@
-remote: Enumerating objects: 32, done.
-remote: Counting objects: 100% (32/32), done.
-remote: Compressing objects: 100% (6/6), done.
-Unpacking objects: 100% (18/18), 10.48 KiB | 1.50 MiB/s, done.
-remote: Total 18 (delta 14), reused 16 (delta 12), pack-reused 0 (from 0)
+remote: Enumerating objects: 9, done.
+remote: Counting objects: 100% (9/9), done.
+remote: Compressing objects: 100% (2/2), done.
+remote: Total 6 (delta 4), reused 6 (delta 4), pack-reused 0 (from 0)
+Unpacking objects: 100% (6/6), 1.11 KiB | 566.00 KiB/s, done.
 From https://github.com/rato-tokyo/new-llm
- * branch            main       -> FETCH_HEAD
-   af9747f..74c929d  main       -> origin/main
-Updating af9747f..74c929d
+   3fbe7e9..645b6c0  main       -> origin/main
+Updating 3fbe7e9..645b6c0
 Fast-forward
- CLAUDE.md                                 | 129 +++++++-----
- colab.py                                  |   5 +-
- colab_output.txt                          | 183 ++++++++---------
- config.py                                 |   8 +-
- importants/NEW-LLM_ALGORITHM_SUMMARY.md   |  60 ++++--
- importants/phase2-context-fixed-design.md | 318 +++++++++++-------------------
- src/models/llm.py                         |  44 +----
- src/trainers/phase2.py                    | 179 ++++++++---------
- train.py                                  |   3 +-
- 9 files changed, 416 insertions(+), 513 deletions(-)
+ colab.py  | 22 +++++++++++++++-------
+ config.py |  2 +-
+ 2 files changed, 16 insertions(+), 8 deletions(-)
 
 ======================================================================
 New-LLM Training for Google Colab
@@ -32,32 +24,50 @@ New-LLM Training for Google Colab
    Architecture: residual_standard
    Layers: 6
    Context dim: 768
-   Diversity weight: 0.9
+   Diversity weight: 0.5
    Phase 2 epochs: 10
    Early stopping patience: 3
    Context-Fixed Learning: context_out = C*[i] (complete fixing)
 
+📥 Downloading GPT-2 tokenizer...
+tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 208kB/s]
+vocab.json: 100% 1.04M/1.04M [00:00<00:00, 4.58MB/s]
+merges.txt: 100% 456k/456k [00:00<00:00, 69.6MB/s]
+tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 8.98MB/s]
+config.json: 100% 665/665 [00:00<00:00, 6.77MB/s]
+✓ Tokenizer saved
+
 📦 Creating model...
-2025-11-26 03:39:06.771151: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
-2025-11-26 03:39:06.789173: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+2025-11-26 04:29:58.863674: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-11-26 04:29:58.880329: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
 WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-E0000 00:00:1764128346.810873   22056 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
-E0000 00:00:1764128346.817509   22056 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
-W0000 00:00:1764128346.834101   22056 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764128346.834128   22056 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764128346.834131   22056 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764128346.834133   22056 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-2025-11-26 03:39:06.839041: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+E0000 00:00:1764131398.898896   35201 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764131398.904355   35201 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764131398.921265   35201 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764131398.921289   35201 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764131398.921292   35201 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764131398.921295   35201 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-11-26 04:29:58.926257: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
 To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
 Loading GPT-2 pretrained embeddings...
 ✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
 ✓ Model created: 130,027,345 parameters
 
 📊 Loading data from UltraChat...
-   Loading from cache: ./cache/ultrachat_50samples_128len.pt
-   Total tokens: 6,400
-   Train: 5,120 tokens (80%)
-   Val:   1,280 tokens (20% from end)
+tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 239kB/s]
+config.json: 100% 665/665 [00:00<00:00, 6.94MB/s]
+vocab.json: 100% 1.04M/1.04M [00:00<00:00, 4.59MB/s]
+merges.txt: 100% 456k/456k [00:00<00:00, 75.6MB/s]
+tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 6.02MB/s]
+   Downloading UltraChat dataset...
+Generating train_sft split: 100% 207865/207865 [00:03<00:00, 54488.24 examples/s]
+Generating test_sft split: 100% 23110/23110 [00:00<00:00, 53872.32 examples/s]
+Generating train_gen split: 100% 256032/256032 [00:03<00:00, 74553.97 examples/s]
+Generating test_gen split: 100% 28304/28304 [00:00<00:00, 73953.88 examples/s]
+   Cached to: ./cache/ultrachat_100samples_128len.pt
+   Total tokens: 12,800
+   Train: 11,520 tokens
+   Val:   1,280 tokens (fixed size)
    ✓ Validation auto-generated from training data
 
 ======================================================================
@@ -68,11 +78,38 @@ PHASE 1: 固定点コンテキスト学習 (CVFP)
 ======================================================================
 PHASE 1: 固定点コンテキスト学習 (CVFP) - Train
 ======================================================================
-Iteration 1/10: 順伝播のみ（シーケンシャル） [10.78s]
-Iteration 2/10: 収束=100.0% | Total=-0.339547 | CVFP=0.000247 | Div=-0.377301 | Time=0.97s
-  → Early stopping: 収束率 = 100.0%
+Iteration 1/30: 順伝播のみ（シーケンシャル） [25.43s]
+Iteration 2/30: 収束=100.0% | Total=-0.125787 | CVFP=0.000130 | Div=-0.251703 | Time=1.89s
+Iteration 3/30: 収束=0.0% | Total=0.338213 | CVFP=0.919122 | Div=-0.242697 | Time=0.15s
+Iteration 4/30: 収束=0.0% | Total=0.551487 | CVFP=1.354262 | Div=-0.251288 | Time=0.15s
+Iteration 5/30: 収束=0.0% | Total=0.581275 | CVFP=1.416801 | Div=-0.254251 | Time=0.15s
+Iteration 6/30: 収束=0.0% | Total=0.514395 | CVFP=1.281560 | Div=-0.252769 | Time=0.15s
+Iteration 7/30: 収束=0.0% | Total=0.377457 | CVFP=1.004008 | Div=-0.249093 | Time=0.15s
+Iteration 8/30: 収束=0.0% | Total=0.208125 | CVFP=0.660728 | Div=-0.244477 | Time=0.15s
+Iteration 9/30: 収束=0.0% | Total=0.061393 | CVFP=0.363126 | Div=-0.240341 | Time=0.15s
+Iteration 10/30: 収束=8.2% | Total=-0.015793 | CVFP=0.206600 | Div=-0.238186 | Time=0.15s
+Iteration 11/30: 収束=18.3% | Total=-0.015080 | CVFP=0.207603 | Div=-0.237763 | Time=0.15s
+Iteration 12/30: 収束=20.2% | Total=-0.033392 | CVFP=0.170018 | Div=-0.236802 | Time=0.15s
+Iteration 13/30: 収束=48.1% | Total=-0.078888 | CVFP=0.078586 | Div=-0.236363 | Time=0.15s
+Iteration 14/30: 収束=79.0% | Total=-0.105096 | CVFP=0.026755 | Div=-0.236946 | Time=0.15s
+Iteration 15/30: 収束=93.8% | Total=-0.113622 | CVFP=0.010289 | Div=-0.237534 | Time=0.15s
+Iteration 16/30: 収束=98.7% | Total=-0.116784 | CVFP=0.005301 | Div=-0.238869 | Time=0.15s
+Iteration 17/30: 収束=99.8% | Total=-0.118559 | CVFP=0.002673 | Div=-0.239790 | Time=0.15s
+Iteration 18/30: 収束=100.0% | Total=-0.119673 | CVFP=0.001713 | Div=-0.241058 | Time=0.15s
+Iteration 19/30: 収束=100.0% | Total=-0.120574 | CVFP=0.000940 | Div=-0.242088 | Time=0.15s
+Iteration 20/30: 収束=100.0% | Total=-0.121237 | CVFP=0.000746 | Div=-0.243220 | Time=0.15s
+Iteration 21/30: 収束=100.0% | Total=-0.121847 | CVFP=0.000540 | Div=-0.244234 | Time=0.15s
+Iteration 22/30: 収束=100.0% | Total=-0.122380 | CVFP=0.000493 | Div=-0.245253 | Time=0.15s
+Iteration 23/30: 収束=100.0% | Total=-0.122892 | CVFP=0.000413 | Div=-0.246197 | Time=0.15s
+Iteration 24/30: 収束=100.0% | Total=-0.123366 | CVFP=0.000384 | Div=-0.247116 | Time=0.15s
+Iteration 25/30: 収束=100.0% | Total=-0.123821 | CVFP=0.000338 | Div=-0.247980 | Time=0.15s
+Iteration 26/30: 収束=100.0% | Total=-0.124249 | CVFP=0.000312 | Div=-0.248809 | Time=0.15s
+Iteration 27/30: 収束=100.0% | Total=-0.124657 | CVFP=0.000280 | Div=-0.249593 | Time=0.15s
+Iteration 28/30: 収束=100.0% | Total=-0.125043 | CVFP=0.000257 | Div=-0.250342 | Time=0.15s
+Iteration 29/30: 収束=100.0% | Total=-0.125411 | CVFP=0.000232 | Div=-0.251053 | Time=0.16s
+Iteration 30/30: 収束=100.0% | Total=-0.125760 | CVFP=0.000212 | Div=-0.251732 | Time=0.15s
 
-Phase 1 完了: 5119/5120 トークンが収束
+Phase 1 完了: 11520/11520 トークンが収束
 
 
 ======================================================================
@@ -80,7 +117,7 @@ Evaluating on validation data...
 ======================================================================
 
 
-⏱️  Phase 1 completed in 13.8s
+⏱️  Phase 1 completed in 34.9s
 💾 Checkpoint saved: ./checkpoints/model_latest.pt
 
 ======================================================================
@@ -93,23 +130,23 @@ FIXED-POINT ANALYSIS - Train
 ======================================================================
 
 1. Global Attractor Detection:
-  Avg L2 Distance: 38.166851 (Range: [28.213446, 42.890305])
-  Avg Cosine Sim:  0.050771 (Range: [-0.197644, 0.481771])
+  Avg L2 Distance: 36.446884 (Range: [0.000000, 51.379765])
+  Avg Cosine Sim:  0.034562 (Range: [-0.743058, 1.000001])
   ✅ Token-specific fixed points
 
 2. Zero Solution Detection:
-  Avg Norm: 27.712793 (Range: [27.712784, 27.712797])
+  Avg Norm: 27.497601 (Range: [27.386269, 27.600359])
   ✅ Non-zero contexts
 
 3. Distribution Statistics:
-  Norm - Mean: 27.7128, Median: 27.7128, Std: 0.0000
-  Pairwise Dist - Mean: 38.1669, Median: 38.2364
-  Sparsity: 0.66% of values < 0.01
+  Norm - Mean: 27.4976, Median: 27.4687, Std: 0.0568
+  Pairwise Dist - Mean: 36.4469, Median: 39.4144
+  Sparsity: 0.51% of values < 0.01
 
 4. Information Content:
   Actual Rank: 768 / 768 (100.0%)
-  Effective Rank: 678.15 / 768 (88.3%)
-  Top 5 Singular Values: [473.3590087890625, 251.67263793945312, 203.8396759033203, 178.4014129638672, 166.4369354248047]
+  Effective Rank: 332.48 / 768 (43.3%)
+  Top 5 Singular Values: [1987.8023681640625, 1140.8616943359375, 889.4025268554688, 618.64306640625, 549.7315063476562]
   ✅ Good diversity
 ======================================================================
 
@@ -119,23 +156,23 @@ FIXED-POINT ANALYSIS - Val
 ======================================================================
 
 1. Global Attractor Detection:
-  Avg L2 Distance: 37.377724 (Range: [25.458109, 42.359058])
-  Avg Cosine Sim:  0.092325 (Range: [-0.163564, 0.579779])
+  Avg L2 Distance: 36.451580 (Range: [0.000000, 51.274815])
+  Avg Cosine Sim:  0.035181 (Range: [-0.732500, 1.000000])
   ✅ Token-specific fixed points
 
 2. Zero Solution Detection:
-  Avg Norm: 27.769251 (Range: [27.763552, 27.775146])
+  Avg Norm: 27.522123 (Range: [27.408857, 27.625631])
   ✅ Non-zero contexts
 
 3. Distribution Statistics:
-  Norm - Mean: 27.7693, Median: 27.7693, Std: 0.0017
-  Pairwise Dist - Mean: 37.3777, Median: 37.6461
-  Sparsity: 0.66% of values < 0.01
+  Norm - Mean: 27.5221, Median: 27.4931, Std: 0.0585
+  Pairwise Dist - Mean: 36.4516, Median: 39.5159
+  Sparsity: 0.50% of values < 0.01
 
 4. Information Content:
   Actual Rank: 768 / 768 (100.0%)
-  Effective Rank: 612.52 / 768 (79.8%)
-  Top 5 Singular Values: [328.3175354003906, 165.98971557617188, 121.27111053466797, 104.47484588623047, 96.45172119140625]
+  Effective Rank: 273.77 / 768 (35.6%)
+  Top 5 Singular Values: [665.7361450195312, 387.9473876953125, 303.6832580566406, 200.89744567871094, 180.89288330078125]
   ✅ Good diversity
 ======================================================================
 
@@ -144,9 +181,9 @@ FIXED-POINT ANALYSIS - Val
 恒等写像チェック (Identity Mapping Check)
 ======================================================================
 コサイン類似度統計 (100サンプル):
-  平均: 0.0012
-  最大: 0.1141
-  最小: -0.0900
+  平均: -0.0026
+  最大: 0.0935
+  最小: -0.0755
   閾値(0.95)超過: 0/100 (0.0%)
 
 ✅ 正常: 恒等写像ではありません
@@ -166,7 +203,7 @@ PHASE 2: Next-Token Prediction Training
          (Context-Fixed Learning)
 ======================================================================
 
-Training tokens: 5,120
+Training tokens: 11,520
 Validation tokens: 1,280
 Epochs: 10
 Learning rate: 0.002
@@ -178,84 +215,22 @@ Early stopping patience: 3
 ✓ Gradients flow through token_out only
 
 Stage 1: Initializing fixed contexts C*...
-✓ Training target contexts initialized: torch.Size([5120, 768])
+✓ Training target contexts initialized: torch.Size([11520, 768])
 ✓ Validation target contexts initialized: torch.Size([1280, 768])
 
 Stage 2: Training with fixed contexts...
 Epoch 1/10:
-  Train Loss: 10.8249 | Train PPL: 50257.02
-  Val Loss: 10.0619 | Val PPL: 23433.53 | Val Acc: 6.10%
-  ✓ New best validation loss: 10.0619
+  Train Loss: 10.8249 | Train PPL: 50256.96
+  Val Loss: 9.7785 | Val PPL: 17649.90 | Val Acc: 1.17%
+  ✓ New best validation loss: 9.7785
 
 Epoch 2/10:
-  Train Loss: 8.7021 | Train PPL: 6015.60
-  Val Loss: 8.7521 | Val PPL: 6324.23 | Val Acc: 6.57%
-  ✓ New best validation loss: 8.7521
+  Train Loss: 8.6851 | Train PPL: 5914.02
+  Val Loss: 9.1432 | Val PPL: 9351.08 | Val Acc: 3.21%
+  ✓ New best validation loss: 9.1432
 
 Epoch 3/10:
-  Train Loss: 6.0365 | Train PPL: 418.43
-  Val Loss: 8.8179 | Val PPL: 6753.88 | Val Acc: 7.35%
-  ⚠️ No improvement (1/3)
+  Train Loss: 6.9466 | Train PPL: 1039.58
+  Val Loss: 8.9512 | Val PPL: 7717.09 | Val Acc: 3.67%
+  ✓ New best validation loss: 8.9512
 
-Epoch 4/10:
-  Train Loss: 4.8225 | Train PPL: 124.27
-  Val Loss: 9.0996 | Val PPL: 8951.81 | Val Acc: 7.66%
-  ⚠️ No improvement (2/3)
-
-Epoch 5/10:
-  Train Loss: 4.0901 | Train PPL: 59.75
-  Val Loss: 9.2718 | Val PPL: 10633.47 | Val Acc: 9.54%
-  ⚠️ No improvement (3/3)
-
-⛔ Early stopping triggered at epoch 5
-   Val loss hasn't improved for 3 epochs
-======================================================================
-Phase 2 Training Complete
-======================================================================
-
-Best epoch: 2
-Best validation loss: 8.7521
-Best validation PPL: 6324.23
-Best validation accuracy: 6.57%
-Early stopped at epoch: 5
-
-
-⏱️  Phase 2 completed in 275.6s
-💾 Final checkpoint saved: ./checkpoints/model_latest.pt
-
-
-======================================================================
-                    NEW-LLM TRAINING RESULTS                         
-======================================================================
-
-[PHASE 1: Context Learning (CVFP)]
-  Effective Rank (Train): 88.3% (678.15/768)
-  Effective Rank (Val):   79.8% (612.52/768)
-  Time: 13.8s
-  Status: ✅ PASSED
-
-[PHASE 2: Token Prediction]
-  Best Val PPL:    6324.23 (Epoch 2)
-  Best Val Acc:    6.57%
-  Final Val PPL:   10633.47
-  Final Val Acc:   9.54%
-  Epochs Run:      5/10
-  Time: 275.6s
-  Status: ⚠️  EARLY STOPPED at epoch 5
-
-----------------------------------------------------------------------
-  TOTAL TIME: 299.9s
-======================================================================
-
-📉 Epoch-by-Epoch Progress:
---------------------------------------------------
- Epoch |  Train PPL |    Val PPL |  Val Acc
---------------------------------------------------
-     1 |   50257.02 |   23433.53 |    6.10%
-     2 |    6015.60 |    6324.23 |    6.57% ⭐
-     3 |     418.43 |    6753.88 |    7.35%
-     4 |     124.27 |    8951.81 |    7.66%
-     5 |      59.75 |   10633.47 |    9.54%
---------------------------------------------------
-
-✅ Training complete!
