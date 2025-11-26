@@ -251,8 +251,7 @@ def main():
             model=model,
             learning_rate=config.phase2_learning_rate,
             freeze_context=config.freeze_context,
-            gradient_clip=config.phase2_gradient_clip,
-            context_stability_weight=config.phase2_context_stability_weight
+            gradient_clip=config.phase2_gradient_clip
         )
 
         # Train Phase 2

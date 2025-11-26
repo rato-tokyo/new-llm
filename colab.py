@@ -92,7 +92,7 @@ def main():
     print_flush(f"   Diversity weight: {config.dist_reg_weight}")
     print_flush(f"   Phase 2 epochs: {args.epochs}")
     print_flush(f"   Early stopping patience: {args.patience}")
-    print_flush(f"   Context stability weight: {config.phase2_context_stability_weight}")
+    print_flush(f"   Context-Fixed Learning: context_out = C*[i] (complete fixing)")
 
     # 結果を格納する変数
     total_start_time = time.time()
@@ -312,8 +312,7 @@ def main():
         model=model,
         learning_rate=config.phase2_learning_rate,
         freeze_context=config.freeze_context,
-        gradient_clip=config.phase2_gradient_clip,
-        context_stability_weight=config.phase2_context_stability_weight
+        gradient_clip=config.phase2_gradient_clip
     )
 
     # Train Phase 2

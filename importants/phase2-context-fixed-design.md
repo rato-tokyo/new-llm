@@ -1,12 +1,13 @@
 # Phase 2: Context-Fixed Token Prediction Design
 
 **作成日**: 2025-11-25
-**バージョン**: v1.0 (Context Stability Loss)
+**更新日**: 2025-11-26
+**バージョン**: v2.0 (Complete Context Fixing)
 
 ## 概要
 
 Phase 2はPhase 1で学習した文脈表現を活用して、次トークン予測を学習するフェーズです。
-重要な特徴として、**文脈ベクトルをPhase 2開始時の値に固定**することで、Phase 1の学習を保護しています。
+**重要な変更（v2.0）**: 文脈ベクトルは**完全固定**（MSE制約ではなく値そのものを置換）します。
 
 ## 設計原則
 
@@ -19,86 +20,114 @@ Phase 2はPhase 1で学習した文脈表現を活用して、次トークン予
 
 **Phase 2の責任**:
 - 次トークン予測ヘッド（token_output）の訓練
-- CVFPブロックの微調整（文脈ベクトル固定の制約付き）
+- CVFPブロックの微調整（token_out経由のみ）
 - 文脈情報とトークン埋め込み両方を活用した予測
 
-### 2. Token Output初期化方針
+### 2. 2段階処理 (Stage 1 & Stage 2)
 
-**Phase 1中**:
-```python
-# llm.py - __init__
-self.token_output = nn.Linear(context_dim + embed_dim, vocab_size)
-
-# ゼロ初期化 + 勾配無効化
-with torch.no_grad():
-    self.token_output.weight.fill_(0)
-    self.token_output.bias.fill_(0)
-self.token_output.weight.requires_grad = False
-self.token_output.bias.requires_grad = False
-```
-
-**理由**:
-- Phase 1ではtoken_outputは一切使用されない
-- ゼロ初期化により出力も自然にゼロになる
-- 文脈処理（CVFPブロック）に影響を与えない
-
-**Phase 2開始時**:
-```python
-# phase2.py - __init__
-self.model.token_output.weight.requires_grad = True
-self.model.token_output.bias.requires_grad = True
-```
-
-### 3. 文脈ベクトル固定の実装
-
-#### 教師データ生成
+#### Stage 1: 初期化（パラメータ更新なし）
 
 Phase 2開始時に1回だけ実行：
 
 ```python
-def initialize_target_contexts(self, token_ids, device, is_training=True):
-    """Phase 2開始時の文脈ベクトルを教師データとして生成"""
+def initialize_target_contexts(self, token_ids, device):
+    """Phase 2開始時の固定文脈ベクトルC*を生成"""
     self.model.eval()
 
     with torch.no_grad():
-        # トークン埋め込み
-        token_embeds = self.model.token_embedding(token_ids.unsqueeze(0).to(device))
-        token_embeds = self.model.embed_norm(token_embeds).squeeze(0)
-
-        # 文脈伝播（Phase 1と同じ）
         context = torch.zeros(1, self.model.context_dim, device=device)
-        target_contexts = []
+        target_contexts = []  # C*[0], C*[1], ..., C*[n-1]
 
-        for token_embed in token_embeds:
-            for block in self.model.blocks:
-                context, token_embed_out = block(token_embed.unsqueeze(0), context)
+        for token_id in token_ids:
+            token_embed = get_normalized_embedding(self.model, token_id)
+            context, token_embed = process_through_blocks(self.model, context, token_embed)
             target_contexts.append(context.squeeze(0))
 
-        target_contexts = torch.stack(target_contexts)  # [seq_len, context_dim]
-
-    # 保存
-    if is_training:
-        self.target_contexts_train = target_contexts
-    else:
-        self.target_contexts_val = target_contexts
+        self.target_contexts = torch.stack(target_contexts)  # [seq_len, context_dim]
 ```
 
-#### 損失関数
+**重要ポイント**:
+- パラメータ更新なし（`torch.no_grad()`）
+- 最初のトークンはゼロベクトルから開始
+- 出力されたコンテキストをC*として固定保存
+- **以降C*は絶対に変更しない**
+
+#### Stage 2: 学習（パラメータ更新あり）
 
 ```python
-# 1. 予測損失（次トークン予測）
-prediction_loss = CrossEntropyLoss(logits, target_ids)
+def train_epoch(self, token_ids, device):
+    for i, token_id in enumerate(input_ids):
+        # 入力: 固定文脈C*[i-1]とトークン埋め込み
+        if i == 0:
+            input_context = torch.zeros(1, context_dim, device=device)
+        else:
+            input_context = self.target_contexts[i-1].unsqueeze(0).detach()
 
-# 2. 文脈安定性損失（Phase 2開始時の文脈と比較）
-context_stability_loss = F.mse_loss(current_contexts, target_contexts)
+        # CVFPブロック処理
+        context_out, token_out = process_through_blocks(model, input_context, token_embed)
 
-# 総合損失
-total_loss = prediction_loss + context_stability_weight * context_stability_loss
+        # CRITICAL: context_outをC*[i]で完全に置換（MSE制約ではない）
+        fixed_context = self.target_contexts[i].unsqueeze(0).detach()
+
+        # 予測: 固定文脈 + token_out
+        combined = torch.cat([fixed_context, token_out], dim=-1)
+        logits = model.token_output(combined)
+
+        # 損失は予測損失のみ（context_stability_lossは不要）
+        loss = CrossEntropy(logits, target)
 ```
 
-**context_stability_weight**:
-- デフォルト値: `1.0`（予測損失と同等の重み）
-- 設定: `config.py` の `phase2_context_stability_weight`
+### 3. 完全固定 vs MSE制約（v1.0からの変更点）
+
+**v1.0（旧設計）: MSE制約**
+```python
+# 出力されたcontext_outとC*[i]のMSEを損失に追加
+context_stability_loss = MSE(context_out, target_contexts)
+total_loss = prediction_loss + λ * context_stability_loss
+```
+
+**v2.0（新設計）: 完全固定**
+```python
+# context_outは使わず、C*[i]で直接置換
+fixed_context = target_contexts[i].detach()
+combined = torch.cat([fixed_context, token_out], dim=-1)
+# context_stability_lossは不要
+total_loss = prediction_loss
+```
+
+**変更理由**:
+- MSE制約は「緩い」固定であり、完全な一致を保証しない
+- 完全固定により、文脈ベクトルが確実にC*と一致
+- 勾配はtoken_out経由のみでCVFPブロックに流れる（意図的な設計）
+
+### 4. 勾配フローの理解
+
+```
+入力: [C*[i-1], token_embed[i]]
+         ↓
+    CVFPブロック
+         ↓
+出力: [context_out, token_out]
+         ↓
+    context_outは破棄、C*[i]を使用
+         ↓
+    combined = [C*[i], token_out]
+         ↓
+    logits = token_output(combined)
+         ↓
+    loss = CrossEntropy(logits, target)
+```
+
+**勾配の流れ**:
+- `loss` → `logits` → `token_output`のパラメータ ✅
+- `loss` → `logits` → `combined` → `token_out` → CVFPブロック ✅
+- `loss` → `logits` → `combined` → `C*[i]` → CVFPブロック ❌ (detach)
+- `loss` → `logits` → `combined` → `context_out` ❌ (未使用)
+
+**結果**:
+- CVFPブロックは**token_out経由のみ**で更新される
+- context_out部分への勾配はゼロ
+- これは意図的な設計（context部分の学習を制限）
 
 ## 訓練フロー
 
@@ -118,93 +147,24 @@ token_output: ゼロ初期化（未使用）
    model.token_output.bias.requires_grad = True
    ```
 
-2. **教師データ生成**:
+2. **Stage 1: 固定文脈C*を生成**:
    ```python
    trainer.initialize_target_contexts(train_token_ids, device, is_training=True)
    trainer.initialize_target_contexts(val_token_ids, device, is_training=False)
    ```
 
 3. **訓練可能パラメータ**:
-   - CVFPブロック: ✅ 訓練可能（文脈安定性損失による制約付き）
+   - CVFPブロック: ✅ 訓練可能（ただしtoken_out経由のみ）
    - token_output: ✅ 訓練可能（新規学習）
    - token_embedding: ❌ 固定（GPT-2事前学習済み）
 
-### 各エポックの訓練
+## 記号定義
 
-```python
-for epoch in range(epochs):
-    # 順伝播
-    context = torch.zeros(1, context_dim, device=device)
-    all_logits = []
-    all_contexts = []
-
-    for token_embed in token_embeds:
-        context = context.detach()  # 勾配遮断
-
-        # CVFPブロック処理
-        for block in model.blocks:
-            context, token_embed = block(token_embed, context)
-
-        all_contexts.append(context)
-
-        # 予測（連結版）
-        combined = torch.cat([context, token_embed], dim=-1)
-        logits = model.token_output(combined)
-        all_logits.append(logits)
-
-    # 損失計算
-    prediction_loss = CrossEntropyLoss(all_logits, targets)
-    context_stability_loss = MSE(all_contexts, target_contexts)
-    total_loss = prediction_loss + lambda * context_stability_loss
-
-    # 最適化
-    total_loss.backward()
-    optimizer.step()
-```
-
-## 重要な制約と特徴
-
-### 1. 文脈伝播
-
-**Phase 1と同じ動作**:
-- 最初のトークンはゼロベクトルから開始
-- 以降のトークンは前の文脈を引き継ぐ
-- 文脈は全トークンを通して連続的に伝播
-
-### 2. 勾配遮断
-
-```python
-context = context.detach()
-```
-
-**目的**:
-- 系列全体への勾配伝播を防ぐ
-- 訓練の安定化
-- Phase 1の固定点学習を保護
-
-### 3. 連結予測
-
-```python
-combined = torch.cat([context, token_embed], dim=-1)  # [1, 1536]
-logits = model.token_output(combined)  # [1, vocab_size]
-```
-
-**理由**:
-- Context: Phase 1で学習した文脈情報（768次元）
-- Token Embed: CVFPブロック出力のトークン部分（768次元）
-- 両方の情報を活用して予測精度を向上
-
-### 4. CVFPブロックの更新方針
-
-**freeze_context = False（デフォルト）**:
-- CVFPブロックは訓練可能
-- ただし、出力される文脈ベクトルは固定（MSE損失による制約）
-- 重みは変化できるが、最終出力は変わらない
-
-**意図**:
-- Phase 1の文脈表現を保護
-- 予測タスクに合わせた微調整を許可
-- 柔軟性と安定性のバランス
+| 記号 | 意味 |
+|------|------|
+| `C*[i]` | **固定目標文脈** - Stage 1で計算した、トークンiを処理した後の文脈ベクトル（不変） |
+| `context_out` | **学習時の出力文脈** - Stage 2でCVFPブロックが出力する文脈（使用しない） |
+| `token_out` | **学習時の出力トークン** - Stage 2でCVFPブロックが出力するトークン表現（予測に使用） |
 
 ## パラメータ設定
 
@@ -214,23 +174,13 @@ logits = model.token_output(combined)  # [1, vocab_size]
 # Phase 2設定
 skip_phase1 = True                              # チェックポイントから続行
 skip_phase2 = False                             # Phase 2を実行
-freeze_context = False                          # CVFPブロックも訓練
+freeze_context = False                          # CVFPブロックも訓練（token_out経由）
 phase2_learning_rate = 0.002                    # Phase 1と同じ
 phase2_epochs = 10                              # 訓練エポック数
+phase2_patience = 3                             # Early stopping patience
 phase2_gradient_clip = 1.0                      # 勾配クリッピング
-phase2_context_stability_weight = 1.0           # 文脈安定性損失の重み
+# Context-Fixed Learning: context_out = C*[i] に完全固定
 ```
-
-### 推奨設定
-
-**context_stability_weight**:
-- `1.0`: 予測損失と文脈安定性を同等に扱う（デフォルト）
-- `0.5`: 予測精度を優先
-- `2.0`: 文脈固定を優先
-
-**freeze_context**:
-- `False`: CVFPブロックも微調整（推奨）
-- `True`: token_outputのみ訓練（完全凍結）
 
 ## 実験結果の評価項目
 
@@ -238,8 +188,7 @@ phase2_context_stability_weight = 1.0           # 文脈安定性損失の重み
 
 1. **Prediction Loss**: 次トークン予測の損失
 2. **Perplexity**: 言語モデルとしての性能指標
-3. **Context Stability Loss**: 文脈ベクトルの変化量
-4. **Validation Accuracy**: 検証データでの予測精度
+3. **Validation Accuracy**: 検証データでの予測精度
 
 ### 記録される履歴
 
@@ -247,80 +196,49 @@ phase2_context_stability_weight = 1.0           # 文脈安定性損失の重み
 history = {
     'train_loss': [],           # 訓練予測損失
     'train_ppl': [],            # 訓練Perplexity
-    'train_context_loss': [],   # 訓練文脈安定性損失
     'val_loss': [],             # 検証予測損失
     'val_ppl': [],              # 検証Perplexity
-    'val_acc': []               # 検証精度
+    'val_acc': [],              # 検証精度
+    'early_stopped': bool,      # Early stoppingが発動したか
+    'stopped_epoch': int,       # 停止エポック
+    'best_epoch': int           # ベストエポック
 }
 ```
 
 ## 理論的根拠
 
-### なぜ文脈ベクトルを固定するのか
+### なぜ文脈ベクトルを完全固定するのか
 
 1. **Phase 1の学習保護**:
    - Phase 1で学習した文脈表現は貴重
    - 予測タスクによって破壊されるべきではない
 
-2. **役割の明確化**:
+2. **明確な役割分離**:
    - Phase 1: 文脈表現の学習
-   - Phase 2: 予測ヘッドの学習
-   - 各フェーズが独立した責任を持つ
+   - Phase 2: 予測ヘッドの学習 + CVFPブロックの微調整（token_out経由）
 
-3. **段階的学習**:
-   - 固定点学習 → 予測学習の順序
-   - 各段階で異なる目的関数を最適化
-   - より安定した学習プロセス
+3. **安定した学習**:
+   - 文脈が固定されているため、予測タスクに集中できる
+   - MSE制約のような「緩い」固定ではなく、完全固定で確実性を確保
 
-### なぜ連結予測なのか
+### なぜtoken_out経由のみでCVFPを更新するのか
 
-1. **情報の最大活用**:
-   - Context: 文脈情報（Phase 1で学習）
-   - Token Embed: 局所表現（CVFPブロック出力）
-   - 両方を使うことで予測精度向上
+1. **バランスの取れた更新**:
+   - context部分の学習を制限し、過度な変更を防ぐ
+   - token部分の学習に集中
 
-2. **Phase 1の意義**:
-   - Phase 1で学習した文脈を予測に活用
-   - 文脈情報を捨てるのはもったいない
-
-3. **次元数の増加**:
-   - 768 + 768 = 1536次元
-   - より豊富な情報で予測
-
-## 既知の制限と将来の改善
-
-### 現在の実装の制限
-
-1. **文脈ベクトルの完全固定ではない**:
-   - MSE損失による"緩い"制約
-   - 完全にゼロにはならない
-
-2. **メモリ使用量**:
-   - target_contextsを全トークン分保存
-   - 大規模データセットでは要注意
-
-### 将来の改善案
-
-1. **完全凍結オプション**:
-   - CVFPブロックを完全に固定
-   - 文脈ベクトルの完全な保護
-
-2. **適応的重み調整**:
-   - エポックごとにcontext_stability_weightを変更
-   - 初期は文脈固定、後期は予測精度優先
-
-3. **選択的固定**:
-   - 特定の層のみ固定
-   - 浅い層は固定、深い層は微調整
+2. **Phase 1の保護**:
+   - context経由の勾配を遮断することで、文脈表現を保護
 
 ## 関連ファイル
 
 - **実装**: `src/trainers/phase2.py`
 - **モデル定義**: `src/models/llm.py`
 - **設定**: `config.py`
-- **訓練スクリプト**: `train.py`
+- **訓練スクリプト**: `train.py`, `colab.py`
 - **設計ドキュメント**: `CLAUDE.md`
 
 ## 変更履歴
 
 - **2025-11-25**: 初版作成（Context Stability Loss実装）
+- **2025-11-26**: v2.0 - 完全固定方式に変更（MSE制約を廃止）

@@ -183,68 +183,103 @@ else:
 
 ---
 
-## 🚨🚨🚨 CRITICAL DESIGN FIX - PHASE 2 CONTEXT PROPAGATION (2025-11-24) 🚨🚨🚨
+## 🚨🚨🚨 CRITICAL DESIGN - PHASE 2 CONTEXT-FIXED LEARNING (2025-11-26) 🚨🚨🚨
 
-### 致命的設計ミス: Phase 2での各トークン独立処理（絶対に忘れてはいけない）
+### Phase 2: Context-Fixed Token Prediction（完全固定方式）
 
-**致命的な問題（修正前の実装）**:
-- Phase 2で各トークンが完全に独立して処理されていた（毎回0ベクトルから開始）
-- **これはPhase 1と矛盾し、言語モデルとして致命的な欠陥**
-- 文脈情報が全く伝わらず、Phase 1の学習が無駄になっていた
+**Phase 2は2段階処理で実行される**:
 
-**修正内容**:
+#### Stage 1: 初期化（パラメータ更新なし）
+- Phase 2開始時に1回だけ実行
+- 訓練データの全トークンを処理し、固定文脈ベクトルC*を生成
+- **C*は以降絶対に変更しない**
+
 ```python
-# ❌❌❌ 絶対にやってはいけない間違った実装（削除済み）
-# 各トークンが独立 = 文脈伝達なし = Phase 1との不整合
-for token_id in input_ids:
-    context = torch.zeros(...)  # 毎回リセット！致命的バグ
-    context = CVFP(token_embed, context)
-    logits = predict(context)
-
-# ✅✅✅ 必須の正しい実装（修正済み）
-# Context伝播 + Token Embed予測
-context = torch.zeros(...)  # 最初のトークンのみ0から開始
-
-for token_id in input_ids:
-    context = context.detach()  # 勾配遮断（重要）
-    token_embed = embedding(token_id)
-
-    # CVFP処理（文脈とトークン埋め込み両方を伝播）
-    for block in blocks:
-        context, token_embed = block(token_embed, context)
-
-    # Context + Token embedの連結から予測（両方の情報を活用）
-    combined = torch.cat([context, token_embed], dim=-1)
-    logits = predict(combined)
-
-    # Contextは次のトークンに引き継がれる
+# Stage 1: 固定文脈C*の生成
+with torch.no_grad():
+    context = torch.zeros(...)
+    C_star = []  # 固定文脈ベクトル
+    for token_id in token_ids:
+        token_embed = get_embedding(token_id)
+        context, token_out = cvfp_block(context, token_embed)
+        C_star.append(context)  # C*[i]として保存
 ```
 
-### なぜこれが致命的か
+#### Stage 2: 学習（パラメータ更新あり）
+- 入力: `[C*[i-1], token_embed[i]]` - 固定文脈を使用
+- 出力: `[context_out, token_out]` - CVFPブロックの出力
+- **context_outはC*[i]で完全に置換**（MSE制約ではなく値そのもの）
+- 予測: `logits = Linear(concat(C*[i], token_out))`
 
-1. **Phase 1との不整合**: Phase 1ではcontext伝播が必須、Phase 2でも同様であるべき
-2. **文脈情報の欠如**: 各トークンが独立では系列全体の理解が不可能
-3. **Phase 1学習の無駄**: 文脈伝達メカニズムがPhase 2で活用されない
-4. **言語モデルとして不完全**: 前のトークン情報が全く使えない
+```python
+# Stage 2: Context-Fixed Learning
+for i, token_id in enumerate(input_ids):
+    # 入力: 固定文脈C*[i-1]（i=0の場合はゼロベクトル）
+    input_context = C_star[i-1] if i > 0 else torch.zeros(...)
 
-### 正しい設計の重要ポイント
+    # CVFPブロック処理
+    context_out, token_out = cvfp_block(input_context, token_embed)
 
-**1. Context伝播（Phase 1と同じ）**:
-- 最初のトークンのみ0ベクトルから開始
-- 以降は前のcontextを引き継ぐ
-- Phase 1で学習した文脈伝達メカニズムを活用
+    # CRITICAL: context_outは使わず、C*[i]で完全置換
+    fixed_context = C_star[i].detach()
 
-**2. Context勾配遮断**:
-- `context = context.detach()` で勾配を遮断
-- 理由: 系列全体への勾配伝播を防ぎ、学習を安定化
+    # 予測: 固定文脈 + token_out
+    combined = torch.cat([fixed_context, token_out], dim=-1)
+    logits = token_output(combined)
 
-**3. Context + Token Embed連結予測**:
-- 予測は`torch.cat([context, token_embed], dim=-1)`から
-- Contextは文脈情報、Token Embedは局所表現として両方を活用
+    # 損失は予測損失のみ（context_stability_lossは不要）
+    loss = CrossEntropy(logits, target)
+```
 
-**4. 全トークン一括処理**:
-- バッチ分割なし（context伝播があるため）
-- Phase 1と同じ処理フロー
+### 記号定義
+
+| 記号 | 意味 |
+|------|------|
+| `C*[i]` | **固定目標文脈** - Stage 1で計算した、トークンiを処理した後の文脈ベクトル（不変） |
+| `context_out` | **学習時の出力文脈** - Stage 2でCVFPブロックが出力する文脈（**使用しない**） |
+| `token_out` | **学習時の出力トークン** - Stage 2でCVFPブロックが出力するトークン表現（予測に使用） |
+
+### 勾配フロー
+
+```
+入力: [C*[i-1], token_embed[i]]
+         ↓
+    CVFPブロック
+         ↓
+出力: [context_out, token_out]
+         ↓
+    context_outは破棄、C*[i]を使用
+         ↓
+    combined = [C*[i], token_out]
+         ↓
+    logits = token_output(combined)
+         ↓
+    loss = CrossEntropy(logits, target)
+```
+
+**勾配の流れ**:
+- ✅ `token_out` → CVFPブロック（更新される）
+- ✅ `token_output`層（更新される）
+- ❌ `context_out` → CVFPブロック（勾配なし - 未使用のため）
+- ❌ `C*[i]` → CVFPブロック（勾配なし - detachのため）
+
+### 重要な設計変更（2025-11-26）
+
+- ❌ **旧設計（v1.0）**: MSE制約による「緩い」固定
+  ```python
+  context_stability_loss = MSE(context_out, C_star[i])  # 緩い制約
+  ```
+- ✅ **新設計（v2.0）**: context_outをC*[i]で完全置換（完全固定）
+  ```python
+  fixed_context = C_star[i].detach()  # 完全固定
+  combined = torch.cat([fixed_context, token_out], dim=-1)
+  ```
+
+### なぜ完全固定が必要か
+
+1. **Phase 1の保護**: Phase 1で学習した文脈表現を確実に保護
+2. **明確な役割分離**: context部分の学習を制限し、token_out部分に集中
+3. **安定した学習**: 文脈が固定されているため、予測タスクに集中できる
 
 ---
 

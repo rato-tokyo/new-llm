@@ -1,15 +1,19 @@
 """
-Phase 2 Trainer: Next-Token Prediction with Context Propagation
+Phase 2 Trainer: Next-Token Prediction with Context-Fixed Learning
 
-Trains the prediction head to predict next tokens using contexts learned in Phase 1.
+Trains the prediction head to predict next tokens using fixed context vectors.
 
-Key Design (Updated 2025-11-25):
-- Context propagation: Context carries forward between tokens (like Phase 1)
-- First token starts from zero-vector, subsequent tokens use previous context
-- Concatenated context + token_embed used for prediction (both information utilized)
-- Context provides文脈information, token_embed provides local representation
-- Context gradient detached to prevent backprop through context history
-- This ensures Phase 1 and Phase 2 consistency
+Key Design (Updated 2025-11-26):
+- Stage 1 (Initialization): Compute fixed context vectors C*[i] from training data
+  - Process all tokens with zero-vector start
+  - NO parameter updates during this stage
+  - Save output contexts as fixed targets (C*)
+- Stage 2 (Training): Train with fixed context
+  - Input: [C*[i-1], token_embed[i]]
+  - Output: [context_out, token_out]
+  - context_out is replaced with C*[i].detach() (complete fixing, no MSE constraint)
+  - token_out used for prediction
+  - Gradients flow through token_out only (CVFPパラメータは更新されるが、context経由のみ制限)
 """
 
 import torch
@@ -88,14 +92,12 @@ class Phase2Trainer:
         model,
         learning_rate=0.0001,
         freeze_context=False,
-        gradient_clip=1.0,
-        context_stability_weight=1.0
+        gradient_clip=1.0
     ):
         self.model = model
         self.learning_rate = learning_rate
         self.freeze_context = freeze_context
         self.gradient_clip = gradient_clip
-        self.context_stability_weight = context_stability_weight
 
         # Phase 2用: token_outputを有効化（Phase 1ではゼロ＋無効化されている）
         self.model.token_output.weight.requires_grad = True
@@ -109,7 +111,7 @@ class Phase2Trainer:
             trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
             total_params = sum(p.numel() for p in model.parameters())
             print(f"✓ Full model fine-tuning: {trainable_params:,}/{total_params:,} parameters trainable")
-            print(f"✓ Context stability weight: {context_stability_weight}")
+            print(f"✓ Context-Fixed Learning: context_out replaced with C*[i] (complete fixing)")
 
         # Optimizer (only trainable parameters)
         self.optimizer = torch.optim.Adam(
@@ -189,12 +191,14 @@ class Phase2Trainer:
 
     def train_epoch(self, token_ids, device):
         """
-        Train one epoch on token sequence with context propagation
+        Train one epoch on token sequence with context-fixed learning
 
-        CRITICAL DESIGN:
-        - Context propagates forward (like Phase 1)
-        - Token embed used for prediction (not context)
-        - Context gradient detached to prevent backprop through history
+        CRITICAL DESIGN (Updated 2025-11-26):
+        - Input: [C*[i-1], token_embed[i]] - fixed context from initialization
+        - Output: [context_out, token_out] from CVFP blocks
+        - context_out is replaced with C*[i].detach() (complete fixing)
+        - Prediction from concatenated C*[i] + token_out
+        - Gradients flow through token_out only (CVFP params still updated via token_out)
 
         Args:
             token_ids: Token IDs [seq_len]
@@ -204,78 +208,51 @@ class Phase2Trainer:
             avg_loss: Average loss for this epoch
             perplexity: Perplexity metric
         """
-        print(f"  [DEBUG] train_epoch called with {len(token_ids)} tokens")
         self.model.train()
 
         # Input: all tokens except last
         # Target: all tokens except first
         input_ids = token_ids[:-1]  # [seq_len - 1]
         target_ids = token_ids[1:]  # [seq_len - 1]
-        print(f"  [DEBUG] Processing {len(input_ids)} input tokens")
 
-        # Initialize context (first token starts from zero)
-        context = torch.zeros(1, self.model.context_dim, device=device)
-        print(f"  [DEBUG] Context initialized: {context.shape}")
-
-        # Process all tokens with context propagation
+        # Process all tokens with context-fixed learning
         all_logits = []
-        all_contexts = []
         for i, token_id in enumerate(input_ids):
-            if i % 1000 == 0:
-                print(f"  [DEBUG] Processing token {i}/{len(input_ids)}")
-            # Detach context to prevent gradient flow through history
-            context = context.detach()
+            # Get fixed input context C*[i-1] (or zero for first token)
+            if i == 0:
+                input_context = torch.zeros(1, self.model.context_dim, device=device)
+            else:
+                # Use fixed target context from previous position
+                input_context = self.target_contexts_train[i-1].unsqueeze(0).detach()
 
-            # Get normalized token embedding (共通関数を使用)
+            # Get normalized token embedding
             token_embed = get_normalized_embedding(self.model, token_id)
 
-            # Process through CVFP blocks (共通関数を使用)
-            context, token_embed = process_through_blocks(
-                self.model, context, token_embed, self.freeze_context
+            # Process through CVFP blocks
+            # Input: [C*[i-1], token_embed[i]]
+            # Output: [context_out, token_out]
+            context_out, token_out = process_through_blocks(
+                self.model, input_context, token_embed, self.freeze_context
             )
 
-            # 文脈ベクトルを記録
-            all_contexts.append(context.squeeze(0))
+            # CRITICAL: Replace context_out with fixed C*[i] (complete fixing)
+            # Gradients flow through token_out only
+            fixed_context = self.target_contexts_train[i].unsqueeze(0).detach()
 
-            # Predict next token from concatenated context + token_embed
-            combined = torch.cat([context, token_embed], dim=-1)  # [1, context_dim + embed_dim]
+            # Predict next token from concatenated fixed_context + token_out
+            combined = torch.cat([fixed_context, token_out], dim=-1)  # [1, context_dim + embed_dim]
             logits = self.model.token_output(combined)  # [1, vocab_size]
             all_logits.append(logits)
 
-            # Context carries forward to next token
-
-        # Stack all logits and contexts
-        print(f"  [DEBUG] Stacking {len(all_logits)} logits")
+        # Stack all logits
         all_logits = torch.cat(all_logits, dim=0)  # [seq_len - 1, vocab_size]
-        all_contexts = torch.stack(all_contexts)  # [seq_len - 1, context_dim]
-        print(f"  [DEBUG] Logits shape: {all_logits.shape}")
-        print(f"  [DEBUG] Contexts shape: {all_contexts.shape}")
 
-        # Compute losses
-        print(f"  [DEBUG] Computing losses...")
+        # Compute loss (prediction loss only, no context stability loss needed)
         self.optimizer.zero_grad()
-
-        # 1. Prediction loss
         prediction_loss = self.criterion(all_logits, target_ids)
 
-        # 2. Context stability loss (文脈ベクトル固定)
-        if self.target_contexts_train is not None:
-            target_contexts_input = self.target_contexts_train[:-1]  # 最後を除く
-            context_stability_loss = F.mse_loss(all_contexts, target_contexts_input)
-        else:
-            context_stability_loss = torch.tensor(0.0, device=device)
-
-        # Total loss
-        total_loss = prediction_loss + self.context_stability_weight * context_stability_loss
-
-        print(f"  [DEBUG] Prediction Loss: {prediction_loss.item():.4f}")
-        print(f"  [DEBUG] Context Stability Loss: {context_stability_loss.item():.6f}")
-        print(f"  [DEBUG] Total Loss: {total_loss.item():.4f}")
-
         # Backward pass
-        print(f"  [DEBUG] Running backward pass...")
-        total_loss.backward()
-        print(f"  [DEBUG] Backward complete")
+        prediction_loss.backward()
 
         # Gradient clipping
         if self.gradient_clip is not None:
@@ -289,17 +266,17 @@ class Phase2Trainer:
         # Calculate metrics
         avg_loss = prediction_loss.item()
         perplexity = torch.exp(torch.tensor(avg_loss)).item()
-        context_loss = context_stability_loss.item()
 
-        return avg_loss, perplexity, context_loss
+        return avg_loss, perplexity
 
-    def evaluate(self, token_ids, device):
+    def evaluate(self, token_ids, device, target_contexts=None):
         """
-        Evaluate on token sequence with context propagation
+        Evaluate on token sequence with context-fixed learning
 
         Args:
             token_ids: Token IDs [seq_len]
             device: Device to use
+            target_contexts: Fixed target contexts (if None, use self.target_contexts_val)
 
         Returns:
             avg_loss: Average loss
@@ -308,29 +285,39 @@ class Phase2Trainer:
         """
         self.model.eval()
 
+        # Use provided target_contexts or default to validation contexts
+        if target_contexts is None:
+            target_contexts = self.target_contexts_val
+
         # Input: all tokens except last
         # Target: all tokens except first
         input_ids = token_ids[:-1]  # [seq_len - 1]
         target_ids = token_ids[1:]  # [seq_len - 1]
 
         with torch.no_grad():
-            # Initialize context (first token starts from zero)
-            context = torch.zeros(1, self.model.context_dim, device=device)
-
-            # Process all tokens with context propagation
+            # Process all tokens with context-fixed learning
             all_logits = []
-            for token_id in input_ids:
-                # Get normalized token embedding (共通関数を使用)
+            for i, token_id in enumerate(input_ids):
+                # Get fixed input context C*[i-1] (or zero for first token)
+                if i == 0:
+                    input_context = torch.zeros(1, self.model.context_dim, device=device)
+                else:
+                    input_context = target_contexts[i-1].unsqueeze(0)
+
+                # Get normalized token embedding
                 token_embed = get_normalized_embedding(self.model, token_id)
 
-                # Process through CVFP blocks (共通関数を使用)
-                context, token_embed = process_through_blocks(
-                    self.model, context, token_embed, freeze_context=False
+                # Process through CVFP blocks
+                context_out, token_out = process_through_blocks(
+                    self.model, input_context, token_embed, freeze_context=False
                 )
 
-                # Predict next token from concatenated context + token_embed
-                combined = torch.cat([context, token_embed], dim=-1)  # [1, context_dim + embed_dim]
-                logits = self.model.token_output(combined)  # [1, vocab_size]
+                # Use fixed context for prediction
+                fixed_context = target_contexts[i].unsqueeze(0)
+
+                # Predict next token from concatenated fixed_context + token_out
+                combined = torch.cat([fixed_context, token_out], dim=-1)
+                logits = self.model.token_output(combined)
                 all_logits.append(logits)
 
             # Stack all logits
@@ -365,23 +352,22 @@ class Phase2Trainer:
         """
         print(f"\n{'='*70}")
         print("PHASE 2: Next-Token Prediction Training")
-        print("         (Context Propagation + Token Embed Prediction)")
+        print("         (Context-Fixed Learning)")
         print(f"{'='*70}\n")
 
         print(f"Training tokens: {len(train_token_ids):,}")
         print(f"Validation tokens: {len(val_token_ids):,}")
         print(f"Epochs: {epochs}")
         print(f"Learning rate: {self.learning_rate}")
-        print(f"Context frozen: {self.freeze_context}")
-        print(f"Context stability weight: {self.context_stability_weight}")
+        print(f"CVFP layers frozen: {self.freeze_context}")
         print(f"Early stopping patience: {patience}")
-        print(f"✓ Context propagates forward (like Phase 1)")
-        print(f"✓ Prediction from concatenated context + token_embed")
-        print(f"✓ Context vectors fixed to Phase 2 start values")
-        print(f"✓ Context gradient detached (no backprop through history)\n")
+        print(f"✓ Stage 1: Initialize fixed contexts C* from training data")
+        print(f"✓ Stage 2: Train with context_out = C*[i] (complete fixing)")
+        print(f"✓ Prediction from concatenated C*[i] + token_out")
+        print(f"✓ Gradients flow through token_out only\n")
 
-        # Initialize target contexts (Phase 2開始時の文脈ベクトル)
-        print(f"Initializing target contexts...")
+        # Stage 1: Initialize target contexts (Phase 2開始時の固定文脈ベクトル)
+        print(f"Stage 1: Initializing fixed contexts C*...")
         self.initialize_target_contexts(train_token_ids, device, is_training=True)
         self.initialize_target_contexts(val_token_ids, device, is_training=False)
         print()
@@ -389,7 +375,6 @@ class Phase2Trainer:
         history = {
             'train_loss': [],
             'train_ppl': [],
-            'train_context_loss': [],
             'val_loss': [],
             'val_ppl': [],
             'val_acc': [],
@@ -402,9 +387,10 @@ class Phase2Trainer:
         best_epoch = 0
         patience_counter = 0
 
+        print(f"Stage 2: Training with fixed contexts...")
         for epoch in range(1, epochs + 1):
             # Train
-            train_loss, train_ppl, train_context_loss = self.train_epoch(
+            train_loss, train_ppl = self.train_epoch(
                 train_token_ids, device
             )
 
@@ -416,14 +402,13 @@ class Phase2Trainer:
             # Record history
             history['train_loss'].append(train_loss)
             history['train_ppl'].append(train_ppl)
-            history['train_context_loss'].append(train_context_loss)
             history['val_loss'].append(val_loss)
             history['val_ppl'].append(val_ppl)
             history['val_acc'].append(val_acc)
 
             # Print progress
             print(f"Epoch {epoch}/{epochs}:")
-            print(f"  Train Loss: {train_loss:.4f} | Train PPL: {train_ppl:.2f} | Context Loss: {train_context_loss:.6f}")
+            print(f"  Train Loss: {train_loss:.4f} | Train PPL: {train_ppl:.2f}")
             print(f"  Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f} | Val Acc: {val_acc*100:.2f}%")
 
             # Track best model and early stopping

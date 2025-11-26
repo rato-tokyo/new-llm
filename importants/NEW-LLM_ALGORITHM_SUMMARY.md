@@ -117,37 +117,55 @@ total_loss = 0.1 * cvfp_loss + 0.9 * diversity_loss
 - 処理時間: 約11秒（シーケンシャル版265秒の23倍高速）
 - 収束率: 27.2%（多様性優先のため低めだが正常）
 
-### Phase 2: Next-Token Prediction（トークン予測）
+### Phase 2: Next-Token Prediction（トークン予測）- Context-Fixed Learning
 
-**目的**: Phase 1で学習した文脈伝播メカニズムを使用して次トークン予測
+**目的**: Phase 1で学習した文脈表現を使用して次トークン予測
 
-**プロセス**:
+**2段階処理**:
 
-1. **文脈伝播（Phase 1と同じ）**:
-   - 最初のトークンのみゼロベクトルから開始
-   - 以降は前のトークンのcontextを引き継ぐ
-   - Context勾配は遮断（`context.detach()`）
+#### Stage 1: 初期化（パラメータ更新なし）
+- Phase 2開始時に1回だけ実行
+- 訓練データの全トークンを処理し、固定文脈ベクトルC*を生成
+- **C*は以降絶対に変更しない**
 
-2. **予測方法**:
-   - `combined = concat(context, token_embed)` - 両方の情報を活用
-   - `logits = Linear(combined)` - 結合ベクトルから予測
-
-3. **損失関数**:
 ```python
-# 予測損失
-prediction_loss = CrossEntropy(logits, target_tokens)
-
-# 文脈安定性損失（Phase 2開始時の文脈を維持）
-context_stability_loss = MSE(contexts, target_contexts_phase2)
-
-# 総合損失
-total_loss = prediction_loss + 1.0 * context_stability_loss
+# 固定文脈C*の生成
+C*[0] = CVFPブロック(token_embed[0], zero_vector).context_out
+C*[1] = CVFPブロック(token_embed[1], C*[0]).context_out
+...
 ```
 
-**重要な設計修正（2025-11-24）**:
-- ❌ **旧設計**: 各トークンが独立処理（毎回ゼロから開始）
-- ✅ **新設計**: 文脈伝播あり（Phase 1と一貫性）
-- **理由**: Phase 1で学習した文脈伝達メカニズムを活用するため
+#### Stage 2: 学習（パラメータ更新あり）
+- 入力: `[C*[i-1], token_embed[i]]` - 固定文脈を使用
+- 出力: `[context_out, token_out]` - CVFPブロックの出力
+- **context_outはC*[i]で完全に置換**（MSE制約ではなく値そのもの）
+- 予測: `logits = Linear(concat(C*[i], token_out))`
+
+```python
+for i in range(num_tokens):
+    # 入力: 固定文脈C*[i-1]
+    input_context = C_star[i-1] if i > 0 else zero_vector
+
+    # CVFPブロック処理
+    context_out, token_out = cvfp_block(input_context, token_embed[i])
+
+    # context_outは使わず、C*[i]で完全置換
+    combined = concat(C_star[i], token_out)
+    logits = Linear(combined)
+
+    # 損失は予測損失のみ
+    loss = CrossEntropy(logits, target[i+1])
+```
+
+**勾配フロー**:
+- ✅ token_out経由でCVFPブロックが更新される
+- ❌ context_out経由の勾配は流れない（完全固定のため）
+- ✅ token_outputは新規学習
+
+**重要な設計変更（2025-11-26）**:
+- ❌ **旧設計（v1.0）**: MSE制約による「緩い」固定
+- ✅ **新設計（v2.0）**: context_outをC*[i]で完全置換（完全固定）
+- **理由**: Phase 1で学習した文脈表現を確実に保護するため
 
 ---
 
