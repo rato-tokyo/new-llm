@@ -43,7 +43,7 @@ class ResidualConfig:
                                          # 0.1: バランスの取れた閾値
                                          # 0.05: やや厳格（以前の設定）
                                          # 0.01: 非常に厳格
-    phase1_min_converged_ratio = 0.95    # 早期停止: 全トークンの95%が収束したら停止
+    phase1_min_converged_ratio = 1.01    # 早期停止を無効化（101%以上 = 不可能）
 
     # 学習率
     phase1_learning_rate = 0.002         # Phase 1の学習率
@@ -102,7 +102,7 @@ class ResidualConfig:
     # ========== チェックポイント ==========
     checkpoint_dir = "./checkpoints"                    # チェックポイント保存ディレクトリ
     checkpoint_path = "./checkpoints/model_latest.pt"   # 最新モデルのパス
-    load_checkpoint = True                              # 訓練開始時にチェックポイントを読み込む
+    load_checkpoint = False                             # 新規モデルから開始（Colab実験用）
     save_checkpoint = True                              # 訓練終了時にチェックポイントを保存
 
     # ========== ログ出力 ==========
