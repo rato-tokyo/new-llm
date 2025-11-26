@@ -19,7 +19,7 @@ class ResidualConfig:
     """
 
     # ========== モデルアーキテクチャ ==========
-    num_layers = 6                  # ContextBlock と TokenBlock の両方のレイヤー数
+    num_layers = 3                  # ContextBlock と TokenBlock の両方のレイヤー数
     context_dim = 768               # コンテキストベクトル次元数（GPT-2に合わせて768次元）
     embed_dim = 768                 # トークン埋め込み次元数（GPT-2事前学習済み: 768次元）
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
