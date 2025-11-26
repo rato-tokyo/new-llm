@@ -1,17 +1,6 @@
-remote: Enumerating objects: 9, done.
-remote: Counting objects: 100% (9/9), done.
-remote: Compressing objects: 100% (1/1), done.
-remote: Total 5 (delta 4), reused 5 (delta 4), pack-reused 0 (from 0)
-Unpacking objects: 100% (5/5), 1.19 KiB | 1.19 MiB/s, done.
-From https://github.com/rato-tokyo/new-llm
-   25bc4eb..3a3692b  main       -> origin/main
-Updating 25bc4eb..3a3692b
-Fast-forward
- src/evaluation/metrics.py | 48 ++++++++++++++++++++++++++++++++++++++---------
- 1 file changed, 39 insertions(+), 9 deletions(-)
 
 ======================================================================
-New-LLM Training for Google Colab
+New-LLM Training for Google Colab (E案アーキテクチャ)
 ======================================================================
 
 ✅ Random seed fixed: 42 (完全な再現性保証)
@@ -20,49 +9,51 @@ New-LLM Training for Google Colab
    Memory: 23.8 GB
 
 📋 Configuration:
-   Architecture: residual_standard
-   Layers: 3
+   Architecture: E案 (Separated ContextBlock + TokenBlock)
+   Context layers: 3
+   Token layers: 3
    Context dim: 768
+   Embed dim: 768
    Diversity weight: 0.5
    Phase 2 epochs: 10
    Early stopping patience: 3
-   Context-Fixed Learning: context_out = C*[i] (complete fixing)
 
 📥 Downloading GPT-2 tokenizer...
-tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 160kB/s]
-vocab.json: 100% 1.04M/1.04M [00:00<00:00, 4.58MB/s]
-merges.txt: 100% 456k/456k [00:00<00:00, 5.77MB/s]
-tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 4.43MB/s]
-config.json: 100% 665/665 [00:00<00:00, 5.99MB/s]
+tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 175kB/s]
+vocab.json: 100% 1.04M/1.04M [00:00<00:00, 2.43MB/s]
+merges.txt: 100% 456k/456k [00:00<00:00, 1.07MB/s]
+tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 3.05MB/s]
+config.json: 100% 665/665 [00:00<00:00, 6.23MB/s]
 ✓ Tokenizer saved
 
-📦 Creating model...
-2025-11-26 05:45:49.299414: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
-2025-11-26 05:45:49.315386: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+📦 Creating model (E案 architecture)...
+2025-11-26 08:10:56.969419: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-11-26 08:10:56.985974: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
 WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-E0000 00:00:1764135949.333914   54344 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
-E0000 00:00:1764135949.339561   54344 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
-W0000 00:00:1764135949.356060   54344 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764135949.356087   54344 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764135949.356090   54344 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764135949.356092   54344 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-2025-11-26 05:45:49.360942: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+E0000 00:00:1764144657.004969    6653 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764144657.010495    6653 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764144657.027310    6653 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764144657.027344    6653 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764144657.027347    6653 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764144657.027349    6653 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-11-26 08:10:57.032251: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
 To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
 Loading GPT-2 pretrained embeddings...
 ✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
-✓ Model created: 122,935,633 parameters
+Using E案 architecture: ContextBlock(3 layers) + TokenBlock(3 layers)
+✓ Model created: 84,338,257 parameters
 
 📊 Loading data from UltraChat...
-tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 221kB/s]
-config.json: 100% 665/665 [00:00<00:00, 2.41MB/s]
-vocab.json: 100% 1.04M/1.04M [00:00<00:00, 4.63MB/s]
-merges.txt: 100% 456k/456k [00:00<00:00, 6.01MB/s]
-tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 6.00MB/s]
+tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 236kB/s]
+config.json: 100% 665/665 [00:00<00:00, 6.00MB/s]
+vocab.json: 100% 1.04M/1.04M [00:00<00:00, 2.48MB/s]
+merges.txt: 100% 456k/456k [00:00<00:00, 85.1MB/s]
+tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 2.11MB/s]
    Downloading UltraChat dataset...
-Generating train_sft split: 100% 207865/207865 [00:04<00:00, 41672.94 examples/s]
-Generating test_sft split: 100% 23110/23110 [00:00<00:00, 56615.29 examples/s]
-Generating train_gen split: 100% 256032/256032 [00:03<00:00, 73387.24 examples/s]
-Generating test_gen split: 100% 28304/28304 [00:00<00:00, 75963.92 examples/s]
+Generating train_sft split: 100% 207865/207865 [00:04<00:00, 51505.40 examples/s]
+Generating test_sft split: 100% 23110/23110 [00:00<00:00, 55822.76 examples/s]
+Generating train_gen split: 100% 256032/256032 [00:05<00:00, 47021.55 examples/s]
+Generating test_gen split: 100% 28304/28304 [00:00<00:00, 72457.89 examples/s]
    Cached to: ./cache/ultrachat_500samples_128len.pt
    Total tokens: 64,000
    Train: 62,720 tokens
@@ -70,35 +61,46 @@ Generating test_gen split: 100% 28304/28304 [00:00<00:00, 75963.92 examples/s]
    ✓ Validation auto-generated from training data
 
 ======================================================================
-PHASE 1: 固定点コンテキスト学習 (CVFP)
+PHASE 1: 固定点コンテキスト学習 (CVFP) - ContextBlock
 ======================================================================
 
 
 ======================================================================
-PHASE 1: 固定点コンテキスト学習 (CVFP) - Train
+PHASE 1: 固定点コンテキスト学習 (ContextBlock) - Train
 ======================================================================
-Iteration 1/20: 順伝播のみ（シーケンシャル） [68.44s]
-Iteration 2/20: 収束=100.0% | Total=-0.051728 | CVFP=0.000014 | Div=-0.103470 | Time=4.57s
-Iteration 3/20: 収束=0.0% | Total=0.235273 | CVFP=0.576503 | Div=-0.105958 | Time=0.39s
-Iteration 4/20: 収束=0.0% | Total=0.285708 | CVFP=0.678205 | Div=-0.106789 | Time=0.39s
-Iteration 5/20: 収束=0.0% | Total=0.280118 | CVFP=0.667569 | Div=-0.107334 | Time=0.40s
-Iteration 6/20: 収束=0.0% | Total=0.244685 | CVFP=0.596226 | Div=-0.106857 | Time=0.40s
-Iteration 7/20: 収束=0.0% | Total=0.201473 | CVFP=0.509311 | Div=-0.106365 | Time=0.40s
-Iteration 8/20: 収束=0.0% | Total=0.154015 | CVFP=0.413982 | Div=-0.105953 | Time=0.39s
-Iteration 9/20: 収束=0.0% | Total=0.106318 | CVFP=0.317860 | Div=-0.105224 | Time=0.40s
-Iteration 10/20: 収束=0.0% | Total=0.063176 | CVFP=0.230838 | Div=-0.104486 | Time=0.39s
-Iteration 11/20: 収束=0.1% | Total=0.027702 | CVFP=0.159265 | Div=-0.103861 | Time=0.40s
-Iteration 12/20: 収束=4.0% | Total=0.000465 | CVFP=0.104405 | Div=-0.103475 | Time=0.40s
-Iteration 13/20: 収束=21.4% | Total=-0.018806 | CVFP=0.065609 | Div=-0.103222 | Time=0.40s
-Iteration 14/20: 収束=49.6% | Total=-0.031575 | CVFP=0.040006 | Div=-0.103155 | Time=0.40s
-Iteration 15/20: 収束=74.6% | Total=-0.039659 | CVFP=0.023910 | Div=-0.103229 | Time=0.40s
-Iteration 16/20: 収束=89.4% | Total=-0.044630 | CVFP=0.014069 | Div=-0.103328 | Time=0.39s
-Iteration 17/20: 収束=96.0% | Total=-0.047610 | CVFP=0.008238 | Div=-0.103458 | Time=0.40s
-Iteration 18/20: 収束=98.6% | Total=-0.049397 | CVFP=0.004850 | Div=-0.103645 | Time=0.40s
-Iteration 19/20: 収束=99.5% | Total=-0.050485 | CVFP=0.002882 | Div=-0.103853 | Time=0.40s
-Iteration 20/20: 収束=99.8% | Total=-0.051162 | CVFP=0.001736 | Div=-0.104060 | Time=0.40s
+Training ContextBlock only (3545856 parameters)
+Iteration 1/30: 順伝播のみ（シーケンシャル） [35.93s]
+Iteration 2/30: 収束=100.0% | Total=-0.049174 | CVFP=0.000005 | Div=-0.098353 | Time=2.82s
+Iteration 3/30: 収束=0.0% | Total=0.111256 | CVFP=0.329293 | Div=-0.106782 | Time=0.17s
+Iteration 4/30: 収束=0.0% | Total=0.075773 | CVFP=0.256596 | Div=-0.105050 | Time=0.18s
+Iteration 5/30: 収束=0.0% | Total=0.025402 | CVFP=0.154372 | Div=-0.103568 | Time=0.18s
+Iteration 6/30: 収束=0.7% | Total=-0.015653 | CVFP=0.071442 | Div=-0.102748 | Time=0.18s
+Iteration 7/30: 収束=41.3% | Total=-0.034850 | CVFP=0.032932 | Div=-0.102631 | Time=0.18s
+Iteration 8/30: 収束=99.2% | Total=-0.043757 | CVFP=0.015437 | Div=-0.102951 | Time=0.18s
+Iteration 9/30: 収束=100.0% | Total=-0.048172 | CVFP=0.006987 | Div=-0.103332 | Time=0.18s
+Iteration 10/30: 収束=100.0% | Total=-0.050286 | CVFP=0.003105 | Div=-0.103677 | Time=0.18s
+Iteration 11/30: 収束=100.0% | Total=-0.051278 | CVFP=0.001445 | Div=-0.104001 | Time=0.18s
+Iteration 12/30: 収束=100.0% | Total=-0.051801 | CVFP=0.000725 | Div=-0.104327 | Time=0.18s
+Iteration 13/30: 収束=100.0% | Total=-0.052122 | CVFP=0.000407 | Div=-0.104652 | Time=0.18s
+Iteration 14/30: 収束=100.0% | Total=-0.052357 | CVFP=0.000262 | Div=-0.104977 | Time=0.18s
+Iteration 15/30: 収束=100.0% | Total=-0.052554 | CVFP=0.000194 | Div=-0.105302 | Time=0.18s
+Iteration 16/30: 収束=100.0% | Total=-0.052734 | CVFP=0.000158 | Div=-0.105627 | Time=0.18s
+Iteration 17/30: 収束=100.0% | Total=-0.052907 | CVFP=0.000138 | Div=-0.105951 | Time=0.18s
+Iteration 18/30: 収束=100.0% | Total=-0.053074 | CVFP=0.000124 | Div=-0.106273 | Time=0.18s
+Iteration 19/30: 収束=100.0% | Total=-0.053239 | CVFP=0.000115 | Div=-0.106593 | Time=0.18s
+Iteration 20/30: 収束=100.0% | Total=-0.053401 | CVFP=0.000107 | Div=-0.106910 | Time=0.18s
+Iteration 21/30: 収束=100.0% | Total=-0.053561 | CVFP=0.000101 | Div=-0.107224 | Time=0.18s
+Iteration 22/30: 収束=100.0% | Total=-0.053720 | CVFP=0.000096 | Div=-0.107535 | Time=0.18s
+Iteration 23/30: 収束=100.0% | Total=-0.053876 | CVFP=0.000091 | Div=-0.107843 | Time=0.18s
+Iteration 24/30: 収束=100.0% | Total=-0.054030 | CVFP=0.000087 | Div=-0.108148 | Time=0.18s
+Iteration 25/30: 収束=100.0% | Total=-0.054183 | CVFP=0.000083 | Div=-0.108450 | Time=0.18s
+Iteration 26/30: 収束=100.0% | Total=-0.054334 | CVFP=0.000080 | Div=-0.108748 | Time=0.18s
+Iteration 27/30: 収束=100.0% | Total=-0.054483 | CVFP=0.000077 | Div=-0.109044 | Time=0.18s
+Iteration 28/30: 収束=100.0% | Total=-0.054631 | CVFP=0.000074 | Div=-0.109336 | Time=0.18s
+Iteration 29/30: 収束=100.0% | Total=-0.054777 | CVFP=0.000071 | Div=-0.109626 | Time=0.18s
+Iteration 30/30: 収束=100.0% | Total=-0.054922 | CVFP=0.000069 | Div=-0.109912 | Time=0.18s
 
-Phase 1 完了: 62605/62720 トークンが収束
+Phase 1 完了: 62720/62720 トークンが収束
 
 
 ======================================================================
@@ -106,7 +108,7 @@ Evaluating on validation data...
 ======================================================================
 
 
-⏱️  Phase 1 completed in 82.0s
+⏱️  Phase 1 completed in 46.5s
 💾 Checkpoint saved: ./checkpoints/model_latest.pt
 
 ======================================================================
@@ -121,23 +123,23 @@ FIXED-POINT ANALYSIS - Train
 (Sampling 5000/62720 tokens for pairwise analysis)
 
 1. Global Attractor Detection:
-  Avg L2 Distance: 36.524075 (Range: [0.224261, 45.731693])
-  Avg Cosine Sim:  0.088511 (Range: [-0.402123, 0.999967])
+  Avg L2 Distance: 38.797886 (Range: [0.000000, 45.744625])
+  Avg Cosine Sim:  0.055463 (Range: [-0.302664, 1.000001])
   ✅ Token-specific fixed points
 
 2. Zero Solution Detection:
-  Avg Norm: 27.312475 (Range: [27.276262, 27.342703])
+  Avg Norm: 28.336758 (Range: [28.240046, 28.448603])
   ✅ Non-zero contexts
 
 3. Distribution Statistics:
-  Norm - Mean: 27.3125, Median: 27.3126, Std: 0.0093
-  Pairwise Dist - Mean: 36.5241
-  Sparsity: 0.60% of values < 0.01
+  Norm - Mean: 28.3368, Median: 28.3370, Std: 0.0239
+  Pairwise Dist - Mean: 38.7979
+  Sparsity: 0.63% of values < 0.01
 
 4. Information Content:
   Actual Rank: 768 / 768 (100.0%)
-  Effective Rank: 559.35 / 768 (72.8%)
-  Top 5 Singular Values: [1201.1953125, 853.2880249023438, 754.5025634765625, 635.5288696289062, 526.506103515625]
+  Effective Rank: 616.92 / 768 (80.3%)
+  Top 5 Singular Values: [989.1885375976562, 624.0169067382812, 599.4425659179688, 476.6092224121094, 443.9137878417969]
   ✅ Good diversity
 ======================================================================
 
@@ -147,23 +149,23 @@ FIXED-POINT ANALYSIS - Val
 ======================================================================
 
 1. Global Attractor Detection:
-  Avg L2 Distance: 36.521900 (Range: [0.000000, 45.761738])
-  Avg Cosine Sim:  0.087324 (Range: [-0.403037, 1.000000])
+  Avg L2 Distance: 38.832539 (Range: [0.000000, 45.096485])
+  Avg Cosine Sim:  0.056143 (Range: [-0.262817, 1.000000])
   ✅ Token-specific fixed points
 
 2. Zero Solution Detection:
-  Avg Norm: 27.310556 (Range: [27.277653, 27.336336])
+  Avg Norm: 28.377045 (Range: [28.297693, 28.467369])
   ✅ Non-zero contexts
 
 3. Distribution Statistics:
-  Norm - Mean: 27.3106, Median: 27.3107, Std: 0.0101
-  Pairwise Dist - Mean: 36.5219
-  Sparsity: 0.61% of values < 0.01
+  Norm - Mean: 28.3770, Median: 28.3765, Std: 0.0245
+  Pairwise Dist - Mean: 38.8325
+  Sparsity: 0.62% of values < 0.01
 
 4. Information Content:
   Actual Rank: 768 / 768 (100.0%)
-  Effective Rank: 487.13 / 768 (63.4%)
-  Top 5 Singular Values: [438.29632568359375, 312.57037353515625, 264.04718017578125, 225.30870056152344, 191.8311004638672]
+  Effective Rank: 533.69 / 768 (69.5%)
+  Top 5 Singular Values: [361.1494140625, 232.88351440429688, 213.8627471923828, 166.22763061523438, 152.5756378173828]
   ✅ Good diversity
 ======================================================================
 
@@ -172,9 +174,9 @@ FIXED-POINT ANALYSIS - Val
 恒等写像チェック (Identity Mapping Check)
 ======================================================================
 コサイン類似度統計 (100サンプル):
-  平均: 0.0652
-  最大: 0.1647
-  最小: -0.0164
+  平均: 0.0638
+  最大: 0.1447
+  最小: -0.0197
   閾値(0.95)超過: 0/100 (0.0%)
 
 ✅ 正常: 恒等写像ではありません
@@ -183,15 +185,15 @@ FIXED-POINT ANALYSIS - Val
 
 
 ======================================================================
-PHASE 2: トークン予測学習
+PHASE 2: トークン予測学習 (TokenBlock)
 ======================================================================
 
-✓ Full model fine-tuning: 84,338,257/122,935,633 parameters trainable
-✓ Context-Fixed Learning: context_out replaced with C*[i] (complete fixing)
+✓ ContextBlock frozen
+✓ token_output layer unfrozen
+✓ Training TokenBlock + token_output: 42,193,489/84,338,257 parameters
 
 ======================================================================
-PHASE 2: Next-Token Prediction Training
-         (Context-Fixed Learning)
+PHASE 2: Next-Token Prediction Training (E案 - レイヤー対応版)
 ======================================================================
 
 Training tokens: 62,720
@@ -199,36 +201,33 @@ Validation tokens: 1,280
 Epochs: 10
 Batch size: 512
 Learning rate: 0.002
-CVFP layers frozen: False
+Gradient clip: 1.0
 Early stopping patience: 3
-✓ Stage 1: Initialize fixed contexts C* from training data
-✓ Stage 2: Train with context_out = C*[i] (complete fixing)
-✓ Prediction from concatenated C*[i] + token_out
-✓ Gradients flow through token_out only
 
-Stage 1: Initializing fixed contexts C*...
-✓ Training target contexts initialized: torch.Size([62720, 768])
-✓ Validation target contexts initialized: torch.Size([1280, 768])
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN (Phase 1で学習済み)
+  - TokenBlock: TRAINING
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
 
-Stage 2: Training with fixed contexts...
-Epoch 1/10:
-  Train Loss: 7.6115 | Train PPL: 2021.31
-  Val Loss: 7.3743 | Val PPL: 1594.53 | Val Acc: 14.31%
-  ✓ New best validation loss: 7.3743
+Epoch 1/10 [295.8s]:
+  Train Loss: 7.2477 | Train PPL: 1404.88
+  Val Loss: 6.6525 | Val PPL: 774.75 | Val Acc: 16.18%
+  ✓ New best validation loss: 6.6525
 
-Epoch 2/10:
-  Train Loss: 5.0282 | Train PPL: 152.66
-  Val Loss: 7.7128 | Val PPL: 2236.69 | Val Acc: 15.09%
+Epoch 2/10 [295.4s]:
+  Train Loss: 4.6388 | Train PPL: 103.42
+  Val Loss: 6.9805 | Val PPL: 1075.45 | Val Acc: 17.04%
   ⚠️ No improvement (1/3)
 
-Epoch 3/10:
-  Train Loss: 3.7206 | Train PPL: 41.29
-  Val Loss: 7.9566 | Val PPL: 2854.34 | Val Acc: 15.40%
+Epoch 3/10 [295.3s]:
+  Train Loss: 3.3043 | Train PPL: 27.23
+  Val Loss: 7.5120 | Val PPL: 1829.88 | Val Acc: 16.65%
   ⚠️ No improvement (2/3)
 
-Epoch 4/10:
-  Train Loss: 3.1058 | Train PPL: 22.33
-  Val Loss: 8.0979 | Val PPL: 3287.41 | Val Acc: 15.40%
+Epoch 4/10 [296.2s]:
+  Train Loss: 2.8499 | Train PPL: 17.29
+  Val Loss: 7.4663 | Val PPL: 1748.19 | Val Acc: 17.36%
   ⚠️ No improvement (3/3)
 
 ⛔ Early stopping triggered at epoch 4
@@ -238,13 +237,13 @@ Phase 2 Training Complete
 ======================================================================
 
 Best epoch: 1
-Best validation loss: 7.3743
-Best validation PPL: 1594.53
-Best validation accuracy: 14.31%
+Best validation loss: 6.6525
+Best validation PPL: 774.75
+Best validation accuracy: 16.18%
 Early stopped at epoch: 4
 
 
-⏱️  Phase 2 completed in 2202.6s
+⏱️  Phase 2 completed in 1182.6s
 💾 Final checkpoint saved: ./checkpoints/model_latest.pt
 
 
@@ -252,33 +251,33 @@ Early stopped at epoch: 4
                     NEW-LLM TRAINING RESULTS                         
 ======================================================================
 
-[PHASE 1: Context Learning (CVFP)]
-  Effective Rank (Train): 72.8% (559.35/768)
-  Effective Rank (Val):   63.4% (487.13/768)
-  Time: 82.0s
+[PHASE 1: Context Learning (CVFP) - ContextBlock]
+  Effective Rank (Train): 80.3% (616.92/768)
+  Effective Rank (Val):   69.5% (533.69/768)
+  Time: 46.5s
   Status: ✅ PASSED
 
-[PHASE 2: Token Prediction]
-  Best Val PPL:    1594.53 (Epoch 1)
-  Best Val Acc:    14.31%
-  Final Val PPL:   3287.41
-  Final Val Acc:   15.40%
+[PHASE 2: Token Prediction - TokenBlock]
+  Best Val PPL:    774.75 (Epoch 1)
+  Best Val Acc:    16.18%
+  Final Val PPL:   1748.19
+  Final Val Acc:   17.36%
   Epochs Run:      4/10
-  Time: 2202.6s
+  Time: 1182.6s
   Status: ⚠️  EARLY STOPPED at epoch 4
 
 ----------------------------------------------------------------------
-  TOTAL TIME: 2310.7s
+  TOTAL TIME: 1264.9s
 ======================================================================
 
 📉 Epoch-by-Epoch Progress:
 --------------------------------------------------
  Epoch |  Train PPL |    Val PPL |  Val Acc
 --------------------------------------------------
-     1 |    2021.31 |    1594.53 |   14.31% ⭐
-     2 |     152.66 |    2236.69 |   15.09%
-     3 |      41.29 |    2854.34 |   15.40%
-     4 |      22.33 |    3287.41 |   15.40%
+     1 |    1404.88 |     774.75 |   16.18% ⭐
+     2 |     103.42 |    1075.45 |   17.04%
+     3 |      27.23 |    1829.88 |   16.65%
+     4 |      17.29 |    1748.19 |   17.36%
 --------------------------------------------------
 
 ✅ Training complete!

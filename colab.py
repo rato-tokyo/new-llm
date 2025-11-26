@@ -259,8 +259,7 @@ def main():
             'model_state_dict': model.state_dict(),
             'epoch': 'phase1_complete',
             'config': {
-                'context_layers': config.context_layers,
-                'token_layers': config.token_layers,
+                'num_layers': config.num_layers,
                 'embed_dim': config.embed_dim,
                 'context_dim': config.context_dim,
                 'vocab_size': config.vocab_size
@@ -350,8 +349,7 @@ def main():
         'epoch': 'phase2_complete',
         'phase2_history': phase2_history,
         'config': {
-            'context_layers': config.context_layers,
-            'token_layers': config.token_layers,
+            'num_layers': config.num_layers,
             'embed_dim': config.embed_dim,
             'context_dim': config.context_dim,
             'vocab_size': config.vocab_size
