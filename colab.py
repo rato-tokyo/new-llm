@@ -185,17 +185,25 @@ def main():
 
     print_flush(f"   Total tokens: {len(all_token_ids):,}")
 
-    # Split into train/val (80% train, 20% val from the END of training data)
-    # This ensures validation uses tokens that exist in training
-    val_ratio = 0.2
-    val_size = int(len(all_token_ids) * val_ratio)
-    train_size = len(all_token_ids) - val_size
+    # Split into train/val with FIXED validation size
+    # Validation is always 1280 tokens (fixed), rest goes to training
+    # This ensures validation size stays constant regardless of num_samples
+    fixed_val_size = 1280  # 検証データは常に1280トークン固定
+
+    if len(all_token_ids) <= fixed_val_size:
+        raise ValueError(
+            f"❌ ERROR: Total tokens ({len(all_token_ids)}) must be greater than "
+            f"fixed validation size ({fixed_val_size}). Increase num_samples."
+        )
+
+    train_size = len(all_token_ids) - fixed_val_size
+    val_size = fixed_val_size
 
     train_token_ids = all_token_ids[:train_size].to(device)
     val_token_ids = all_token_ids[train_size:].to(device)
 
-    print_flush(f"   Train: {len(train_token_ids):,} tokens (80%)")
-    print_flush(f"   Val:   {len(val_token_ids):,} tokens (20% from end)")
+    print_flush(f"   Train: {len(train_token_ids):,} tokens")
+    print_flush(f"   Val:   {len(val_token_ids):,} tokens (fixed size)")
     print_flush(f"   ✓ Validation auto-generated from training data")
 
     # Load checkpoint if skipping Phase 1
