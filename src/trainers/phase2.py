@@ -189,9 +189,9 @@ class Phase2Trainer:
 
         return target_contexts
 
-    def train_epoch(self, token_ids, device):
+    def train_epoch(self, token_ids, device, batch_size=512):
         """
-        Train one epoch on token sequence with context-fixed learning
+        Train one epoch on token sequence with context-fixed learning (mini-batch version)
 
         CRITICAL DESIGN (Updated 2025-11-26):
         - Input: [C*[i-1], token_embed[i]] - fixed context from initialization
@@ -200,9 +200,15 @@ class Phase2Trainer:
         - Prediction from concatenated C*[i] + token_out
         - Gradients flow through token_out only (CVFP params still updated via token_out)
 
+        Mini-batch processing (Updated 2025-11-26):
+        - Process tokens in batches to reduce GPU memory usage
+        - Each batch: forward -> loss -> backward -> update
+        - Enables training with larger datasets
+
         Args:
             token_ids: Token IDs [seq_len]
             device: Device to use
+            batch_size: Number of tokens per mini-batch (default: 512)
 
         Returns:
             avg_loss: Average loss for this epoch
@@ -215,56 +221,69 @@ class Phase2Trainer:
         input_ids = token_ids[:-1]  # [seq_len - 1]
         target_ids = token_ids[1:]  # [seq_len - 1]
 
-        # Process all tokens with context-fixed learning
-        all_logits = []
-        for i, token_id in enumerate(input_ids):
-            # Get fixed input context C*[i-1] (or zero for first token)
-            if i == 0:
-                input_context = torch.zeros(1, self.model.context_dim, device=device)
-            else:
-                # Use fixed target context from previous position
-                input_context = self.target_contexts_train[i-1].unsqueeze(0).detach()
+        num_tokens = len(input_ids)
+        total_loss = 0.0
+        num_batches = 0
 
-            # Get normalized token embedding
-            token_embed = get_normalized_embedding(self.model, token_id)
+        # Process tokens in mini-batches
+        for batch_start in range(0, num_tokens, batch_size):
+            batch_end = min(batch_start + batch_size, num_tokens)
 
-            # Process through CVFP blocks
-            # Input: [C*[i-1], token_embed[i]]
-            # Output: [context_out, token_out]
-            context_out, token_out = process_through_blocks(
-                self.model, input_context, token_embed, self.freeze_context
-            )
+            # Process batch tokens
+            batch_logits = []
+            for i in range(batch_start, batch_end):
+                token_id = input_ids[i]
 
-            # CRITICAL: Replace context_out with fixed C*[i] (complete fixing)
-            # Gradients flow through token_out only
-            fixed_context = self.target_contexts_train[i].unsqueeze(0).detach()
+                # Get fixed input context C*[i-1] (or zero for first token)
+                if i == 0:
+                    input_context = torch.zeros(1, self.model.context_dim, device=device)
+                else:
+                    # Use fixed target context from previous position
+                    input_context = self.target_contexts_train[i-1].unsqueeze(0).detach()
 
-            # Predict next token from concatenated fixed_context + token_out
-            combined = torch.cat([fixed_context, token_out], dim=-1)  # [1, context_dim + embed_dim]
-            logits = self.model.token_output(combined)  # [1, vocab_size]
-            all_logits.append(logits)
+                # Get normalized token embedding
+                token_embed = get_normalized_embedding(self.model, token_id)
 
-        # Stack all logits
-        all_logits = torch.cat(all_logits, dim=0)  # [seq_len - 1, vocab_size]
+                # Process through CVFP blocks
+                # Input: [C*[i-1], token_embed[i]]
+                # Output: [context_out, token_out]
+                context_out, token_out = process_through_blocks(
+                    self.model, input_context, token_embed, self.freeze_context
+                )
 
-        # Compute loss (prediction loss only, no context stability loss needed)
-        self.optimizer.zero_grad()
-        prediction_loss = self.criterion(all_logits, target_ids)
+                # CRITICAL: Replace context_out with fixed C*[i] (complete fixing)
+                # Gradients flow through token_out only
+                fixed_context = self.target_contexts_train[i].unsqueeze(0).detach()
 
-        # Backward pass
-        prediction_loss.backward()
+                # Predict next token from concatenated fixed_context + token_out
+                combined = torch.cat([fixed_context, token_out], dim=-1)  # [1, context_dim + embed_dim]
+                logits = self.model.token_output(combined)  # [1, vocab_size]
+                batch_logits.append(logits)
 
-        # Gradient clipping
-        if self.gradient_clip is not None:
-            torch.nn.utils.clip_grad_norm_(
-                filter(lambda p: p.requires_grad, self.model.parameters()),
-                self.gradient_clip
-            )
+            # Stack batch logits
+            batch_logits = torch.cat(batch_logits, dim=0)  # [batch_size, vocab_size]
+            batch_targets = target_ids[batch_start:batch_end]
 
-        self.optimizer.step()
+            # Compute loss and update
+            self.optimizer.zero_grad()
+            batch_loss = self.criterion(batch_logits, batch_targets)
+            batch_loss.backward()
 
-        # Calculate metrics
-        avg_loss = prediction_loss.item()
+            # Gradient clipping
+            if self.gradient_clip is not None:
+                torch.nn.utils.clip_grad_norm_(
+                    filter(lambda p: p.requires_grad, self.model.parameters()),
+                    self.gradient_clip
+                )
+
+            self.optimizer.step()
+
+            # Accumulate loss
+            total_loss += batch_loss.item() * (batch_end - batch_start)
+            num_batches += 1
+
+        # Calculate metrics (weighted average)
+        avg_loss = total_loss / num_tokens
         perplexity = torch.exp(torch.tensor(avg_loss)).item()
 
         return avg_loss, perplexity
@@ -336,7 +355,7 @@ class Phase2Trainer:
 
         return avg_loss, perplexity, accuracy
 
-    def train_full(self, train_token_ids, val_token_ids, device, epochs=10, patience=3):
+    def train_full(self, train_token_ids, val_token_ids, device, epochs=10, patience=3, batch_size=512):
         """
         Full training loop with validation and early stopping
 
@@ -346,6 +365,7 @@ class Phase2Trainer:
             device: Device to use
             epochs: Number of training epochs
             patience: Early stopping patience (stop if val_loss doesn't improve for this many epochs)
+            batch_size: Mini-batch size for training (GPU memory optimization)
 
         Returns:
             history: Dictionary with training history
@@ -358,6 +378,7 @@ class Phase2Trainer:
         print(f"Training tokens: {len(train_token_ids):,}")
         print(f"Validation tokens: {len(val_token_ids):,}")
         print(f"Epochs: {epochs}")
+        print(f"Batch size: {batch_size}")
         print(f"Learning rate: {self.learning_rate}")
         print(f"CVFP layers frozen: {self.freeze_context}")
         print(f"Early stopping patience: {patience}")
@@ -391,7 +412,7 @@ class Phase2Trainer:
         for epoch in range(1, epochs + 1):
             # Train
             train_loss, train_ppl = self.train_epoch(
-                train_token_ids, device
+                train_token_ids, device, batch_size=batch_size
             )
 
             # Validate

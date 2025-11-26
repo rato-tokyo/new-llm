@@ -329,7 +329,8 @@ def main():
         val_token_ids=val_token_ids,
         device=device,
         epochs=args.epochs,
-        patience=args.patience
+        patience=args.patience,
+        batch_size=config.phase2_batch_size
     )
 
     phase2_time = time.time() - phase2_start

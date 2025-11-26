@@ -58,7 +58,10 @@ class ResidualConfig:
     phase2_learning_rate = 0.002    # トークン予測の学習率 (Phase 1と同じ)
     phase2_epochs = 10              # 訓練エポック数
     phase2_patience = 3             # Early stopping patience
-    # NOTE: No batch_size - all tokens processed at once (each token is independent)
+    phase2_batch_size = 512         # ミニバッチサイズ（GPUメモリ節約のため）
+                                    # 512: 推奨（~4GB VRAM削減）
+                                    # 256: メモリ不足時
+                                    # 1024: 高速化重視
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
     # Context-Fixed Learning: context_out = C*[i] に完全固定（MSE制約ではない）
 
