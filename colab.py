@@ -1,21 +1,23 @@
 """
-New-LLM Colab Training Script
+New-LLM Colab Training Script (E案アーキテクチャ対応版)
 
 Google Colabで実行するための完全な訓練スクリプト。
-Phase 1からPhase 2まで一貫して実行し、すべての数値を表示します。
+Phase 1（固定点学習）からPhase 2（トークン予測）まで一貫して実行し、すべての数値を表示します。
 
 使い方:
     # Google Colabで
     !git clone https://github.com/your-repo/new-llm.git
     %cd new-llm
+    !pip install torch transformers tokenizers datasets
     !python colab.py
 
-    # または
-    !python colab.py --epochs 20  # Phase 2のエポック数を変更
+    # オプション
+    !python colab.py --epochs 20      # Phase 2のエポック数を変更
+    !python colab.py --skip-phase1    # Phase 1をスキップ（チェックポイント使用）
 
 出力される数値:
     - Phase 1: Effective Rank, 収束率, CVFP損失, 多様性損失
-    - Phase 2: Perplexity (PPL), Loss, Accuracy, Context Stability Loss
+    - Phase 2: Perplexity (PPL), Loss, Accuracy
 """
 
 import os
@@ -76,7 +78,7 @@ def main():
     device = torch.device(config.device)
 
     print_flush("\n" + "=" * 70)
-    print_flush("New-LLM Training for Google Colab")
+    print_flush("New-LLM Training for Google Colab (E案アーキテクチャ)")
     print_flush("=" * 70 + "\n")
 
     print_flush("✅ Random seed fixed: 42 (完全な再現性保証)")
@@ -86,13 +88,14 @@ def main():
         print_flush(f"   Memory: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
 
     print_flush(f"\n📋 Configuration:")
-    print_flush(f"   Architecture: {config.architecture}")
-    print_flush(f"   Layers: {config.num_layers}")
+    print_flush(f"   Architecture: E案 (Separated ContextBlock + TokenBlock)")
+    print_flush(f"   Context layers: {config.context_layers}")
+    print_flush(f"   Token layers: {config.token_layers}")
     print_flush(f"   Context dim: {config.context_dim}")
+    print_flush(f"   Embed dim: {config.embed_dim}")
     print_flush(f"   Diversity weight: {config.dist_reg_weight}")
     print_flush(f"   Phase 2 epochs: {args.epochs}")
     print_flush(f"   Early stopping patience: {args.patience}")
-    print_flush(f"   Context-Fixed Learning: context_out = C*[i] (complete fixing)")
 
     # 結果を格納する変数
     total_start_time = time.time()
@@ -118,16 +121,15 @@ def main():
         gpt2_tokenizer.save_pretrained(tokenizer_dir)
         print_flush("✓ Tokenizer saved")
 
-    # Create model
-    print_flush("\n📦 Creating model...")
-    layer_structure = [1] * config.num_layers
+    # Create model with E案 architecture
+    print_flush("\n📦 Creating model (E案 architecture)...")
     model = LLM(
         vocab_size=config.vocab_size,
         embed_dim=config.embed_dim,
         context_dim=config.context_dim,
-        hidden_dim=config.hidden_dim,
-        layer_structure=layer_structure,
-        layernorm_mix=1.0,
+        context_layers=config.context_layers,
+        token_layers=config.token_layers,
+        layernorm_mix=config.layernorm_mix,
         use_pretrained_embeddings=config.use_pretrained_embeddings
     )
     model.to(device)
@@ -186,8 +188,6 @@ def main():
     print_flush(f"   Total tokens: {len(all_token_ids):,}")
 
     # Split into train/val with FIXED validation size
-    # Validation is always 1280 tokens (fixed), rest goes to training
-    # This ensures validation size stays constant regardless of num_samples
     fixed_val_size = 1280  # 検証データは常に1280トークン固定
 
     if len(all_token_ids) <= fixed_val_size:
@@ -214,9 +214,10 @@ def main():
         print_flush("✓ Checkpoint loaded")
 
     # ========== PHASE 1 ==========
+    is_identity = False
     if not args.skip_phase1:
         print_flush(f"\n{'=' * 70}")
-        print_flush("PHASE 1: 固定点コンテキスト学習 (CVFP)")
+        print_flush("PHASE 1: 固定点コンテキスト学習 (CVFP) - ContextBlock")
         print_flush(f"{'=' * 70}\n")
 
         phase1_start = time.time()
@@ -263,10 +264,10 @@ def main():
             'model_state_dict': model.state_dict(),
             'epoch': 'phase1_complete',
             'config': {
-                'num_layers': config.num_layers,
+                'context_layers': config.context_layers,
+                'token_layers': config.token_layers,
                 'embed_dim': config.embed_dim,
                 'context_dim': config.context_dim,
-                'hidden_dim': config.hidden_dim,
                 'vocab_size': config.vocab_size
             }
         }
@@ -286,9 +287,9 @@ def main():
         val_er = val_metrics.get('effective_rank', 0)
         phase1_results = {
             'train_effective_rank': train_er,
-            'train_effective_rank_pct': train_er / 768 * 100,
+            'train_effective_rank_pct': train_er / config.context_dim * 100,
             'val_effective_rank': val_er,
-            'val_effective_rank_pct': val_er / 768 * 100,
+            'val_effective_rank_pct': val_er / config.context_dim * 100,
             'time': phase1_time
         }
 
@@ -305,12 +306,10 @@ def main():
         if is_identity:
             print_flush("\n⚠️  恒等写像が検出されたため、Phase 2をスキップします。")
             return
-    else:
-        is_identity = False
 
     # ========== PHASE 2 ==========
     print_flush(f"\n{'=' * 70}")
-    print_flush("PHASE 2: トークン予測学習")
+    print_flush("PHASE 2: トークン予測学習 (TokenBlock)")
     print_flush(f"{'=' * 70}\n")
 
     phase2_start = time.time()
@@ -319,7 +318,6 @@ def main():
     phase2_trainer = Phase2Trainer(
         model=model,
         learning_rate=config.phase2_learning_rate,
-        freeze_context=config.freeze_context,
         gradient_clip=config.phase2_gradient_clip
     )
 
@@ -357,17 +355,17 @@ def main():
         'epoch': 'phase2_complete',
         'phase2_history': phase2_history,
         'config': {
-            'num_layers': config.num_layers,
+            'context_layers': config.context_layers,
+            'token_layers': config.token_layers,
             'embed_dim': config.embed_dim,
             'context_dim': config.context_dim,
-            'hidden_dim': config.hidden_dim,
             'vocab_size': config.vocab_size
         }
     }
     torch.save(checkpoint, config.checkpoint_path)
     print_flush(f"💾 Final checkpoint saved: {config.checkpoint_path}")
 
-    # ========== FINAL SUMMARY (見やすいボックス形式) ==========
+    # ========== FINAL SUMMARY ==========
     total_time = time.time() - total_start_time
 
     print_flush("\n")
@@ -376,17 +374,17 @@ def main():
     print_flush("=" * 70)
 
     # Phase 1 結果
-    print_flush("\n[PHASE 1: Context Learning (CVFP)]")
+    print_flush("\n[PHASE 1: Context Learning (CVFP) - ContextBlock]")
     if phase1_results:
-        print_flush(f"  Effective Rank (Train): {phase1_results['train_effective_rank_pct']:.1f}% ({phase1_results['train_effective_rank']:.2f}/768)")
-        print_flush(f"  Effective Rank (Val):   {phase1_results['val_effective_rank_pct']:.1f}% ({phase1_results['val_effective_rank']:.2f}/768)")
+        print_flush(f"  Effective Rank (Train): {phase1_results['train_effective_rank_pct']:.1f}% ({phase1_results['train_effective_rank']:.2f}/{config.context_dim})")
+        print_flush(f"  Effective Rank (Val):   {phase1_results['val_effective_rank_pct']:.1f}% ({phase1_results['val_effective_rank']:.2f}/{config.context_dim})")
         print_flush(f"  Time: {phase1_results['time']:.1f}s")
         print_flush(f"  Status: ✅ PASSED")
     else:
         print_flush(f"  Status: ⏭️  SKIPPED (using checkpoint)")
 
     # Phase 2 結果
-    print_flush("\n[PHASE 2: Token Prediction]")
+    print_flush("\n[PHASE 2: Token Prediction - TokenBlock]")
     print_flush(f"  Best Val PPL:    {phase2_results['best_val_ppl']:.2f} (Epoch {phase2_results['best_epoch']})")
     print_flush(f"  Best Val Acc:    {phase2_results['best_val_acc'] * 100:.2f}%")
     print_flush(f"  Final Val PPL:   {phase2_results['final_val_ppl']:.2f}")
@@ -404,7 +402,7 @@ def main():
     print_flush(f"  TOTAL TIME: {total_time:.1f}s")
     print_flush("=" * 70)
 
-    # 詳細ログ（必要に応じて）
+    # 詳細ログ
     print_flush("\n📉 Epoch-by-Epoch Progress:")
     print_flush("-" * 50)
     print_flush(f"{'Epoch':>6} | {'Train PPL':>10} | {'Val PPL':>10} | {'Val Acc':>8}")
