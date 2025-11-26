@@ -78,7 +78,7 @@ class ResidualConfig:
 
     # UltraChat settings
     max_seq_length = 128                                   # 最大シーケンス長
-    num_samples = 50                                       # 訓練サンプル数（→ ~6400トークン）
+    num_samples = 100                                      # 訓練サンプル数（→ ~12800トークン）
     dataset_name = "HuggingFaceH4/ultrachat_200k"          # HuggingFaceデータセット
     dataset_split = "train_sft"                            # 使用するデータセット分割
     cache_dir = "./cache"                                  # キャッシュディレクトリ
