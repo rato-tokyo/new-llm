@@ -53,6 +53,7 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description='New-LLM Colab Training')
     parser.add_argument('--epochs', type=int, default=10, help='Phase 2 epochs')
+    parser.add_argument('--patience', type=int, default=3, help='Early stopping patience')
     parser.add_argument('--skip-phase1', action='store_true', help='Skip Phase 1 (use checkpoint)')
     parser.add_argument('--no-cache', action='store_true', help='Regenerate data cache')
     args = parser.parse_args()
@@ -89,7 +90,13 @@ def main():
     print_flush(f"   Context dim: {config.context_dim}")
     print_flush(f"   Diversity weight: {config.dist_reg_weight}")
     print_flush(f"   Phase 2 epochs: {args.epochs}")
+    print_flush(f"   Early stopping patience: {args.patience}")
     print_flush(f"   Context stability weight: {config.phase2_context_stability_weight}")
+
+    # 結果を格納する変数
+    total_start_time = time.time()
+    phase1_results = None
+    phase2_results = None
 
     # Delete cache if requested
     if args.no_cache:
@@ -210,6 +217,17 @@ def main():
         train_metrics = analyze_fixed_points(train_contexts, label="Train")
         val_metrics = analyze_fixed_points(val_contexts, label="Val")
 
+        # Phase 1結果を保存
+        train_er = train_metrics.get('effective_rank', 0)
+        val_er = val_metrics.get('effective_rank', 0)
+        phase1_results = {
+            'train_effective_rank': train_er,
+            'train_effective_rank_pct': train_er / 768 * 100,
+            'val_effective_rank': val_er,
+            'val_effective_rank_pct': val_er / 768 * 100,
+            'time': phase1_time
+        }
+
         # Identity mapping check
         identity_check = check_identity_mapping(
             model=model,
@@ -247,11 +265,27 @@ def main():
         train_token_ids=train_token_ids,
         val_token_ids=val_token_ids,
         device=device,
-        epochs=args.epochs
+        epochs=args.epochs,
+        patience=args.patience
     )
 
     phase2_time = time.time() - phase2_start
     print_flush(f"\n⏱️  Phase 2 completed in {phase2_time:.1f}s")
+
+    # Phase 2結果を保存
+    best_epoch = phase2_history['best_epoch']
+    phase2_results = {
+        'best_epoch': best_epoch,
+        'best_val_loss': phase2_history['val_loss'][best_epoch - 1],
+        'best_val_ppl': phase2_history['val_ppl'][best_epoch - 1],
+        'best_val_acc': phase2_history['val_acc'][best_epoch - 1],
+        'final_val_ppl': phase2_history['val_ppl'][-1],
+        'final_val_acc': phase2_history['val_acc'][-1],
+        'early_stopped': phase2_history['early_stopped'],
+        'stopped_epoch': phase2_history['stopped_epoch'],
+        'total_epochs': len(phase2_history['train_loss']),
+        'time': phase2_time
+    }
 
     # Save final checkpoint
     checkpoint = {
@@ -269,38 +303,54 @@ def main():
     torch.save(checkpoint, config.checkpoint_path)
     print_flush(f"💾 Final checkpoint saved: {config.checkpoint_path}")
 
-    # ========== FINAL SUMMARY ==========
-    print_flush(f"\n{'=' * 70}")
-    print_flush("TRAINING COMPLETE - FINAL RESULTS")
-    print_flush(f"{'=' * 70}\n")
+    # ========== FINAL SUMMARY (見やすいボックス形式) ==========
+    total_time = time.time() - total_start_time
 
-    print_flush("📊 Phase 2 Results:")
-    print_flush(f"   Final Train Loss: {phase2_history['train_loss'][-1]:.4f}")
-    print_flush(f"   Final Train PPL:  {phase2_history['train_ppl'][-1]:.2f}")
-    print_flush(f"   Final Val Loss:   {phase2_history['val_loss'][-1]:.4f}")
-    print_flush(f"   Final Val PPL:    {phase2_history['val_ppl'][-1]:.2f}")
-    print_flush(f"   Final Val Acc:    {phase2_history['val_acc'][-1] * 100:.2f}%")
+    print_flush("\n")
+    print_flush("=" * 70)
+    print_flush("                    NEW-LLM TRAINING RESULTS                         ")
+    print_flush("=" * 70)
 
-    print_flush(f"\n📈 Best Results:")
-    best_val_idx = np.argmin(phase2_history['val_loss'])
-    print_flush(f"   Best Epoch:       {best_val_idx + 1}")
-    print_flush(f"   Best Val Loss:    {phase2_history['val_loss'][best_val_idx]:.4f}")
-    print_flush(f"   Best Val PPL:     {phase2_history['val_ppl'][best_val_idx]:.2f}")
-    print_flush(f"   Best Val Acc:     {phase2_history['val_acc'][best_val_idx] * 100:.2f}%")
+    # Phase 1 結果
+    print_flush("\n[PHASE 1: Context Learning (CVFP)]")
+    if phase1_results:
+        print_flush(f"  Effective Rank (Train): {phase1_results['train_effective_rank_pct']:.1f}% ({phase1_results['train_effective_rank']:.2f}/768)")
+        print_flush(f"  Effective Rank (Val):   {phase1_results['val_effective_rank_pct']:.1f}% ({phase1_results['val_effective_rank']:.2f}/768)")
+        print_flush(f"  Time: {phase1_results['time']:.1f}s")
+        print_flush(f"  Status: ✅ PASSED")
+    else:
+        print_flush(f"  Status: ⏭️  SKIPPED (using checkpoint)")
 
-    print_flush(f"\n📉 Training Progress (Loss):")
-    for i, (tl, vl) in enumerate(zip(phase2_history['train_loss'], phase2_history['val_loss'])):
-        print_flush(f"   Epoch {i+1:2d}: Train={tl:.4f}, Val={vl:.4f}")
+    # Phase 2 結果
+    print_flush("\n[PHASE 2: Token Prediction]")
+    print_flush(f"  Best Val PPL:    {phase2_results['best_val_ppl']:.2f} (Epoch {phase2_results['best_epoch']})")
+    print_flush(f"  Best Val Acc:    {phase2_results['best_val_acc'] * 100:.2f}%")
+    print_flush(f"  Final Val PPL:   {phase2_results['final_val_ppl']:.2f}")
+    print_flush(f"  Final Val Acc:   {phase2_results['final_val_acc'] * 100:.2f}%")
+    print_flush(f"  Epochs Run:      {phase2_results['total_epochs']}/{args.epochs}")
+    print_flush(f"  Time: {phase2_results['time']:.1f}s")
 
-    print_flush(f"\n📉 Training Progress (PPL):")
-    for i, (tp, vp) in enumerate(zip(phase2_history['train_ppl'], phase2_history['val_ppl'])):
-        print_flush(f"   Epoch {i+1:2d}: Train={tp:.2f}, Val={vp:.2f}")
+    if phase2_results['early_stopped']:
+        print_flush(f"  Status: ⚠️  EARLY STOPPED at epoch {phase2_results['stopped_epoch']}")
+    else:
+        print_flush(f"  Status: ✅ COMPLETED all epochs")
 
-    print_flush(f"\n📊 Context Stability Loss:")
-    for i, cl in enumerate(phase2_history['train_context_loss']):
-        print_flush(f"   Epoch {i+1:2d}: {cl:.6f}")
+    # 総合結果
+    print_flush("\n" + "-" * 70)
+    print_flush(f"  TOTAL TIME: {total_time:.1f}s")
+    print_flush("=" * 70)
 
-    print_flush("\n✅ All training complete!")
+    # 詳細ログ（必要に応じて）
+    print_flush("\n📉 Epoch-by-Epoch Progress:")
+    print_flush("-" * 50)
+    print_flush(f"{'Epoch':>6} | {'Train PPL':>10} | {'Val PPL':>10} | {'Val Acc':>8}")
+    print_flush("-" * 50)
+    for i in range(len(phase2_history['train_ppl'])):
+        marker = " ⭐" if i + 1 == best_epoch else ""
+        print_flush(f"{i+1:>6} | {phase2_history['train_ppl'][i]:>10.2f} | {phase2_history['val_ppl'][i]:>10.2f} | {phase2_history['val_acc'][i]*100:>7.2f}%{marker}")
+    print_flush("-" * 50)
+
+    print_flush("\n✅ Training complete!")
 
 
 if __name__ == "__main__":

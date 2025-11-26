@@ -304,15 +304,16 @@ class Phase2Trainer:
 
         return avg_loss, perplexity, accuracy
 
-    def train_full(self, train_token_ids, val_token_ids, device, epochs=10):
+    def train_full(self, train_token_ids, val_token_ids, device, epochs=10, patience=3):
         """
-        Full training loop with validation
+        Full training loop with validation and early stopping
 
         Args:
             train_token_ids: Training token IDs [seq_len]
             val_token_ids: Validation token IDs [seq_len]
             device: Device to use
             epochs: Number of training epochs
+            patience: Early stopping patience (stop if val_loss doesn't improve for this many epochs)
 
         Returns:
             history: Dictionary with training history
@@ -328,6 +329,7 @@ class Phase2Trainer:
         print(f"Learning rate: {self.learning_rate}")
         print(f"Context frozen: {self.freeze_context}")
         print(f"Context stability weight: {self.context_stability_weight}")
+        print(f"Early stopping patience: {patience}")
         print(f"✓ Context propagates forward (like Phase 1)")
         print(f"✓ Prediction from concatenated context + token_embed")
         print(f"✓ Context vectors fixed to Phase 2 start values")
@@ -345,26 +347,26 @@ class Phase2Trainer:
             'train_context_loss': [],
             'val_loss': [],
             'val_ppl': [],
-            'val_acc': []
+            'val_acc': [],
+            'early_stopped': False,
+            'stopped_epoch': None,
+            'best_epoch': None
         }
 
         best_val_loss = float('inf')
+        best_epoch = 0
+        patience_counter = 0
 
         for epoch in range(1, epochs + 1):
-            print(f"\n[DEBUG] Starting Epoch {epoch}/{epochs}")
             # Train
-            print(f"[DEBUG] Calling train_epoch...")
             train_loss, train_ppl, train_context_loss = self.train_epoch(
                 train_token_ids, device
             )
-            print(f"[DEBUG] train_epoch complete: loss={train_loss:.4f}, context_loss={train_context_loss:.6f}")
 
             # Validate
-            print(f"[DEBUG] Calling evaluate...")
             val_loss, val_ppl, val_acc = self.evaluate(
                 val_token_ids, device
             )
-            print(f"[DEBUG] evaluate complete: loss={val_loss:.4f}")
 
             # Record history
             history['train_loss'].append(train_loss)
@@ -379,18 +381,38 @@ class Phase2Trainer:
             print(f"  Train Loss: {train_loss:.4f} | Train PPL: {train_ppl:.2f} | Context Loss: {train_context_loss:.6f}")
             print(f"  Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f} | Val Acc: {val_acc*100:.2f}%")
 
-            # Track best model
+            # Track best model and early stopping
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
+                best_epoch = epoch
+                patience_counter = 0
                 print(f"  ✓ New best validation loss: {best_val_loss:.4f}")
+            else:
+                patience_counter += 1
+                print(f"  ⚠️ No improvement ({patience_counter}/{patience})")
 
             print()
+
+            # Early stopping check
+            if patience_counter >= patience:
+                print(f"⛔ Early stopping triggered at epoch {epoch}")
+                print(f"   Val loss hasn't improved for {patience} epochs")
+                history['early_stopped'] = True
+                history['stopped_epoch'] = epoch
+                break
+
+        history['best_epoch'] = best_epoch
 
         print(f"{'='*70}")
         print("Phase 2 Training Complete")
         print(f"{'='*70}\n")
+        print(f"Best epoch: {best_epoch}")
         print(f"Best validation loss: {best_val_loss:.4f}")
-        print(f"Final validation perplexity: {history['val_ppl'][-1]:.2f}")
-        print(f"Final validation accuracy: {history['val_acc'][-1]*100:.2f}%\n")
+        print(f"Best validation PPL: {history['val_ppl'][best_epoch-1]:.2f}")
+        print(f"Best validation accuracy: {history['val_acc'][best_epoch-1]*100:.2f}%")
+        if history['early_stopped']:
+            print(f"Early stopped at epoch: {history['stopped_epoch']}\n")
+        else:
+            print(f"Completed all {epochs} epochs\n")
 
         return history

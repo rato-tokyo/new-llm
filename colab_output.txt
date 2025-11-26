@@ -1,0 +1,607 @@
+Cloning into 'new-llm'...
+remote: Enumerating objects: 1630, done.
+remote: Counting objects: 100% (62/62), done.
+remote: Compressing objects: 100% (43/43), done.
+remote: Total 1630 (delta 26), reused 48 (delta 19), pack-reused 1568 (from 1)
+Receiving objects: 100% (1630/1630), 288.20 MiB | 42.26 MiB/s, done.
+Resolving deltas: 100% (914/914), done.
+/content/new-llm
+Requirement already satisfied: transformers in /usr/local/lib/python3.12/dist-packages (4.57.1)
+Requirement already satisfied: datasets in /usr/local/lib/python3.12/dist-packages (4.0.0)
+Requirement already satisfied: filelock in /usr/local/lib/python3.12/dist-packages (from transformers) (3.20.0)
+Requirement already satisfied: huggingface-hub<1.0,>=0.34.0 in /usr/local/lib/python3.12/dist-packages (from transformers) (0.36.0)
+Requirement already satisfied: numpy>=1.17 in /usr/local/lib/python3.12/dist-packages (from transformers) (2.0.2)
+Requirement already satisfied: packaging>=20.0 in /usr/local/lib/python3.12/dist-packages (from transformers) (25.0)
+Requirement already satisfied: pyyaml>=5.1 in /usr/local/lib/python3.12/dist-packages (from transformers) (6.0.3)
+Requirement already satisfied: regex!=2019.12.17 in /usr/local/lib/python3.12/dist-packages (from transformers) (2025.11.3)
+Requirement already satisfied: requests in /usr/local/lib/python3.12/dist-packages (from transformers) (2.32.4)
+Requirement already satisfied: tokenizers<=0.23.0,>=0.22.0 in /usr/local/lib/python3.12/dist-packages (from transformers) (0.22.1)
+Requirement already satisfied: safetensors>=0.4.3 in /usr/local/lib/python3.12/dist-packages (from transformers) (0.7.0)
+Requirement already satisfied: tqdm>=4.27 in /usr/local/lib/python3.12/dist-packages (from transformers) (4.67.1)
+Requirement already satisfied: pyarrow>=15.0.0 in /usr/local/lib/python3.12/dist-packages (from datasets) (18.1.0)
+Requirement already satisfied: dill<0.3.9,>=0.3.0 in /usr/local/lib/python3.12/dist-packages (from datasets) (0.3.8)
+Requirement already satisfied: pandas in /usr/local/lib/python3.12/dist-packages (from datasets) (2.2.2)
+Requirement already satisfied: xxhash in /usr/local/lib/python3.12/dist-packages (from datasets) (3.6.0)
+Requirement already satisfied: multiprocess<0.70.17 in /usr/local/lib/python3.12/dist-packages (from datasets) (0.70.16)
+Requirement already satisfied: fsspec<=2025.3.0,>=2023.1.0 in /usr/local/lib/python3.12/dist-packages (from fsspec[http]<=2025.3.0,>=2023.1.0->datasets) (2025.3.0)
+Requirement already satisfied: aiohttp!=4.0.0a0,!=4.0.0a1 in /usr/local/lib/python3.12/dist-packages (from fsspec[http]<=2025.3.0,>=2023.1.0->datasets) (3.13.2)
+Requirement already satisfied: typing-extensions>=3.7.4.3 in /usr/local/lib/python3.12/dist-packages (from huggingface-hub<1.0,>=0.34.0->transformers) (4.15.0)
+Requirement already satisfied: hf-xet<2.0.0,>=1.1.3 in /usr/local/lib/python3.12/dist-packages (from huggingface-hub<1.0,>=0.34.0->transformers) (1.2.0)
+Requirement already satisfied: charset_normalizer<4,>=2 in /usr/local/lib/python3.12/dist-packages (from requests->transformers) (3.4.4)
+Requirement already satisfied: idna<4,>=2.5 in /usr/local/lib/python3.12/dist-packages (from requests->transformers) (3.11)
+Requirement already satisfied: urllib3<3,>=1.21.1 in /usr/local/lib/python3.12/dist-packages (from requests->transformers) (2.5.0)
+Requirement already satisfied: certifi>=2017.4.17 in /usr/local/lib/python3.12/dist-packages (from requests->transformers) (2025.11.12)
+Requirement already satisfied: python-dateutil>=2.8.2 in /usr/local/lib/python3.12/dist-packages (from pandas->datasets) (2.9.0.post0)
+Requirement already satisfied: pytz>=2020.1 in /usr/local/lib/python3.12/dist-packages (from pandas->datasets) (2025.2)
+Requirement already satisfied: tzdata>=2022.7 in /usr/local/lib/python3.12/dist-packages (from pandas->datasets) (2025.2)
+Requirement already satisfied: aiohappyeyeballs>=2.5.0 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2025.3.0,>=2023.1.0->datasets) (2.6.1)
+Requirement already satisfied: aiosignal>=1.4.0 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2025.3.0,>=2023.1.0->datasets) (1.4.0)
+Requirement already satisfied: attrs>=17.3.0 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2025.3.0,>=2023.1.0->datasets) (25.4.0)
+Requirement already satisfied: frozenlist>=1.1.1 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2025.3.0,>=2023.1.0->datasets) (1.8.0)
+Requirement already satisfied: multidict<7.0,>=4.5 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2025.3.0,>=2023.1.0->datasets) (6.7.0)
+Requirement already satisfied: propcache>=0.2.0 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2025.3.0,>=2023.1.0->datasets) (0.4.1)
+Requirement already satisfied: yarl<2.0,>=1.17.0 in /usr/local/lib/python3.12/dist-packages (from aiohttp!=4.0.0a0,!=4.0.0a1->fsspec[http]<=2025.3.0,>=2023.1.0->datasets) (1.22.0)
+Requirement already satisfied: six>=1.5 in /usr/local/lib/python3.12/dist-packages (from python-dateutil>=2.8.2->pandas->datasets) (1.17.0)
+
+======================================================================
+New-LLM Training for Google Colab
+======================================================================
+
+✅ Random seed fixed: 42 (完全な再現性保証)
+🖥️  Device: cuda
+   GPU: NVIDIA L4
+   Memory: 23.8 GB
+
+📋 Configuration:
+   Architecture: residual_standard
+   Layers: 6
+   Context dim: 768
+   Diversity weight: 0.9
+   Phase 2 epochs: 10
+   Context stability weight: 1.0
+
+📥 Downloading GPT-2 tokenizer...
+tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 187kB/s]
+vocab.json: 100% 1.04M/1.04M [00:00<00:00, 6.34MB/s]
+merges.txt: 100% 456k/456k [00:00<00:00, 3.05MB/s]
+tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 8.87MB/s]
+config.json: 100% 665/665 [00:00<00:00, 6.09MB/s]
+✓ Tokenizer saved
+
+📦 Creating model...
+2025-11-26 02:15:24.323864: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-11-26 02:15:24.340196: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1764123324.358832    1028 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764123324.364633    1028 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764123324.381068    1028 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764123324.381098    1028 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764123324.381101    1028 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764123324.381104    1028 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-11-26 02:15:24.385906: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+config.json: 100% 665/665 [00:00<00:00, 5.97MB/s]
+model.safetensors: 100% 548M/548M [00:02<00:00, 225MB/s]
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+✓ Model created: 130,027,345 parameters
+
+📊 Loading data...
+Loading training data...
+Loading 50 samples from UltraChat...
+tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 244kB/s]
+config.json: 100% 665/665 [00:00<00:00, 7.64MB/s]
+vocab.json: 100% 1.04M/1.04M [00:00<00:00, 13.8MB/s]
+merges.txt: 100% 456k/456k [00:00<00:00, 3.03MB/s]
+tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 8.76MB/s]
+README.md: 3.90kB [00:00, 14.7MB/s]
+data/train_sft-00000-of-00003-a3ecf92756(…): 100% 244M/244M [00:02<00:00, 87.8MB/s]
+data/train_sft-00001-of-00003-0a1804bcb6(…): 100% 244M/244M [00:02<00:00, 94.1MB/s]
+data/train_sft-00002-of-00003-ee46ed25cf(…): 100% 244M/244M [00:00<00:00, 262MB/s]
+data/test_sft-00000-of-00001-f7dfac4afe5(…): 100% 81.2M/81.2M [00:00<00:00, 104MB/s]
+data/train_gen-00000-of-00003-a6c9fb894b(…): 100% 244M/244M [00:01<00:00, 214MB/s]
+data/train_gen-00001-of-00003-d6a0402e41(…): 100% 243M/243M [00:01<00:00, 222MB/s]
+data/train_gen-00002-of-00003-c0db75b92a(…): 100% 243M/243M [00:01<00:00, 209MB/s]
+data/test_gen-00000-of-00001-3d4cd830914(…): 100% 80.4M/80.4M [00:00<00:00, 128MB/s]
+Generating train_sft split: 100% 207865/207865 [00:03<00:00, 53175.17 examples/s]
+Generating test_sft split: 100% 23110/23110 [00:00<00:00, 57588.91 examples/s]
+Generating train_gen split: 100% 256032/256032 [00:03<00:00, 73604.38 examples/s]
+Generating test_gen split: 100% 28304/28304 [00:00<00:00, 76012.75 examples/s]
+  Cached to: ./cache/ultrachat_50samples_128len.pt
+  Loaded 50 text segments → 6400 tokens
+Loading validation data...
+Loading text file: ./data/ultrachat_50samples_val.txt
+  Warning: File not found, creating empty data
+  Train: 6400 tokens
+  Val:   100 tokens (text_file)
+   Train: 6,400 tokens
+   Val:   100 tokens
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 (CVFP)
+======================================================================
+
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 (CVFP) - Train
+======================================================================
+Iteration 1/10: 順伝播のみ（シーケンシャル） [14.22s]
+Iteration 2/10: 収束=0.0% | Total=-0.099884 | CVFP=1.991384 | Div=-0.332247 | Time=1.29s
+Iteration 3/10: 収束=0.0% | Total=-0.120035 | CVFP=1.710879 | Div=-0.323469 | Time=0.08s
+Iteration 4/10: 収束=0.0% | Total=-0.137957 | CVFP=1.469442 | Div=-0.316557 | Time=0.08s
+Iteration 5/10: 収束=0.0% | Total=-0.149612 | CVFP=1.439974 | Div=-0.326233 | Time=0.08s
+Iteration 6/10: 収束=0.0% | Total=-0.163977 | CVFP=1.333534 | Div=-0.330367 | Time=0.08s
+Iteration 7/10: 収束=4.4% | Total=-0.171717 | CVFP=1.239047 | Div=-0.328468 | Time=0.08s
+Iteration 8/10: 収束=27.1% | Total=-0.177691 | CVFP=1.204173 | Div=-0.331232 | Time=0.08s
+Iteration 9/10: 収束=36.9% | Total=-0.184069 | CVFP=1.179657 | Div=-0.335594 | Time=0.08s
+Iteration 10/10: 収束=47.6% | Total=-0.188551 | CVFP=1.140025 | Div=-0.336171 | Time=0.08s
+
+Phase 1 完了: 3047/6400 トークンが収束
+
+
+======================================================================
+Evaluating on validation data...
+======================================================================
+
+
+⏱️  Phase 1 completed in 16.6s
+💾 Checkpoint saved: ./checkpoints/model_latest.pt
+
+======================================================================
+FIXED-POINT ANALYSIS
+======================================================================
+
+
+======================================================================
+FIXED-POINT ANALYSIS - Train
+======================================================================
+
+1. Global Attractor Detection:
+  Avg L2 Distance: 36.729500 (Range: [0.000000, 50.073841])
+  Avg Cosine Sim:  0.089630 (Range: [-0.579410, 1.000000])
+  ✅ Token-specific fixed points
+
+2. Zero Solution Detection:
+  Avg Norm: 28.190643 (Range: [28.064709, 28.285215])
+  ✅ Non-zero contexts
+
+3. Distribution Statistics:
+  Norm - Mean: 28.1906, Median: 28.2100, Std: 0.0594
+  Pairwise Dist - Mean: 36.7295, Median: 38.5394
+  Sparsity: 0.52% of values < 0.01
+
+4. Information Content:
+  Actual Rank: 768 / 768 (100.0%)
+  Effective Rank: 478.89 / 768 (62.4%)
+  Top 5 Singular Values: [1412.859130859375, 750.3226928710938, 661.145751953125, 525.59326171875, 418.64764404296875]
+  ✅ Good diversity
+======================================================================
+
+
+======================================================================
+FIXED-POINT ANALYSIS - Val
+======================================================================
+
+1. Global Attractor Detection:
+  Avg L2 Distance: 0.104276 (Range: [0.000000, 4.090320])
+  Avg Cosine Sim:  0.999787 (Range: [0.989581, 1.000000])
+  ✅ Token-specific fixed points
+
+2. Zero Solution Detection:
+  Avg Norm: 28.335564 (Range: [28.335297, 28.335573])
+  ✅ Non-zero contexts
+
+3. Distribution Statistics:
+  Norm - Mean: 28.3356, Median: 28.3356, Std: 0.0000
+  Pairwise Dist - Mean: 0.1043, Median: 0.0110
+  Sparsity: 0.65% of values < 0.01
+
+4. Information Content:
+  Actual Rank: 98 / 768 (12.8%)
+  Effective Rank: 1.10 / 768 (0.1%)
+  Top 5 Singular Values: [283.3240966796875, 4.040706634521484, 0.7004970908164978, 0.12715159356594086, 0.022255614399909973]
+  ⚠️ Low dimensional diversity (ER=1.10/768)
+======================================================================
+
+
+======================================================================
+恒等写像チェック (Identity Mapping Check)
+======================================================================
+コサイン類似度統計 (100サンプル):
+  平均: 0.0045
+  最大: 0.1013
+  最小: -0.0804
+  閾値(0.95)超過: 0/100 (0.0%)
+
+✅ 正常: 恒等写像ではありません
+    モデルがトークン情報を使用してコンテキストを変換しています。
+======================================================================
+
+
+======================================================================
+PHASE 2: トークン予測学習
+======================================================================
+
+✓ Full model fine-tuning: 91,429,969/130,027,345 parameters trainable
+✓ Context stability weight: 1.0
+
+======================================================================
+PHASE 2: Next-Token Prediction Training
+         (Context Propagation + Token Embed Prediction)
+======================================================================
+
+Training tokens: 6,400
+Validation tokens: 100
+Epochs: 10
+Learning rate: 0.002
+Context frozen: False
+Context stability weight: 1.0
+✓ Context propagates forward (like Phase 1)
+✓ Prediction from concatenated context + token_embed
+✓ Context vectors fixed to Phase 2 start values
+✓ Context gradient detached (no backprop through history)
+
+Initializing target contexts...
+✓ Training target contexts initialized: torch.Size([6400, 768])
+✓ Validation target contexts initialized: torch.Size([100, 768])
+
+
+[DEBUG] Starting Epoch 1/10
+[DEBUG] Calling train_epoch...
+  [DEBUG] train_epoch called with 6400 tokens
+  [DEBUG] Processing 6399 input tokens
+  [DEBUG] Context initialized: torch.Size([1, 768])
+  [DEBUG] Processing token 0/6399
+  [DEBUG] Processing token 1000/6399
+  [DEBUG] Processing token 2000/6399
+  [DEBUG] Processing token 3000/6399
+  [DEBUG] Processing token 4000/6399
+  [DEBUG] Processing token 5000/6399
+  [DEBUG] Processing token 6000/6399
+  [DEBUG] Stacking 6399 logits
+  [DEBUG] Logits shape: torch.Size([6399, 50257])
+  [DEBUG] Contexts shape: torch.Size([6399, 768])
+  [DEBUG] Computing losses...
+  [DEBUG] Prediction Loss: 10.8249
+  [DEBUG] Context Stability Loss: 1.624357
+  [DEBUG] Total Loss: 12.4493
+  [DEBUG] Running backward pass...
+  [DEBUG] Backward complete
+[DEBUG] train_epoch complete: loss=10.8249, context_loss=1.624357
+[DEBUG] Calling evaluate...
+[DEBUG] evaluate complete: loss=10.0296
+Epoch 1/10:
+  Train Loss: 10.8249 | Train PPL: 50256.96 | Context Loss: 1.624357
+  Val Loss: 10.0296 | Val PPL: 22688.65 | Val Acc: 0.00%
+  ✓ New best validation loss: 10.0296
+
+
+[DEBUG] Starting Epoch 2/10
+[DEBUG] Calling train_epoch...
+  [DEBUG] train_epoch called with 6400 tokens
+  [DEBUG] Processing 6399 input tokens
+  [DEBUG] Context initialized: torch.Size([1, 768])
+  [DEBUG] Processing token 0/6399
+  [DEBUG] Processing token 1000/6399
+  [DEBUG] Processing token 2000/6399
+  [DEBUG] Processing token 3000/6399
+  [DEBUG] Processing token 4000/6399
+  [DEBUG] Processing token 5000/6399
+  [DEBUG] Processing token 6000/6399
+  [DEBUG] Stacking 6399 logits
+  [DEBUG] Logits shape: torch.Size([6399, 50257])
+  [DEBUG] Contexts shape: torch.Size([6399, 768])
+  [DEBUG] Computing losses...
+  [DEBUG] Prediction Loss: 9.1379
+  [DEBUG] Context Stability Loss: 1.148298
+  [DEBUG] Total Loss: 10.2862
+  [DEBUG] Running backward pass...
+  [DEBUG] Backward complete
+[DEBUG] train_epoch complete: loss=9.1379, context_loss=1.148298
+[DEBUG] Calling evaluate...
+[DEBUG] evaluate complete: loss=8.4585
+Epoch 2/10:
+  Train Loss: 9.1379 | Train PPL: 9301.67 | Context Loss: 1.148298
+  Val Loss: 8.4585 | Val PPL: 4714.88 | Val Acc: 0.00%
+  ✓ New best validation loss: 8.4585
+
+
+[DEBUG] Starting Epoch 3/10
+[DEBUG] Calling train_epoch...
+  [DEBUG] train_epoch called with 6400 tokens
+  [DEBUG] Processing 6399 input tokens
+  [DEBUG] Context initialized: torch.Size([1, 768])
+  [DEBUG] Processing token 0/6399
+  [DEBUG] Processing token 1000/6399
+  [DEBUG] Processing token 2000/6399
+  [DEBUG] Processing token 3000/6399
+  [DEBUG] Processing token 4000/6399
+  [DEBUG] Processing token 5000/6399
+  [DEBUG] Processing token 6000/6399
+  [DEBUG] Stacking 6399 logits
+  [DEBUG] Logits shape: torch.Size([6399, 50257])
+  [DEBUG] Contexts shape: torch.Size([6399, 768])
+  [DEBUG] Computing losses...
+  [DEBUG] Prediction Loss: 7.1919
+  [DEBUG] Context Stability Loss: 1.099750
+  [DEBUG] Total Loss: 8.2917
+  [DEBUG] Running backward pass...
+  [DEBUG] Backward complete
+[DEBUG] train_epoch complete: loss=7.1919, context_loss=1.099750
+[DEBUG] Calling evaluate...
+[DEBUG] evaluate complete: loss=7.1381
+Epoch 3/10:
+  Train Loss: 7.1919 | Train PPL: 1328.68 | Context Loss: 1.099750
+  Val Loss: 7.1381 | Val PPL: 1259.08 | Val Acc: 0.00%
+  ✓ New best validation loss: 7.1381
+
+
+[DEBUG] Starting Epoch 4/10
+[DEBUG] Calling train_epoch...
+  [DEBUG] train_epoch called with 6400 tokens
+  [DEBUG] Processing 6399 input tokens
+  [DEBUG] Context initialized: torch.Size([1, 768])
+  [DEBUG] Processing token 0/6399
+  [DEBUG] Processing token 1000/6399
+  [DEBUG] Processing token 2000/6399
+  [DEBUG] Processing token 3000/6399
+  [DEBUG] Processing token 4000/6399
+  [DEBUG] Processing token 5000/6399
+  [DEBUG] Processing token 6000/6399
+  [DEBUG] Stacking 6399 logits
+  [DEBUG] Logits shape: torch.Size([6399, 50257])
+  [DEBUG] Contexts shape: torch.Size([6399, 768])
+  [DEBUG] Computing losses...
+  [DEBUG] Prediction Loss: 6.5446
+  [DEBUG] Context Stability Loss: 1.105869
+  [DEBUG] Total Loss: 7.6505
+  [DEBUG] Running backward pass...
+  [DEBUG] Backward complete
+[DEBUG] train_epoch complete: loss=6.5446, context_loss=1.105869
+[DEBUG] Calling evaluate...
+[DEBUG] evaluate complete: loss=6.8670
+Epoch 4/10:
+  Train Loss: 6.5446 | Train PPL: 695.49 | Context Loss: 1.105869
+  Val Loss: 6.8670 | Val PPL: 960.04 | Val Acc: 0.00%
+  ✓ New best validation loss: 6.8670
+
+
+[DEBUG] Starting Epoch 5/10
+[DEBUG] Calling train_epoch...
+  [DEBUG] train_epoch called with 6400 tokens
+  [DEBUG] Processing 6399 input tokens
+  [DEBUG] Context initialized: torch.Size([1, 768])
+  [DEBUG] Processing token 0/6399
+  [DEBUG] Processing token 1000/6399
+  [DEBUG] Processing token 2000/6399
+  [DEBUG] Processing token 3000/6399
+  [DEBUG] Processing token 4000/6399
+  [DEBUG] Processing token 5000/6399
+  [DEBUG] Processing token 6000/6399
+  [DEBUG] Stacking 6399 logits
+  [DEBUG] Logits shape: torch.Size([6399, 50257])
+  [DEBUG] Contexts shape: torch.Size([6399, 768])
+  [DEBUG] Computing losses...
+  [DEBUG] Prediction Loss: 6.5672
+  [DEBUG] Context Stability Loss: 1.073242
+  [DEBUG] Total Loss: 7.6404
+  [DEBUG] Running backward pass...
+  [DEBUG] Backward complete
+[DEBUG] train_epoch complete: loss=6.5672, context_loss=1.073242
+[DEBUG] Calling evaluate...
+[DEBUG] evaluate complete: loss=7.0736
+Epoch 5/10:
+  Train Loss: 6.5672 | Train PPL: 711.37 | Context Loss: 1.073242
+  Val Loss: 7.0736 | Val PPL: 1180.41 | Val Acc: 0.00%
+
+
+[DEBUG] Starting Epoch 6/10
+[DEBUG] Calling train_epoch...
+  [DEBUG] train_epoch called with 6400 tokens
+  [DEBUG] Processing 6399 input tokens
+  [DEBUG] Context initialized: torch.Size([1, 768])
+  [DEBUG] Processing token 0/6399
+  [DEBUG] Processing token 1000/6399
+  [DEBUG] Processing token 2000/6399
+  [DEBUG] Processing token 3000/6399
+  [DEBUG] Processing token 4000/6399
+  [DEBUG] Processing token 5000/6399
+  [DEBUG] Processing token 6000/6399
+  [DEBUG] Stacking 6399 logits
+  [DEBUG] Logits shape: torch.Size([6399, 50257])
+  [DEBUG] Contexts shape: torch.Size([6399, 768])
+  [DEBUG] Computing losses...
+  [DEBUG] Prediction Loss: 6.5891
+  [DEBUG] Context Stability Loss: 1.058222
+  [DEBUG] Total Loss: 7.6473
+  [DEBUG] Running backward pass...
+  [DEBUG] Backward complete
+[DEBUG] train_epoch complete: loss=6.5891, context_loss=1.058222
+[DEBUG] Calling evaluate...
+[DEBUG] evaluate complete: loss=7.2853
+Epoch 6/10:
+  Train Loss: 6.5891 | Train PPL: 727.14 | Context Loss: 1.058222
+  Val Loss: 7.2853 | Val PPL: 1458.71 | Val Acc: 0.00%
+
+
+[DEBUG] Starting Epoch 7/10
+[DEBUG] Calling train_epoch...
+  [DEBUG] train_epoch called with 6400 tokens
+  [DEBUG] Processing 6399 input tokens
+  [DEBUG] Context initialized: torch.Size([1, 768])
+  [DEBUG] Processing token 0/6399
+  [DEBUG] Processing token 1000/6399
+  [DEBUG] Processing token 2000/6399
+  [DEBUG] Processing token 3000/6399
+  [DEBUG] Processing token 4000/6399
+  [DEBUG] Processing token 5000/6399
+  [DEBUG] Processing token 6000/6399
+  [DEBUG] Stacking 6399 logits
+  [DEBUG] Logits shape: torch.Size([6399, 50257])
+  [DEBUG] Contexts shape: torch.Size([6399, 768])
+  [DEBUG] Computing losses...
+  [DEBUG] Prediction Loss: 6.5417
+  [DEBUG] Context Stability Loss: 1.083424
+  [DEBUG] Total Loss: 7.6251
+  [DEBUG] Running backward pass...
+  [DEBUG] Backward complete
+[DEBUG] train_epoch complete: loss=6.5417, context_loss=1.083424
+[DEBUG] Calling evaluate...
+[DEBUG] evaluate complete: loss=7.3054
+Epoch 7/10:
+  Train Loss: 6.5417 | Train PPL: 693.44 | Context Loss: 1.083424
+  Val Loss: 7.3054 | Val PPL: 1488.32 | Val Acc: 0.00%
+
+
+[DEBUG] Starting Epoch 8/10
+[DEBUG] Calling train_epoch...
+  [DEBUG] train_epoch called with 6400 tokens
+  [DEBUG] Processing 6399 input tokens
+  [DEBUG] Context initialized: torch.Size([1, 768])
+  [DEBUG] Processing token 0/6399
+  [DEBUG] Processing token 1000/6399
+  [DEBUG] Processing token 2000/6399
+  [DEBUG] Processing token 3000/6399
+  [DEBUG] Processing token 4000/6399
+  [DEBUG] Processing token 5000/6399
+  [DEBUG] Processing token 6000/6399
+  [DEBUG] Stacking 6399 logits
+  [DEBUG] Logits shape: torch.Size([6399, 50257])
+  [DEBUG] Contexts shape: torch.Size([6399, 768])
+  [DEBUG] Computing losses...
+  [DEBUG] Prediction Loss: 6.4252
+  [DEBUG] Context Stability Loss: 1.036477
+  [DEBUG] Total Loss: 7.4617
+  [DEBUG] Running backward pass...
+  [DEBUG] Backward complete
+[DEBUG] train_epoch complete: loss=6.4252, context_loss=1.036477
+[DEBUG] Calling evaluate...
+[DEBUG] evaluate complete: loss=7.0572
+Epoch 8/10:
+  Train Loss: 6.4252 | Train PPL: 617.21 | Context Loss: 1.036477
+  Val Loss: 7.0572 | Val PPL: 1161.15 | Val Acc: 0.00%
+
+
+[DEBUG] Starting Epoch 9/10
+[DEBUG] Calling train_epoch...
+  [DEBUG] train_epoch called with 6400 tokens
+  [DEBUG] Processing 6399 input tokens
+  [DEBUG] Context initialized: torch.Size([1, 768])
+  [DEBUG] Processing token 0/6399
+  [DEBUG] Processing token 1000/6399
+  [DEBUG] Processing token 2000/6399
+  [DEBUG] Processing token 3000/6399
+  [DEBUG] Processing token 4000/6399
+  [DEBUG] Processing token 5000/6399
+  [DEBUG] Processing token 6000/6399
+  [DEBUG] Stacking 6399 logits
+  [DEBUG] Logits shape: torch.Size([6399, 50257])
+  [DEBUG] Contexts shape: torch.Size([6399, 768])
+  [DEBUG] Computing losses...
+  [DEBUG] Prediction Loss: 6.3562
+  [DEBUG] Context Stability Loss: 1.008657
+  [DEBUG] Total Loss: 7.3649
+  [DEBUG] Running backward pass...
+  [DEBUG] Backward complete
+[DEBUG] train_epoch complete: loss=6.3562, context_loss=1.008657
+[DEBUG] Calling evaluate...
+[DEBUG] evaluate complete: loss=7.1597
+Epoch 9/10:
+  Train Loss: 6.3562 | Train PPL: 576.07 | Context Loss: 1.008657
+  Val Loss: 7.1597 | Val PPL: 1286.51 | Val Acc: 0.00%
+
+
+[DEBUG] Starting Epoch 10/10
+[DEBUG] Calling train_epoch...
+  [DEBUG] train_epoch called with 6400 tokens
+  [DEBUG] Processing 6399 input tokens
+  [DEBUG] Context initialized: torch.Size([1, 768])
+  [DEBUG] Processing token 0/6399
+  [DEBUG] Processing token 1000/6399
+  [DEBUG] Processing token 2000/6399
+  [DEBUG] Processing token 3000/6399
+  [DEBUG] Processing token 4000/6399
+  [DEBUG] Processing token 5000/6399
+  [DEBUG] Processing token 6000/6399
+  [DEBUG] Stacking 6399 logits
+  [DEBUG] Logits shape: torch.Size([6399, 50257])
+  [DEBUG] Contexts shape: torch.Size([6399, 768])
+  [DEBUG] Computing losses...
+  [DEBUG] Prediction Loss: 6.3289
+  [DEBUG] Context Stability Loss: 0.978864
+  [DEBUG] Total Loss: 7.3078
+  [DEBUG] Running backward pass...
+  [DEBUG] Backward complete
+[DEBUG] train_epoch complete: loss=6.3289, context_loss=0.978864
+[DEBUG] Calling evaluate...
+[DEBUG] evaluate complete: loss=7.1688
+Epoch 10/10:
+  Train Loss: 6.3289 | Train PPL: 560.54 | Context Loss: 0.978864
+  Val Loss: 7.1688 | Val PPL: 1298.29 | Val Acc: 0.00%
+
+======================================================================
+Phase 2 Training Complete
+======================================================================
+
+Best validation loss: 6.8670
+Final validation perplexity: 1298.29
+Final validation accuracy: 0.00%
+
+
+⏱️  Phase 2 completed in 647.1s
+💾 Final checkpoint saved: ./checkpoints/model_latest.pt
+
+======================================================================
+TRAINING COMPLETE - FINAL RESULTS
+======================================================================
+
+📊 Phase 2 Results:
+   Final Train Loss: 6.3289
+   Final Train PPL:  560.54
+   Final Val Loss:   7.1688
+   Final Val PPL:    1298.29
+   Final Val Acc:    0.00%
+
+📈 Best Results:
+   Best Epoch:       4
+   Best Val Loss:    6.8670
+   Best Val PPL:     960.04
+   Best Val Acc:     0.00%
+
+📉 Training Progress (Loss):
+   Epoch  1: Train=10.8249, Val=10.0296
+   Epoch  2: Train=9.1379, Val=8.4585
+   Epoch  3: Train=7.1919, Val=7.1381
+   Epoch  4: Train=6.5446, Val=6.8670
+   Epoch  5: Train=6.5672, Val=7.0736
+   Epoch  6: Train=6.5891, Val=7.2853
+   Epoch  7: Train=6.5417, Val=7.3054
+   Epoch  8: Train=6.4252, Val=7.0572
+   Epoch  9: Train=6.3562, Val=7.1597
+   Epoch 10: Train=6.3289, Val=7.1688
+
+📉 Training Progress (PPL):
+   Epoch  1: Train=50256.96, Val=22688.65
+   Epoch  2: Train=9301.67, Val=4714.88
+   Epoch  3: Train=1328.68, Val=1259.08
+   Epoch  4: Train=695.49, Val=960.04
+   Epoch  5: Train=711.37, Val=1180.41
+   Epoch  6: Train=727.14, Val=1458.71
+   Epoch  7: Train=693.44, Val=1488.32
+   Epoch  8: Train=617.21, Val=1161.15
+   Epoch  9: Train=576.07, Val=1286.51
+   Epoch 10: Train=560.54, Val=1298.29
+
+📊 Context Stability Loss:
+   Epoch  1: 1.624357
+   Epoch  2: 1.148298
+   Epoch  3: 1.099750
+   Epoch  4: 1.105869
+   Epoch  5: 1.073242
+   Epoch  6: 1.058222
+   Epoch  7: 1.083424
+   Epoch  8: 1.036477
+   Epoch  9: 1.008657
+   Epoch 10: 0.978864
+
+✅ All training complete!
