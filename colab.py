@@ -383,7 +383,7 @@ def main():
     print_flush(f"  Best Val Acc:    {phase2_results['best_val_acc'] * 100:.2f}%")
     print_flush(f"  Final Val PPL:   {phase2_results['final_val_ppl']:.2f}")
     print_flush(f"  Final Val Acc:   {phase2_results['final_val_acc'] * 100:.2f}%")
-    print_flush(f"  Epochs Run:      {phase2_results['total_epochs']}/{args.epochs}")
+    print_flush(f"  Epochs Run:      {phase2_results['total_epochs']}/{config.phase2_epochs}")
     print_flush(f"  Time: {phase2_results['time']:.1f}s")
 
     if phase2_results['early_stopped']:
