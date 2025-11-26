@@ -28,6 +28,7 @@ def phase1_train(
     min_converged_ratio=0.95,
     learning_rate=0.002,
     dist_reg_weight=0.9,
+    context_noise=0.0,
     label="Train"
 ):
     """
@@ -46,6 +47,7 @@ def phase1_train(
         min_converged_ratio: 早期停止の収束率閾値
         learning_rate: 学習率
         dist_reg_weight: 多様性正則化の重み（並列版最適値: 0.9）
+        context_noise: コンテキストに追加するガウシアンノイズの標準偏差（汎化性能向上）
         label: ログ用ラベル
 
     Returns:
@@ -94,7 +96,8 @@ def phase1_train(
 
         # Iteration 1+: 並列処理（23x高速化）
         contexts = forward_all_tokens_parallel(
-            model, token_embeds, previous_contexts, device
+            model, token_embeds, previous_contexts, device,
+            context_noise=context_noise
         )
 
         # 結合損失による最適化（CVFP + Diversity）
@@ -186,7 +189,7 @@ def forward_all_tokens_sequential(model, token_embeds, previous_contexts, device
     return contexts
 
 
-def forward_all_tokens_parallel(model, token_embeds, previous_contexts, device, batch_size=8192):
+def forward_all_tokens_parallel(model, token_embeds, previous_contexts, device, batch_size=8192, context_noise=0.0):
     """
     全トークンを並列処理（前回contextを使用）
 
@@ -204,6 +207,7 @@ def forward_all_tokens_parallel(model, token_embeds, previous_contexts, device, 
         previous_contexts: 前回イテレーションの全context [num_tokens, context_dim]
         device: torch device
         batch_size: バッチサイズ（デフォルト: 8192）
+        context_noise: コンテキストに追加するガウシアンノイズの標準偏差（汎化性能向上）
 
     Returns:
         contexts: [num_tokens, context_dim]
@@ -219,6 +223,11 @@ def forward_all_tokens_parallel(model, token_embeds, previous_contexts, device, 
         contexts_for_batch[1:] = previous_contexts[:-1].detach()
         # Token 0: 最後のトークンのcontextを使用（イテレーション引継ぎ）
         contexts_for_batch[0] = previous_contexts[-1].detach()
+
+    # コンテキストノイズ追加（汎化性能向上、訓練時のみ）
+    if context_noise > 0 and model.training:
+        noise = torch.randn_like(contexts_for_batch) * context_noise
+        contexts_for_batch = contexts_for_batch + noise
 
     # 大規模データセット: バッチ分割処理（メモリオーバーフロー防止）
     if num_tokens > batch_size:

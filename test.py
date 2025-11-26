@@ -92,6 +92,7 @@ train_contexts = phase1_train(
     min_converged_ratio=config.phase1_min_converged_ratio,
     learning_rate=config.phase1_learning_rate,
     dist_reg_weight=config.dist_reg_weight,
+    context_noise=config.phase1_context_noise,
     label="Train"
 )
 train_time = time.time() - train_start

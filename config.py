@@ -44,6 +44,12 @@ class ResidualConfig:
                                          # 0.01: 非常に厳格
     phase1_min_converged_ratio = 1.01    # 早期停止を無効化（101%以上 = 不可能）
 
+    # コンテキストノイズ（汎化性能向上）
+    phase1_context_noise = 0.1           # コンテキストに追加するガウシアンノイズの標準偏差
+                                         # 0.0: ノイズなし
+                                         # 0.1: 推奨（軽いノイズ）
+                                         # 0.2: 強めのノイズ
+
     # 学習率
     phase1_learning_rate = 0.002         # Phase 1の学習率
                                          # 0.002: 推奨（高速収束）

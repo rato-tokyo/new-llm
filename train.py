@@ -162,6 +162,7 @@ def main():
             convergence_threshold=config.phase1_convergence_threshold,
             dist_reg_weight=config.dist_reg_weight,
             min_converged_ratio=config.phase1_min_converged_ratio,
+            context_noise=config.phase1_context_noise,
             label="Train"
         )
 
