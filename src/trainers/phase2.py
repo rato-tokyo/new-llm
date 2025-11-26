@@ -18,6 +18,60 @@ import torch.nn.functional as F
 from typing import Optional
 
 
+def get_normalized_embedding(model, token_id):
+    """
+    トークンIDから正規化された埋め込みを取得（共通関数）
+
+    CRITICAL: この関数を必ず使用すること！
+    - token_embedding + embed_norm の組み合わせが必須
+    - この共通関数を使わないとバグの原因になる
+
+    Args:
+        model: LLMモデル
+        token_id: 単一トークンID [1] or スカラー
+
+    Returns:
+        token_embed: 正規化された埋め込み [1, embed_dim]
+    """
+    # トークン埋め込みを取得
+    token_embed = model.token_embedding(token_id.unsqueeze(0) if token_id.dim() == 0 else token_id)
+
+    # タプルの場合の処理（一部のembeddingがタプルを返す場合）
+    if isinstance(token_embed, tuple):
+        token_embed = token_embed[0]
+
+    # embed_normを適用（CRITICAL: これを忘れるとバグになる）
+    token_embed = model.embed_norm(token_embed)
+
+    return token_embed
+
+
+def process_through_blocks(model, context, token_embed, freeze_context=False):
+    """
+    CVFPブロックを通過させる（共通関数）
+
+    CRITICAL: 引数順序は (context, token_embed)
+
+    Args:
+        model: LLMモデル
+        context: コンテキストベクトル [1, context_dim]
+        token_embed: トークン埋め込み [1, embed_dim]
+        freeze_context: Trueの場合、勾配を計算しない
+
+    Returns:
+        context: 更新されたコンテキスト [1, context_dim]
+        token_embed: 更新されたトークン埋め込み [1, embed_dim]
+    """
+    for block in model.blocks:
+        if freeze_context:
+            with torch.no_grad():
+                context, token_embed = block(context, token_embed)
+        else:
+            context, token_embed = block(context, token_embed)
+
+    return context, token_embed
+
+
 class Phase2Trainer:
     """
     Phase 2 Trainer for next-token prediction
@@ -104,19 +158,18 @@ class Phase2Trainer:
         self.model.eval()
 
         with torch.no_grad():
-            # トークン埋め込み
-            token_embeds = self.model.token_embedding(token_ids.unsqueeze(0).to(device))
-            token_embeds = self.model.embed_norm(token_embeds).squeeze(0)
-
             # 文脈伝播（Phase 1と同じ）
             context = torch.zeros(1, self.model.context_dim, device=device)
             target_contexts = []
 
-            for token_embed in token_embeds:
-                token_embed_current = token_embed.unsqueeze(0)
-                for block in self.model.blocks:
-                    # CRITICAL: 引数順序は (context, token_embed) - llm.pyの定義に合わせる
-                    context, token_embed_current = block(context, token_embed_current)
+            for token_id in token_ids:
+                # Get normalized token embedding (共通関数を使用)
+                token_embed = get_normalized_embedding(self.model, token_id)
+
+                # Process through CVFP blocks (共通関数を使用)
+                context, token_embed = process_through_blocks(
+                    self.model, context, token_embed, freeze_context=False
+                )
                 target_contexts.append(context.squeeze(0))
 
             target_contexts = torch.stack(target_contexts)  # [seq_len, context_dim]
@@ -173,20 +226,13 @@ class Phase2Trainer:
             # Detach context to prevent gradient flow through history
             context = context.detach()
 
-            # Get token embedding
-            token_embed_output = self.model.token_embedding(token_id.unsqueeze(0))
-            if isinstance(token_embed_output, tuple):
-                token_embed = token_embed_output[0]  # [1, embed_dim]
-            else:
-                token_embed = token_embed_output  # [1, embed_dim]
+            # Get normalized token embedding (共通関数を使用)
+            token_embed = get_normalized_embedding(self.model, token_id)
 
-            # Process through CVFP blocks
-            for block in self.model.blocks:
-                if self.freeze_context:
-                    with torch.no_grad():
-                        context, token_embed = block(context, token_embed)
-                else:
-                    context, token_embed = block(context, token_embed)
+            # Process through CVFP blocks (共通関数を使用)
+            context, token_embed = process_through_blocks(
+                self.model, context, token_embed, self.freeze_context
+            )
 
             # 文脈ベクトルを記録
             all_contexts.append(context.squeeze(0))
@@ -274,16 +320,13 @@ class Phase2Trainer:
             # Process all tokens with context propagation
             all_logits = []
             for token_id in input_ids:
-                # Get token embedding
-                token_embed_output = self.model.token_embedding(token_id.unsqueeze(0))
-                if isinstance(token_embed_output, tuple):
-                    token_embed = token_embed_output[0]  # [1, embed_dim]
-                else:
-                    token_embed = token_embed_output  # [1, embed_dim]
+                # Get normalized token embedding (共通関数を使用)
+                token_embed = get_normalized_embedding(self.model, token_id)
 
-                # Process through CVFP blocks
-                for block in self.model.blocks:
-                    context, token_embed = block(context, token_embed)
+                # Process through CVFP blocks (共通関数を使用)
+                context, token_embed = process_through_blocks(
+                    self.model, context, token_embed, freeze_context=False
+                )
 
                 # Predict next token from concatenated context + token_embed
                 combined = torch.cat([context, token_embed], dim=-1)  # [1, context_dim + embed_dim]
