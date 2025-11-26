@@ -64,11 +64,12 @@ def main():
     # Import after path setup
     from config import ResidualConfig
     from src.models.llm import LLM
-    from src.data.loader import load_data
     from src.trainers.phase1 import phase1_train, forward_all_tokens_sequential
     from src.trainers.phase2 import Phase2Trainer
     from src.evaluation.metrics import analyze_fixed_points
     from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
+    from transformers import AutoTokenizer
+    from datasets import load_dataset
 
     # Configuration
     config = ResidualConfig()
@@ -134,13 +135,68 @@ def main():
     total_params = sum(p.numel() for p in model.parameters())
     print_flush(f"✓ Model created: {total_params:,} parameters")
 
-    # Load data
-    print_flush("\n📊 Loading data...")
-    train_token_ids, val_token_ids = load_data(config)
-    train_token_ids = train_token_ids.to(device)
-    val_token_ids = val_token_ids.to(device)
-    print_flush(f"   Train: {len(train_token_ids):,} tokens")
-    print_flush(f"   Val:   {len(val_token_ids):,} tokens")
+    # Load data directly from UltraChat (auto-generate validation from training)
+    print_flush("\n📊 Loading data from UltraChat...")
+
+    # Load tokenizer
+    tokenizer = AutoTokenizer.from_pretrained(
+        "gpt2",
+        cache_dir=os.path.join(config.cache_dir, "tokenizer")
+    )
+    tokenizer.pad_token = tokenizer.eos_token
+
+    # Check for cached data
+    cache_file = os.path.join(
+        config.cache_dir,
+        f"ultrachat_{config.num_samples}samples_{config.max_seq_length}len.pt"
+    )
+
+    if os.path.exists(cache_file) and not args.no_cache:
+        print_flush(f"   Loading from cache: {cache_file}")
+        all_token_ids = torch.load(cache_file)
+    else:
+        print_flush(f"   Downloading UltraChat dataset...")
+        dataset = load_dataset(
+            config.dataset_name,
+            split=config.dataset_split,
+            cache_dir=os.path.join(config.cache_dir, "datasets")
+        )
+
+        # Process samples
+        all_tokens = []
+        for idx in range(min(config.num_samples, len(dataset))):
+            messages = dataset[idx]["messages"]
+            text = "\n".join([msg["content"] for msg in messages])
+
+            tokens = tokenizer(
+                text,
+                max_length=config.max_seq_length,
+                truncation=True,
+                return_tensors="pt"
+            )
+            all_tokens.append(tokens["input_ids"].squeeze(0))
+
+        all_token_ids = torch.cat(all_tokens)
+
+        # Save cache
+        os.makedirs(config.cache_dir, exist_ok=True)
+        torch.save(all_token_ids, cache_file)
+        print_flush(f"   Cached to: {cache_file}")
+
+    print_flush(f"   Total tokens: {len(all_token_ids):,}")
+
+    # Split into train/val (80% train, 20% val from the END of training data)
+    # This ensures validation uses tokens that exist in training
+    val_ratio = 0.2
+    val_size = int(len(all_token_ids) * val_ratio)
+    train_size = len(all_token_ids) - val_size
+
+    train_token_ids = all_token_ids[:train_size].to(device)
+    val_token_ids = all_token_ids[train_size:].to(device)
+
+    print_flush(f"   Train: {len(train_token_ids):,} tokens (80%)")
+    print_flush(f"   Val:   {len(val_token_ids):,} tokens (20% from end)")
+    print_flush(f"   ✓ Validation auto-generated from training data")
 
     # Load checkpoint if skipping Phase 1
     if args.skip_phase1 and os.path.exists(config.checkpoint_path):

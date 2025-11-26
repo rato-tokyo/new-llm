@@ -150,8 +150,16 @@ def load_text_file(file_path, config):
     print_flush(f"Loading text file: {file_path}")
 
     if not os.path.exists(file_path):
-        print_flush(f"  Warning: File not found, creating empty data")
-        return torch.zeros(100, dtype=torch.long)
+        raise FileNotFoundError(
+            f"❌ CRITICAL ERROR: Validation file not found: {file_path}\n"
+            "\n"
+            "Solutions:\n"
+            "  1. Use colab.py which auto-generates validation data from training data\n"
+            "  2. Manually create the validation file\n"
+            "  3. Run: python3 scripts/create_val_from_train.py\n"
+            "\n"
+            "Validation data MUST contain only tokens from training data.\n"
+        )
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
@@ -180,8 +188,10 @@ def load_text_directory(dir_path, config):
     print_flush(f"Loading text files from: {dir_path}")
 
     if not os.path.exists(dir_path):
-        print_flush(f"  Warning: Directory not found, creating empty data")
-        return torch.zeros(100, dtype=torch.long)
+        raise FileNotFoundError(
+            f"❌ CRITICAL ERROR: Directory not found: {dir_path}\n"
+            "Please create the directory and add text files."
+        )
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(
@@ -206,8 +216,10 @@ def load_text_directory(dir_path, config):
             all_token_ids.append(tokens["input_ids"].squeeze(0))
 
     if not all_token_ids:
-        print_flush(f"  Warning: No text files found, creating empty data")
-        return torch.zeros(100, dtype=torch.long)
+        raise FileNotFoundError(
+            f"❌ CRITICAL ERROR: No text files found in {dir_path}\n"
+            "Please add .txt files to the directory."
+        )
 
     token_ids = torch.cat(all_token_ids)
     print_flush(f"  Loaded {len(all_token_ids)} files → {len(token_ids)} tokens")
@@ -224,9 +236,10 @@ def load_manual_validation(config):
         print_flush(f"  Loaded {len(token_ids)} validation tokens")
         return token_ids
     else:
-        print_flush(f"  Warning: Manual validation file not found: {manual_path}")
-        print_flush(f"  Creating small default validation data")
-        return torch.randint(0, 1000, (100,))
+        raise FileNotFoundError(
+            f"❌ CRITICAL ERROR: Manual validation file not found: {manual_path}\n"
+            "Please create the validation file or use colab.py for auto-generation."
+        )
 
 
 def print_flush(msg):
