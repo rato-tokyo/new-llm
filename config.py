@@ -81,15 +81,15 @@ class ResidualConfig:
 
     # UltraChat settings
     max_seq_length = 128                                   # 最大シーケンス長
-    num_samples = 100                                      # 訓練サンプル数（→ ~12800トークン）
+    num_samples = 500                                      # 訓練サンプル数（→ ~64000トークン）
     dataset_name = "HuggingFaceH4/ultrachat_200k"          # HuggingFaceデータセット
     dataset_split = "train_sft"                            # 使用するデータセット分割
     cache_dir = "./cache"                                  # キャッシュディレクトリ
 
-    # 推奨データセットサイズ（並列処理版の高速化により可能）
-    # - テスト: num_samples=50, max_seq_length=128 (~6400トークン, ~11秒)
-    # - 小規模: num_samples=200, max_seq_length=256 (~25000トークン, ~40秒)
-    # - 中規模: num_samples=1000, max_seq_length=512 (~128000トークン, ~3分)
+    # 推奨データセットサイズ（3層モデル + ミニバッチ処理版）
+    # - テスト: num_samples=100, max_seq_length=128 (~12800トークン)
+    # - 中規模: num_samples=500, max_seq_length=128 (~64000トークン) ← 現在
+    # - 大規模: num_samples=1000, max_seq_length=128 (~128000トークン) ※メモリ注意
 
     # ========== デバイス ==========
     device = "cuda" if torch.cuda.is_available() else "cpu"  # 自動GPU検出
