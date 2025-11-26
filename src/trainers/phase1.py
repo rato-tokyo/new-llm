@@ -152,12 +152,11 @@ def forward_all_tokens_sequential(model, token_embeds, previous_contexts, device
     # 全トークンを順次処理
     context_list = []
     for t, token_embed in enumerate(token_embeds):
+        token_embed_current = token_embed.unsqueeze(0)
         # CVFPブロックを通過
         for block in model.blocks:
-            context, token_embed_out = block(
-                token_embed.unsqueeze(0),
-                context
-            )
+            # CRITICAL: 引数順序は (context, token_embed) - llm.pyの定義に合わせる
+            context, token_embed_current = block(context, token_embed_current)
 
         context_list.append(context.squeeze(0))
 

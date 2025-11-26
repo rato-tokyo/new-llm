@@ -113,8 +113,10 @@ class Phase2Trainer:
             target_contexts = []
 
             for token_embed in token_embeds:
+                token_embed_current = token_embed.unsqueeze(0)
                 for block in self.model.blocks:
-                    context, token_embed_out = block(token_embed.unsqueeze(0), context)
+                    # CRITICAL: 引数順序は (context, token_embed) - llm.pyの定義に合わせる
+                    context, token_embed_current = block(context, token_embed_current)
                 target_contexts.append(context.squeeze(0))
 
             target_contexts = torch.stack(target_contexts)  # [seq_len, context_dim]
