@@ -15,7 +15,7 @@ def print_flush(msg):
     sys.stdout.flush()
 
 
-def analyze_fixed_points(contexts, label="", verbose=True):
+def analyze_fixed_points(contexts, label="", verbose=True, max_samples=5000):
     """
     Analyze fixed-point contexts for quality metrics.
 
@@ -23,6 +23,7 @@ def analyze_fixed_points(contexts, label="", verbose=True):
         contexts: Fixed-point contexts [num_tokens, context_dim]
         label: Label for display (e.g., "Train", "Val")
         verbose: If True, print detailed analysis
+        max_samples: Maximum samples for pairwise analysis (memory optimization)
 
     Returns:
         dict: Analysis metrics including effective rank
@@ -36,11 +37,22 @@ def analyze_fixed_points(contexts, label="", verbose=True):
     num_tokens = contexts.shape[0]
     context_dim = contexts.shape[1]
 
+    # Sample contexts for pairwise analysis if too many tokens (memory optimization)
+    if num_tokens > max_samples:
+        indices = torch.randperm(num_tokens, device=device)[:max_samples]
+        sampled_contexts = contexts[indices]
+        sample_size = max_samples
+        if verbose:
+            print_flush(f"(Sampling {max_samples}/{num_tokens} tokens for pairwise analysis)\n")
+    else:
+        sampled_contexts = contexts
+        sample_size = num_tokens
+
     # 1. Global Attractor Detection
-    # Compute pairwise L2 distances
-    distances = torch.cdist(contexts, contexts, p=2)
+    # Compute pairwise L2 distances on sampled data
+    distances = torch.cdist(sampled_contexts, sampled_contexts, p=2)
     # Exclude diagonal (self-distances)
-    mask = ~torch.eye(num_tokens, dtype=bool, device=device)
+    mask = ~torch.eye(sample_size, dtype=bool, device=device)
     pairwise_distances = distances[mask]
 
     avg_distance = pairwise_distances.mean().item()
@@ -48,13 +60,18 @@ def analyze_fixed_points(contexts, label="", verbose=True):
     max_distance = pairwise_distances.max().item()
 
     # Cosine similarity
-    normalized = F.normalize(contexts, p=2, dim=1)
+    normalized = F.normalize(sampled_contexts, p=2, dim=1)
     cosine_sim = torch.mm(normalized, normalized.t())
     pairwise_cosine = cosine_sim[mask]
 
     avg_cosine = pairwise_cosine.mean().item()
     min_cosine = pairwise_cosine.min().item()
     max_cosine = pairwise_cosine.max().item()
+
+    # Free memory
+    del distances, mask, pairwise_distances, normalized, cosine_sim, pairwise_cosine
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
 
     if verbose:
         print_flush("1. Global Attractor Detection:")
@@ -93,8 +110,8 @@ def analyze_fixed_points(contexts, label="", verbose=True):
     norm_median = norms.median().item()
     norm_std = norms.std().item()
 
-    pairwise_mean = pairwise_distances.mean().item()
-    pairwise_median = pairwise_distances.median().item()
+    # Use already computed avg_distance for pairwise stats
+    pairwise_mean = avg_distance
 
     # Sparsity
     sparsity = (contexts.abs() < 0.01).float().mean().item()
@@ -102,12 +119,20 @@ def analyze_fixed_points(contexts, label="", verbose=True):
     if verbose:
         print_flush("\n3. Distribution Statistics:")
         print_flush(f"  Norm - Mean: {norm_mean:.4f}, Median: {norm_median:.4f}, Std: {norm_std:.4f}")
-        print_flush(f"  Pairwise Dist - Mean: {pairwise_mean:.4f}, Median: {pairwise_median:.4f}")
+        print_flush(f"  Pairwise Dist - Mean: {pairwise_mean:.4f}")
         print_flush(f"  Sparsity: {sparsity*100:.2f}% of values < 0.01")
 
     # 4. Information Content (Effective Rank)
+    # Use sampled contexts for SVD to save memory
+    max_svd_samples = 10000
+    if num_tokens > max_svd_samples:
+        svd_indices = torch.randperm(num_tokens, device=device)[:max_svd_samples]
+        svd_contexts = contexts[svd_indices]
+    else:
+        svd_contexts = contexts
+
     # Compute SVD
-    U, S, V = torch.svd(contexts)
+    U, S, V = torch.svd(svd_contexts)
 
     # Actual rank (number of non-zero singular values)
     # Consider values > 1e-6 as non-zero to account for numerical precision
@@ -117,6 +142,11 @@ def analyze_fixed_points(contexts, label="", verbose=True):
     S_normalized = S / S.sum()
     entropy = -(S_normalized * torch.log(S_normalized + 1e-10)).sum()
     effective_rank = torch.exp(entropy).item()
+
+    # Free SVD memory
+    del U, V, svd_contexts
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
 
     if verbose:
         print_flush("\n4. Information Content:")
