@@ -64,13 +64,16 @@ class MemoryPhase1Trainer(Phase1Trainer):
         optimizer = torch.optim.Adam(context_params, lr=self.config.phase1_learning_rate)
 
         # トークン埋め込み（1回のみ計算、CPUに保存）
+        # デバイス判定用（文字列またはtorch.device両対応）
+        is_cuda = str(self.device) == 'cuda' or (hasattr(self.device, 'type') and self.device.type == 'cuda')
+
         with torch.no_grad():
             # GPUで計算してCPUに移動（大規模データ対応）
             token_embeds_gpu = self.model.token_embedding(token_ids.unsqueeze(0).to(self.device))
             token_embeds_gpu = self.model.embed_norm(token_embeds_gpu).squeeze(0)
             token_embeds = token_embeds_gpu.cpu()  # CPUに保存
             del token_embeds_gpu
-            if self.device.type == 'cuda':
+            if is_cuda:
                 torch.cuda.empty_cache()
 
         previous_contexts = None  # CPUに保存
@@ -86,7 +89,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 contexts = self._forward_sequential(token_embeds_gpu, None)
                 previous_contexts = contexts.detach().cpu()  # CPUに保存
                 del token_embeds_gpu, contexts
-                if self.device.type == 'cuda':
+                if is_cuda:
                     torch.cuda.empty_cache()
                 elapsed = time.time() - start_time
                 print_flush(f"Iteration 1/{self.config.phase1_max_iterations}: シーケンシャル [{elapsed:.2f}s]")
@@ -109,7 +112,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             final_convergence_rate = convergence_rate
 
             del token_embeds_gpu, previous_contexts_gpu, contexts
-            if self.device.type == 'cuda':
+            if is_cuda:
                 torch.cuda.empty_cache()
 
             elapsed = time.time() - start_time
@@ -234,6 +237,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
         num_batches = (num_tokens + batch_size - 1) // batch_size
         context_noise = self.config.phase1_context_noise
 
+        # デバイス判定用（文字列またはtorch.device両対応）
+        is_cuda = str(self.device) == 'cuda' or (hasattr(self.device, 'type') and self.device.type == 'cuda')
+
         # 勾配をゼロに
         optimizer.zero_grad()
 
@@ -298,7 +304,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             # メモリ解放
             del batch_combined, batch_output, batch_loss, scaled_loss, batch_contexts, batch_prev
 
-            if self.device.type == 'cuda':
+            if is_cuda:
                 torch.cuda.empty_cache()
 
         # 勾配クリッピングとパラメータ更新
