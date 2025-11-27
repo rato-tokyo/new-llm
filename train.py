@@ -1,11 +1,14 @@
 """
 New-LLM Training Script (Refactored Version)
 
-Uses the new CVFPLayer-based architecture with clean encapsulation.
+依存性注入による疎結合設計:
+- DataProvider: データロード（memory/storage）
+- Phase1Trainer: CVFP固定点学習（memory/storage）
 
 Usage:
-    python3 train.py           # Full training with config.py settings
-    python3 train.py --test    # Quick test with 10 tokens only
+    python3 train.py                    # メモリモード（デフォルト）
+    python3 train.py --data-mode storage # ストレージモード（大規模データ用）
+    python3 train.py --test             # クイックテスト（100トークン）
 """
 
 import os
@@ -15,7 +18,6 @@ import time
 import argparse
 import random
 import numpy as np
-from tokenizers import Tokenizer
 
 # Add project root to path
 project_root = os.path.dirname(os.path.abspath(__file__))
@@ -23,8 +25,7 @@ sys.path.insert(0, project_root)
 
 from config import ResidualConfig
 from src.models.llm import LLM
-from src.data.loader import load_data
-from src.trainers.phase1 import phase1_train
+from src.providers import create_data_provider, create_phase1_trainer
 from src.trainers.phase2 import Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
@@ -42,7 +43,6 @@ def set_seed(seed=42):
     np.random.seed(seed)
     torch.manual_seed(seed)
     torch.cuda.manual_seed_all(seed)
-    # 決定的動作を保証
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
@@ -56,6 +56,8 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description='New-LLM Training')
     parser.add_argument('--test', action='store_true', help='Run quick test with 100 tokens')
+    parser.add_argument('--data-mode', choices=['memory', 'storage'], default=None,
+                        help='Data loading mode: memory (default) or storage (for large datasets)')
     args = parser.parse_args()
 
     # Configuration
@@ -71,12 +73,20 @@ def main():
         print_flush("New-LLM Training (Refactored Architecture)")
     print_flush(f"{'='*70}\n")
 
+    # Determine data mode
+    if args.data_mode:
+        data_mode = args.data_mode
+    elif config.use_disk_offload:
+        data_mode = "storage"
+    else:
+        data_mode = "memory"
+
     print_flush("📋 Configuration:")
-    print_flush(f"   Architecture: {config.architecture}")
     print_flush(f"   Layers: {config.num_layers}")
     print_flush(f"   Context dim: {config.context_dim}")
     print_flush(f"   Device: {config.device}")
     print_flush(f"   Diversity weight: {config.dist_reg_weight}")
+    print_flush(f"   Data mode: {data_mode}")
     if not test_mode:
         print_flush(f"   Data: {config.num_samples} samples from {config.train_data_source}")
 
@@ -91,7 +101,7 @@ def main():
         os.makedirs(tokenizer_dir, exist_ok=True)
         gpt2_tokenizer.save_pretrained(tokenizer_dir)
 
-    # Create model with E案 architecture
+    # Create model
     model = LLM(
         vocab_size=config.vocab_size,
         embed_dim=config.embed_dim,
@@ -102,7 +112,6 @@ def main():
     model.to(device)
 
     total_params = sum(p.numel() for p in model.parameters())
-    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print_flush(f"\nModel initialized: {total_params:,} parameters")
 
     # Load checkpoint if available
@@ -120,19 +129,36 @@ def main():
             print_flush(f"⚠️ Failed to load checkpoint: {e}")
             print_flush("Starting training from scratch...")
 
-    # Load data
+    # Load data using DataProvider (dependency injection)
+    data_provider = None
     if test_mode:
         print_flush("\nGenerating test data (100 tokens for stability test)...")
-        # 訓練データ: ランダムな100トークン
         train_token_ids = torch.randint(0, 1000, (100,), device=device)
-        # 検証データ: 訓練データから50トークンをランダムサンプリング（重複なし）
         indices = torch.randperm(100)[:50]
         val_token_ids = train_token_ids[indices]
     else:
-        print_flush("\nLoading training data...")
-        train_token_ids, val_token_ids = load_data(config)
+        print_flush(f"\nLoading training data (mode: {data_mode})...")
+        data_provider = create_data_provider(data_mode, config)
 
-    # Phase 1: Fixed-Point Learning
+        # ストレージモードで未準備の場合は準備
+        if data_mode == "storage" and hasattr(data_provider, 'is_prepared'):
+            if not data_provider.is_prepared():
+                print_flush("  Preparing storage data (first-time setup)...")
+                data_provider.prepare(device)
+
+        # データロード
+        if data_provider.is_streaming:
+            data_provider.load_data()
+            train_token_ids = data_provider.get_all_train_tokens(device)
+            val_token_ids = data_provider.get_all_val_tokens(device)
+            print_flush(f"  Train: {len(train_token_ids)} tokens (streaming mode)")
+            print_flush(f"  Val:   {len(val_token_ids)} tokens")
+        else:
+            train_token_ids, val_token_ids = data_provider.load_data()
+            train_token_ids = train_token_ids.to(device)
+            val_token_ids = val_token_ids.to(device)
+
+    # Phase 1: Fixed-Point Learning (using Phase1Trainer)
     should_skip_phase1 = config.skip_phase1 and checkpoint_loaded and checkpoint_epoch in ['phase1_complete', 'phase2_complete']
 
     if should_skip_phase1:
@@ -141,10 +167,7 @@ def main():
         print_flush(f"{'='*70}\n")
         print_flush("✓ Phase 1 already completed, loading from checkpoint")
         print_flush("  Proceeding directly to Phase 2...\n")
-
-        # Skip identity mapping check when using checkpoint
         is_identity = False
-
     else:
         print_flush(f"\n{'='*70}")
         print_flush("STARTING PHASE 1")
@@ -152,43 +175,14 @@ def main():
 
         phase1_start = time.time()
 
-        # Phase 1: CVFP Learning with parallel processing
-        train_contexts = phase1_train(
-            model=model,
-            token_ids=train_token_ids,
-            device=device,
-            learning_rate=config.phase1_learning_rate,
-            max_iterations=config.phase1_max_iterations,
-            convergence_threshold=config.phase1_convergence_threshold,
-            dist_reg_weight=config.dist_reg_weight,
-            min_converged_ratio=config.phase1_min_converged_ratio,
-            context_noise=config.phase1_context_noise,
-            label="Train"
-        )
+        # Create Phase 1 Trainer (dependency injection)
+        phase1_trainer = create_phase1_trainer(data_mode, model, config, device)
 
-        # Validation: Use forward_all_tokens_sequential for evaluation
-        print_flush("\n" + "="*70)
-        print_flush("Evaluating on validation data...")
-        print_flush("="*70 + "\n")
+        # Train Phase 1
+        train_contexts = phase1_trainer.train(train_token_ids, label="Train")
 
-        from src.trainers.phase1 import forward_all_tokens_sequential
-
-        # Prepare validation token embeddings
-        val_token_embeds = model.token_embedding(val_token_ids.unsqueeze(0).to(device))
-        if isinstance(val_token_embeds, tuple):
-            val_token_embeds = val_token_embeds[0]
-        val_token_embeds = model.embed_norm(val_token_embeds).squeeze(0)
-
-        # Single forward pass (no training)
-        model.eval()
-        with torch.no_grad():
-            val_contexts = forward_all_tokens_sequential(
-                model=model,
-                token_embeds=val_token_embeds,
-                previous_contexts=None,
-                device=device
-            )
-        model.train()
+        # Evaluate on validation data
+        val_contexts = phase1_trainer.evaluate(val_token_ids, label="Val")
 
         phase1_time = time.time() - phase1_start
         print_flush(f"\nPhase 1 completed in {phase1_time:.1f}s")
@@ -198,18 +192,7 @@ def main():
             print_flush(f"\n💾 Saving checkpoint to {config.checkpoint_path}")
             os.makedirs(config.checkpoint_dir, exist_ok=True)
             try:
-                checkpoint = {
-                    'model_state_dict': model.state_dict(),
-                    'epoch': 'phase1_complete',
-                    'config': {
-                        'num_layers': config.num_layers,
-                        'embed_dim': config.embed_dim,
-                        'context_dim': config.context_dim,
-                        'vocab_size': config.vocab_size
-                    }
-                }
-                torch.save(checkpoint, config.checkpoint_path)
-                print_flush(f"✓ Checkpoint saved successfully")
+                phase1_trainer.save_checkpoint(config.checkpoint_path)
             except Exception as e:
                 print_flush(f"⚠️ Failed to save checkpoint: {e}")
 
@@ -243,14 +226,12 @@ def main():
         print_flush("STARTING PHASE 2")
         print_flush(f"{'='*70}\n")
 
-        # Phase 2: Next-Token Prediction
         phase2_trainer = Phase2Trainer(
             model=model,
             learning_rate=config.phase2_learning_rate,
             gradient_clip=config.phase2_gradient_clip
         )
 
-        # Train Phase 2
         phase2_history = phase2_trainer.train_full(
             train_token_ids=train_token_ids,
             val_token_ids=val_token_ids,
@@ -284,6 +265,10 @@ def main():
     print_flush(f"{'='*70}\n")
 
     print_flush("✅ All training phases completed successfully")
+
+    # Clean up
+    if data_provider is not None:
+        data_provider.close()
 
 
 if __name__ == "__main__":
