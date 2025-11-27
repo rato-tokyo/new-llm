@@ -27,10 +27,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from config import ResidualConfig
 from src.models import LLM
-from src.providers.data import MemoryDataProvider
 from src.trainers.phase1 import MemoryPhase1Trainer
 from src.trainers.phase2 import Phase2Trainer
-from src.evaluation import analyze_fixed_points, check_convergence
+from src.evaluation import analyze_fixed_points
 
 
 def print_flush(msg: str):
@@ -70,28 +69,27 @@ def estimate_remaining_time(elapsed_times: list, remaining_count: int) -> str:
 def load_fixed_val_data(config, device) -> torch.Tensor:
     """固定の検証データを読み込み（全実験で共通）
 
-    訓練データの最後20%を検証データとして使用（ファイルがない場合は自動生成）
+    最小サンプル数（50サンプル）の最後20%を検証データとして使用。
+    これにより全実験で同じvalデータを使用し、公平な比較が可能。
     """
     print_flush("\n" + "="*70)
-    print_flush("Loading fixed validation data...")
+    print_flush("Loading fixed validation data (from 50 samples)...")
     print_flush("="*70)
 
     from transformers import GPT2Tokenizer
+    from datasets import load_dataset
 
-    # 最大サンプル数で訓練データをロードし、その一部をvalとして使用
-    original_samples = config.num_samples
-    config.num_samples = 500  # 十分大きい値
+    # 50サンプル分のデータをロードし、最後20%をvalとして使用
+    VAL_BASE_SAMPLES = 50
 
-    # 訓練データのみをロード
     tokenizer = GPT2Tokenizer.from_pretrained(config.tokenizer_name)
     tokenizer.pad_token = tokenizer.eos_token
 
     # UltraChatからデータ取得
-    from datasets import load_dataset
     dataset = load_dataset(config.dataset_name, split=config.dataset_split)
 
-    # 最初の500サンプルを使用
-    samples = [dataset[i]["messages"][0]["content"] for i in range(min(500, len(dataset)))]
+    # 最初の50サンプルを使用
+    samples = [dataset[i]["messages"][0]["content"] for i in range(VAL_BASE_SAMPLES)]
 
     # トークン化
     all_tokens = []
@@ -106,15 +104,56 @@ def load_fixed_val_data(config, device) -> torch.Tensor:
 
     all_token_ids = torch.cat(all_tokens)
 
-    # 最後20%を検証データとして使用
+    # 最後20%を検証データとして使用（約1,280トークン）
     val_ratio = 0.2
     val_start = int(len(all_token_ids) * (1 - val_ratio))
     val_tokens = all_token_ids[val_start:].to(device)
 
-    config.num_samples = original_samples
-
-    print_flush(f"  Val tokens: {len(val_tokens):,} (固定、訓練データの最後20%)")
+    print_flush(f"  Base samples: {VAL_BASE_SAMPLES}")
+    print_flush(f"  Val tokens: {len(val_tokens):,} (固定)")
     return val_tokens
+
+
+def load_train_data_only(num_samples: int, config: ResidualConfig, device: torch.device) -> torch.Tensor:
+    """訓練データのみをロード（valファイル不要）"""
+    from transformers import GPT2Tokenizer
+    from datasets import load_dataset
+
+    cache_file = f"{config.cache_dir}/ultrachat_{num_samples}samples_{config.max_seq_length}len.pt"
+
+    # キャッシュがあれば使用
+    if os.path.exists(cache_file):
+        print_flush(f"  Loading from cache: {cache_file}")
+        cached = torch.load(cache_file)
+        return cached['token_ids'].to(device)
+
+    print_flush(f"  Loading {num_samples} samples from UltraChat...")
+
+    tokenizer = GPT2Tokenizer.from_pretrained(config.tokenizer_name)
+    tokenizer.pad_token = tokenizer.eos_token
+
+    dataset = load_dataset(config.dataset_name, split=config.dataset_split)
+
+    samples = [dataset[i]["messages"][0]["content"] for i in range(num_samples)]
+
+    all_tokens = []
+    for text in samples:
+        tokens = tokenizer(
+            text,
+            max_length=config.max_seq_length,
+            truncation=True,
+            return_tensors="pt"
+        )
+        all_tokens.append(tokens["input_ids"].squeeze(0))
+
+    token_ids = torch.cat(all_tokens)
+
+    # キャッシュ保存
+    os.makedirs(config.cache_dir, exist_ok=True)
+    torch.save({'token_ids': token_ids}, cache_file)
+    print_flush(f"  Cached to: {cache_file}")
+
+    return token_ids.to(device)
 
 
 def run_single_experiment(
@@ -148,10 +187,8 @@ def run_single_experiment(
     )
     model.to(device)
 
-    # データプロバイダー（訓練データのみ）
-    data_provider = MemoryDataProvider(config)
-    data_provider.load_data()
-    train_tokens = data_provider.get_all_train_tokens(device)
+    # 訓練データのみを直接ロード（valファイル不要）
+    train_tokens = load_train_data_only(num_samples, config, device)
 
     num_train_tokens = len(train_tokens)
     num_val_tokens = len(val_tokens)
@@ -238,8 +275,7 @@ def run_single_experiment(
     print_flush(f"  Phase 2: Val PPL={result['val_ppl']:.2f}, Val Acc={result['val_accuracy']*100:.2f}%")
 
     # クリーンアップ
-    data_provider.close()
-    del model, trainer1, trainer2, train_contexts
+    del model, trainer1, trainer2, train_contexts, train_tokens
     if device.type == 'cuda':
         torch.cuda.empty_cache()
 
@@ -289,8 +325,8 @@ def main():
     # 設定
     config = ResidualConfig()
 
-    # テストするサンプル数（対数スケール）
-    sample_sizes = [10, 25, 50, 100, 200, 500]
+    # テストするサンプル数（50から開始、対数スケール）
+    sample_sizes = [50, 100, 200, 500]
 
     print_flush(f"\nSample sizes: {sample_sizes}")
     print_flush(f"Config:")
