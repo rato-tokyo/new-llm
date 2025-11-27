@@ -52,7 +52,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         print_flush(f"\n{'='*70}")
         print_flush(f"PHASE 1: 固定点コンテキスト学習 - {label}")
         print_flush(f"{'='*70}")
-        print_flush(f"  Mode: Memory")
+        print_flush(f"  Mode: Memory (GPU-optimized)")
         print_flush(f"  Tokens: {num_tokens:,}")
         print_flush(f"  Max iterations: {self.config.phase1_max_iterations}")
         print_flush(f"  Learning rate: {self.config.phase1_learning_rate}")
@@ -63,12 +63,17 @@ class MemoryPhase1Trainer(Phase1Trainer):
         print_flush(f"  ContextBlock params: {sum(p.numel() for p in context_params):,}")
         optimizer = torch.optim.Adam(context_params, lr=self.config.phase1_learning_rate)
 
-        # トークン埋め込み（1回のみ計算）
+        # トークン埋め込み（1回のみ計算、CPUに保存）
         with torch.no_grad():
-            token_embeds = self.model.token_embedding(token_ids.unsqueeze(0).to(self.device))
-            token_embeds = self.model.embed_norm(token_embeds).squeeze(0)
+            # GPUで計算してCPUに移動（大規模データ対応）
+            token_embeds_gpu = self.model.token_embedding(token_ids.unsqueeze(0).to(self.device))
+            token_embeds_gpu = self.model.embed_norm(token_embeds_gpu).squeeze(0)
+            token_embeds = token_embeds_gpu.cpu()  # CPUに保存
+            del token_embeds_gpu
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
 
-        previous_contexts = None
+        previous_contexts = None  # CPUに保存
         final_convergence_rate = 0.0
 
         for iteration in range(self.config.phase1_max_iterations):
@@ -76,21 +81,36 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
             if iteration == 0:
                 # Iteration 0: シーケンシャル（学習なし）
-                contexts = self._forward_sequential(token_embeds, None)
-                previous_contexts = contexts.detach()
+                # token_embedsをGPUに移動して処理
+                token_embeds_gpu = token_embeds.to(self.device)
+                contexts = self._forward_sequential(token_embeds_gpu, None)
+                previous_contexts = contexts.detach().cpu()  # CPUに保存
+                del token_embeds_gpu, contexts
+                if self.device.type == 'cuda':
+                    torch.cuda.empty_cache()
                 elapsed = time.time() - start_time
                 print_flush(f"Iteration 1/{self.config.phase1_max_iterations}: シーケンシャル [{elapsed:.2f}s]")
                 continue
 
             # Iteration 1+: 勾配累積付き並列処理
+            # token_embedsとprevious_contextsをGPUに移動
+            token_embeds_gpu = token_embeds.to(self.device)
+            previous_contexts_gpu = previous_contexts.to(self.device)
+
             contexts, total_loss, cvfp_loss, diversity_loss = self._forward_parallel_with_grad_accum(
-                token_embeds, previous_contexts, optimizer
+                token_embeds_gpu, previous_contexts_gpu, optimizer
             )
 
-            # 収束率
-            convergence_rate = self._compute_convergence_rate(contexts, previous_contexts, num_tokens)
-            previous_contexts = contexts.detach()
+            # 収束率（GPUで計算）
+            convergence_rate = self._compute_convergence_rate(contexts, previous_contexts_gpu, num_tokens)
+
+            # CPUに保存してGPUメモリ解放
+            previous_contexts = contexts.detach().cpu()
             final_convergence_rate = convergence_rate
+
+            del token_embeds_gpu, previous_contexts_gpu, contexts
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
 
             elapsed = time.time() - start_time
             print_flush(
@@ -107,9 +127,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 print_flush(f"  → Early stopping (min_iterations={min_iterations} satisfied)")
                 break
 
-            if self.device.type == 'cuda':
-                torch.cuda.empty_cache()
-
         self._training_stats = {
             'iterations': iteration + 1,
             'convergence_rate': final_convergence_rate,
@@ -117,7 +134,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
         }
 
         print_flush(f"\nPhase 1 完了: {int(final_convergence_rate * num_tokens)}/{num_tokens} トークン収束\n")
-        return contexts.detach()
+
+        # 最終結果をGPUに戻す
+        return previous_contexts.to(self.device)
 
     def evaluate(
         self,
@@ -213,29 +232,39 @@ class MemoryPhase1Trainer(Phase1Trainer):
         batch_size = self.config.phase1_batch_size
         num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
         num_batches = (num_tokens + batch_size - 1) // batch_size
-
-        # コンテキスト準備
-        contexts_for_batch = torch.zeros(num_tokens, self.model.context_dim, device=self.device)
-        contexts_for_batch[1:] = previous_contexts[:-1].detach()
-        contexts_for_batch[0] = previous_contexts[-1].detach()
-
-        if self.config.phase1_context_noise > 0 and self.model.training:
-            noise = torch.randn_like(contexts_for_batch) * self.config.phase1_context_noise
-            contexts_for_batch = contexts_for_batch + noise
+        context_noise = self.config.phase1_context_noise
 
         # 勾配をゼロに
         optimizer.zero_grad()
 
-        # 結果を格納
-        all_contexts = []
+        # 結果を格納（CPUに保存してGPUメモリ節約）
+        all_contexts_cpu = []
         total_cvfp_loss = 0.0
         total_diversity_loss = 0.0
         total_loss_sum = 0.0
+
+        # 最終コンテキスト（ラップアラウンド用）
+        last_context = previous_contexts[-1].detach()
 
         # バッチ処理（勾配累積）
         for start_idx in range(0, num_tokens, batch_size):
             end_idx = min(start_idx + batch_size, num_tokens)
             current_batch_size = end_idx - start_idx
+
+            # バッチ分のコンテキストをその場で作成（メモリ効率化）
+            if start_idx == 0:
+                # 最初のバッチ: index 0 は last_context を使用
+                batch_contexts = torch.zeros(current_batch_size, self.model.context_dim, device=self.device)
+                batch_contexts[0] = last_context
+                if current_batch_size > 1:
+                    batch_contexts[1:] = previous_contexts[:end_idx-1].detach()
+            else:
+                batch_contexts = previous_contexts[start_idx-1:end_idx-1].detach().clone()
+
+            # ノイズ追加
+            if context_noise > 0 and self.model.training:
+                noise = torch.randn_like(batch_contexts) * context_noise
+                batch_contexts = batch_contexts + noise
 
             # バッチ分のcombined_tokensを作成
             batch_combined = self._build_combined_tokens_batch(
@@ -243,10 +272,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             )
 
             # Forward pass
-            batch_output = self.model.context_block(
-                contexts_for_batch[start_idx:end_idx],
-                batch_combined
-            )
+            batch_output = self.model.context_block(batch_contexts, batch_combined)
 
             # バッチごとの損失計算
             batch_prev = previous_contexts[start_idx:end_idx].detach()
@@ -261,8 +287,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
             if not torch.isnan(scaled_loss) and not torch.isinf(scaled_loss):
                 scaled_loss.backward()
 
-            # 結果を保存（勾配グラフから切り離して保存）
-            all_contexts.append(batch_output.detach())
+            # 結果をCPUに保存（GPUメモリ節約）
+            all_contexts_cpu.append(batch_output.detach().cpu())
 
             # 損失の記録
             total_cvfp_loss += cvfp_loss.item() * current_batch_size
@@ -270,7 +296,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             total_loss_sum += batch_loss.item() * current_batch_size
 
             # メモリ解放
-            del batch_combined, batch_output, batch_loss, scaled_loss
+            del batch_combined, batch_output, batch_loss, scaled_loss, batch_contexts, batch_prev
 
             if self.device.type == 'cuda':
                 torch.cuda.empty_cache()
@@ -279,8 +305,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.config.phase1_gradient_clip)
         optimizer.step()
 
-        # コンテキストを結合（勾配なし）
-        contexts = torch.cat(all_contexts, dim=0)
+        # コンテキストを結合してGPUに戻す
+        contexts = torch.cat(all_contexts_cpu, dim=0).to(self.device)
+        del all_contexts_cpu
 
         # 平均損失を計算
         avg_cvfp_loss = total_cvfp_loss / num_tokens
