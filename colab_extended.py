@@ -131,6 +131,7 @@ def run_single_experiment(
         embed_dim=config.embed_dim,
         context_dim=config.context_dim,
         num_layers=num_layers,
+        num_input_tokens=getattr(config, 'num_input_tokens', 1),
         use_pretrained_embeddings=config.use_pretrained_embeddings
     )
     model.to(device)
@@ -208,10 +209,13 @@ def run_single_experiment(
 
     print_flush(f"  RESULT: Val PPL={result['val_ppl']:.2f}, Val Acc={result['val_accuracy']*100:.2f}% ({format_time(experiment_time)})")
 
-    # クリーンアップ
-    del model, trainer1, trainer2, train_contexts, train_tokens
+    # クリーンアップ（確実にGPUメモリを解放）
+    del model, trainer1, trainer2, train_contexts, train_tokens, val_tokens, val_result
+    import gc
+    gc.collect()
     if device.type == 'cuda':
         torch.cuda.empty_cache()
+        torch.cuda.synchronize()
 
     return result
 

@@ -20,11 +20,18 @@ class ResidualConfig:
 
     # ========== モデルアーキテクチャ ==========
     num_layers = 6                  # ContextBlock と TokenBlock の両方のレイヤー数
-    context_dim = 768               # コンテキストベクトル次元数（GPT-2に合わせて768次元）
-    embed_dim = 768                 # トークン埋め込み次元数（GPT-2事前学習済み: 768次元）
+    embed_dim = 768                 # トークン埋め込み次元数（GPT-2事前学習済み: 768次元、固定）
+    context_multiplier = 1          # context_dim = embed_dim × この値（1, 2, 3, ...）
+    context_dim = embed_dim * context_multiplier  # コンテキストベクトル次元数（自動計算）
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
     # LayerNorm: 常に有効（数値安定性のため必須）
+
+    # ========== 複数トークン入力 ==========
+    num_input_tokens = 1            # 入力するトークン数
+                                    # 1: 現在のトークンのみ（現状維持）
+                                    # 2: 直前2トークン [token_{t-1}, token_t]
+                                    # N: 直前Nトークン [token_{t-N+1}, ..., token_t]
 
     # ========== Diversity Regularization (Per-Dimension Usage Tracking) ==========
     # LayerNorm + Per-Dimension Variance Tracking (EMA-based) による多様性確保

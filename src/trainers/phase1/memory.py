@@ -154,12 +154,15 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         print_flush(f"\nEvaluating {label} data...")
 
+        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+
         result = check_convergence(
             model=self.model,
             token_ids=token_ids,
             device=self.device,
             num_trials=num_trials,
-            verbose=True
+            verbose=True,
+            num_input_tokens=num_input_tokens
         )
 
         if return_contexts_only:
@@ -168,22 +171,43 @@ class MemoryPhase1Trainer(Phase1Trainer):
         return result
 
     def _forward_sequential(self, token_embeds: torch.Tensor, previous_contexts: Optional[torch.Tensor]) -> torch.Tensor:
+        """シーケンシャル処理（Iteration 0用）"""
         if previous_contexts is None:
             context = torch.zeros(1, self.model.context_dim, device=self.device)
         else:
             context = previous_contexts[-1].unsqueeze(0).detach()
 
+        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+
+        # トークン履歴を初期化（ゼロベクトルで埋める）
+        # イテレーション開始時はトークン履歴をリセット
+        token_history = [torch.zeros(self.model.embed_dim, device=self.device)
+                         for _ in range(num_input_tokens - 1)]
+
         context_list = []
         for token_embed in token_embeds:
-            context = self.model.context_block(context, token_embed.unsqueeze(0))
+            # 履歴 + 現在のトークンを結合
+            token_history.append(token_embed)
+            combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
+            # combined_tokens: [embed_dim * num_input_tokens]
+
+            context = self.model.context_block(context, combined_tokens.unsqueeze(0))
             context_list.append(context.squeeze(0))
 
         return torch.stack(context_list)
 
     def _forward_parallel(self, token_embeds: torch.Tensor, previous_contexts: torch.Tensor) -> torch.Tensor:
+        """並列処理（Iteration 1+用）"""
         num_tokens = len(token_embeds)
         batch_size = self.config.phase1_batch_size
+        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
 
+        # 複数トークンの結合テンソルを作成
+        # token_embeds: [num_tokens, embed_dim]
+        # 出力: [num_tokens, embed_dim * num_input_tokens]
+        combined_tokens = self._build_combined_tokens(token_embeds, num_input_tokens)
+
+        # コンテキスト準備（既存ロジック）
         contexts_for_batch = torch.zeros(num_tokens, self.model.context_dim, device=self.device)
         contexts_for_batch[1:] = previous_contexts[:-1].detach()
         contexts_for_batch[0] = previous_contexts[-1].detach()
@@ -198,12 +222,53 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 end_idx = min(start_idx + batch_size, num_tokens)
                 batch_output = self.model.context_block(
                     contexts_for_batch[start_idx:end_idx],
-                    token_embeds[start_idx:end_idx]
+                    combined_tokens[start_idx:end_idx]
                 )
                 all_contexts.append(batch_output)
             return torch.cat(all_contexts, dim=0)
         else:
-            return self.model.context_block(contexts_for_batch, token_embeds)
+            return self.model.context_block(contexts_for_batch, combined_tokens)
+
+    def _build_combined_tokens(self, token_embeds: torch.Tensor, num_input_tokens: int) -> torch.Tensor:
+        """
+        複数トークンの結合テンソルを作成
+
+        Args:
+            token_embeds: [num_tokens, embed_dim]
+            num_input_tokens: 入力トークン数
+
+        Returns:
+            combined_tokens: [num_tokens, embed_dim * num_input_tokens]
+
+        例（num_input_tokens=2）:
+            時刻t=0: [zero_vector, token_0]
+            時刻t=1: [token_0, token_1]
+            時刻t=2: [token_1, token_2]
+            ...
+        """
+        if num_input_tokens == 1:
+            return token_embeds
+
+        num_tokens = len(token_embeds)
+        embed_dim = self.model.embed_dim
+
+        combined_tokens = torch.zeros(
+            num_tokens,
+            embed_dim * num_input_tokens,
+            device=self.device
+        )
+
+        for i in range(num_tokens):
+            for j in range(num_input_tokens):
+                # j=0 が最も古いトークン、j=num_input_tokens-1 が現在のトークン
+                src_idx = i - (num_input_tokens - 1 - j)
+                if src_idx >= 0:
+                    start = j * embed_dim
+                    end = (j + 1) * embed_dim
+                    combined_tokens[i, start:end] = token_embeds[src_idx]
+                # src_idx < 0 の場合はゼロベクトル（初期化済み）
+
+        return combined_tokens
 
     def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
         context_mean = contexts.mean(dim=0)

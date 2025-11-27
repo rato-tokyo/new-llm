@@ -31,7 +31,7 @@ class ConvergenceResult:
     contexts: torch.Tensor  # 最終イテレーションのコンテキスト
 
 
-def forward_sequential(model, token_embeds: torch.Tensor, previous_contexts: Optional[torch.Tensor], device: torch.device) -> torch.Tensor:
+def forward_sequential(model, token_embeds: torch.Tensor, previous_contexts: Optional[torch.Tensor], device: torch.device, num_input_tokens: int = 1) -> torch.Tensor:
     """
     順次処理で全トークンのコンテキストを計算
 
@@ -40,6 +40,7 @@ def forward_sequential(model, token_embeds: torch.Tensor, previous_contexts: Opt
         token_embeds: トークン埋め込み [num_tokens, embed_dim]
         previous_contexts: 前回のコンテキスト（Noneの場合はゼロから開始）
         device: デバイス
+        num_input_tokens: 入力トークン数
 
     Returns:
         contexts: 新しいコンテキスト [num_tokens, context_dim]
@@ -49,9 +50,19 @@ def forward_sequential(model, token_embeds: torch.Tensor, previous_contexts: Opt
     else:
         context = previous_contexts[-1].unsqueeze(0).detach()
 
+    # トークン履歴を初期化（ゼロベクトルで埋める）
+    # イテレーション開始時はトークン履歴をリセット
+    token_history = [torch.zeros(model.embed_dim, device=device)
+                     for _ in range(num_input_tokens - 1)]
+
     context_list = []
     for token_embed in token_embeds:
-        context = model.context_block(context, token_embed.unsqueeze(0))
+        # 履歴 + 現在のトークンを結合
+        token_history.append(token_embed)
+        combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
+        # combined_tokens: [embed_dim * num_input_tokens]
+
+        context = model.context_block(context, combined_tokens.unsqueeze(0))
         context_list.append(context.squeeze(0))
 
     return torch.stack(context_list)
@@ -62,7 +73,8 @@ def check_convergence(
     token_ids: torch.Tensor,
     device: torch.device,
     num_trials: int = 10,
-    verbose: bool = True
+    verbose: bool = True,
+    num_input_tokens: int = 1
 ) -> ConvergenceResult:
     """
     検証データの収束性をチェック
@@ -76,6 +88,7 @@ def check_convergence(
         device: デバイス
         num_trials: イテレーション回数
         verbose: 詳細出力
+        num_input_tokens: 入力トークン数
 
     Returns:
         ConvergenceResult: 収束判定結果
@@ -88,6 +101,7 @@ def check_convergence(
         print_flush(f"{'='*70}")
         print_flush(f"  Tokens: {len(token_ids):,}")
         print_flush(f"  Trials: {num_trials}")
+        print_flush(f"  num_input_tokens: {num_input_tokens}")
 
     # トークン埋め込みを計算
     with torch.no_grad():
@@ -104,7 +118,7 @@ def check_convergence(
 
     for trial in range(num_trials):
         with torch.no_grad():
-            contexts = forward_sequential(model, token_embeds, previous_contexts, device)
+            contexts = forward_sequential(model, token_embeds, previous_contexts, device, num_input_tokens)
 
             if trial > 0:
                 cvfp_loss = F.mse_loss(contexts, previous_contexts)

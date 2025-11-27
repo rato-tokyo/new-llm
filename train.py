@@ -107,6 +107,7 @@ def main():
         embed_dim=config.embed_dim,
         context_dim=config.context_dim,
         num_layers=config.num_layers,
+        num_input_tokens=getattr(config, 'num_input_tokens', 1),
         use_pretrained_embeddings=config.use_pretrained_embeddings
     )
     model.to(device)
@@ -210,7 +211,8 @@ def main():
             context_dim=config.context_dim,
             device=device,
             num_samples=config.identity_check_samples,
-            threshold=config.identity_mapping_threshold
+            threshold=config.identity_mapping_threshold,
+            num_input_tokens=getattr(config, 'num_input_tokens', 1)
         )
         is_identity = print_identity_mapping_warning(identity_check)
 

@@ -135,6 +135,8 @@ class Phase2Trainer:
         if batch_size is None:
             batch_size = self.config.phase2_batch_size
 
+        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+
         # Input: all tokens except last
         # Target: all tokens except first (next token prediction)
         input_ids = token_ids[:-1]
@@ -145,6 +147,10 @@ class Phase2Trainer:
 
         # シーケンシャル処理でコンテキストを伝播
         context = torch.zeros(1, self.model.context_dim, device=device)
+
+        # トークン履歴を初期化（ゼロベクトルで埋める）
+        token_history = [torch.zeros(1, self.model.embed_dim, device=device)
+                         for _ in range(num_input_tokens - 1)]
 
         for batch_start in range(0, num_tokens, batch_size):
             batch_end = min(batch_start + batch_size, num_tokens)
@@ -163,15 +169,22 @@ class Phase2Trainer:
                     token_embed = token_embed[0]
                 token_embed = self.model.embed_norm(token_embed)
 
+                # 履歴に追加
+                token_history.append(token_embed)
+
+                # 最新の num_input_tokens 個を結合
+                combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
+                # combined_tokens: [1, embed_dim * num_input_tokens]
+
                 # Step 1: ContextBlock（frozen）- 各レイヤーの出力を取得（E案）
                 with torch.no_grad():
                     context_outputs = self.model.forward_context_with_intermediates(
-                        context, token_embed
+                        context, combined_tokens
                     )
                     # context_outputs = [context_1, context_2, ..., context_N]
 
                 # Step 2: TokenBlock（学習）- 対応するレイヤーのcontextを使用（E案）
-                token_out = self.model.forward_token_e(context_outputs, token_embed)
+                token_out = self.model.forward_token_e(context_outputs, combined_tokens)
 
                 # Step 3: 予測
                 logits = self.model.token_output(token_out)
@@ -221,6 +234,8 @@ class Phase2Trainer:
         """
         self.model.eval()
 
+        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+
         input_ids = token_ids[:-1]
         target_ids = token_ids[1:]
         num_tokens = len(input_ids)
@@ -231,6 +246,10 @@ class Phase2Trainer:
         with torch.no_grad():
             context = torch.zeros(1, self.model.context_dim, device=device)
 
+            # トークン履歴を初期化（ゼロベクトルで埋める）
+            token_history = [torch.zeros(1, self.model.embed_dim, device=device)
+                             for _ in range(num_input_tokens - 1)]
+
             for i in range(num_tokens):
                 token_id = input_ids[i]
 
@@ -240,13 +259,20 @@ class Phase2Trainer:
                     token_embed = token_embed[0]
                 token_embed = self.model.embed_norm(token_embed)
 
+                # 履歴に追加
+                token_history.append(token_embed)
+
+                # 最新の num_input_tokens 個を結合
+                combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
+                # combined_tokens: [1, embed_dim * num_input_tokens]
+
                 # Step 1: ContextBlock - 各レイヤーの出力を取得（E案）
                 context_outputs = self.model.forward_context_with_intermediates(
-                    context, token_embed
+                    context, combined_tokens
                 )
 
                 # Step 2: TokenBlock - 対応するレイヤーのcontextを使用（E案）
-                token_out = self.model.forward_token_e(context_outputs, token_embed)
+                token_out = self.model.forward_token_e(context_outputs, combined_tokens)
 
                 # Step 3: 予測
                 logits = self.model.token_output(token_out)

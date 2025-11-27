@@ -32,13 +32,12 @@ def set_seed(seed=42):
         torch.cuda.manual_seed_all(seed)
 
 
-def run_experiment(num_samples: int, config: ResidualConfig, val_tokens: torch.Tensor, device: torch.device) -> dict:
+def run_experiment(num_samples: int, config: ResidualConfig, device: torch.device) -> dict:
     """単一サンプル数での実験を実行
 
     Args:
         num_samples: 訓練サンプル数
         config: 設定
-        val_tokens: 検証データ（全実験で共通）
         device: デバイス
     """
     print(f"\n{'='*70}")
@@ -56,6 +55,7 @@ def run_experiment(num_samples: int, config: ResidualConfig, val_tokens: torch.T
         embed_dim=config.embed_dim,
         context_dim=config.context_dim,
         num_layers=config.num_layers,
+        num_input_tokens=getattr(config, 'num_input_tokens', 1),
         use_pretrained_embeddings=config.use_pretrained_embeddings
     )
     model.to(device)
@@ -65,6 +65,7 @@ def run_experiment(num_samples: int, config: ResidualConfig, val_tokens: torch.T
     data_provider.load_data()
 
     train_tokens = data_provider.get_all_train_tokens(device)
+    val_tokens = data_provider.get_all_val_tokens(device)
 
     num_train_tokens = len(train_tokens)
     num_val_tokens = len(val_tokens)
@@ -160,9 +161,12 @@ def main():
 
     results = []
 
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    print(f"Device: {device}")
+
     for num_samples in sample_sizes:
         try:
-            result = run_experiment(num_samples, config)
+            result = run_experiment(num_samples, config, device)
             results.append(result)
 
             # 中間結果を表示

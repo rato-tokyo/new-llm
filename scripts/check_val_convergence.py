@@ -25,16 +25,24 @@ from src.models.llm import LLM
 from src.providers import create_data_provider
 
 
-def forward_sequential(model, token_embeds, previous_contexts, device):
+def forward_sequential(model, token_embeds, previous_contexts, device, num_input_tokens=1):
     """順次処理で全トークンのコンテキストを計算"""
     if previous_contexts is None:
         context = torch.zeros(1, model.context_dim, device=device)
     else:
         context = previous_contexts[-1].unsqueeze(0).detach()
 
+    # トークン履歴を初期化（ゼロベクトルで埋める）
+    token_history = [torch.zeros(model.embed_dim, device=device)
+                     for _ in range(num_input_tokens - 1)]
+
     context_list = []
     for token_embed in token_embeds:
-        context = model.context_block(context, token_embed.unsqueeze(0))
+        # 履歴 + 現在のトークンを結合
+        token_history.append(token_embed)
+        combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
+
+        context = model.context_block(context, combined_tokens.unsqueeze(0))
         context_list.append(context.squeeze(0))
 
     return torch.stack(context_list)
@@ -49,6 +57,7 @@ def load_checkpoint(checkpoint_path, config, device):
         embed_dim=config.embed_dim,
         context_dim=config.context_dim,
         num_layers=config.num_layers,
+        num_input_tokens=getattr(config, 'num_input_tokens', 1),
         use_pretrained_embeddings=True
     )
 
@@ -61,13 +70,14 @@ def load_checkpoint(checkpoint_path, config, device):
     return model
 
 
-def check_convergence(model, val_token_ids, device, num_trials=10):
+def check_convergence(model, val_token_ids, device, num_trials=10, num_input_tokens=1):
     """検証データの収束性をチェック"""
     print(f"{'='*70}")
     print(f"Validation Convergence Check")
     print(f"{'='*70}\n")
     print(f"Validation tokens: {len(val_token_ids)}")
-    print(f"Number of trials: {num_trials}\n")
+    print(f"Number of trials: {num_trials}")
+    print(f"num_input_tokens: {num_input_tokens}\n")
 
     with torch.no_grad():
         val_token_embeds = model.token_embedding(val_token_ids.unsqueeze(0).to(device))
@@ -82,7 +92,7 @@ def check_convergence(model, val_token_ids, device, num_trials=10):
 
     for trial in range(num_trials):
         with torch.no_grad():
-            contexts = forward_sequential(model, val_token_embeds, previous_contexts, device)
+            contexts = forward_sequential(model, val_token_embeds, previous_contexts, device, num_input_tokens)
 
             if trial > 0:
                 cvfp_loss = F.mse_loss(contexts, previous_contexts)
@@ -170,8 +180,9 @@ def main():
     print(f"  Validation tokens: {len(val_token_ids)}")
 
     # モデルロード・チェック
+    num_input_tokens = getattr(config, 'num_input_tokens', 1)
     model = load_checkpoint(args.checkpoint_path, config, device)
-    analysis = check_convergence(model, val_token_ids, device, args.num_trials)
+    analysis = check_convergence(model, val_token_ids, device, args.num_trials, num_input_tokens)
 
     print(f"{'='*70}")
     print(f"Final: {'✅ CONVERGES' if analysis['is_converging'] else '❌ DOES NOT CONVERGE'}")

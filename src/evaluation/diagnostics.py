@@ -9,7 +9,7 @@ import torch
 import torch.nn.functional as F
 
 
-def check_identity_mapping(model, context_dim, device, num_samples=100, threshold=0.95):
+def check_identity_mapping(model, context_dim, device, num_samples=100, threshold=0.95, num_input_tokens=1):
     """
     恒等写像かどうかをチェック
 
@@ -22,6 +22,7 @@ def check_identity_mapping(model, context_dim, device, num_samples=100, threshol
         device: デバイス（'cpu' or 'cuda'）
         num_samples: テストするサンプル数
         threshold: 恒等写像と判定するコサイン類似度の閾値（デフォルト: 0.95）
+        num_input_tokens: 入力トークン数
 
     Returns:
         dict: {
@@ -40,7 +41,8 @@ def check_identity_mapping(model, context_dim, device, num_samples=100, threshol
         for _ in range(num_samples):
             # ランダムなコンテキストとトークンを生成
             test_context = torch.randn(1, context_dim, device=device)
-            test_token = torch.randn(1, model.embed_dim, device=device)
+            # num_input_tokensに対応した結合トークンを生成
+            test_token = torch.randn(1, model.embed_dim * num_input_tokens, device=device)
 
             # モデルでコンテキストを更新
             output_context = model._update_context_one_step(test_token, test_context)

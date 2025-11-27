@@ -1,21 +1,41 @@
 # Scripts Directory
 
-This directory contains experimental and utility scripts for the New-LLM project.
+実験・ユーティリティスクリプト。
 
-## Purpose
+## 利用可能なスクリプト
 
-- Experimental scripts for testing new ideas
-- One-off analysis and investigation tools
-- Utility scripts for data processing
+### check_val_convergence.py
+学習済みモデルで検証データの収束性をチェック。
 
-## Usage
+```bash
+python3 scripts/check_val_convergence.py --num_trials 10
+python3 scripts/check_val_convergence.py --checkpoint_path ./checkpoints/my_model.pt
+```
 
-Scripts in this directory are not part of the main training pipeline. They are for development and research purposes only.
+### check_token_overlap.py
+訓練データと検証データのトークン重複率を分析。
 
-## Examples
+```bash
+python3 scripts/check_token_overlap.py
+```
 
-Future scripts might include:
-- Performance benchmarking tools
-- Model analysis scripts
-- Data preprocessing utilities
-- Experimental architecture variants
+### sample_scaling_experiment.py
+サンプル数スケーリング実験。
+
+```bash
+python3 scripts/sample_scaling_experiment.py
+```
+
+### prepare_disk_offload.py
+大規模データ用のディスクオフロード準備。
+
+```bash
+python3 scripts/prepare_disk_offload.py --output_dir /path/to/nvme --num_samples 200000
+```
+
+### train_full_ultrachat.py
+UltraChat全データでの訓練。
+
+```bash
+python3 scripts/train_full_ultrachat.py
+```
