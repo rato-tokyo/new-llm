@@ -67,7 +67,7 @@ class ResidualConfig:
                                          # 0.002: 推奨（高速収束）
                                          # 0.001: 安定的
                                          # 0.0005: 慎重
-    phase1_batch_size = 8000            # 並列処理のバッチサイズ
+    phase1_batch_size = 4096            # 並列処理のバッチサイズ（L4 GPU 24GB対応）
     phase1_gradient_clip = 1.0           # 勾配クリッピング値
 
     # ========== Phase 2: トークン予測（分離アーキテクチャ） ==========
