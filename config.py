@@ -35,6 +35,7 @@ class ResidualConfig:
                                        # 並列版の情報遅延を多様性強化で補償
 
     # ========== Phase 1: CVFP学習（固定点学習） ==========
+    phase1_min_iterations = 3            # 固定点探索の最小反復回数（早期停止の最低保証）
     phase1_max_iterations = 10           # 固定点探索の最大反復回数
     phase1_convergence_threshold = 0.03   # 収束判定のMSE閾値
                                          # 意味: 前回iterationとのMSE < 0.1なら収束と判定
@@ -42,7 +43,11 @@ class ResidualConfig:
                                          # 0.1: バランスの取れた閾値
                                          # 0.05: やや厳格（以前の設定）
                                          # 0.01: 非常に厳格
-    phase1_min_converged_ratio = 1.01    # 早期停止を無効化（101%以上 = 不可能）
+    phase1_min_converged_ratio = 0.95    # 早期停止を無効化（101%以上 = 不可能）
+
+    # 検証データ収束判定
+    val_convergence_trials = 10              # 検証データの収束判定イテレーション回数
+                                             # 複数回順伝播してCVFP損失の推移を確認
 
     # コンテキストノイズ（汎化性能向上）
     phase1_context_noise = 0.1           # コンテキストに追加するガウシアンノイズの標準偏差
@@ -55,6 +60,8 @@ class ResidualConfig:
                                          # 0.002: 推奨（高速収束）
                                          # 0.001: 安定的
                                          # 0.0005: 慎重
+    phase1_batch_size = 8192             # 並列処理のバッチサイズ
+    phase1_gradient_clip = 1.0           # 勾配クリッピング値
 
     # ========== Phase 2: トークン予測（分離アーキテクチャ） ==========
     # 分離アーキテクチャ: ContextBlock(frozen) + TokenBlock(学習)
@@ -75,8 +82,12 @@ class ResidualConfig:
     # ⚠️ UltraChat専用設定 (高速化により大規模データセットに対応)
     # データ生成: cd ../new-llm-data && python3 generate_ultrachat_data.py --num_samples 50 --max_seq_length 128
 
+    # トークナイザー設定
+    tokenizer_name = "gpt2"                                # トークナイザーモデル名
+
     # Training data source
     train_data_source = "ultrachat"                        # UltraChat専用（キャッシュ使用で高速）
+    train_val_split_ratio = 0.9                            # 訓練データの割合（storage mode用）
 
     # Validation data source
     # ⚠️ CRITICAL: Must use "text_file" only! auto_split is FORBIDDEN!
@@ -123,6 +134,7 @@ class ResidualConfig:
     use_disk_offload = False                            # ディスクオフロードモード有効化
     disk_offload_dir = "/mnt/nvme/cvfp"                 # NVMeマウントポイント
     disk_offload_chunk_size = 1_000_000                 # チャンクサイズ（トークン数）
+    streaming_chunk_size = 10_000                       # ストリーミングローダーのチャンクサイズ
     full_ultrachat_samples = 200_000                    # 全サンプル数（UltraChat 200k）
     use_bf16 = True                                     # bf16精度を使用（メモリ50%削減）
 

@@ -25,8 +25,8 @@ sys.path.insert(0, project_root)
 
 from config import ResidualConfig
 from src.models.llm import LLM
-from src.providers import create_data_provider, create_phase1_trainer
-from src.trainers.phase2 import Phase2Trainer
+from src.providers import create_data_provider
+from src.trainers import create_phase1_trainer, Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
 
@@ -226,17 +226,12 @@ def main():
         print_flush("STARTING PHASE 2")
         print_flush(f"{'='*70}\n")
 
-        phase2_trainer = Phase2Trainer(
-            model=model,
-            learning_rate=config.phase2_learning_rate,
-            gradient_clip=config.phase2_gradient_clip
-        )
+        phase2_trainer = Phase2Trainer(model=model, config=config)
 
         phase2_history = phase2_trainer.train_full(
             train_token_ids=train_token_ids,
             val_token_ids=val_token_ids,
-            device=device,
-            epochs=config.phase2_epochs
+            device=device
         )
 
         # Save checkpoint after Phase 2

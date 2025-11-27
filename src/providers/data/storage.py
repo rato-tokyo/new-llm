@@ -40,10 +40,10 @@ class StorageDataProvider(DataProvider):
 
         loader = StreamingDataLoader(
             output_dir=self.storage_dir,
-            num_samples=getattr(self.config, 'full_ultrachat_samples', 200_000),
+            num_samples=self.config.full_ultrachat_samples,
             max_seq_length=self.config.max_seq_length,
             use_bf16=self.use_bf16,
-            chunk_size=10_000
+            chunk_size=getattr(self.config, 'streaming_chunk_size', 10_000)
         )
         return loader.prepare(device)
 
@@ -80,7 +80,8 @@ class StorageDataProvider(DataProvider):
 
     def get_num_train_tokens(self) -> int:
         metadata = self._load_metadata()
-        return int(metadata['num_tokens'] * 0.9)
+        split_ratio = getattr(self.config, 'train_val_split_ratio', 0.9)
+        return int(metadata['num_tokens'] * split_ratio)
 
     def get_num_val_tokens(self) -> int:
         metadata = self._load_metadata()

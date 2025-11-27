@@ -30,7 +30,7 @@ sys.path.insert(0, project_root)
 
 from config import ResidualConfig
 from src.models.llm import LLM
-from src.providers import create_phase1_trainer
+from src.trainers import create_phase1_trainer
 
 
 def set_seed(seed: int = 42):

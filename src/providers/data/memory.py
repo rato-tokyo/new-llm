@@ -38,7 +38,7 @@ class MemoryDataProvider(DataProvider):
             return self._train_token_ids, self._val_token_ids
 
         tokenizer = AutoTokenizer.from_pretrained(
-            "gpt2",
+            self.config.tokenizer_name,
             cache_dir=os.path.join(self.config.cache_dir, "tokenizer")
         )
         tokenizer.pad_token = tokenizer.eos_token
@@ -136,32 +136,33 @@ class MemoryDataProvider(DataProvider):
         """
         サンプルを再シャッフルして訓練データを再生成
 
+        シンプルに現在ロード済みのトークンIDを並び替えるだけ。
+        サンプル単位ではなく、全体のトークン順序をシャッフル。
+
         Args:
             new_seed: 新しいシード（Noneの場合は現在のシード+1）
 
         Returns:
             再シャッフル後の訓練トークンID
         """
+        if not self._loaded:
+            self.load_data()
+
         if new_seed is not None:
             self.shuffle_seed = new_seed
         else:
             self.shuffle_seed += 1
 
-        self.shuffle_samples = True
-        self._loaded = False
-        self._train_token_ids = None
-        self._sample_order = None
+        # 現在のトークンIDをシャッフル
+        import random
+        rng = random.Random(self.shuffle_seed)
 
-        # キャッシュをバイパスして再ロード
-        tokenizer = AutoTokenizer.from_pretrained(
-            "gpt2",
-            cache_dir=os.path.join(self.config.cache_dir, "tokenizer")
-        )
-        tokenizer.pad_token = tokenizer.eos_token
+        indices = list(range(len(self._train_token_ids)))
+        rng.shuffle(indices)
+        self._train_token_ids = self._train_token_ids[indices]
+        self._sample_order = indices  # シャッフル順序を記録
 
-        print_flush(f"Reshuffling with seed {self.shuffle_seed}...")
-        self._train_token_ids, self._sample_order = self._load_train_data(tokenizer)
-
+        print_flush(f"Reshuffled tokens with seed {self.shuffle_seed}")
         return self._train_token_ids
 
     def get_num_train_tokens(self) -> int:

@@ -73,19 +73,14 @@ class Phase2Trainer:
 
     Args:
         model: LLMモデル（分離アーキテクチャ）
-        learning_rate: 学習率
-        gradient_clip: 勾配クリッピング値
+        config: ResidualConfig（設定）
     """
 
-    def __init__(
-        self,
-        model,
-        learning_rate=0.002,
-        gradient_clip=1.0
-    ):
+    def __init__(self, model, config):
         self.model = model
-        self.learning_rate = learning_rate
-        self.gradient_clip = gradient_clip
+        self.config = config
+        self.learning_rate = config.phase2_learning_rate
+        self.gradient_clip = config.phase2_gradient_clip
 
         # ContextBlockをfreeze
         self.model.freeze_context_block()
@@ -111,13 +106,13 @@ class Phase2Trainer:
         # Optimizer
         self.optimizer = torch.optim.Adam(
             filter(lambda p: p.requires_grad, model.parameters()),
-            lr=learning_rate
+            lr=self.learning_rate
         )
 
         # Loss function
         self.criterion = nn.CrossEntropyLoss(reduction='mean')
 
-    def train_epoch(self, token_ids, device, batch_size=512):
+    def train_epoch(self, token_ids, device, batch_size=None):
         """
         1エポックの訓練（ミニバッチ処理）- E案
 
@@ -136,6 +131,9 @@ class Phase2Trainer:
             perplexity: パープレキシティ
         """
         self.model.train()
+
+        if batch_size is None:
+            batch_size = self.config.phase2_batch_size
 
         # Input: all tokens except last
         # Target: all tokens except first (next token prediction)
@@ -272,7 +270,7 @@ class Phase2Trainer:
 
         return avg_loss, perplexity, accuracy
 
-    def train_full(self, train_token_ids, val_token_ids, device, epochs=10, patience=3, batch_size=512):
+    def train_full(self, train_token_ids, val_token_ids, device, epochs=None, patience=None, batch_size=None):
         """
         フル訓練ループ（早期停止あり）
 
@@ -287,6 +285,13 @@ class Phase2Trainer:
         Returns:
             history: 訓練履歴
         """
+        if epochs is None:
+            epochs = self.config.phase2_epochs
+        if patience is None:
+            patience = self.config.phase2_patience
+        if batch_size is None:
+            batch_size = self.config.phase2_batch_size
+
         print(f"\n{'='*70}")
         print("PHASE 2: Next-Token Prediction Training (E案 - レイヤー対応版)")
         print(f"{'='*70}\n")
