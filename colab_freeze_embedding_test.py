@@ -95,7 +95,7 @@ def run_single_experiment(num_samples: int, config, device: str) -> dict:
     print(f"\n  Phase 1 starting...")
     phase1_start = time.time()
 
-    trainer1 = MemoryPhase1Trainer(model, config, device)
+    trainer1 = MemoryPhase1Trainer(model, config, torch.device(device))
     train_contexts = trainer1.train(train_tokens, label="Train")
 
     phase1_time = time.time() - phase1_start
@@ -112,26 +112,29 @@ def run_single_experiment(num_samples: int, config, device: str) -> dict:
     # config に freeze_embedding を設定
     config.phase2_freeze_embedding = FREEZE_EMBEDDING
 
-    trainer2 = Phase2Trainer(model, config, device)
-    phase2_result = trainer2.train(
-        train_tokens=train_tokens,
-        val_tokens=val_tokens,
+    trainer2 = Phase2Trainer(model, config)
+    history = trainer2.train_full(
+        train_token_ids=train_tokens,
+        val_token_ids=val_tokens,
+        device=device,
         epochs=config.phase2_epochs
     )
 
     phase2_time = time.time() - phase2_start
     total_time = time.time() - start_time
 
+    # historyから結果を取得
+    best_epoch = history['best_epoch']
     result = {
         'num_samples': num_samples,
         'num_layers': NUM_LAYERS,
         'freeze_embedding': FREEZE_EMBEDDING,
         'num_train_tokens': len(train_tokens),
         'num_val_tokens': len(val_tokens),
-        'val_ppl': phase2_result['best_val_ppl'],
-        'val_accuracy': phase2_result['best_val_accuracy'],
-        'val_loss': phase2_result['best_val_loss'],
-        'best_epoch': phase2_result['best_epoch'],
+        'val_ppl': history['val_ppl'][best_epoch - 1],
+        'val_accuracy': history['val_acc'][best_epoch - 1],
+        'val_loss': history['val_loss'][best_epoch - 1],
+        'best_epoch': best_epoch,
         'train_effective_rank_percent': train_er,
         'phase1_time_sec': phase1_time,
         'phase2_time_sec': phase2_time,
