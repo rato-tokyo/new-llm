@@ -286,11 +286,8 @@ def main():
         device = torch.device('cpu')
         print_flush("WARNING: Running on CPU (slow)")
 
-    # 設定
+    # 設定（config.pyから読み込み）
     config = ResidualConfig()
-
-    # ===== Layer 6 実験用設定 =====
-    config.num_layers = 6  # 3 → 6 に変更
 
     # テストするサンプル数（50から開始、対数スケール）
     sample_sizes = [50, 100, 200, 500]
