@@ -72,7 +72,8 @@ class DataLoader:
     def __init__(self, config: ResidualConfig, device: torch.device):
         self.config = config
         self.device = device
-        self.all_tokens = None  # 全トークン（キャッシュ）
+        self.sample_tokens = []  # 各サンプルのトークン列
+        self.sample_boundaries = []  # 各サンプルの開始インデックス
 
     def load_all(self, total_samples: int):
         """全サンプルをロード（train + val用）"""
@@ -86,7 +87,9 @@ class DataLoader:
 
         dataset = load_dataset(self.config.dataset_name, split=self.config.dataset_split)
 
-        all_tokens = []
+        self.sample_tokens = []
+        self.sample_boundaries = [0]
+
         for i in range(total_samples):
             text = dataset[i]["messages"][0]["content"]
             tokens = tokenizer(
@@ -95,23 +98,23 @@ class DataLoader:
                 truncation=True,
                 return_tensors="pt"
             )
-            all_tokens.append(tokens["input_ids"].squeeze(0))
+            self.sample_tokens.append(tokens["input_ids"].squeeze(0))
+            self.sample_boundaries.append(self.sample_boundaries[-1] + len(self.sample_tokens[-1]))
 
-        self.all_tokens = torch.cat(all_tokens).to(self.device)
-        print_flush(f"  Total tokens: {len(self.all_tokens):,}")
+        all_tokens = torch.cat(self.sample_tokens).to(self.device)
+        print_flush(f"  Total tokens: {len(all_tokens):,}")
+        print_flush(f"  Samples loaded: {total_samples}")
+        self.all_tokens = all_tokens
 
     def get_train(self, num_samples: int) -> torch.Tensor:
         """訓練データを取得（サンプル0〜num_samples-1）"""
-        # サンプル数に対応するトークン数を計算
-        tokens_per_sample = self.config.max_seq_length
-        end_idx = num_samples * tokens_per_sample
+        end_idx = self.sample_boundaries[num_samples]
         return self.all_tokens[:end_idx]
 
     def get_val(self, train_samples: int, val_samples: int = 10) -> torch.Tensor:
         """検証データを取得（訓練データの直後）"""
-        tokens_per_sample = self.config.max_seq_length
-        start_idx = train_samples * tokens_per_sample
-        end_idx = start_idx + val_samples * tokens_per_sample
+        start_idx = self.sample_boundaries[train_samples]
+        end_idx = self.sample_boundaries[train_samples + val_samples]
         return self.all_tokens[start_idx:end_idx]
 
 
