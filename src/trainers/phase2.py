@@ -85,17 +85,23 @@ class Phase2Trainer:
         # ContextBlockをfreeze
         self.model.freeze_context_block()
 
-        # token_outputを有効化
-        self.model.unfreeze_token_output()
+        # Embedding凍結オプション
+        freeze_embedding = getattr(config, 'phase2_freeze_embedding', False)
+
+        # token_outputを有効化（Embedding凍結オプション付き）
+        self.model.unfreeze_token_output(freeze_embedding=freeze_embedding)
 
         # 学習対象パラメータの確認
         if model.use_separated_architecture:
-            # TokenBlock + token_output
-            trainable_params = list(model.token_block.parameters()) + \
-                              list(model.token_output.parameters())
+            # 実際に学習されるパラメータを計算
+            trainable_params = [p for p in model.parameters() if p.requires_grad]
             num_trainable = sum(p.numel() for p in trainable_params)
             total_params = sum(p.numel() for p in model.parameters())
-            print(f"✓ Training TokenBlock + token_output: {num_trainable:,}/{total_params:,} parameters")
+
+            if freeze_embedding:
+                print(f"✓ Training TokenBlock only: {num_trainable:,}/{total_params:,} parameters")
+            else:
+                print(f"✓ Training TokenBlock + token_output: {num_trainable:,}/{total_params:,} parameters")
         else:
             # Legacy: token_outputのみ
             trainable_params = list(model.token_output.parameters())

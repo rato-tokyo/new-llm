@@ -461,18 +461,38 @@ class LLM(nn.Module):
             param.requires_grad = False
         print("✓ ContextBlock frozen")
 
-    def unfreeze_token_output(self):
-        """token_output層の勾配を有効化する（Phase 2用）"""
+    def unfreeze_token_output(self, freeze_embedding: bool = False):
+        """
+        token_output層の勾配を有効化する（Phase 2用）
+
+        Args:
+            freeze_embedding: Trueの場合、Embeddingを凍結したまま維持
+                             Weight Tying時はOutput Headも凍結される
+                             TokenBlockのみ学習（パラメータ大幅削減）
+        """
         if self.use_weight_tying:
-            # Weight Tying時: embeddingの勾配を有効化
-            # 注意: これによりembeddingも学習される
-            self.token_embedding.weight.requires_grad = True
-            print("✓ token_output (weight-tied with embedding) unfrozen")
-            print("  Note: token_embedding will also be updated during Phase 2")
+            if freeze_embedding:
+                # Embedding凍結 → Weight TyingによりOutput Headも凍結
+                # TokenBlockのみ学習
+                self.token_embedding.weight.requires_grad = False
+                print("✓ Embedding frozen (Weight Tying: Output Head also frozen)")
+                print("  → Only TokenBlock will be trained")
+            else:
+                # Embedding学習 → Output Headも学習
+                self.token_embedding.weight.requires_grad = True
+                print("✓ token_output (weight-tied with embedding) unfrozen")
+                print("  Note: token_embedding will also be updated during Phase 2")
         else:
-            self.token_output.weight.requires_grad = True
-            self.token_output.bias.requires_grad = True
-            print("✓ token_output layer unfrozen")
+            if freeze_embedding:
+                # Weight Tyingなし: Output Headのみ学習、Embedding凍結
+                self.token_output.weight.requires_grad = True
+                self.token_output.bias.requires_grad = True
+                self.token_embedding.weight.requires_grad = False
+                print("✓ token_output unfrozen, Embedding frozen")
+            else:
+                self.token_output.weight.requires_grad = True
+                self.token_output.bias.requires_grad = True
+                print("✓ token_output layer unfrozen")
 
     def _update_context_one_step(self, token_embeds, context):
         """

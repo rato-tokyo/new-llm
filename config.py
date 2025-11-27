@@ -82,11 +82,15 @@ class ResidualConfig:
     phase2_learning_rate = 0.002    # トークン予測の学習率 (Phase 1と同じ)
     phase2_epochs = 10              # 訓練エポック数
     phase2_patience = 2             # Early stopping patience
-    phase2_batch_size =512         # ミニバッチサイズ（分離アーキテクチャは逐次処理のため小さめ）
+    phase2_batch_size = 512         # ミニバッチサイズ（分離アーキテクチャは逐次処理のため小さめ）
                                     # 512: 推奨
                                     # 256: メモリ不足時
                                     # 1024: メモリに余裕がある場合
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
+    phase2_freeze_embedding = False # Embedding凍結オプション
+                                    # False: Embedding学習（現状、49.2Mパラメータ）
+                                    # True: Embedding凍結（TokenBlockのみ、10.6Mパラメータ）
+                                    # ⚠️ Weight Tying時はOutput Headも凍結される
 
     # ========== データ ==========
     # ⚠️ UltraChat専用設定 (高速化により大規模データセットに対応)
