@@ -24,6 +24,7 @@ from config import ResidualConfig
 from src.models.llm import LLM
 from src.trainers.phase1.memory import MemoryPhase1Trainer
 from src.trainers.phase2 import Phase2Trainer
+from src.evaluation.metrics import analyze_fixed_points
 
 
 # ========== 実験設定 ==========
@@ -98,7 +99,10 @@ def run_single_experiment(num_samples: int, config, device: str) -> dict:
     train_contexts = trainer1.train(train_tokens, label="Train")
 
     phase1_time = time.time() - phase1_start
-    train_er = trainer1.compute_effective_rank_percent(train_contexts)
+
+    # Effective Rank計算
+    metrics = analyze_fixed_points(train_contexts, label="Train", verbose=False)
+    train_er = metrics['effective_rank'] / config.context_dim * 100
     print(f"  Phase 1 done: {phase1_time/60:.1f}min, Train ER={train_er:.1f}%")
 
     # Phase 2（Embedding凍結オプション）
