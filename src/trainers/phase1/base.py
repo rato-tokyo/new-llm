@@ -4,8 +4,10 @@ Phase1Trainer - CVFP固定点学習トレーナーの抽象基底クラス
 
 import sys
 from abc import ABC, abstractmethod
-from typing import Dict, Any
+from typing import Dict, Any, Optional, Union
 import torch
+
+from src.evaluation import ConvergenceResult
 
 
 def print_flush(msg: str):
@@ -27,7 +29,13 @@ class Phase1Trainer(ABC):
         pass
 
     @abstractmethod
-    def evaluate(self, token_ids: torch.Tensor, label: str = "Val") -> torch.Tensor:
+    def evaluate(
+        self,
+        token_ids: torch.Tensor,
+        label: str = "Val",
+        num_trials: Optional[int] = None,
+        return_contexts_only: bool = False
+    ) -> Union[ConvergenceResult, torch.Tensor]:
         pass
 
     def get_training_stats(self) -> Dict[str, Any]:

@@ -76,7 +76,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             if is_cuda:
                 torch.cuda.empty_cache()
 
-        previous_contexts = None  # CPUに保存
+        previous_contexts: Optional[torch.Tensor] = None  # CPUに保存
         final_convergence_rate = 0.0
 
         for iteration in range(self.config.phase1_max_iterations):
@@ -97,6 +97,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
             # Iteration 1+: 勾配累積付き並列処理
             # token_embedsとprevious_contextsをGPUに移動
+            assert previous_contexts is not None  # iteration 0で必ず設定される
             token_embeds_gpu = token_embeds.to(self.device)
             previous_contexts_gpu = previous_contexts.to(self.device)
 
@@ -139,13 +140,14 @@ class MemoryPhase1Trainer(Phase1Trainer):
         print_flush(f"\nPhase 1 完了: {int(final_convergence_rate * num_tokens)}/{num_tokens} トークン収束\n")
 
         # 最終結果をGPUに戻す
+        assert previous_contexts is not None  # 必ず1回以上iterationが実行される
         return previous_contexts.to(self.device)
 
     def evaluate(
         self,
         token_ids: torch.Tensor,
         label: str = "Val",
-        num_trials: int = None,
+        num_trials: Optional[int] = None,
         return_contexts_only: bool = False
     ) -> Union[ConvergenceResult, torch.Tensor]:
         """

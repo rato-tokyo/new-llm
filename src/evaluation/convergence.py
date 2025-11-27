@@ -120,7 +120,7 @@ def check_convergence(
         with torch.no_grad():
             contexts = forward_sequential(model, token_embeds, previous_contexts, device, num_input_tokens)
 
-            if trial > 0:
+            if trial > 0 and previous_contexts is not None:
                 cvfp_loss = F.mse_loss(contexts, previous_contexts)
                 loss_history.append(cvfp_loss.item())
                 if verbose:

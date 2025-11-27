@@ -6,7 +6,7 @@ mmapでディスクから直接処理（大規模データ用）
 
 import gc
 import time
-from typing import Union
+from typing import Union, Optional
 import torch
 import torch.nn.functional as F
 
@@ -106,7 +106,7 @@ class StoragePhase1Trainer(Phase1Trainer):
         self,
         token_ids: torch.Tensor,
         label: str = "Val",
-        num_trials: int = None,
+        num_trials: Optional[int] = None,
         return_contexts_only: bool = False
     ) -> Union[ConvergenceResult, torch.Tensor]:
         """
