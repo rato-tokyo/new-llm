@@ -44,12 +44,6 @@ def main():
         help='処理するサンプル数（デフォルト: 200000）'
     )
     parser.add_argument(
-        '--max_seq_length',
-        type=int,
-        default=128,
-        help='最大シーケンス長（デフォルト: 128）'
-    )
-    parser.add_argument(
         '--no_bf16',
         action='store_true',
         help='bf16を使用しない（float32を使用）'
@@ -74,7 +68,6 @@ def main():
     loader = StreamingDataLoader(
         output_dir=args.output_dir,
         num_samples=args.num_samples,
-        max_seq_length=args.max_seq_length,
         use_bf16=not args.no_bf16
     )
 

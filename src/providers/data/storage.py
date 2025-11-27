@@ -41,7 +41,6 @@ class StorageDataProvider(DataProvider):
         loader = StreamingDataLoader(
             output_dir=self.storage_dir,
             num_samples=self.config.full_ultrachat_samples,
-            max_seq_length=self.config.max_seq_length,
             use_bf16=self.use_bf16,
             chunk_size=getattr(self.config, 'streaming_chunk_size', 10_000)
         )

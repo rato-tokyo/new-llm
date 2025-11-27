@@ -62,7 +62,7 @@ class MemoryDataProvider(DataProvider):
         shuffle_suffix = f"_shuffle{self.shuffle_seed}" if self.shuffle_samples else ""
         cache_file = os.path.join(
             self.config.cache_dir,
-            f"ultrachat_{self.config.num_samples}samples_{self.config.max_seq_length}len{shuffle_suffix}.pt"
+            f"ultrachat_{self.config.num_samples}samples_full{shuffle_suffix}.pt"
         )
 
         if os.path.exists(cache_file):
@@ -96,8 +96,7 @@ class MemoryDataProvider(DataProvider):
 
             tokens = tokenizer(
                 text,
-                max_length=self.config.max_seq_length,
-                truncation=True,
+                truncation=False,
                 return_tensors="pt"
             )
             all_token_ids.append(tokens["input_ids"].squeeze(0))

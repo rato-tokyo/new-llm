@@ -94,8 +94,6 @@ class DataLoader:
             text = dataset[i]["messages"][0]["content"]
             tokens = tokenizer(
                 text,
-                max_length=self.config.max_seq_length,
-                truncation=True,
                 return_tensors="pt"
             )
             self.sample_tokens.append(tokens["input_ids"].squeeze(0))
@@ -371,7 +369,7 @@ def main():
             "phase2_learning_rate": config.phase2_learning_rate,
         },
         "val_samples": val_samples,
-        "val_tokens_count": val_samples * config.max_seq_length,
+        "val_tokens_count": len(data_loader.get_val(max_train_samples, val_samples)),
         "sample_sizes": sample_sizes,
         "results": results
     }

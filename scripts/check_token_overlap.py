@@ -33,12 +33,13 @@ def main():
     # Load cached data or download
     cache_file = os.path.join(
         config.cache_dir,
-        f"ultrachat_{config.num_samples}samples_{config.max_seq_length}len.pt"
+        f"ultrachat_{config.num_samples}samples_full.pt"
     )
 
     if os.path.exists(cache_file):
         print(f"\n📂 Loading from cache: {cache_file}")
-        all_token_ids = torch.load(cache_file)
+        cached = torch.load(cache_file)
+        all_token_ids = cached['token_ids'] if isinstance(cached, dict) else cached
     else:
         print(f"\n📥 Downloading UltraChat dataset...")
         dataset = load_dataset(
@@ -54,8 +55,7 @@ def main():
 
             tokens = tokenizer(
                 text,
-                max_length=config.max_seq_length,
-                truncation=True,
+                truncation=False,
                 return_tensors="pt"
             )
             all_tokens.append(tokens["input_ids"].squeeze(0))
@@ -63,7 +63,7 @@ def main():
         all_token_ids = torch.cat(all_tokens)
 
         os.makedirs(config.cache_dir, exist_ok=True)
-        torch.save(all_token_ids, cache_file)
+        torch.save({'token_ids': all_token_ids}, cache_file)
 
     # Split into train/val (same as colab.py)
     val_ratio = 0.2

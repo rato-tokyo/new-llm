@@ -31,13 +31,11 @@ class StreamingDataLoader:
         self,
         output_dir: str,
         num_samples: int = 200_000,
-        max_seq_length: int = 128,
         use_bf16: bool = True,
         chunk_size: int = 10_000
     ):
         self.output_dir = output_dir
         self.num_samples = num_samples
-        self.max_seq_length = max_seq_length
         self.use_bf16 = use_bf16
         self.chunk_size = chunk_size
 
@@ -60,7 +58,6 @@ class StreamingDataLoader:
         print_flush(f"{'='*70}")
         print_flush(f"  出力先: {self.output_dir}")
         print_flush(f"  サンプル数: {self.num_samples:,}")
-        print_flush(f"  最大シーケンス長: {self.max_seq_length}")
         print_flush(f"  精度: {'bf16' if self.use_bf16 else 'float32'}")
 
         os.makedirs(self.output_dir, exist_ok=True)
@@ -113,7 +110,6 @@ class StreamingDataLoader:
         self._metadata = {
             'num_samples': self.num_samples,
             'num_tokens': total_tokens,
-            'max_seq_length': self.max_seq_length,
             'use_bf16': self.use_bf16,
             'context_dim': 768,
             'embed_dim': 768,
@@ -142,14 +138,9 @@ class StreamingDataLoader:
             messages = sample.get("messages", [])
             text = "\n".join([msg.get("content", "") for msg in messages])
 
-            tokens = tokenizer(text, max_length=self.max_seq_length, truncation=True, return_tensors="pt")
+            tokens = tokenizer(text, truncation=False, return_tensors="pt")
             token_ids = tokens["input_ids"].squeeze(0)
-            actual_length = (token_ids != tokenizer.pad_token_id).sum().item()
-            actual_length = min(actual_length, self.max_seq_length)
-            if actual_length == 0:
-                actual_length = len(token_ids)
-
-            total_tokens += actual_length
+            total_tokens += len(token_ids)
             sample_count += 1
 
         return total_tokens
@@ -170,14 +161,8 @@ class StreamingDataLoader:
                 messages = sample.get("messages", [])
                 text = "\n".join([msg.get("content", "") for msg in messages])
 
-                tokens = tokenizer(text, max_length=self.max_seq_length, truncation=True, return_tensors="pt")
+                tokens = tokenizer(text, truncation=False, return_tensors="pt")
                 token_ids = tokens["input_ids"].squeeze(0)
-
-                mask = token_ids != tokenizer.pad_token_id
-                if mask.sum() == 0:
-                    token_ids = token_ids[:1]
-                else:
-                    token_ids = token_ids[mask]
 
                 token_ids_device = token_ids.to(device)
                 embeds = embedding_layer(token_ids_device)

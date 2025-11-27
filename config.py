@@ -80,7 +80,6 @@ class ResidualConfig:
 
     # ========== データ ==========
     # ⚠️ UltraChat専用設定 (高速化により大規模データセットに対応)
-    # データ生成: cd ../new-llm-data && python3 generate_ultrachat_data.py --num_samples 50 --max_seq_length 128
 
     # トークナイザー設定
     tokenizer_name = "gpt2"                                # トークナイザーモデル名
@@ -97,16 +96,10 @@ class ResidualConfig:
     val_text_file = "./data/ultrachat_50samples_val.txt"   # 自動生成される検証データ
 
     # UltraChat settings
-    max_seq_length = 128                                   # 最大シーケンス長
-    num_samples = 500                                      # 訓練サンプル数（→ ~64000トークン）
+    num_samples = 500                                      # 訓練サンプル数
     dataset_name = "HuggingFaceH4/ultrachat_200k"          # HuggingFaceデータセット
     dataset_split = "train_sft"                            # 使用するデータセット分割
     cache_dir = "./cache"                                  # キャッシュディレクトリ
-
-    # 推奨データセットサイズ（3層モデル + ミニバッチ処理版）
-    # - テスト: num_samples=100, max_seq_length=128 (~12800トークン)
-    # - 中規模: num_samples=500, max_seq_length=128 (~64000トークン) ← 現在
-    # - 大規模: num_samples=1000, max_seq_length=128 (~128000トークン) ※メモリ注意
 
     # ========== デバイス ==========
     device = "cuda" if torch.cuda.is_available() else "cpu"  # 自動GPU検出

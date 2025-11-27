@@ -24,7 +24,6 @@ set_seed(42)
 # Configuration
 config = ResidualConfig()
 config.num_samples = 50
-config.max_seq_length = 128
 
 device = torch.device("cpu")
 

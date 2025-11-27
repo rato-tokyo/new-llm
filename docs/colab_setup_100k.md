@@ -205,8 +205,7 @@ torch.save(checkpoint, './checkpoints/backup.pt')
 
 ```python
 # Data configuration
-num_samples = 781                    # 100k tokens (781 × 128)
-max_seq_length = 128                 # Keep as is
+num_samples = 100                    # Adjust based on token count needed
 
 # Phase 1: Fixed-Point Learning
 phase1_max_iterations = 10           # Usually converges in 3-5
