@@ -66,103 +66,63 @@ def estimate_remaining_time(elapsed_times: list, remaining_count: int) -> str:
     return format_time(remaining)
 
 
-def load_fixed_val_data(config, device) -> torch.Tensor:
-    """固定の検証データを読み込み（全実験で共通）
+class DataLoader:
+    """データローダー（1回のロードでtrain/valを分離）"""
 
-    最小サンプル数（50サンプル）の最後20%を検証データとして使用。
-    これにより全実験で同じvalデータを使用し、公平な比較が可能。
-    """
-    print_flush("\n" + "="*70)
-    print_flush("Loading fixed validation data (from 50 samples)...")
-    print_flush("="*70)
+    def __init__(self, config: ResidualConfig, device: torch.device):
+        self.config = config
+        self.device = device
+        self.all_tokens = None  # 全トークン（キャッシュ）
 
-    from transformers import GPT2Tokenizer
-    from datasets import load_dataset
+    def load_all(self, total_samples: int):
+        """全サンプルをロード（train + val用）"""
+        print_flush(f"\n  Loading {total_samples} samples from UltraChat...")
 
-    # 50サンプル分のデータをロードし、最後20%をvalとして使用
-    VAL_BASE_SAMPLES = 50
+        from transformers import GPT2Tokenizer
+        from datasets import load_dataset
 
-    tokenizer = GPT2Tokenizer.from_pretrained(config.tokenizer_name)
-    tokenizer.pad_token = tokenizer.eos_token
+        tokenizer = GPT2Tokenizer.from_pretrained(self.config.tokenizer_name)
+        tokenizer.pad_token = tokenizer.eos_token
 
-    # UltraChatからデータ取得
-    dataset = load_dataset(config.dataset_name, split=config.dataset_split)
+        dataset = load_dataset(self.config.dataset_name, split=self.config.dataset_split)
 
-    # 最初の50サンプルを使用
-    samples = [dataset[i]["messages"][0]["content"] for i in range(VAL_BASE_SAMPLES)]
+        all_tokens = []
+        for i in range(total_samples):
+            text = dataset[i]["messages"][0]["content"]
+            tokens = tokenizer(
+                text,
+                max_length=self.config.max_seq_length,
+                truncation=True,
+                return_tensors="pt"
+            )
+            all_tokens.append(tokens["input_ids"].squeeze(0))
 
-    # トークン化
-    all_tokens = []
-    for text in samples:
-        tokens = tokenizer(
-            text,
-            max_length=config.max_seq_length,
-            truncation=True,
-            return_tensors="pt"
-        )
-        all_tokens.append(tokens["input_ids"].squeeze(0))
+        self.all_tokens = torch.cat(all_tokens).to(self.device)
+        print_flush(f"  Total tokens: {len(self.all_tokens):,}")
 
-    all_token_ids = torch.cat(all_tokens)
+    def get_train(self, num_samples: int) -> torch.Tensor:
+        """訓練データを取得（サンプル0〜num_samples-1）"""
+        # サンプル数に対応するトークン数を計算
+        tokens_per_sample = self.config.max_seq_length
+        end_idx = num_samples * tokens_per_sample
+        return self.all_tokens[:end_idx]
 
-    # 最後20%を検証データとして使用（約1,280トークン）
-    val_ratio = 0.2
-    val_start = int(len(all_token_ids) * (1 - val_ratio))
-    val_tokens = all_token_ids[val_start:].to(device)
-
-    print_flush(f"  Base samples: {VAL_BASE_SAMPLES}")
-    print_flush(f"  Val tokens: {len(val_tokens):,} (固定)")
-    return val_tokens
-
-
-def load_train_data_only(num_samples: int, config: ResidualConfig, device: torch.device) -> torch.Tensor:
-    """訓練データのみをロード（valファイル不要）"""
-    from transformers import GPT2Tokenizer
-    from datasets import load_dataset
-
-    cache_file = f"{config.cache_dir}/ultrachat_{num_samples}samples_{config.max_seq_length}len.pt"
-
-    # キャッシュがあれば使用
-    if os.path.exists(cache_file):
-        print_flush(f"  Loading from cache: {cache_file}")
-        cached = torch.load(cache_file)
-        return cached['token_ids'].to(device)
-
-    print_flush(f"  Loading {num_samples} samples from UltraChat...")
-
-    tokenizer = GPT2Tokenizer.from_pretrained(config.tokenizer_name)
-    tokenizer.pad_token = tokenizer.eos_token
-
-    dataset = load_dataset(config.dataset_name, split=config.dataset_split)
-
-    samples = [dataset[i]["messages"][0]["content"] for i in range(num_samples)]
-
-    all_tokens = []
-    for text in samples:
-        tokens = tokenizer(
-            text,
-            max_length=config.max_seq_length,
-            truncation=True,
-            return_tensors="pt"
-        )
-        all_tokens.append(tokens["input_ids"].squeeze(0))
-
-    token_ids = torch.cat(all_tokens)
-
-    # キャッシュ保存
-    os.makedirs(config.cache_dir, exist_ok=True)
-    torch.save({'token_ids': token_ids}, cache_file)
-    print_flush(f"  Cached to: {cache_file}")
-
-    return token_ids.to(device)
+    def get_val(self, train_samples: int, val_samples: int = 10) -> torch.Tensor:
+        """検証データを取得（訓練データの直後）"""
+        tokens_per_sample = self.config.max_seq_length
+        start_idx = train_samples * tokens_per_sample
+        end_idx = start_idx + val_samples * tokens_per_sample
+        return self.all_tokens[start_idx:end_idx]
 
 
 def run_single_experiment(
     num_samples: int,
     config: ResidualConfig,
-    val_tokens: torch.Tensor,
+    data_loader: DataLoader,
     device: torch.device,
     experiment_idx: int,
-    total_experiments: int
+    total_experiments: int,
+    max_train_samples: int
 ) -> dict:
     """単一サンプル数での実験（Phase1 + Phase2）"""
 
@@ -187,8 +147,9 @@ def run_single_experiment(
     )
     model.to(device)
 
-    # 訓練データのみを直接ロード（valファイル不要）
-    train_tokens = load_train_data_only(num_samples, config, device)
+    # データ取得（DataLoaderから）
+    train_tokens = data_loader.get_train(num_samples)
+    val_tokens = data_loader.get_val(max_train_samples)  # valは常に訓練最大サンプルの直後
 
     num_train_tokens = len(train_tokens)
     num_val_tokens = len(val_tokens)
@@ -327,6 +288,8 @@ def main():
 
     # テストするサンプル数（50から開始、対数スケール）
     sample_sizes = [50, 100, 200, 500]
+    max_train_samples = max(sample_sizes)  # 訓練で使用する最大サンプル数
+    val_samples = 10  # 検証サンプル数
 
     print_flush(f"\nSample sizes: {sample_sizes}")
     print_flush(f"Config:")
@@ -336,8 +299,15 @@ def main():
     print_flush(f"  - phase2_epochs: {config.phase2_epochs}")
     print_flush(f"  - phase2_batch_size: {config.phase2_batch_size}")
 
-    # 固定の検証データを読み込み
-    val_tokens = load_fixed_val_data(config, device)
+    # データローダー初期化（1回で全データをロード）
+    print_flush("\n" + "="*70)
+    print_flush("Loading all data...")
+    print_flush("="*70)
+    data_loader = DataLoader(config, device)
+    total_samples = max_train_samples + val_samples  # train最大 + val
+    data_loader.load_all(total_samples)
+    print_flush(f"  Train samples: 0 ~ {max_train_samples - 1}")
+    print_flush(f"  Val samples: {max_train_samples} ~ {max_train_samples + val_samples - 1}")
 
     results = []
     elapsed_times = []
@@ -352,10 +322,11 @@ def main():
             result = run_single_experiment(
                 num_samples=num_samples,
                 config=config,
-                val_tokens=val_tokens,
+                data_loader=data_loader,
                 device=device,
                 experiment_idx=idx,
-                total_experiments=len(sample_sizes)
+                total_experiments=len(sample_sizes),
+                max_train_samples=max_train_samples
             )
             results.append(result)
             elapsed_times.append(result['total_time_sec'])
@@ -396,7 +367,8 @@ def main():
             "phase2_batch_size": config.phase2_batch_size,
             "phase2_learning_rate": config.phase2_learning_rate,
         },
-        "val_tokens_count": len(val_tokens),
+        "val_samples": val_samples,
+        "val_tokens_count": val_samples * config.max_seq_length,
         "sample_sizes": sample_sizes,
         "results": results
     }
