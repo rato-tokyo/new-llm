@@ -348,12 +348,14 @@ def main():
     layers_exp2 = [6, 9, 12]
     samples_exp2 = 2000
 
-    val_samples = 10
+    # 検証データ: 50サンプル（前回10→50に増加、約4000トークン）
+    val_samples = 50
     max_train_samples = max(max(sample_sizes_exp1), samples_exp2)
     total_samples = max_train_samples + val_samples
 
     print_flush(f"\n案1: samples={sample_sizes_exp1}, layer={layer_exp1}")
     print_flush(f"案2: layers={layers_exp2}, samples={samples_exp2}")
+    print_flush(f"Val samples: {val_samples} (固定)")
     print_flush(f"Total samples to load: {total_samples}")
 
     # データローダー初期化
