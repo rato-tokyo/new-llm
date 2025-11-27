@@ -72,7 +72,7 @@ class ResidualConfig:
     phase2_learning_rate = 0.002    # トークン予測の学習率 (Phase 1と同じ)
     phase2_epochs = 10              # 訓練エポック数
     phase2_patience = 2             # Early stopping patience
-    phase2_batch_size =2000         # ミニバッチサイズ（分離アーキテクチャは逐次処理のため小さめ）
+    phase2_batch_size =512         # ミニバッチサイズ（分離アーキテクチャは逐次処理のため小さめ）
                                     # 512: 推奨
                                     # 256: メモリ不足時
                                     # 1024: メモリに余裕がある場合
