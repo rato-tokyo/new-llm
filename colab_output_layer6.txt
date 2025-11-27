@@ -1,0 +1,585 @@
+
+======================================================================
+COLAB SCALING EXPERIMENT (Phase1 + Phase2)
+======================================================================
+Start time: 2025-11-27 07:28:34
+GPU: NVIDIA L4 (23.8GB)
+
+Sample sizes: [50, 100, 200, 500]
+Config:
+  - num_layers: 6
+  - context_dim: 768
+  - phase1_max_iterations: 10
+  - phase2_epochs: 10
+  - phase2_batch_size: 512
+
+======================================================================
+Loading all data...
+======================================================================
+
+  Loading 510 samples from UltraChat...
+  Total tokens: 40,504
+  Samples loaded: 510
+  Train samples: 0 ~ 499
+  Val samples: 500 ~ 509
+
+[Progress: 1/4] 残り推定時間: 不明
+
+======================================================================
+EXPERIMENT 1/4: num_samples = 50
+======================================================================
+2025-11-27 07:28:44.803568: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-11-27 07:28:44.821390: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1764228524.842843   20969 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764228524.849340   20969 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764228524.866431   20969 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764228524.866470   20969 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764228524.866474   20969 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764228524.866477   20969 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-11-27 07:28:44.871686: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  Train tokens: 3,495
+  Val tokens: 690 (固定)
+
+--- Phase 1: CVFP Learning ---
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train (samples=50)
+======================================================================
+  Mode: Memory
+  Tokens: 3,495
+  Max iterations: 10
+  Learning rate: 0.002
+  Diversity weight: 0.5
+  ContextBlock params: 7,091,712
+Iteration 1/10: シーケンシャル [3.79s]
+Iteration 2/10: 収束=100.0% | Loss=-0.209699 | CVFP=0.002216 | Div=-0.421615 [0.52s]
+Iteration 3/10: 収束=0.0% | Loss=0.057947 | CVFP=0.559683 | Div=-0.443788 [0.02s]
+Iteration 4/10: 収束=0.0% | Loss=-0.032860 | CVFP=0.387432 | Div=-0.453153 [0.02s]
+Iteration 5/10: 収束=0.0% | Loss=-0.169639 | CVFP=0.115957 | Div=-0.455234 [0.02s]
+Iteration 6/10: 収束=24.3% | Loss=-0.208487 | CVFP=0.040202 | Div=-0.457176 [0.02s]
+Iteration 7/10: 収束=99.6% | Loss=-0.222523 | CVFP=0.014174 | Div=-0.459220 [0.02s]
+  → Early stopping (min_iterations=3 satisfied)
+
+Phase 1 完了: 3480/3495 トークン収束
+
+
+Evaluating Val data...
+
+======================================================================
+CVFP Convergence Check
+======================================================================
+  Tokens: 690
+  Trials: 10
+
+======================================================================
+CVFP Loss Progression
+======================================================================
+
+Trial  1/10: CVFP Loss = N/A (baseline)
+Trial  2/10: CVFP Loss = 0.000197
+Trial  3/10: CVFP Loss = 0.000000
+Trial  4/10: CVFP Loss = 0.000000
+Trial  5/10: CVFP Loss = 0.000000
+Trial  6/10: CVFP Loss = 0.000000
+Trial  7/10: CVFP Loss = 0.000000
+Trial  8/10: CVFP Loss = 0.000000
+Trial  9/10: CVFP Loss = 0.000000
+Trial 10/10: CVFP Loss = 0.000000
+
+======================================================================
+Convergence Analysis
+======================================================================
+
+Statistics:
+  - Initial Loss: 0.000197
+  - Final Loss: 0.000000
+  - Reduction: +100.00%
+  - Slope: -0.000013
+
+Verdict: ✅ CONVERGED: Loss is stable - model has converged
+
+  Phase 1 完了: 4.5s
+  Train ER: 559.5 (72.8%)
+  Val ER: 377.9 (49.2%)
+
+--- Phase 2: Next-Token Prediction ---
+✓ ContextBlock frozen
+✓ token_output layer unfrozen
+✓ Training TokenBlock + token_output: 45,739,345/91,429,969 parameters
+
+======================================================================
+PHASE 2: Next-Token Prediction Training (E案 - レイヤー対応版)
+======================================================================
+
+Training tokens: 3,495
+Validation tokens: 690
+Epochs: 10
+Batch size: 512
+Learning rate: 0.002
+Gradient clip: 1.0
+Early stopping patience: 2
+
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN (Phase 1で学習済み)
+  - TokenBlock: TRAINING
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+Epoch 1/10 [21.9s]:
+  Train Loss: 9.3863 | Train PPL: 11924.01
+  Val Loss: 8.9208 | Val PPL: 7486.08 | Val Acc: 7.84%
+  ✓ New best validation loss: 8.9208
+
+Epoch 2/10 [21.8s]:
+  Train Loss: 5.6429 | Train PPL: 282.29
+  Val Loss: 8.9014 | Val PPL: 7341.91 | Val Acc: 8.42%
+  ✓ New best validation loss: 8.9014
+
+Epoch 3/10 [21.8s]:
+  Train Loss: 4.4055 | Train PPL: 81.90
+  Val Loss: 9.4216 | Val PPL: 12351.79 | Val Acc: 11.03%
+  ⚠️ No improvement (1/2)
+
+Epoch 4/10 [21.8s]:
+  Train Loss: 3.2587 | Train PPL: 26.02
+  Val Loss: 9.6385 | Val PPL: 15343.54 | Val Acc: 11.18%
+  ⚠️ No improvement (2/2)
+
+⛔ Early stopping triggered at epoch 4
+   Val loss hasn't improved for 2 epochs
+======================================================================
+Phase 2 Training Complete
+======================================================================
+
+Best epoch: 2
+Best validation loss: 8.9014
+Best validation PPL: 7341.91
+Best validation accuracy: 8.42%
+Early stopped at epoch: 4
+
+
+==================================================
+RESULT: 50 samples (1.8min)
+==================================================
+  Phase 1: Train ER=72.8%, Val ER=49.2%
+  Phase 2: Val PPL=7341.91, Val Acc=8.42%
+
+[Progress: 2/4] 残り推定時間: 5.3min
+
+======================================================================
+EXPERIMENT 2/4: num_samples = 100
+======================================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  Train tokens: 7,466
+  Val tokens: 690 (固定)
+
+--- Phase 1: CVFP Learning ---
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train (samples=100)
+======================================================================
+  Mode: Memory
+  Tokens: 7,466
+  Max iterations: 10
+  Learning rate: 0.002
+  Diversity weight: 0.5
+  ContextBlock params: 7,091,712
+Iteration 1/10: シーケンシャル [7.77s]
+Iteration 2/10: 収束=100.0% | Loss=-0.143226 | CVFP=0.002196 | Div=-0.288648 [0.53s]
+Iteration 3/10: 収束=0.0% | Loss=0.123753 | CVFP=0.551418 | Div=-0.303913 [0.04s]
+Iteration 4/10: 収束=0.0% | Loss=0.040762 | CVFP=0.390815 | Div=-0.309292 [0.04s]
+Iteration 5/10: 収束=0.0% | Loss=-0.096163 | CVFP=0.117652 | Div=-0.309977 [0.04s]
+Iteration 6/10: 収束=22.3% | Loss=-0.134680 | CVFP=0.041433 | Div=-0.310792 [0.04s]
+Iteration 7/10: 収束=99.0% | Loss=-0.148512 | CVFP=0.014835 | Div=-0.311858 [0.04s]
+  → Early stopping (min_iterations=3 satisfied)
+
+Phase 1 完了: 7395/7466 トークン収束
+
+
+Evaluating Val data...
+
+======================================================================
+CVFP Convergence Check
+======================================================================
+  Tokens: 690
+  Trials: 10
+
+======================================================================
+CVFP Loss Progression
+======================================================================
+
+Trial  1/10: CVFP Loss = N/A (baseline)
+Trial  2/10: CVFP Loss = 0.000197
+Trial  3/10: CVFP Loss = 0.000000
+Trial  4/10: CVFP Loss = 0.000000
+Trial  5/10: CVFP Loss = 0.000000
+Trial  6/10: CVFP Loss = 0.000000
+Trial  7/10: CVFP Loss = 0.000000
+Trial  8/10: CVFP Loss = 0.000000
+Trial  9/10: CVFP Loss = 0.000000
+Trial 10/10: CVFP Loss = 0.000000
+
+======================================================================
+Convergence Analysis
+======================================================================
+
+Statistics:
+  - Initial Loss: 0.000197
+  - Final Loss: 0.000000
+  - Reduction: +100.00%
+  - Slope: -0.000013
+
+Verdict: ✅ CONVERGED: Loss is stable - model has converged
+
+  Phase 1 完了: 8.6s
+  Train ER: 582.0 (75.8%)
+  Val ER: 376.2 (49.0%)
+
+--- Phase 2: Next-Token Prediction ---
+✓ ContextBlock frozen
+✓ token_output layer unfrozen
+✓ Training TokenBlock + token_output: 45,739,345/91,429,969 parameters
+
+======================================================================
+PHASE 2: Next-Token Prediction Training (E案 - レイヤー対応版)
+======================================================================
+
+Training tokens: 7,466
+Validation tokens: 690
+Epochs: 10
+Batch size: 512
+Learning rate: 0.002
+Gradient clip: 1.0
+Early stopping patience: 2
+
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN (Phase 1で学習済み)
+  - TokenBlock: TRAINING
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+Epoch 1/10 [44.9s]:
+  Train Loss: 8.8094 | Train PPL: 6697.00
+  Val Loss: 8.1600 | Val PPL: 3498.24 | Val Acc: 6.97%
+  ✓ New best validation loss: 8.1600
+
+Epoch 2/10 [44.9s]:
+  Train Loss: 5.9271 | Train PPL: 375.06
+  Val Loss: 8.4479 | Val PPL: 4665.09 | Val Acc: 9.00%
+  ⚠️ No improvement (1/2)
+
+Epoch 3/10 [45.2s]:
+  Train Loss: 4.7988 | Train PPL: 121.37
+  Val Loss: 8.6940 | Val PPL: 5967.13 | Val Acc: 12.34%
+  ⚠️ No improvement (2/2)
+
+⛔ Early stopping triggered at epoch 3
+   Val loss hasn't improved for 2 epochs
+======================================================================
+Phase 2 Training Complete
+======================================================================
+
+Best epoch: 1
+Best validation loss: 8.1600
+Best validation PPL: 3498.24
+Best validation accuracy: 6.97%
+Early stopped at epoch: 3
+
+
+==================================================
+RESULT: 100 samples (2.5min)
+==================================================
+  Phase 1: Train ER=75.8%, Val ER=49.0%
+  Phase 2: Val PPL=3498.24, Val Acc=6.97%
+
+[Progress: 3/4] 残り推定時間: 4.3min
+
+======================================================================
+EXPERIMENT 3/4: num_samples = 200
+======================================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  Train tokens: 15,832
+  Val tokens: 690 (固定)
+
+--- Phase 1: CVFP Learning ---
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train (samples=200)
+======================================================================
+  Mode: Memory
+  Tokens: 15,832
+  Max iterations: 10
+  Learning rate: 0.002
+  Diversity weight: 0.5
+  ContextBlock params: 7,091,712
+Iteration 1/10: シーケンシャル [16.03s]
+Iteration 2/10: 収束=100.0% | Loss=-0.097912 | CVFP=0.002179 | Div=-0.198003 [1.15s]
+Iteration 3/10: 収束=0.0% | Loss=0.172497 | CVFP=0.553546 | Div=-0.208551 [0.09s]
+Iteration 4/10: 収束=0.0% | Loss=0.093388 | CVFP=0.398679 | Div=-0.211903 [0.09s]
+Iteration 5/10: 収束=0.0% | Loss=-0.046397 | CVFP=0.119093 | Div=-0.211887 [0.09s]
+Iteration 6/10: 収束=21.3% | Loss=-0.085098 | CVFP=0.042004 | Div=-0.212199 [0.09s]
+Iteration 7/10: 収束=98.9% | Loss=-0.098859 | CVFP=0.014961 | Div=-0.212679 [0.09s]
+  → Early stopping (min_iterations=3 satisfied)
+
+Phase 1 完了: 15662/15832 トークン収束
+
+
+Evaluating Val data...
+
+======================================================================
+CVFP Convergence Check
+======================================================================
+  Tokens: 690
+  Trials: 10
+
+======================================================================
+CVFP Loss Progression
+======================================================================
+
+Trial  1/10: CVFP Loss = N/A (baseline)
+Trial  2/10: CVFP Loss = 0.000216
+Trial  3/10: CVFP Loss = 0.000000
+Trial  4/10: CVFP Loss = 0.000000
+Trial  5/10: CVFP Loss = 0.000000
+Trial  6/10: CVFP Loss = 0.000000
+Trial  7/10: CVFP Loss = 0.000000
+Trial  8/10: CVFP Loss = 0.000000
+Trial  9/10: CVFP Loss = 0.000000
+Trial 10/10: CVFP Loss = 0.000000
+
+======================================================================
+Convergence Analysis
+======================================================================
+
+Statistics:
+  - Initial Loss: 0.000216
+  - Final Loss: 0.000000
+  - Reduction: +100.00%
+  - Slope: -0.000014
+
+Verdict: ✅ CONVERGED: Loss is stable - model has converged
+
+  Phase 1 完了: 17.9s
+  Train ER: 584.5 (76.1%)
+  Val ER: 374.5 (48.8%)
+
+--- Phase 2: Next-Token Prediction ---
+✓ ContextBlock frozen
+✓ token_output layer unfrozen
+✓ Training TokenBlock + token_output: 45,739,345/91,429,969 parameters
+
+======================================================================
+PHASE 2: Next-Token Prediction Training (E案 - レイヤー対応版)
+======================================================================
+
+Training tokens: 15,832
+Validation tokens: 690
+Epochs: 10
+Batch size: 512
+Learning rate: 0.002
+Gradient clip: 1.0
+Early stopping patience: 2
+
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN (Phase 1で学習済み)
+  - TokenBlock: TRAINING
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+Epoch 1/10 [93.8s]:
+  Train Loss: 8.1118 | Train PPL: 3333.53
+  Val Loss: 7.7151 | Val PPL: 2242.03 | Val Acc: 9.00%
+  ✓ New best validation loss: 7.7151
+
+Epoch 2/10 [94.1s]:
+  Train Loss: 5.3850 | Train PPL: 218.11
+  Val Loss: 8.2668 | Val PPL: 3892.32 | Val Acc: 9.72%
+  ⚠️ No improvement (1/2)
+
+Epoch 3/10 [93.8s]:
+  Train Loss: 4.2643 | Train PPL: 71.11
+  Val Loss: 8.5059 | Val PPL: 4943.61 | Val Acc: 9.87%
+  ⚠️ No improvement (2/2)
+
+⛔ Early stopping triggered at epoch 3
+   Val loss hasn't improved for 2 epochs
+======================================================================
+Phase 2 Training Complete
+======================================================================
+
+Best epoch: 1
+Best validation loss: 7.7151
+Best validation PPL: 2242.03
+Best validation accuracy: 9.00%
+Early stopped at epoch: 3
+
+
+==================================================
+RESULT: 200 samples (5.1min)
+==================================================
+  Phase 1: Train ER=76.1%, Val ER=48.8%
+  Phase 2: Val PPL=2242.03, Val Acc=9.00%
+
+[Progress: 4/4] 残り推定時間: 3.1min
+
+======================================================================
+EXPERIMENT 4/4: num_samples = 500
+======================================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  Train tokens: 39,814
+  Val tokens: 690 (固定)
+
+--- Phase 1: CVFP Learning ---
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train (samples=500)
+======================================================================
+  Mode: Memory
+  Tokens: 39,814
+  Max iterations: 10
+  Learning rate: 0.002
+  Diversity weight: 0.5
+  ContextBlock params: 7,091,712
+Iteration 1/10: シーケンシャル [41.01s]
+Iteration 2/10: 収束=100.0% | Loss=-0.061356 | CVFP=0.002177 | Div=-0.124890 [2.99s]
+Iteration 3/10: 収束=0.0% | Loss=0.209260 | CVFP=0.550090 | Div=-0.131569 [0.23s]
+Iteration 4/10: 収束=0.0% | Loss=0.135796 | CVFP=0.404944 | Div=-0.133352 [0.23s]
+Iteration 5/10: 収束=0.0% | Loss=-0.006674 | CVFP=0.119729 | Div=-0.133078 [0.23s]
+Iteration 6/10: 収束=21.5% | Loss=-0.045645 | CVFP=0.041830 | Div=-0.133119 [0.23s]
+Iteration 7/10: 収束=99.0% | Loss=-0.059204 | CVFP=0.014843 | Div=-0.133252 [0.23s]
+  → Early stopping (min_iterations=3 satisfied)
+
+Phase 1 完了: 39425/39814 トークン収束
+
+
+Evaluating Val data...
+
+======================================================================
+CVFP Convergence Check
+======================================================================
+  Tokens: 690
+  Trials: 10
+
+======================================================================
+CVFP Loss Progression
+======================================================================
+
+Trial  1/10: CVFP Loss = N/A (baseline)
+Trial  2/10: CVFP Loss = 0.000218
+Trial  3/10: CVFP Loss = 0.000000
+Trial  4/10: CVFP Loss = 0.000000
+Trial  5/10: CVFP Loss = 0.000000
+Trial  6/10: CVFP Loss = 0.000000
+Trial  7/10: CVFP Loss = 0.000000
+Trial  8/10: CVFP Loss = 0.000000
+Trial  9/10: CVFP Loss = 0.000000
+Trial 10/10: CVFP Loss = 0.000000
+
+======================================================================
+Convergence Analysis
+======================================================================
+
+Statistics:
+  - Initial Loss: 0.000218
+  - Final Loss: 0.000000
+  - Reduction: +100.00%
+  - Slope: -0.000015
+
+Verdict: ✅ CONVERGED: Loss is stable - model has converged
+
+  Phase 1 完了: 45.7s
+  Train ER: 582.9 (75.9%)
+  Val ER: 372.6 (48.5%)
+
+--- Phase 2: Next-Token Prediction ---
+✓ ContextBlock frozen
+✓ token_output layer unfrozen
+✓ Training TokenBlock + token_output: 45,739,345/91,429,969 parameters
+
+======================================================================
+PHASE 2: Next-Token Prediction Training (E案 - レイヤー対応版)
+======================================================================
+
+Training tokens: 39,814
+Validation tokens: 690
+Epochs: 10
+Batch size: 512
+Learning rate: 0.002
+Gradient clip: 1.0
+Early stopping patience: 2
+
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN (Phase 1で学習済み)
+  - TokenBlock: TRAINING
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+Epoch 1/10 [233.3s]:
+  Train Loss: 7.4612 | Train PPL: 1739.28
+  Val Loss: 7.0434 | Val PPL: 1145.23 | Val Acc: 15.24%
+  ✓ New best validation loss: 7.0434
+
+Epoch 2/10 [233.3s]:
+  Train Loss: 5.0126 | Train PPL: 150.30
+  Val Loss: 7.6039 | Val PPL: 2005.94 | Val Acc: 14.80%
+  ⚠️ No improvement (1/2)
+
+Epoch 3/10 [233.7s]:
+  Train Loss: 3.8346 | Train PPL: 46.27
+  Val Loss: 8.0833 | Val PPL: 3240.00 | Val Acc: 12.77%
+  ⚠️ No improvement (2/2)
+
+⛔ Early stopping triggered at epoch 3
+   Val loss hasn't improved for 2 epochs
+======================================================================
+Phase 2 Training Complete
+======================================================================
+
+Best epoch: 1
+Best validation loss: 7.0434
+Best validation PPL: 1145.23
+Best validation accuracy: 15.24%
+Early stopped at epoch: 3
+
+
+==================================================
+RESULT: 500 samples (12.6min)
+==================================================
+  Phase 1: Train ER=75.9%, Val ER=48.5%
+  Phase 2: Val PPL=1145.23, Val Acc=15.24%
+
+========================================================================================================================
+SUMMARY TABLE
+========================================================================================================================
+ Samples |     Tokens |     Time |  Train ER% |    Val ER% |    Val PPL |   Val Acc% |  P2 Epochs
+---------+------------+----------+------------+------------+------------+------------+-----------
+      50 |      3,495 |   1.8min |      72.8% |      49.2% |    7341.91 |      8.42% |          4
+     100 |      7,466 |   2.5min |      75.8% |      49.0% |    3498.24 |      6.97% |          3
+     200 |     15,832 |   5.1min |      76.1% |      48.8% |    2242.03 |      9.00% |          3
+     500 |     39,814 |  12.6min |      75.9% |      48.5% |    1145.23 |     15.24% |          3
+
+======================================================================
+EXPERIMENT COMPLETE
+======================================================================
+Total time: 22.1min
+End time: 2025-11-27 07:50:40
+
+Results saved to: ./results/colab_scaling_layer6.json
+
+======================================================================
+SCALING TRENDS (for prediction)
+======================================================================
+Val PPL trend: 7341.91 (50 samples) -> 1145.23 (500 samples)
+Val ER% trend: 49.2% (50 samples) -> 48.5% (500 samples)
+Val Acc trend: 8.42% (50 samples) -> 15.24% (500 samples)
