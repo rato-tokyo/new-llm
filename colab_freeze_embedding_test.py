@@ -24,7 +24,6 @@ from config import ResidualConfig
 from src.models.llm import LLM
 from src.trainers.phase1.memory import MemoryPhase1Trainer
 from src.trainers.phase2 import Phase2Trainer
-from src.evaluation.convergence import CVFPConvergenceChecker
 
 
 # ========== 実験設定 ==========
@@ -97,11 +96,6 @@ def run_single_experiment(num_samples: int, config, device: str) -> dict:
 
     trainer1 = MemoryPhase1Trainer(model, config, device)
     train_contexts = trainer1.train(train_tokens, label="Train")
-
-    # 検証データ収束チェック
-    print(f"\nEvaluating Val data...")
-    checker = CVFPConvergenceChecker(model, config, device)
-    val_result = checker.check_convergence(val_tokens, num_trials=10)
 
     phase1_time = time.time() - phase1_start
     train_er = trainer1.compute_effective_rank_percent(train_contexts)
