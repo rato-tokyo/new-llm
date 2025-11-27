@@ -1,5 +1,42 @@
 # New-LLM Project Guidelines
 
+## 🔗 WEIGHT TYING ADOPTED - 重み共有採用 (2025-11-27)
+
+**Weight Tyingを標準採用しました。**
+
+### 概要
+
+Token EmbeddingとOutput Headで重みを共有する手法（GPT-2と同じ）。
+パラメータ数を約38M削減し、モデル効率を大幅に向上。
+
+### 効果
+
+| 項目 | Without Weight Tying | With Weight Tying |
+|------|---------------------|-------------------|
+| 全体パラメータ | 91.43M | **52.78M** (-42%) |
+| Output Head | 38.65M | **0** (共有) |
+| Phase 2学習対象 | 45.74M | 45.69M |
+
+### 設定
+
+```python
+# config.py
+use_weight_tying = True  # 推奨（デフォルト）
+```
+
+### 採用理由
+
+1. **パラメータ効率**: 小〜中規模モデル（100M以下）では特に効果的
+2. **Chinchilla則との整合**: UltraChatデータ量に対してより適切なモデルサイズに
+3. **業界標準**: GPT-2, GPT-3, BERT, LLaMA, Mistralなど多くのモデルで採用
+
+### 注意点
+
+- Weight Tying時はPhase 2でEmbeddingも学習される
+- `unfreeze_token_output()`で自動的にEmbeddingの勾配が有効化される
+
+---
+
 ## ⚡ PARALLEL PROCESSING ADOPTED - 並列処理版採用 (2025-11-25)
 
 **並列処理版を標準実装として完全採用しました。**

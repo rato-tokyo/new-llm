@@ -1,0 +1,375 @@
+remote: Enumerating objects: 13, done.
+remote: Counting objects: 100% (13/13), done.
+remote: Compressing objects: 100% (2/2), done.
+remote: Total 7 (delta 5), reused 7 (delta 5), pack-reused 0 (from 0)
+Unpacking objects: 100% (7/7), 1.44 KiB | 736.00 KiB/s, done.
+From https://github.com/rato-tokyo/new-llm
+ * branch            main       -> FETCH_HEAD
+   1f4be23..40147f3  main       -> origin/main
+Updating 1f4be23..40147f3
+Fast-forward
+ colab_extended.py             | 15 +++++++++++++++
+ src/trainers/phase1/memory.py | 33 ++++++++++++++++++++-------------
+ 2 files changed, 35 insertions(+), 13 deletions(-)
+
+======================================================================
+EXTENDED SCALING EXPERIMENT
+案1: Sample scaling [500, 1000, 2000, 5000] × Layer 6
+案2: Layer comparison [6, 9, 12] × 2000 samples
+======================================================================
+Start time: 2025-11-27 11:35:26
+GPU: NVIDIA L4 (23.8GB)
+
+案1: samples=[500, 1000, 2000, 5000], layer=6
+案2: layers=[6, 9, 12], samples=2000
+Val samples: 50 (固定)
+Total samples to load: 5050
+
+======================================================================
+Loading all data...
+======================================================================
+
+  Loading 5050 samples from UltraChat...
+Token indices sequence length is longer than the specified maximum sequence length for this model (1204 > 1024). Running this sequence through the model will result in indexing errors
+  Total tokens: 923,883
+  Samples loaded: 5050
+
+######################################################################
+# 案1: Sample Scaling Experiment
+######################################################################
+
+======================================================================
+EXPERIMENT SET: Sample Scaling (Layer 6)
+======================================================================
+Experiments: 4
+
+[1/4] Running experiment...
+
+  num_samples=500, num_layers=6
+2025-11-27 11:35:44.825306: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-11-27 11:35:44.842818: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1764243344.864465   41200 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764243344.871053   41200 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764243344.887427   41200 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764243344.887458   41200 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764243344.887461   41200 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764243344.887463   41200 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-11-27 11:35:44.892333: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  num_input_tokens: 1
+  Train tokens: 86,925
+  Val tokens: 4,768
+  Phase 1 starting...
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train
+======================================================================
+  Mode: Memory
+  Tokens: 86,925
+  Max iterations: 10
+  Learning rate: 0.002
+  Diversity weight: 0.5
+  ContextBlock params: 7,091,712
+Iteration 1/10: シーケンシャル [74.48s]
+Iteration 2/10: 収束=100.0% | Loss=-0.041137 | CVFP=0.002164 | Div=-0.084437 [0.73s]
+Iteration 3/10: 収束=0.0% | Loss=0.227905 | CVFP=0.544849 | Div=-0.089039 [0.51s]
+Iteration 4/10: 収束=0.0% | Loss=0.157742 | CVFP=0.405588 | Div=-0.090105 [0.51s]
+Iteration 5/10: 収束=0.0% | Loss=0.014612 | CVFP=0.119002 | Div=-0.089778 [0.51s]
+Iteration 6/10: 収束=24.5% | Loss=-0.024484 | CVFP=0.040788 | Div=-0.089755 [0.51s]
+Iteration 7/10: 収束=99.4% | Loss=-0.037732 | CVFP=0.014330 | Div=-0.089794 [0.51s]
+  → Early stopping (min_iterations=3 satisfied)
+
+Phase 1 完了: 86413/86925 トークン収束
+
+
+Evaluating Val data...
+
+======================================================================
+CVFP Convergence Check
+======================================================================
+  Tokens: 4,768
+  Trials: 10
+  num_input_tokens: 1
+
+======================================================================
+CVFP Loss Progression
+======================================================================
+
+Trial  1/10: CVFP Loss = N/A (baseline)
+Trial  2/10: CVFP Loss = 0.000028
+Trial  3/10: CVFP Loss = 0.000000
+Trial  4/10: CVFP Loss = 0.000000
+Trial  5/10: CVFP Loss = 0.000000
+Trial  6/10: CVFP Loss = 0.000000
+Trial  7/10: CVFP Loss = 0.000000
+Trial  8/10: CVFP Loss = 0.000000
+Trial  9/10: CVFP Loss = 0.000000
+Trial 10/10: CVFP Loss = 0.000000
+
+======================================================================
+Convergence Analysis
+======================================================================
+
+Statistics:
+  - Initial Loss: 0.000028
+  - Final Loss: 0.000000
+  - Reduction: +100.00%
+  - Slope: -0.000002
+
+Verdict: ✅ CONVERGED: Loss is stable - model has converged
+
+  Phase 1 done: 1.3min, Train ER=76.4%
+  Phase 2 starting...
+✓ ContextBlock frozen
+✓ token_output layer unfrozen
+✓ Training TokenBlock + token_output: 45,739,345/91,429,969 parameters
+
+======================================================================
+PHASE 2: Next-Token Prediction Training (E案 - レイヤー対応版)
+======================================================================
+
+Training tokens: 86,925
+Validation tokens: 4,768
+Epochs: 10
+Batch size: 512
+Learning rate: 0.002
+Gradient clip: 1.0
+Early stopping patience: 2
+
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN (Phase 1で学習済み)
+  - TokenBlock: TRAINING
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+Epoch 1/10 [543.7s]:
+  Train Loss: 7.4501 | Train PPL: 1719.97
+  Val Loss: 7.0810 | Val PPL: 1189.15 | Val Acc: 11.58%
+  ✓ New best validation loss: 7.0810
+
+Epoch 2/10 [542.7s]:
+  Train Loss: 5.2224 | Train PPL: 185.38
+  Val Loss: 7.5866 | Val PPL: 1971.62 | Val Acc: 11.64%
+  ⚠️ No improvement (1/2)
+
+Epoch 3/10 [543.4s]:
+  Train Loss: 4.1696 | Train PPL: 64.69
+  Val Loss: 8.0043 | Val PPL: 2993.94 | Val Acc: 11.31%
+  ⚠️ No improvement (2/2)
+
+⛔ Early stopping triggered at epoch 3
+   Val loss hasn't improved for 2 epochs
+======================================================================
+Phase 2 Training Complete
+======================================================================
+
+Best epoch: 1
+Best validation loss: 7.0810
+Best validation PPL: 1189.15
+Best validation accuracy: 11.58%
+Early stopped at epoch: 3
+
+  RESULT: Val PPL=1189.15, Val Acc=11.58% (29.3min)
+  Progress: 1/4, Remaining: 1.5h
+
+[2/4] Running experiment...
+
+  num_samples=1000, num_layers=6
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  num_input_tokens: 1
+  Train tokens: 183,620
+  Val tokens: 4,768
+  Phase 1 starting...
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train
+======================================================================
+  Mode: Memory
+  Tokens: 183,620
+  Max iterations: 10
+  Learning rate: 0.002
+  Diversity weight: 0.5
+  ContextBlock params: 7,091,712
+Iteration 1/10: シーケンシャル [156.51s]
+Iteration 2/10: 収束=100.0% | Loss=-0.027968 | CVFP=0.002161 | Div=-0.058097 [1.17s]
+Iteration 3/10: 収束=0.0% | Loss=0.239137 | CVFP=0.539532 | Div=-0.061258 [1.18s]
+Iteration 4/10: 収束=0.0% | Loss=0.173141 | CVFP=0.408213 | Div=-0.061931 [1.19s]
+Iteration 5/10: 収束=0.0% | Loss=0.027236 | CVFP=0.116089 | Div=-0.061616 [1.19s]
+Iteration 6/10: 収束=26.8% | Loss=-0.011229 | CVFP=0.039136 | Div=-0.061593 [1.19s]
+Iteration 7/10: 収束=99.6% | Loss=-0.023879 | CVFP=0.013825 | Div=-0.061584 [1.20s]
+  → Early stopping (min_iterations=3 satisfied)
+
+Phase 1 完了: 182908/183620 トークン収束
+
+
+Evaluating Val data...
+
+======================================================================
+CVFP Convergence Check
+======================================================================
+  Tokens: 4,768
+  Trials: 10
+  num_input_tokens: 1
+
+======================================================================
+CVFP Loss Progression
+======================================================================
+
+Trial  1/10: CVFP Loss = N/A (baseline)
+Trial  2/10: CVFP Loss = 0.000028
+Trial  3/10: CVFP Loss = 0.000000
+Trial  4/10: CVFP Loss = 0.000000
+Trial  5/10: CVFP Loss = 0.000000
+Trial  6/10: CVFP Loss = 0.000000
+Trial  7/10: CVFP Loss = 0.000000
+Trial  8/10: CVFP Loss = 0.000000
+Trial  9/10: CVFP Loss = 0.000000
+Trial 10/10: CVFP Loss = 0.000000
+
+======================================================================
+Convergence Analysis
+======================================================================
+
+Statistics:
+  - Initial Loss: 0.000028
+  - Final Loss: 0.000000
+  - Reduction: +100.00%
+  - Slope: -0.000002
+
+Verdict: ✅ CONVERGED: Loss is stable - model has converged
+
+  Phase 1 done: 2.8min, Train ER=76.3%
+  Phase 2 starting...
+✓ ContextBlock frozen
+✓ token_output layer unfrozen
+✓ Training TokenBlock + token_output: 45,739,345/91,429,969 parameters
+
+======================================================================
+PHASE 2: Next-Token Prediction Training (E案 - レイヤー対応版)
+======================================================================
+
+Training tokens: 183,620
+Validation tokens: 4,768
+Epochs: 10
+Batch size: 512
+Learning rate: 0.002
+Gradient clip: 1.0
+Early stopping patience: 2
+
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN (Phase 1で学習済み)
+  - TokenBlock: TRAINING
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+Epoch 1/10 [1139.2s]:
+  Train Loss: 7.1585 | Train PPL: 1285.03
+  Val Loss: 6.7339 | Val PPL: 840.46 | Val Acc: 13.03%
+  ✓ New best validation loss: 6.7339
+
+Epoch 2/10 [1139.8s]:
+  Train Loss: 5.0398 | Train PPL: 154.45
+  Val Loss: 7.1145 | Val PPL: 1229.66 | Val Acc: 12.94%
+  ⚠️ No improvement (1/2)
+
+Epoch 3/10 [1140.0s]:
+  Train Loss: 4.1118 | Train PPL: 61.06
+  Val Loss: 7.5746 | Val PPL: 1948.10 | Val Acc: 12.27%
+  ⚠️ No improvement (2/2)
+
+⛔ Early stopping triggered at epoch 3
+   Val loss hasn't improved for 2 epochs
+======================================================================
+Phase 2 Training Complete
+======================================================================
+
+Best epoch: 1
+Best validation loss: 6.7339
+Best validation PPL: 840.46
+Best validation accuracy: 13.03%
+Early stopped at epoch: 3
+
+  RESULT: Val PPL=840.46, Val Acc=13.03% (1.0h)
+  Progress: 2/4, Remaining: 1.5h
+
+[3/4] Running experiment...
+
+  num_samples=2000, num_layers=6
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  num_input_tokens: 1
+  Train tokens: 366,242
+  Val tokens: 4,768
+  Phase 1 starting...
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train
+======================================================================
+  Mode: Memory
+  Tokens: 366,242
+  Max iterations: 10
+  Learning rate: 0.002
+  Diversity weight: 0.5
+  ContextBlock params: 7,091,712
+Iteration 1/10: シーケンシャル [309.82s]
+ERROR: CUDA out of memory. Tried to allocate 24.00 MiB. GPU 0 has a total capacity of 22.16 GiB of which 13.38 MiB is free. Process 483293 has 22.14 GiB memory in use. Of the allocated memory 21.85 GiB is allocated by PyTorch, and 26.44 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+Traceback (most recent call last):
+  File "/content/new-llm/colab_extended.py", line 246, in run_experiment_set
+    result = run_single_experiment(
+             ^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/new-llm/colab_extended.py", line 161, in run_single_experiment
+    train_contexts = trainer1.train(train_tokens, label=f"Train")
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/new-llm/src/trainers/phase1/memory.py", line 86, in train
+    contexts = self._forward_parallel(token_embeds, previous_contexts)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/new-llm/src/trainers/phase1/memory.py", line 230, in _forward_parallel
+    batch_output = self.model.context_block(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/new-llm/src/models/llm.py", line 194, in forward
+    context = layer(context, token_embeds)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1775, in _wrapped_call_impl
+    return self._call_impl(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/usr/local/lib/python3.12/dist-packages/torch/nn/modules/module.py", line 1786, in _call_impl
+    return forward_call(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/new-llm/src/models/llm.py", line 73, in forward
+    fnn_input = torch.cat([context, token_embeds], dim=-1)
+                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 24.00 MiB. GPU 0 has a total capacity of 22.16 GiB of which 13.38 MiB is free. Process 483293 has 22.14 GiB memory in use. Of the allocated memory 21.85 GiB is allocated by PyTorch, and 26.44 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+
+[4/4] Running experiment...
+
+  num_samples=5000, num_layers=6
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  num_input_tokens: 1
+  Train tokens: 913,615
+  Val tokens: 4,768
+  Phase 1 starting...
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train
+======================================================================
+  Mode: Memory
+  Tokens: 913,615
+  Max iterations: 10
+  Learning rate: 0.002
+  Diversity weight: 0.5
+  ContextBlock params: 7,091,712

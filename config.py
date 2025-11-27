@@ -25,6 +25,9 @@ class ResidualConfig:
     context_dim = embed_dim * context_multiplier  # コンテキストベクトル次元数（自動計算）
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
+    use_weight_tying = True         # Weight Tying: Token EmbeddingとOutput Headで重み共有
+                                    # True: GPT-2スタイル、パラメータ約38M削減、推奨
+                                    # False: 従来の独立した重み
     # LayerNorm: 常に有効（数値安定性のため必須）
 
     # ========== 複数トークン入力 ==========

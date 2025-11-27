@@ -313,6 +313,8 @@ class LLM(nn.Module):
         num_layers: Number of layers in both ContextBlock and TokenBlock
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
+        use_weight_tying: Whether to tie token_embedding and token_output weights
+                          (reduces parameters by ~38M, GPT-2 style)
     """
 
     def __init__(
@@ -322,7 +324,8 @@ class LLM(nn.Module):
         context_dim,
         num_layers=6,
         num_input_tokens=1,
-        use_pretrained_embeddings=True
+        use_pretrained_embeddings=True,
+        use_weight_tying=False
     ):
         super().__init__()
 
@@ -333,6 +336,7 @@ class LLM(nn.Module):
         self.num_layers = num_layers
         self.num_input_tokens = num_input_tokens
         self.use_separated_architecture = True  # Always true now
+        self.use_weight_tying = use_weight_tying
 
         # ========== Token Embeddings ==========
         if use_pretrained_embeddings:
@@ -363,14 +367,22 @@ class LLM(nn.Module):
         )
 
         # ========== Output Head ==========
-        self.token_output = nn.Linear(embed_dim, vocab_size)
-
-        # Phase 1用: ゼロ初期化 + 勾配無効化
-        with torch.no_grad():
-            self.token_output.weight.fill_(0)
-            self.token_output.bias.fill_(0)
-        self.token_output.weight.requires_grad = False
-        self.token_output.bias.requires_grad = False
+        if use_weight_tying:
+            # Weight Tying: Token EmbeddingとOutput Headで重みを共有
+            # GPT-2と同じ手法、パラメータを約38M削減
+            self.token_output = nn.Linear(embed_dim, vocab_size, bias=False)
+            # 重み共有（転置の関係: embedding [vocab, embed] → output [embed, vocab].T）
+            self.token_output.weight = self.token_embedding.weight
+            print(f"✓ Weight Tying enabled: token_output shares weights with token_embedding")
+            print(f"  → Saved ~{vocab_size * embed_dim / 1e6:.2f}M parameters")
+        else:
+            self.token_output = nn.Linear(embed_dim, vocab_size)
+            # Phase 1用: ゼロ初期化 + 勾配無効化
+            with torch.no_grad():
+                self.token_output.weight.fill_(0)
+                self.token_output.bias.fill_(0)
+            self.token_output.weight.requires_grad = False
+            self.token_output.bias.requires_grad = False
 
         # Initialize embeddings (if not pretrained)
         if not use_pretrained_embeddings:
@@ -451,9 +463,16 @@ class LLM(nn.Module):
 
     def unfreeze_token_output(self):
         """token_output層の勾配を有効化する（Phase 2用）"""
-        self.token_output.weight.requires_grad = True
-        self.token_output.bias.requires_grad = True
-        print("✓ token_output layer unfrozen")
+        if self.use_weight_tying:
+            # Weight Tying時: embeddingの勾配を有効化
+            # 注意: これによりembeddingも学習される
+            self.token_embedding.weight.requires_grad = True
+            print("✓ token_output (weight-tied with embedding) unfrozen")
+            print("  Note: token_embedding will also be updated during Phase 2")
+        else:
+            self.token_output.weight.requires_grad = True
+            self.token_output.bias.requires_grad = True
+            print("✓ token_output layer unfrozen")
 
     def _update_context_one_step(self, token_embeds, context):
         """

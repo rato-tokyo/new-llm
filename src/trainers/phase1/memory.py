@@ -209,11 +209,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         batch_size = self.config.phase1_batch_size
         num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
 
-        # 複数トークンの結合テンソルを作成
-        # token_embeds: [num_tokens, embed_dim]
-        # 出力: [num_tokens, embed_dim * num_input_tokens]
-        combined_tokens = self._build_combined_tokens(token_embeds, num_input_tokens)
-
         # コンテキスト準備（既存ロジック）
         contexts_for_batch = torch.zeros(num_tokens, self.model.context_dim, device=self.device)
         contexts_for_batch[1:] = previous_contexts[:-1].detach()
@@ -223,56 +218,63 @@ class MemoryPhase1Trainer(Phase1Trainer):
             noise = torch.randn_like(contexts_for_batch) * self.config.phase1_context_noise
             contexts_for_batch = contexts_for_batch + noise
 
-        if num_tokens > batch_size:
-            all_contexts = []
-            for start_idx in range(0, num_tokens, batch_size):
-                end_idx = min(start_idx + batch_size, num_tokens)
-                batch_output = self.model.context_block(
-                    contexts_for_batch[start_idx:end_idx],
-                    combined_tokens[start_idx:end_idx]
-                )
-                all_contexts.append(batch_output)
-            return torch.cat(all_contexts, dim=0)
-        else:
-            return self.model.context_block(contexts_for_batch, combined_tokens)
+        # バッチ処理（メモリ効率: combined_tokensをバッチごとに作成）
+        all_contexts = []
+        for start_idx in range(0, num_tokens, batch_size):
+            end_idx = min(start_idx + batch_size, num_tokens)
 
-    def _build_combined_tokens(self, token_embeds: torch.Tensor, num_input_tokens: int) -> torch.Tensor:
+            # バッチ分のcombined_tokensを作成（メモリ効率化）
+            batch_combined = self._build_combined_tokens_batch(
+                token_embeds, num_input_tokens, start_idx, end_idx
+            )
+
+            batch_output = self.model.context_block(
+                contexts_for_batch[start_idx:end_idx],
+                batch_combined
+            )
+            all_contexts.append(batch_output)
+
+            # メモリ解放
+            del batch_combined
+
+        return torch.cat(all_contexts, dim=0)
+
+    def _build_combined_tokens_batch(
+        self, token_embeds: torch.Tensor, num_input_tokens: int,
+        start_idx: int, end_idx: int
+    ) -> torch.Tensor:
         """
-        複数トークンの結合テンソルを作成
+        バッチ範囲のみの結合テンソルを作成（メモリ効率版）
 
         Args:
-            token_embeds: [num_tokens, embed_dim]
+            token_embeds: [num_tokens, embed_dim] - 全トークン
             num_input_tokens: 入力トークン数
+            start_idx: バッチ開始インデックス
+            end_idx: バッチ終了インデックス
 
         Returns:
-            combined_tokens: [num_tokens, embed_dim * num_input_tokens]
-
-        例（num_input_tokens=2）:
-            時刻t=0: [zero_vector, token_0]
-            時刻t=1: [token_0, token_1]
-            時刻t=2: [token_1, token_2]
-            ...
+            combined_tokens: [batch_size, embed_dim * num_input_tokens]
         """
         if num_input_tokens == 1:
-            return token_embeds
+            return token_embeds[start_idx:end_idx]
 
-        num_tokens = len(token_embeds)
+        batch_size = end_idx - start_idx
         embed_dim = self.model.embed_dim
 
         combined_tokens = torch.zeros(
-            num_tokens,
+            batch_size,
             embed_dim * num_input_tokens,
             device=self.device
         )
 
-        for i in range(num_tokens):
+        for batch_i, global_i in enumerate(range(start_idx, end_idx)):
             for j in range(num_input_tokens):
                 # j=0 が最も古いトークン、j=num_input_tokens-1 が現在のトークン
-                src_idx = i - (num_input_tokens - 1 - j)
+                src_idx = global_i - (num_input_tokens - 1 - j)
                 if src_idx >= 0:
                     start = j * embed_dim
                     end = (j + 1) * embed_dim
-                    combined_tokens[i, start:end] = token_embeds[src_idx]
+                    combined_tokens[batch_i, start:end] = token_embeds[src_idx]
                 # src_idx < 0 の場合はゼロベクトル（初期化済み）
 
         return combined_tokens
