@@ -82,19 +82,10 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 print_flush(f"Iteration 1/{self.config.phase1_max_iterations}: シーケンシャル [{elapsed:.2f}s]")
                 continue
 
-            # Iteration 1+: 並列処理
-            contexts = self._forward_parallel(token_embeds, previous_contexts)
-
-            # 損失計算
-            cvfp_loss = F.mse_loss(contexts, previous_contexts)
-            diversity_loss = self._compute_diversity_loss(contexts)
-            total_loss = (1 - self.config.dist_reg_weight) * cvfp_loss + self.config.dist_reg_weight * diversity_loss
-
-            if not torch.isnan(total_loss) and not torch.isinf(total_loss):
-                optimizer.zero_grad()
-                total_loss.backward()
-                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.config.phase1_gradient_clip)
-                optimizer.step()
+            # Iteration 1+: 勾配累積付き並列処理
+            contexts, total_loss, cvfp_loss, diversity_loss = self._forward_parallel_with_grad_accum(
+                token_embeds, previous_contexts, optimizer
+            )
 
             # 収束率
             convergence_rate = self._compute_convergence_rate(contexts, previous_contexts, num_tokens)
@@ -105,9 +96,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
             print_flush(
                 f"Iteration {iteration+1}/{self.config.phase1_max_iterations}: "
                 f"収束={convergence_rate*100:.1f}% | "
-                f"Loss={total_loss.item():.6f} | "
-                f"CVFP={cvfp_loss.item():.6f} | "
-                f"Div={diversity_loss.item():.6f} [{elapsed:.2f}s]"
+                f"Loss={total_loss:.6f} | "
+                f"CVFP={cvfp_loss:.6f} | "
+                f"Div={diversity_loss:.6f} [{elapsed:.2f}s]"
             )
 
             # 早期停止: 最小イテレーション数を超え、かつ収束率が閾値以上
@@ -203,8 +194,103 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         return contexts
 
+    def _forward_parallel_with_grad_accum(
+        self,
+        token_embeds: torch.Tensor,
+        previous_contexts: torch.Tensor,
+        optimizer: torch.optim.Optimizer
+    ) -> tuple:
+        """
+        勾配累積付き並列処理（メモリ効率版）
+
+        バッチごとに勾配を計算・累積し、最後にまとめてパラメータ更新。
+        これにより、大規模データでもOOMを回避できる。
+
+        Returns:
+            (contexts, total_loss, cvfp_loss, diversity_loss)
+        """
+        num_tokens = len(token_embeds)
+        batch_size = self.config.phase1_batch_size
+        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+        num_batches = (num_tokens + batch_size - 1) // batch_size
+
+        # コンテキスト準備
+        contexts_for_batch = torch.zeros(num_tokens, self.model.context_dim, device=self.device)
+        contexts_for_batch[1:] = previous_contexts[:-1].detach()
+        contexts_for_batch[0] = previous_contexts[-1].detach()
+
+        if self.config.phase1_context_noise > 0 and self.model.training:
+            noise = torch.randn_like(contexts_for_batch) * self.config.phase1_context_noise
+            contexts_for_batch = contexts_for_batch + noise
+
+        # 勾配をゼロに
+        optimizer.zero_grad()
+
+        # 結果を格納
+        all_contexts = []
+        total_cvfp_loss = 0.0
+        total_diversity_loss = 0.0
+        total_loss_sum = 0.0
+
+        # バッチ処理（勾配累積）
+        for start_idx in range(0, num_tokens, batch_size):
+            end_idx = min(start_idx + batch_size, num_tokens)
+            current_batch_size = end_idx - start_idx
+
+            # バッチ分のcombined_tokensを作成
+            batch_combined = self._build_combined_tokens_batch(
+                token_embeds, num_input_tokens, start_idx, end_idx
+            )
+
+            # Forward pass
+            batch_output = self.model.context_block(
+                contexts_for_batch[start_idx:end_idx],
+                batch_combined
+            )
+
+            # バッチごとの損失計算
+            batch_prev = previous_contexts[start_idx:end_idx].detach()
+            cvfp_loss = F.mse_loss(batch_output, batch_prev)
+            diversity_loss = self._compute_diversity_loss(batch_output)
+            batch_loss = (1 - self.config.dist_reg_weight) * cvfp_loss + self.config.dist_reg_weight * diversity_loss
+
+            # 勾配累積のためにバッチ数で割る
+            scaled_loss = batch_loss / num_batches
+
+            # Backward（勾配累積）
+            if not torch.isnan(scaled_loss) and not torch.isinf(scaled_loss):
+                scaled_loss.backward()
+
+            # 結果を保存（勾配グラフから切り離して保存）
+            all_contexts.append(batch_output.detach())
+
+            # 損失の記録
+            total_cvfp_loss += cvfp_loss.item() * current_batch_size
+            total_diversity_loss += diversity_loss.item() * current_batch_size
+            total_loss_sum += batch_loss.item() * current_batch_size
+
+            # メモリ解放
+            del batch_combined, batch_output, batch_loss, scaled_loss
+
+            if self.device.type == 'cuda':
+                torch.cuda.empty_cache()
+
+        # 勾配クリッピングとパラメータ更新
+        torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.config.phase1_gradient_clip)
+        optimizer.step()
+
+        # コンテキストを結合（勾配なし）
+        contexts = torch.cat(all_contexts, dim=0)
+
+        # 平均損失を計算
+        avg_cvfp_loss = total_cvfp_loss / num_tokens
+        avg_diversity_loss = total_diversity_loss / num_tokens
+        avg_total_loss = total_loss_sum / num_tokens
+
+        return contexts, avg_total_loss, avg_cvfp_loss, avg_diversity_loss
+
     def _forward_parallel(self, token_embeds: torch.Tensor, previous_contexts: torch.Tensor) -> torch.Tensor:
-        """並列処理（Iteration 1+用）"""
+        """並列処理（Iteration 1+用）- 推論専用（勾配なし）"""
         num_tokens = len(token_embeds)
         batch_size = self.config.phase1_batch_size
         num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
@@ -220,22 +306,23 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         # バッチ処理（メモリ効率: combined_tokensをバッチごとに作成）
         all_contexts = []
-        for start_idx in range(0, num_tokens, batch_size):
-            end_idx = min(start_idx + batch_size, num_tokens)
+        with torch.no_grad():
+            for start_idx in range(0, num_tokens, batch_size):
+                end_idx = min(start_idx + batch_size, num_tokens)
 
-            # バッチ分のcombined_tokensを作成（メモリ効率化）
-            batch_combined = self._build_combined_tokens_batch(
-                token_embeds, num_input_tokens, start_idx, end_idx
-            )
+                # バッチ分のcombined_tokensを作成（メモリ効率化）
+                batch_combined = self._build_combined_tokens_batch(
+                    token_embeds, num_input_tokens, start_idx, end_idx
+                )
 
-            batch_output = self.model.context_block(
-                contexts_for_batch[start_idx:end_idx],
-                batch_combined
-            )
-            all_contexts.append(batch_output)
+                batch_output = self.model.context_block(
+                    contexts_for_batch[start_idx:end_idx],
+                    batch_combined
+                )
+                all_contexts.append(batch_output)
 
-            # メモリ解放
-            del batch_combined
+                # メモリ解放
+                del batch_combined
 
         return torch.cat(all_contexts, dim=0)
 
