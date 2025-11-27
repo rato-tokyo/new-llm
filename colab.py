@@ -289,6 +289,9 @@ def main():
     # 設定
     config = ResidualConfig()
 
+    # ===== Layer 6 実験用設定 =====
+    config.num_layers = 6  # 3 → 6 に変更
+
     # テストするサンプル数（50から開始、対数スケール）
     sample_sizes = [50, 100, 200, 500]
     max_train_samples = max(sample_sizes)  # 訓練で使用する最大サンプル数
@@ -350,8 +353,8 @@ def main():
     print_flush(f"Total time: {format_time(total_time)}")
     print_flush(f"End time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
-    # JSON保存
-    output_path = "./results/colab_scaling_experiment.json"
+    # JSON保存（レイヤー数を含む）
+    output_path = f"./results/colab_scaling_layer{config.num_layers}.json"
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
 
     output_data = {
