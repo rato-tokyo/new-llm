@@ -171,30 +171,37 @@ class MemoryPhase1Trainer(Phase1Trainer):
         return result
 
     def _forward_sequential(self, token_embeds: torch.Tensor, previous_contexts: Optional[torch.Tensor]) -> torch.Tensor:
-        """シーケンシャル処理（Iteration 0用）"""
+        """シーケンシャル処理（Iteration 0用）- 勾配なし"""
+        num_tokens = len(token_embeds)
+        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+
+        # 結果を格納するテンソルを事前確保（メモリ効率）
+        contexts = torch.zeros(num_tokens, self.model.context_dim, device=self.device)
+
         if previous_contexts is None:
             context = torch.zeros(1, self.model.context_dim, device=self.device)
         else:
             context = previous_contexts[-1].unsqueeze(0).detach()
 
-        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
-
         # トークン履歴を初期化（ゼロベクトルで埋める）
-        # イテレーション開始時はトークン履歴をリセット
         token_history = [torch.zeros(self.model.embed_dim, device=self.device)
                          for _ in range(num_input_tokens - 1)]
 
-        context_list = []
-        for token_embed in token_embeds:
-            # 履歴 + 現在のトークンを結合
-            token_history.append(token_embed)
-            combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
-            # combined_tokens: [embed_dim * num_input_tokens]
+        # 勾配なしで処理（Iteration 0は学習なし）
+        with torch.no_grad():
+            for i, token_embed in enumerate(token_embeds):
+                # 履歴 + 現在のトークンを結合
+                token_history.append(token_embed)
+                combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
 
-            context = self.model.context_block(context, combined_tokens.unsqueeze(0))
-            context_list.append(context.squeeze(0))
+                context = self.model.context_block(context, combined_tokens.unsqueeze(0))
+                contexts[i] = context.squeeze(0)
 
-        return torch.stack(context_list)
+                # メモリ効率: 古い履歴を削除
+                if len(token_history) > num_input_tokens:
+                    token_history = token_history[-num_input_tokens:]
+
+        return contexts
 
     def _forward_parallel(self, token_embeds: torch.Tensor, previous_contexts: torch.Tensor) -> torch.Tensor:
         """並列処理（Iteration 1+用）"""

@@ -264,6 +264,13 @@ def run_experiment_set(
             import traceback
             traceback.print_exc()
 
+            # エラー時もメモリクリーンアップ
+            import gc
+            gc.collect()
+            if device.type == 'cuda':
+                torch.cuda.empty_cache()
+                torch.cuda.synchronize()
+
     total_time = time.time() - total_start
     print_flush(f"\n{experiment_name} complete: {format_time(total_time)}")
 
@@ -398,6 +405,14 @@ def main():
 
     print_summary_table(results_exp1, "案1: Sample Scaling Results")
     all_results.extend(results_exp1)
+
+    # メモリクリーンアップ（案2開始前）
+    import gc
+    gc.collect()
+    if device.type == 'cuda':
+        torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        print_flush(f"\nGPU memory cleared before Layer Comparison")
 
     # ========== 案2: レイヤー数比較 ==========
     print_flush(f"\n{'#'*70}")
