@@ -68,23 +68,52 @@ def estimate_remaining_time(elapsed_times: list, remaining_count: int) -> str:
 
 
 def load_fixed_val_data(config, device) -> torch.Tensor:
-    """固定の検証データを読み込み（全実験で共通）"""
+    """固定の検証データを読み込み（全実験で共通）
+
+    訓練データの最後20%を検証データとして使用（ファイルがない場合は自動生成）
+    """
     print_flush("\n" + "="*70)
     print_flush("Loading fixed validation data...")
     print_flush("="*70)
 
-    # 最大サンプル数で一度読み込み、valデータを取得
+    from transformers import GPT2Tokenizer
+
+    # 最大サンプル数で訓練データをロードし、その一部をvalとして使用
     original_samples = config.num_samples
     config.num_samples = 500  # 十分大きい値
 
-    data_provider = MemoryDataProvider(config)
-    data_provider.load_data()
-    val_tokens = data_provider.get_all_val_tokens(device)
+    # 訓練データのみをロード
+    tokenizer = GPT2Tokenizer.from_pretrained(config.tokenizer_name)
+    tokenizer.pad_token = tokenizer.eos_token
+
+    # UltraChatからデータ取得
+    from datasets import load_dataset
+    dataset = load_dataset(config.dataset_name, split=config.dataset_split)
+
+    # 最初の500サンプルを使用
+    samples = [dataset[i]["messages"][0]["content"] for i in range(min(500, len(dataset)))]
+
+    # トークン化
+    all_tokens = []
+    for text in samples:
+        tokens = tokenizer(
+            text,
+            max_length=config.max_seq_length,
+            truncation=True,
+            return_tensors="pt"
+        )
+        all_tokens.append(tokens["input_ids"].squeeze(0))
+
+    all_token_ids = torch.cat(all_tokens)
+
+    # 最後20%を検証データとして使用
+    val_ratio = 0.2
+    val_start = int(len(all_token_ids) * (1 - val_ratio))
+    val_tokens = all_token_ids[val_start:].to(device)
 
     config.num_samples = original_samples
-    data_provider.close()
 
-    print_flush(f"  Val tokens: {len(val_tokens):,} (固定)")
+    print_flush(f"  Val tokens: {len(val_tokens):,} (固定、訓練データの最後20%)")
     return val_tokens
 
 
