@@ -15,6 +15,7 @@ from datasets import load_dataset
 from transformers import AutoTokenizer, GPT2Model
 
 from src.utils.disk_offload import TokenIDCache, EmbeddingCache
+from config import ResidualConfig
 
 
 def print_flush(msg: str):
@@ -88,9 +89,13 @@ class StreamingDataLoader:
         total_tokens = self._count_tokens(tokenizer)
         print_flush(f"  総トークン数: {total_tokens:,}")
 
+        # 設定からembed_dimを取得
+        config = ResidualConfig()
+        embed_dim = config.embed_dim
+
         # キャッシュを作成
         token_cache = TokenIDCache(self.output_dir, total_tokens)
-        embed_cache = EmbeddingCache(self.output_dir, total_tokens, 768, self.use_bf16)
+        embed_cache = EmbeddingCache(self.output_dir, total_tokens, embed_dim, self.use_bf16)
 
         token_cache.create()
         embed_cache.create()
@@ -111,8 +116,8 @@ class StreamingDataLoader:
             'num_samples': self.num_samples,
             'num_tokens': total_tokens,
             'use_bf16': self.use_bf16,
-            'context_dim': 768,
-            'embed_dim': 768,
+            'context_dim': config.context_dim,
+            'embed_dim': embed_dim,
             'vocab_size': tokenizer.vocab_size
         }
 

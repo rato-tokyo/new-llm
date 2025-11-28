@@ -8,6 +8,7 @@ import time
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from calculate_params import calculate_params
 from config import ResidualConfig
 from src.evaluation import analyze_fixed_points
 from src.experiments.config import ExperimentConfig, TrainingConfig
@@ -100,38 +101,24 @@ class ExperimentRunner:
                         results.append(json.load(f))
         return results
 
-    def _calculate_params(
-        self, num_layers: int, context_dim: int
+    def _get_params_info(
+        self, num_layers: int, context_dim: int, num_input_tokens: int
     ) -> Dict[str, int]:
-        """パラメータ数を計算"""
-        embed_dim = self.training_config.embed_dim
-        num_input_tokens = self.training_config.num_input_tokens
-        vocab_size = self.training_config.vocab_size
-
-        input_dim = context_dim + embed_dim * num_input_tokens
-
-        # ContextBlock
-        context_linear = input_dim * context_dim + context_dim
-        context_layernorm = context_dim * 2
-        context_layer_params = context_linear + context_layernorm
-        context_block_total = context_layer_params * num_layers
-
-        # TokenBlock
-        token_linear = input_dim * embed_dim + embed_dim
-        token_layernorm = embed_dim * 2
-        token_layer_params = token_linear + token_layernorm
-        token_block_total = token_layer_params * num_layers
-
-        # Embedding
-        embedding = vocab_size * embed_dim
-
+        """パラメータ数を計算（等差減少設計対応）"""
+        params = calculate_params(
+            num_layers=num_layers,
+            context_dim=context_dim,
+            embed_dim=self.training_config.embed_dim,
+            num_input_tokens=num_input_tokens,
+            vocab_size=self.training_config.vocab_size,
+        )
         return {
-            "total": embedding + context_block_total + token_block_total,
-            "context_block": context_block_total,
-            "token_block": token_block_total,
-            "embedding": embedding,
-            "trainable_phase1": context_block_total,
-            "trainable_phase2": token_block_total,
+            "total": params["total"],
+            "context_block": params["context_block"],
+            "token_block": params["token_block"],
+            "embedding": params["embedding"],
+            "trainable_phase1": params["trainable_phase1"],
+            "trainable_phase2": params["trainable_phase2"],
         }
 
     def _run_single_experiment(
@@ -160,7 +147,7 @@ class ExperimentRunner:
         set_seed(42)
 
         # パラメータ数計算
-        params_info = self._calculate_params(num_layers, context_dim)
+        params_info = self._get_params_info(num_layers, context_dim, num_input_tokens)
         print_flush(f"    ContextBlock params: {format_number(params_info['context_block'])}")
         print_flush(f"    TokenBlock params: {format_number(params_info['token_block'])}")
         print_flush(f"    Phase 1 学習対象: {format_number(params_info['trainable_phase1'])}")

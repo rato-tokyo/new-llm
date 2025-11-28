@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CVFPモデル（E案アーキテクチャ）のパラメータ数計算スクリプト
+CVFPモデル（E案アーキテクチャ - 等差減少設計）のパラメータ数計算スクリプト
 
 使用方法:
     python calculate_params.py
@@ -17,32 +17,89 @@ def calculate_params(
     vocab_size: int
 ) -> dict:
     """
-    CVFPモデルのパラメータ数を計算（Weight Tying有効）
+    CVFPモデルのパラメータ数を計算（Weight Tying有効、等差減少設計）
 
     Args:
         num_layers: レイヤー数
         context_dim: コンテキスト次元
-        embed_dim: 埋め込み次元（GPT-2: 768）
+        embed_dim: 埋め込み次元
         num_input_tokens: 入力トークン数
-        vocab_size: 語彙サイズ（GPT-2: 50257）
+        vocab_size: 語彙サイズ
 
     Returns:
         パラメータ数の詳細辞書
     """
-    # FNN入力次元
-    input_dim = context_dim + embed_dim * num_input_tokens
+    token_input_dim = embed_dim * num_input_tokens
 
-    # ContextBlock (1層あたり)
-    context_linear = input_dim * context_dim + context_dim
-    context_layernorm = context_dim * 2
-    context_layer_params = context_linear + context_layernorm
-    context_block_total = context_layer_params * num_layers
+    # ========== ContextBlock（等差減少設計） ==========
+    # 最初のレイヤー入力: context_dim + token_input_dim → 出力: 等差減少
+    # 2番目以降: token入力なし、等差減少で context_dim まで縮小
+    input_context_dim = context_dim + token_input_dim
+    output_context_dim = context_dim
+    total_reduction = input_context_dim - output_context_dim
 
-    # TokenBlock (1層あたり)
-    token_linear = input_dim * embed_dim + embed_dim
-    token_layernorm = embed_dim * 2
-    token_layer_params = token_linear + token_layernorm
-    token_block_total = token_layer_params * num_layers
+    # 各レイヤーの入出力次元を計算
+    context_dims = []
+    for i in range(num_layers + 1):
+        dim = input_context_dim - (total_reduction * i) // num_layers
+        context_dims.append(dim)
+
+    context_block_total = 0
+    for i in range(num_layers):
+        if i == 0:
+            # 最初のレイヤー: context_dim + token_input_dim → context_dims[1]
+            layer_input_dim = context_dim + token_input_dim
+        else:
+            # 2番目以降: context_dims[i] → context_dims[i+1] (token入力なし)
+            layer_input_dim = context_dims[i]
+
+        layer_output_dim = context_dims[i + 1]
+
+        # FNN: Linear(layer_input_dim, layer_output_dim) + bias
+        fnn_params = layer_input_dim * layer_output_dim + layer_output_dim
+        # LayerNorm: gamma + beta
+        layernorm_params = layer_output_dim * 2
+        # 残差射影（次元が異なる場合のみ）
+        if i == 0:
+            residual_input = context_dim
+        else:
+            residual_input = context_dims[i]
+
+        if residual_input != layer_output_dim:
+            residual_proj_params = residual_input * layer_output_dim + layer_output_dim
+        else:
+            residual_proj_params = 0
+
+        context_block_total += fnn_params + layernorm_params + residual_proj_params
+
+    # ========== TokenBlock（等差減少設計） ==========
+    # 入力: embed_dim * num_input_tokens → 出力: embed_dim
+    input_token_dim = embed_dim * num_input_tokens
+    output_token_dim = embed_dim
+    token_reduction = input_token_dim - output_token_dim
+
+    token_dims = []
+    for i in range(num_layers + 1):
+        dim = input_token_dim - (token_reduction * i) // num_layers
+        token_dims.append(dim)
+
+    token_block_total = 0
+    for i in range(num_layers):
+        token_in = token_dims[i]
+        token_out = token_dims[i + 1]
+        ctx_dim = context_dims[i + 1]  # E案: ContextBlockの各レイヤー出力を参照
+
+        # FNN: Linear(ctx_dim + token_in, token_out) + bias
+        fnn_params = (ctx_dim + token_in) * token_out + token_out
+        # LayerNorm: gamma + beta
+        layernorm_params = token_out * 2
+        # 残差射影（次元が異なる場合のみ）
+        if token_in != token_out:
+            residual_proj_params = token_in * token_out + token_out
+        else:
+            residual_proj_params = 0
+
+        token_block_total += fnn_params + layernorm_params + residual_proj_params
 
     # Output Head: Weight Tyingで重み共有（追加パラメータなし）
     output_head = 0
@@ -65,7 +122,8 @@ def calculate_params(
         'embed_dim': embed_dim,
         'num_input_tokens': num_input_tokens,
         'vocab_size': vocab_size,
-        'input_dim': input_dim,
+        'context_dims': context_dims,
+        'token_dims': token_dims,
         'embedding': embedding,
         'embed_norm': embed_norm,
         'context_block': context_block_total,
@@ -101,16 +159,19 @@ def main():
         vocab_size=config.vocab_size
     )
 
-    print("\n" + "=" * 60)
-    print("CVFPモデル パラメータ数計算（Weight Tying有効）")
-    print("=" * 60)
+    print("\n" + "=" * 70)
+    print("CVFPモデル パラメータ数計算（Weight Tying有効、等差減少設計）")
+    print("=" * 70)
     print(f"\n【設定】")
     print(f"  num_layers:       {params['num_layers']}")
     print(f"  context_dim:      {params['context_dim']}")
     print(f"  embed_dim:        {params['embed_dim']}")
     print(f"  num_input_tokens: {params['num_input_tokens']}")
     print(f"  vocab_size:       {params['vocab_size']:,}")
-    print(f"  FNN input_dim:    {params['input_dim']}")
+
+    print(f"\n【等差減少設計】")
+    print(f"  ContextBlock次元: {' → '.join(map(str, params['context_dims']))}")
+    print(f"  TokenBlock次元:   {' → '.join(map(str, params['token_dims']))}")
 
     print(f"\n【パラメータ内訳】")
     print(f"  Token Embedding:          {params['embedding']:>12,} ({format_number(params['embedding'])}) ← GPT-2事前学習（凍結）")
@@ -145,7 +206,7 @@ def main():
     print(f"\n  ◆ Embedding学習時 [非推奨]:")
     print(f"    最適トークン数: {format_number(optimal_tokens)} (= {format_number(params['trainable_phase2'])} × 20)")
     print(f"    UltraChat比:    {ratio:.1f}x → データ不足")
-    print("=" * 60)
+    print("=" * 70)
 
 
 if __name__ == '__main__':

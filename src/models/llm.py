@@ -186,13 +186,9 @@ class ContextBlock(nn.Module):
         各レイヤーで等差的に次元を減少させる
         2番目以降のレイヤーはtoken入力なし
 
-    例: num_input_tokens=2, num_layers=6, context_dim=768, embed_dim=768
-        Layer 0: context(768) + token(1536) → 2176  (token入力あり)
-        Layer 1: 2176 → 1894                         (token入力なし)
-        Layer 2: 1894 → 1613
-        Layer 3: 1613 → 1331
-        Layer 4: 1331 → 1050
-        Layer 5: 1050 → 768
+    次元計算（動的）:
+        Layer 0: context_dim + token_input_dim → first_output_dim (token入力あり)
+        Layer 1+: 等差減少 → context_dim (token入力なし)
 
     Args:
         num_layers: Number of context layers
@@ -299,13 +295,10 @@ class TokenBlock(nn.Module):
         各レイヤーはContextBlockの対応するレイヤーの出力を参照
         ContextBlockの出力次元もレイヤーごとに異なる
 
-    例: num_input_tokens=2, num_layers=6, embed_dim=768
-        Layer 0: token(1536) + context(2048) → 1408
-        Layer 1: token(1408) + context(1792) → 1280
-        Layer 2: token(1280) + context(1536) → 1152
-        Layer 3: token(1152) + context(1280) → 1024
-        Layer 4: token(1024) + context(1024) → 896
-        Layer 5: token(896)  + context(768)  → 768
+    次元計算（動的）:
+        入力: embed_dim * num_input_tokens
+        出力: embed_dim
+        各レイヤーで等差的に次元を減少
 
     Args:
         num_layers: Number of token layers
@@ -486,8 +479,9 @@ class LLM(nn.Module):
             self.token_output = nn.Linear(embed_dim, vocab_size, bias=False)
             # 重み共有（転置の関係: embedding [vocab, embed] → output [embed, vocab].T）
             self.token_output.weight = self.token_embedding.weight
+            saved_params = vocab_size * embed_dim
             print("✓ Weight Tying enabled: token_output shares weights with token_embedding")
-            print(f"  → Saved ~{vocab_size * embed_dim / 1e6:.2f}M parameters")
+            print(f"  → Saved ~{saved_params / 1e6:.2f}M parameters")
         else:
             self.token_output = nn.Linear(embed_dim, vocab_size)
             # Phase 1用: ゼロ初期化 + 勾配無効化

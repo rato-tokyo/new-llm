@@ -49,7 +49,6 @@ SAMPLE_SIZES = [500, 1000, 2000, 5000]  # 訓練サンプル数
 # 固定パラメータ
 NUM_LAYERS = 6                          # レイヤー数（先行実験の結果で決定）
 VAL_SAMPLES = 50                        # 検証サンプル数
-EMBED_DIM = 768                         # GPT-2埋め込み次元（固定）
 
 # 訓練パラメータ
 PHASE1_MAX_ITERATIONS = 10
@@ -192,13 +191,18 @@ def run_single_experiment(
 
     set_seed(42)
 
+    # config から設定を取得
+    base_config = ResidualConfig()
+    embed_dim = base_config.embed_dim
+    vocab_size = base_config.vocab_size
+
     # context_dim を計算
-    context_dim = EMBED_DIM * exp_config['context_multiplier']
+    context_dim = embed_dim * exp_config['context_multiplier']
 
     # モデル初期化
     model = LLM(
-        vocab_size=50257,  # GPT-2
-        embed_dim=EMBED_DIM,
+        vocab_size=vocab_size,
+        embed_dim=embed_dim,
         context_dim=context_dim,
         num_layers=exp_config['num_layers'],
         num_input_tokens=exp_config['num_input_tokens'],
