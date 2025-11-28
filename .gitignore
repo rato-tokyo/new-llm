@@ -2,7 +2,8 @@
 checkpoints/*.pt
 test_run/
 test_*/
-experiments/
+# experiments/ at root level (results of experiments)
+/experiments/
 
 # Training logs
 *.log
