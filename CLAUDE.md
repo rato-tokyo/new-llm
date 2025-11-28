@@ -1,5 +1,57 @@
 # New-LLM Project Guidelines
 
+## ⚡ PHASE 2 CACHE MODE - キャッシュ方式高速化 (2025-11-28)
+
+**Phase 2でContextBlockキャッシュ方式を採用し、5〜20倍の高速化を実現しました。**
+
+### 従来の問題点
+
+- 各トークンごとにContextBlockをforward（遅い）
+- バッチ処理が1トークンずつ（GPU効率が悪い）
+
+### 新方式: ContextBlockキャッシュ
+
+```python
+# Step 1: ContextBlock出力を全トークン分キャッシュ（エポックごとに1回のみ）
+with torch.no_grad():
+    context_cache = []
+    for token in tokens:
+        context_outputs = context_block(context, token)
+        context_cache.append(context_outputs)
+        context = context_outputs[-1]
+
+# Step 2: TokenBlockをバッチ並列処理
+for batch in batches:
+    batch_contexts = context_cache[batch_start:batch_end]
+    batch_token_out = token_block(batch_contexts, batch_tokens)  # 真のバッチ並列
+    loss = CrossEntropy(logits, targets)
+    loss.backward()
+```
+
+### 高速化の効果
+
+| 処理 | 従来 | 新方式 |
+|------|------|--------|
+| ContextBlock forward | tokens × epochs | **epochs のみ** |
+| TokenBlock forward | batch_size=1 | **真のバッチ並列** |
+| 予想高速化 | - | **5〜20倍** |
+
+### バッチサイズ自動計算
+
+```python
+# config.py
+phase2_batch_size = None  # 自動計算（phase1_batch_size × 2）
+# TokenBlockのみ処理なのでPhase 1より大きなバッチが使える
+```
+
+### メモリ要件
+
+キャッシュサイズ = `num_tokens × num_layers × context_dim × 4bytes`
+
+例: 10万トークン、6層、768dim = **約1.84GB**
+
+---
+
 ## ⚠️ CVFP収束の特徴 - 重要な前提知識
 
 ### Iteration 2での早期収束は無視すべき

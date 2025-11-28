@@ -176,7 +176,10 @@ class Phase2Trainer:
         self.model.train()
 
         if batch_size is None:
-            batch_size = self.config.phase2_batch_size
+            # effective_phase2_batch_sizeプロパティを使用（自動計算対応）
+            batch_size = getattr(self.config, 'effective_phase2_batch_size', None)
+            if batch_size is None:
+                batch_size = self.config.phase2_batch_size or 1024
 
         target_ids = token_ids[1:]  # 最初のトークン以外（次トークン予測の正解）
         num_tokens = len(target_ids)
@@ -311,7 +314,10 @@ class Phase2Trainer:
         if patience is None:
             patience = self.config.phase2_patience
         if batch_size is None:
-            batch_size = self.config.phase2_batch_size
+            # effective_phase2_batch_sizeプロパティを使用（自動計算対応）
+            batch_size = getattr(self.config, 'effective_phase2_batch_size', None)
+            if batch_size is None:
+                batch_size = self.config.phase2_batch_size or 1024
 
         print_flush(f"\n{'='*70}")
         print_flush("PHASE 2: Next-Token Prediction Training (キャッシュ方式)")
