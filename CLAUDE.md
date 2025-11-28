@@ -1,5 +1,33 @@
 # New-LLM Project Guidelines
 
+## ⚠️ CVFP収束の特徴 - 重要な前提知識
+
+### Iteration 2での早期収束は無視すべき
+
+**CVFPの特徴**: Iteration 2で100%収束と表示されることがあるが、これは参考にならない。
+
+**理由**:
+- 初期状態（Iteration 1）からの変化が小さいため、閾値をクリアしやすい
+- 実際の固定点学習には、より多くのイテレーションが必要
+- `phase1_min_iterations`で最低イテレーション数を保証している
+
+**正しい解釈**:
+```
+Iteration 2/10: 収束=100.0%  ← これは無視する
+Iteration 3/10: 収束=0.0%    ← ここからが本当の学習
+...
+Iteration 10/10: 収束=XX%    ← 最終結果を見る
+```
+
+**設定**:
+```python
+# config.py
+phase1_min_iterations = 5   # 最低5イテレーション保証（早期停止防止）
+phase1_max_iterations = 20  # 等差減少設計では多めに
+```
+
+---
+
 ## 🧊 EMBEDDING FREEZE ADOPTED - Embedding凍結採用 (2025-11-27)
 
 **Phase 2でEmbedding凍結を標準採用しました。**

@@ -45,8 +45,8 @@ class ResidualConfig:
                                        # 並列版の情報遅延を多様性強化で補償
 
     # ========== Phase 1: CVFP学習（固定点学習） ==========
-    phase1_min_iterations = 3            # 固定点探索の最小反復回数（早期停止の最低保証）
-    phase1_max_iterations = 10           # 固定点探索の最大反復回数
+    phase1_min_iterations = 5            # 固定点探索の最小反復回数（早期停止の最低保証）
+    phase1_max_iterations = 20           # 固定点探索の最大反復回数
     phase1_convergence_threshold = 0.03   # 収束判定のMSE閾値
                                          # 意味: 前回iterationとのMSE < 0.1なら収束と判定
                                          # 実測値: 初期MSE≈1.43、学習後MSE≈0.001-0.1
@@ -66,10 +66,10 @@ class ResidualConfig:
                                          # 0.2: 強めのノイズ
 
     # 学習率
-    phase1_learning_rate = 0.002         # Phase 1の学習率
-                                         # 0.002: 推奨（高速収束）
+    phase1_learning_rate = 0.004         # Phase 1の学習率
+                                         # 0.004: 等差減少設計で収束しない場合
+                                         # 0.002: 標準（等差減少なしの場合）
                                          # 0.001: 安定的
-                                         # 0.0005: 慎重
     phase1_batch_size = 4096            # 並列処理のバッチサイズ（L4 GPU 24GB対応）
     phase1_gradient_clip = 1.0           # 勾配クリッピング値
 
