@@ -87,9 +87,11 @@ class ResidualConfig:
                                     # 256: メモリ不足時
                                     # 1024: メモリに余裕がある場合
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
-    phase2_freeze_embedding = False # Embedding凍結オプション
-                                    # False: Embedding学習（現状、49.2Mパラメータ）
-                                    # True: Embedding凍結（TokenBlockのみ、10.6Mパラメータ）
+    phase2_freeze_embedding = True  # Embedding凍結オプション [推奨: True]
+                                    # True: Embedding凍結（TokenBlockのみ、7.09Mパラメータ）[推奨]
+                                    #       → PPL 66-72%改善、Accuracy 53-63%改善
+                                    # False: Embedding学習（49.2Mパラメータ）[非推奨]
+                                    #       → 過学習しやすく、汎化性能が低下
                                     # ⚠️ Weight Tying時はOutput Headも凍結される
 
     # ========== データ ==========
