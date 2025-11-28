@@ -36,12 +36,16 @@ for batch in batches:
 | TokenBlock forward | batch_size=1 | **真のバッチ並列** |
 | 予想高速化 | - | **5〜20倍** |
 
-### バッチサイズ自動計算
+### バッチサイズ自動計算（GPUメモリベース）
 
 ```python
 # config.py
-phase2_batch_size = None  # 自動計算（phase1_batch_size × 2）
-# TokenBlockのみ処理なのでPhase 1より大きなバッチが使える
+phase2_batch_size = None  # GPUメモリに基づいて自動計算
+
+# 計算式: batch_size = GPU_memory_GB × 500 × 0.8
+# L4 (24GB) → 9,600
+# T4 (16GB) → 6,400
+# CPU → 512 (固定)
 ```
 
 ### メモリ要件

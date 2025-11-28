@@ -88,9 +88,9 @@ class ResidualConfig:
     phase2_epochs = 10              # 訓練エポック数
     phase2_patience = 1             # Early stopping patience
     phase2_batch_size = None        # ミニバッチサイズ（Noneで自動計算）
-                                    # None: phase1_batch_sizeの2倍を自動設定
-                                    #       → TokenBlockのみ処理なのでPhase 1より大きくできる
-                                    # 512-2048: 手動指定も可能
+                                    # None: GPUメモリに基づいて自動設定
+                                    #       L4(24GB)→9600, T4(16GB)→6400, CPU→512
+                                    # 手動指定も可能
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
     phase2_freeze_embedding = True  # Embedding凍結オプション [推奨: True]
                                     # True: Embedding凍結（TokenBlockのみ、7.09Mパラメータ）[推奨]
@@ -101,11 +101,20 @@ class ResidualConfig:
 
     @property
     def effective_phase2_batch_size(self):
-        """Phase 2のバッチサイズを取得（自動計算対応）"""
-        if self.phase2_batch_size is None:
-            # Phase 1の2倍（TokenBlockのみなのでメモリ余裕あり）
-            return self.phase1_batch_size * 2
-        return self.phase2_batch_size
+        """Phase 2のバッチサイズを取得（GPUメモリベース自動計算）"""
+        if self.phase2_batch_size is not None:
+            return self.phase2_batch_size
+
+        # GPUメモリに基づく自動計算
+        if torch.cuda.is_available():
+            gpu_memory_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            # 目安: 1GB あたり 500トークン、安全係数0.8
+            batch_size = int(gpu_memory_gb * 500 * 0.8)
+        else:
+            # CPU: 固定値
+            batch_size = 512
+
+        return batch_size
 
     # ========== データ ==========
     # ⚠️ UltraChat専用設定 (高速化により大規模データセットに対応)
