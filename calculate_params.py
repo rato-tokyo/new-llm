@@ -104,7 +104,7 @@ def main():
     print(f"  FNN input_dim:    {params['input_dim']}")
 
     print(f"\n【パラメータ内訳】")
-    print(f"  Token Embedding:          {params['embedding']:>12,} ({format_number(params['embedding'])}) ← Phase 2で学習")
+    print(f"  Token Embedding:          {params['embedding']:>12,} ({format_number(params['embedding'])}) ← GPT-2事前学習（凍結）")
     print(f"  Embed Norm:               {params['embed_norm']:>12,} ({format_number(params['embed_norm'])})")
     print(f"  ContextBlock ({params['num_layers']}層):      {params['context_block']:>12,} ({format_number(params['context_block'])})")
     print(f"  TokenBlock ({params['num_layers']}層):        {params['token_block']:>12,} ({format_number(params['token_block'])})")
