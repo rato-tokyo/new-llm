@@ -3,6 +3,7 @@
 """
 
 import json
+import math
 import os
 import time
 from datetime import datetime
@@ -364,6 +365,7 @@ class ExperimentRunner:
         self._save_all_results()
         self._save_summary_markdown()
         self._print_comparison_table()
+        self._analyze_scaling_law()
 
         return self.results
 
@@ -442,3 +444,94 @@ class ExperimentRunner:
                 f"{r['train_effective_rank_percent']:>9.1f}% | "
                 f"{r['val_effective_rank_percent']:>9.1f}%"
             )
+
+    def _analyze_scaling_law(self) -> None:
+        """スケーリング則を分析: PPL = A × tokens^α"""
+        if len(self.sample_sizes) < 2:
+            print_flush("\n⚠️ Scaling law analysis requires at least 2 sample sizes")
+            return
+
+        print_flush(f"\n{'=' * 70}")
+        print_flush("SCALING LAW ANALYSIS")
+        print_flush(f"{'=' * 70}")
+        print_flush("\nModel: PPL = A × tokens^α (log-log linear regression)\n")
+
+        scaling_results = []
+
+        # 各実験ごとに分析
+        for exp in self.experiments:
+            subset = [
+                r for r in self.results
+                if r["experiment_name"] == exp.name
+            ]
+
+            if len(subset) < 2:
+                continue
+
+            # データ抽出
+            tokens = [r["num_train_tokens"] for r in subset]
+            ppls = [r["val_ppl"] for r in subset]
+
+            # log変換
+            log_tokens = [math.log(t) for t in tokens]
+            log_ppls = [math.log(p) for p in ppls]
+
+            # 最小二乗法 (log-log線形回帰)
+            n = len(log_tokens)
+            sum_x = sum(log_tokens)
+            sum_y = sum(log_ppls)
+            sum_xy = sum(x * y for x, y in zip(log_tokens, log_ppls))
+            sum_xx = sum(x * x for x in log_tokens)
+
+            denominator = n * sum_xx - sum_x * sum_x
+            if abs(denominator) < 1e-10:
+                continue
+
+            alpha = (n * sum_xy - sum_x * sum_y) / denominator
+            intercept = (sum_y - alpha * sum_x) / n
+            A = math.exp(intercept)
+
+            # 結果表示
+            context_dim = exp.get_context_dim(self.training_config.embed_dim)
+            print_flush(f"Experiment {exp.name} ({exp.num_layers}層, {context_dim}dim):")
+            print_flush(f"  PPL = {A:.2f} × tokens^({alpha:.4f})")
+            print_flush(f"  α = {alpha:.4f} (negative = improvement with more data)")
+
+            # 各データポイントの予測精度
+            for r in sorted(subset, key=lambda x: x["num_train_tokens"]):
+                predicted_ppl = A * (r["num_train_tokens"] ** alpha)
+                error = abs(r["val_ppl"] - predicted_ppl) / r["val_ppl"] * 100
+                print_flush(
+                    f"    tokens={r['num_train_tokens']:,}: "
+                    f"actual={r['val_ppl']:.2f}, pred={predicted_ppl:.2f}, err={error:.1f}%"
+                )
+
+            scaling_results.append({
+                "experiment": exp.name,
+                "num_layers": exp.num_layers,
+                "context_dim": context_dim,
+                "alpha": alpha,
+                "A": A,
+                "data_points": len(subset),
+            })
+            print_flush("")
+
+        # スケーリング効率の比較
+        if len(scaling_results) >= 2:
+            print_flush("Scaling Efficiency Comparison:")
+            print_flush("-" * 50)
+            sorted_by_alpha = sorted(scaling_results, key=lambda x: x["alpha"])
+            for i, sr in enumerate(sorted_by_alpha):
+                rank = "🥇" if i == 0 else "🥈" if i == 1 else "  "
+                print_flush(
+                    f"  {rank} Exp {sr['experiment']}: α={sr['alpha']:.4f} "
+                    f"({sr['num_layers']}層, {sr['context_dim']}dim)"
+                )
+            print_flush("\n  Lower α = better scaling (more improvement with data)")
+
+        # 結果をJSONに追加保存
+        if scaling_results:
+            scaling_path = os.path.join(self.output_dir, "scaling_analysis.json")
+            with open(scaling_path, "w") as f:
+                json.dump(scaling_results, f, indent=2)
+            print_flush(f"\nScaling analysis saved to: {scaling_path}")
