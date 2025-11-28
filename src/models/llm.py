@@ -88,29 +88,36 @@ class TokenLayer(nn.Module):
     入力: [context, token_embeds]
     出力: token_out（tokenのみ更新、contextは参照のみ）
 
+    等差減少設計: 入力トークン次元から出力トークン次元へ段階的に縮小
+
     Args:
         context_dim: Context vector dimension
-        embed_dim: Token embedding dimension (単一トークンの次元)
-        num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
+        token_input_dim: Input token dimension (前のレイヤーからの出力次元)
+        token_output_dim: Output token dimension (このレイヤーの出力次元)
     """
 
-    def __init__(self, context_dim, embed_dim, num_input_tokens=1):
+    def __init__(self, context_dim, token_input_dim, token_output_dim):
         super().__init__()
 
         self.context_dim = context_dim
-        self.embed_dim = embed_dim
-        self.num_input_tokens = num_input_tokens
+        self.token_input_dim = token_input_dim
+        self.token_output_dim = token_output_dim
 
-        # FNN: [context + token_embeds] -> embed_dim
-        # token_embeds の次元は embed_dim * num_input_tokens
-        input_dim = context_dim + embed_dim * num_input_tokens
+        # FNN: [context + token_embeds] -> token_output_dim
+        input_dim = context_dim + token_input_dim
         self.fnn = nn.Sequential(
-            nn.Linear(input_dim, embed_dim),
+            nn.Linear(input_dim, token_output_dim),
             nn.ReLU()
         )
 
         # LayerNorm（必須：数値安定性のため）
-        self.token_norm = nn.LayerNorm(embed_dim)
+        self.token_norm = nn.LayerNorm(token_output_dim)
+
+        # 残差接続用の射影レイヤー（次元が異なる場合のみ）
+        if token_input_dim != token_output_dim:
+            self.residual_proj = nn.Linear(token_input_dim, token_output_dim)
+        else:
+            self.residual_proj = None
 
         self._init_weights()
 
@@ -128,11 +135,10 @@ class TokenLayer(nn.Module):
 
         Args:
             context: Context vector [batch, context_dim] (参照のみ)
-            token_embeds: Token embeddings [batch, embed_dim * num_input_tokens]
-                          （複数トークンが結合済み）
+            token_embeds: Token embeddings [batch, token_input_dim]
 
         Returns:
-            new_token: Updated token [batch, embed_dim]
+            new_token: Updated token [batch, token_output_dim]
         """
         # Concatenate inputs
         fnn_input = torch.cat([context, token_embeds], dim=-1)
@@ -140,12 +146,14 @@ class TokenLayer(nn.Module):
         # FNN forward -> delta_token
         delta_token = self.fnn(fnn_input)
 
-        # 残差接続は最後のトークン部分のみ使用
-        # token_embeds から最後の embed_dim 部分を抽出
-        last_token = token_embeds[:, -self.embed_dim:]
+        # 残差接続（次元が異なる場合は射影）
+        if self.residual_proj is not None:
+            residual = self.residual_proj(token_embeds)
+        else:
+            residual = token_embeds
 
         # Residual connection + LayerNorm
-        new_token = self.token_norm(last_token + delta_token)
+        new_token = self.token_norm(residual + delta_token)
 
         return new_token
 
@@ -223,10 +231,23 @@ class TokenBlock(nn.Module):
 
     Phase 2で学習
 
+    等差減少設計:
+        入力: embed_dim * num_input_tokens
+        出力: embed_dim
+        各レイヤーで等差的に次元を減少させる
+
+    例: num_input_tokens=2, num_layers=6, embed_dim=768
+        Layer 0: 1536 → 1408
+        Layer 1: 1408 → 1280
+        Layer 2: 1280 → 1152
+        Layer 3: 1152 → 1024
+        Layer 4: 1024 → 896
+        Layer 5: 896  → 768
+
     Args:
         num_layers: Number of token layers
         context_dim: Context vector dimension
-        embed_dim: Token embedding dimension (単一トークンの次元)
+        embed_dim: Token embedding dimension (最終出力次元)
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
     """
 
@@ -237,17 +258,28 @@ class TokenBlock(nn.Module):
         self.num_input_tokens = num_input_tokens
         self.embed_dim = embed_dim
 
+        # 等差減少の次元計算
+        # 入力次元: embed_dim * num_input_tokens
+        # 出力次元: embed_dim
+        input_token_dim = embed_dim * num_input_tokens
+        output_token_dim = embed_dim
+        total_reduction = input_token_dim - output_token_dim
+
+        # 各レイヤーの入出力次元を計算
+        self.token_dims = []
+        for i in range(num_layers + 1):
+            # 線形補間: input_dim から output_dim へ
+            dim = input_token_dim - (total_reduction * i) // num_layers
+            self.token_dims.append(dim)
+
         # Stack of Token layers
-        # 最初のレイヤーのみ num_input_tokens を使用
-        # 2番目以降のレイヤーは前のレイヤーからの単一トークン出力を受け取る
         self.layers = nn.ModuleList()
         for i in range(num_layers):
-            layer_input_tokens = num_input_tokens if i == 0 else 1
             self.layers.append(
                 TokenLayer(
                     context_dim=context_dim,
-                    embed_dim=embed_dim,
-                    num_input_tokens=layer_input_tokens
+                    token_input_dim=self.token_dims[i],
+                    token_output_dim=self.token_dims[i + 1]
                 )
             )
 
