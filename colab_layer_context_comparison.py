@@ -55,7 +55,7 @@ SAMPLE_SIZES = [500, 1000]
 # 固定パラメータ
 VAL_SAMPLES = 50
 EMBED_DIM = 768
-NUM_INPUT_TOKENS = 1  # config.pyから取得も可能
+NUM_INPUT_TOKENS = 2  # config.pyと同じ
 
 # 訓練パラメータ
 PHASE1_MAX_ITERATIONS = 10
