@@ -6,13 +6,15 @@ CVFPモデル（E案アーキテクチャ）のパラメータ数計算スクリ
     python calculate_params.py
 """
 
+from config import ResidualConfig
+
 
 def calculate_params(
-    num_layers: int = 6,
-    context_dim: int = 768,
-    embed_dim: int = 768,
-    num_input_tokens: int = 2,
-    vocab_size: int = 50257
+    num_layers: int,
+    context_dim: int,
+    embed_dim: int,
+    num_input_tokens: int,
+    vocab_size: int
 ) -> dict:
     """
     CVFPモデルのパラメータ数を計算（Weight Tying有効）
@@ -89,8 +91,15 @@ def format_number(n: int) -> str:
 
 
 def main():
-    # デフォルト設定（6層, Weight Tying有効）
-    params = calculate_params()
+    # config.pyから設定を取得
+    config = ResidualConfig()
+    params = calculate_params(
+        num_layers=config.num_layers,
+        context_dim=config.context_dim,
+        embed_dim=config.embed_dim,
+        num_input_tokens=config.num_input_tokens,
+        vocab_size=config.vocab_size
+    )
 
     print("\n" + "=" * 60)
     print("CVFPモデル パラメータ数計算（Weight Tying有効）")
