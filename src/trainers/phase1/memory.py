@@ -5,7 +5,7 @@ MemoryPhase1Trainer - メモリ展開型Phase 1トレーナー
 """
 
 import time
-from typing import Optional, Callable, Union
+from typing import Optional, Union
 import torch
 import torch.nn.functional as F
 
@@ -52,7 +52,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         print_flush(f"\n{'='*70}")
         print_flush(f"PHASE 1: 固定点コンテキスト学習 - {label}")
         print_flush(f"{'='*70}")
-        print_flush(f"  Mode: Memory (GPU-optimized)")
+        print_flush("  Mode: Memory (GPU-optimized)")
         print_flush(f"  Tokens: {num_tokens:,}")
         print_flush(f"  Max iterations: {self.config.phase1_max_iterations}")
         print_flush(f"  Learning rate: {self.config.phase1_learning_rate}")

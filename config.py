@@ -56,7 +56,7 @@ class ResidualConfig:
     phase1_min_converged_ratio = 0.95    # 早期停止を無効化（101%以上 = 不可能）
 
     # 検証データ収束判定
-    val_convergence_trials = 10              # 検証データの収束判定イテレーション回数
+    val_convergence_trials = 4              # 検証データの収束判定イテレーション回数
                                              # 複数回順伝播してCVFP損失の推移を確認
 
     # コンテキストノイズ（汎化性能向上）
