@@ -8,6 +8,10 @@
 
 両者のパラメータ数を比較し、Val PPL, Val Accuracy, Effective Rank を評価する。
 
+設定値:
+  - embed_dim, num_input_tokens, vocab_size 等は config.py から取得
+  - デフォルト値は使用しない（config.py が唯一の設定ソース）
+
 GPUで実行: L4推奨（23.8GB）
 実験時間: 約1-2時間
 
@@ -52,19 +56,21 @@ EXPERIMENTS = [
 # サンプル数（複数でスケーリング確認）
 SAMPLE_SIZES = [500, 1000]
 
-# 固定パラメータ
+# 固定パラメータ（config.pyから取得）
+_base_config = ResidualConfig()
 VAL_SAMPLES = 50
-EMBED_DIM = 768
-NUM_INPUT_TOKENS = 2  # config.pyと同じ
+EMBED_DIM = _base_config.embed_dim
+NUM_INPUT_TOKENS = _base_config.num_input_tokens
+VOCAB_SIZE = _base_config.vocab_size
 
-# 訓練パラメータ
-PHASE1_MAX_ITERATIONS = 10
-PHASE1_LEARNING_RATE = 0.002
-DIST_REG_WEIGHT = 0.5
-PHASE2_EPOCHS = 10
-PHASE2_BATCH_SIZE = 512
-PHASE2_PATIENCE = 2
-PHASE2_FREEZE_EMBEDDING = True  # Embedding凍結（推奨）
+# 訓練パラメータ（config.pyから取得）
+PHASE1_MAX_ITERATIONS = _base_config.phase1_max_iterations
+PHASE1_LEARNING_RATE = _base_config.phase1_learning_rate
+DIST_REG_WEIGHT = _base_config.dist_reg_weight
+PHASE2_EPOCHS = _base_config.phase2_epochs
+PHASE2_BATCH_SIZE = _base_config.phase2_batch_size
+PHASE2_PATIENCE = _base_config.phase2_patience
+PHASE2_FREEZE_EMBEDDING = _base_config.phase2_freeze_embedding
 
 # 出力設定
 OUTPUT_DIR = "./results/layer_context_comparison"
@@ -206,7 +212,7 @@ def calculate_params(num_layers: int, context_dim: int, embed_dim: int, num_inpu
     token_block_total = token_layer_params * num_layers
 
     # Embedding (凍結)
-    embedding = 50257 * embed_dim
+    embedding = VOCAB_SIZE * embed_dim
 
     # 合計
     total = embedding + context_block_total + token_block_total
@@ -253,7 +259,7 @@ def run_single_experiment(
 
     # モデル初期化
     model = LLM(
-        vocab_size=50257,
+        vocab_size=VOCAB_SIZE,
         embed_dim=EMBED_DIM,
         context_dim=context_dim,
         num_layers=num_layers,
