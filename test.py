@@ -48,7 +48,7 @@ print("\n" + "="*70)
 print("Phase 1 Test: 複数トークン入力対応版")
 print("="*70 + "\n")
 
-print(f"Config:")
+print("Config:")
 print(f"  - num_samples: {config.num_samples}")
 print(f"  - num_layers: {config.num_layers}")
 print(f"  - context_dim: {config.context_dim}")
@@ -156,7 +156,7 @@ print(f"合計時間: {train_time + val_time:.2f}秒")
 # ============================================================
 # FINAL SUMMARY - 3つのチェック結果まとめ
 # ============================================================
-print(f"\n" + "="*70)
+print("\n" + "="*70)
 print("FINAL SUMMARY")
 print("="*70)
 

@@ -36,6 +36,9 @@ class MemoryDataProvider(DataProvider):
 
     def load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
         if self._loaded:
+            # _loaded が True なら必ず値が設定されている
+            assert self._train_token_ids is not None
+            assert self._val_token_ids is not None
             return self._train_token_ids, self._val_token_ids
 
         tokenizer = AutoTokenizer.from_pretrained(
@@ -188,6 +191,8 @@ class MemoryDataProvider(DataProvider):
 
         if self._sample_boundaries is None:
             raise ValueError("Sample boundaries not available")
+        if self._train_token_ids is None:
+            raise ValueError("Train token IDs not available")
 
         # このsplitに属するサンプルを抽出
         split_tokens = []
@@ -225,6 +230,9 @@ class MemoryDataProvider(DataProvider):
         import random
         rng = random.Random(self.shuffle_seed)
 
+        if self._train_token_ids is None:
+            raise ValueError("Train token IDs not available")
+
         indices = list(range(len(self._train_token_ids)))
         rng.shuffle(indices)
         self._train_token_ids = self._train_token_ids[indices]
@@ -236,21 +244,29 @@ class MemoryDataProvider(DataProvider):
     def get_num_train_tokens(self) -> int:
         if not self._loaded:
             self.load_data()
+        if self._train_token_ids is None:
+            raise ValueError("Train token IDs not available")
         return len(self._train_token_ids)
 
     def get_num_val_tokens(self) -> int:
         if not self._loaded:
             self.load_data()
+        if self._val_token_ids is None:
+            raise ValueError("Val token IDs not available")
         return len(self._val_token_ids)
 
     def get_all_train_tokens(self, device: torch.device) -> torch.Tensor:
         if not self._loaded:
             self.load_data()
+        if self._train_token_ids is None:
+            raise ValueError("Train token IDs not available")
         return self._train_token_ids.to(device)
 
     def get_all_val_tokens(self, device: torch.device) -> torch.Tensor:
         if not self._loaded:
             self.load_data()
+        if self._val_token_ids is None:
+            raise ValueError("Val token IDs not available")
         return self._val_token_ids.to(device)
 
     @property

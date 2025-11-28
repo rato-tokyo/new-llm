@@ -225,7 +225,7 @@ def check_identity_mapping(model, token_embeds, contexts, device):
             deviations = contexts - context_mean.unsqueeze(0)
             avg_deviation = torch.norm(deviations, dim=1).mean().item()
 
-        print_flush(f"\n2. Context Diversity:")
+        print_flush("\n2. Context Diversity:")
         print_flush(f"   Average deviation from mean: {avg_deviation:.6f}")
 
         if avg_deviation < 0.1:
@@ -240,7 +240,7 @@ def check_identity_mapping(model, token_embeds, contexts, device):
     if contexts.shape[1] == token_embeds.shape[1]:
         embed_similarity = F.cosine_similarity(contexts, token_embeds, dim=1).mean().item()
 
-        print_flush(f"\n3. Context vs Token Embedding Similarity:")
+        print_flush("\n3. Context vs Token Embedding Similarity:")
         print_flush(f"   Cosine Similarity: {embed_similarity:.6f}")
 
         if embed_similarity > 0.95:
@@ -250,7 +250,7 @@ def check_identity_mapping(model, token_embeds, contexts, device):
             print_flush("   ✅ PASSED: Contexts are transformed from embeddings")
     else:
         embed_similarity = None
-        print_flush(f"\n3. Context vs Token Embedding Similarity:")
+        print_flush("\n3. Context vs Token Embedding Similarity:")
         print_flush(f"   (Skipped: dimension mismatch {contexts.shape[1]} vs {token_embeds.shape[1]})")
 
     print_flush("="*70 + "\n")

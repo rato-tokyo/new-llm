@@ -157,7 +157,6 @@ def _analyze_convergence_trend(losses: List[float], contexts: torch.Tensor, verb
 
     initial_loss = losses_np[0]
     final_loss = losses_np[-1]
-    mean_loss = losses_np.mean()
     std_loss = losses_np.std()
 
     reduction = (initial_loss - final_loss) / initial_loss * 100 if initial_loss > 0 else 0
@@ -185,7 +184,7 @@ def _analyze_convergence_trend(losses: List[float], contexts: torch.Tensor, verb
         print_flush(f"\n{'='*70}")
         print_flush("Convergence Analysis")
         print_flush(f"{'='*70}\n")
-        print_flush(f"Statistics:")
+        print_flush("Statistics:")
         print_flush(f"  - Initial Loss: {initial_loss:.6f}")
         print_flush(f"  - Final Loss: {final_loss:.6f}")
         print_flush(f"  - Reduction: {reduction:+.2f}%")

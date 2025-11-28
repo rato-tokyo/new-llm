@@ -1,13 +1,8 @@
 """
-New-LLM Training Script (Refactored Version)
-
-依存性注入による疎結合設計:
-- DataProvider: データロード（memory/storage）
-- Phase1Trainer: CVFP固定点学習（memory/storage）
+New-LLM Training Script
 
 Usage:
-    python3 train.py                    # メモリモード（デフォルト）
-    python3 train.py --data-mode storage # ストレージモード（大規模データ用）
+    python3 train.py                    # 通常訓練
     python3 train.py --test             # クイックテスト（100トークン）
 """
 
@@ -25,8 +20,9 @@ sys.path.insert(0, project_root)
 
 from config import ResidualConfig
 from src.models.llm import LLM
-from src.providers import create_data_provider
-from src.trainers import create_phase1_trainer, Phase2Trainer
+from src.providers.data import MemoryDataProvider
+from src.trainers.phase1 import MemoryPhase1Trainer
+from src.trainers.phase2 import Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
 
@@ -56,8 +52,6 @@ def main():
     # Parse arguments
     parser = argparse.ArgumentParser(description='New-LLM Training')
     parser.add_argument('--test', action='store_true', help='Run quick test with 100 tokens')
-    parser.add_argument('--data-mode', choices=['memory', 'storage'], default=None,
-                        help='Data loading mode: memory (default) or storage (for large datasets)')
     args = parser.parse_args()
 
     # Configuration
@@ -70,23 +64,15 @@ def main():
     if test_mode:
         print_flush("New-LLM Quick Test Mode (100 tokens)")
     else:
-        print_flush("New-LLM Training (Refactored Architecture)")
+        print_flush("New-LLM Training")
     print_flush(f"{'='*70}\n")
-
-    # Determine data mode
-    if args.data_mode:
-        data_mode = args.data_mode
-    elif config.use_disk_offload:
-        data_mode = "storage"
-    else:
-        data_mode = "memory"
 
     print_flush("📋 Configuration:")
     print_flush(f"   Layers: {config.num_layers}")
     print_flush(f"   Context dim: {config.context_dim}")
+    print_flush(f"   num_context_splits: {config.num_context_splits}")
     print_flush(f"   Device: {config.device}")
     print_flush(f"   Diversity weight: {config.dist_reg_weight}")
-    print_flush(f"   Data mode: {data_mode}")
     if not test_mode:
         print_flush(f"   Data: {config.num_samples} samples from {config.train_data_source}")
 
@@ -108,7 +94,9 @@ def main():
         context_dim=config.context_dim,
         num_layers=config.num_layers,
         num_input_tokens=getattr(config, 'num_input_tokens', 1),
-        use_pretrained_embeddings=config.use_pretrained_embeddings
+        num_context_splits=getattr(config, 'num_context_splits', 1),
+        use_pretrained_embeddings=config.use_pretrained_embeddings,
+        use_weight_tying=config.use_weight_tying
     )
     model.to(device)
 
@@ -130,7 +118,7 @@ def main():
             print_flush(f"⚠️ Failed to load checkpoint: {e}")
             print_flush("Starting training from scratch...")
 
-    # Load data using DataProvider (dependency injection)
+    # Load data
     data_provider = None
     if test_mode:
         print_flush("\nGenerating test data (100 tokens for stability test)...")
@@ -138,28 +126,13 @@ def main():
         indices = torch.randperm(100)[:50]
         val_token_ids = train_token_ids[indices]
     else:
-        print_flush(f"\nLoading training data (mode: {data_mode})...")
-        data_provider = create_data_provider(data_mode, config)
+        print_flush("\nLoading training data...")
+        data_provider = MemoryDataProvider(config)
+        train_token_ids, val_token_ids = data_provider.load_data()
+        train_token_ids = train_token_ids.to(device)
+        val_token_ids = val_token_ids.to(device)
 
-        # ストレージモードで未準備の場合は準備
-        if data_mode == "storage" and hasattr(data_provider, 'is_prepared'):
-            if not data_provider.is_prepared():
-                print_flush("  Preparing storage data (first-time setup)...")
-                data_provider.prepare(device)
-
-        # データロード
-        if data_provider.is_streaming:
-            data_provider.load_data()
-            train_token_ids = data_provider.get_all_train_tokens(device)
-            val_token_ids = data_provider.get_all_val_tokens(device)
-            print_flush(f"  Train: {len(train_token_ids)} tokens (streaming mode)")
-            print_flush(f"  Val:   {len(val_token_ids)} tokens")
-        else:
-            train_token_ids, val_token_ids = data_provider.load_data()
-            train_token_ids = train_token_ids.to(device)
-            val_token_ids = val_token_ids.to(device)
-
-    # Phase 1: Fixed-Point Learning (using Phase1Trainer)
+    # Phase 1: Fixed-Point Learning
     should_skip_phase1 = config.skip_phase1 and checkpoint_loaded and checkpoint_epoch in ['phase1_complete', 'phase2_complete']
 
     if should_skip_phase1:
@@ -176,11 +149,15 @@ def main():
 
         phase1_start = time.time()
 
-        # Create Phase 1 Trainer (dependency injection)
-        phase1_trainer = create_phase1_trainer(data_mode, model, config, device)
+        # Create Phase 1 Trainer
+        phase1_trainer = MemoryPhase1Trainer(model, config, device)
 
         # Train Phase 1
-        train_contexts = phase1_trainer.train(train_token_ids, label="Train")
+        train_contexts = phase1_trainer.train(
+            train_token_ids,
+            label="Train",
+            data_provider=data_provider
+        )
 
         # Evaluate on validation data
         val_contexts = phase1_trainer.evaluate(val_token_ids, label="Val")
@@ -202,8 +179,8 @@ def main():
         print_flush("FIXED-POINT ANALYSIS")
         print_flush(f"{'='*70}\n")
 
-        train_metrics = analyze_fixed_points(train_contexts, label="Train")
-        val_metrics = analyze_fixed_points(val_contexts, label="Val")
+        analyze_fixed_points(train_contexts, label="Train")
+        analyze_fixed_points(val_contexts, label="Val")
 
         # Check for identity mapping
         identity_check = check_identity_mapping(
@@ -248,11 +225,12 @@ def main():
                         'num_layers': config.num_layers,
                         'embed_dim': config.embed_dim,
                         'context_dim': config.context_dim,
-                        'vocab_size': config.vocab_size
+                        'vocab_size': config.vocab_size,
+                        'num_context_splits': config.num_context_splits
                     }
                 }
                 torch.save(checkpoint, config.checkpoint_path)
-                print_flush(f"✓ Phase 2 checkpoint saved successfully")
+                print_flush("✓ Phase 2 checkpoint saved successfully")
             except Exception as e:
                 print_flush(f"⚠️ Failed to save Phase 2 checkpoint: {e}")
 

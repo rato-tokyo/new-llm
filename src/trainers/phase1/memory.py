@@ -544,7 +544,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 # 早期停止
                 min_iterations = getattr(self.config, 'phase1_min_iterations', 3)
                 if iteration + 1 >= min_iterations and convergence_rate >= self.config.phase1_min_converged_ratio:
-                    print_flush(f"  → Early stopping")
+                    print_flush("  → Early stopping")
                     break
 
             print_flush(f"  Split {split_id} 完了: {int(final_convergence_rate * num_tokens)}/{num_tokens} トークン収束")

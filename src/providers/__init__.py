@@ -1,24 +1,13 @@
 """
-Providers - 依存性注入によるデータローダー切り替え
+Providers - データプロバイダー
 
 Usage:
-    from src.providers import create_data_provider
-
-    # データプロバイダー
-    data_provider = create_data_provider("memory", config)  # or "storage"
+    from src.providers.data import MemoryDataProvider
 """
 
-from .data import (
-    DataProvider,
-    MemoryDataProvider,
-    StorageDataProvider,
-    create_data_provider,
-)
+from .data import DataProvider, MemoryDataProvider
 
 __all__ = [
-    # Data providers
     "DataProvider",
     "MemoryDataProvider",
-    "StorageDataProvider",
-    "create_data_provider",
 ]
