@@ -25,7 +25,7 @@ import torch
 import random
 import numpy as np
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -236,7 +236,7 @@ def run_single_experiment(
     }
 
     # ========== Phase 1 ==========
-    print_flush(f"    Phase 1 starting...")
+    print_flush("    Phase 1 starting...")
     phase1_start = time.time()
 
     # Config を一時的に変更
@@ -270,7 +270,7 @@ def run_single_experiment(
     print_flush(f"    Phase 1 done: {format_time(phase1_time)}, Train ER={result['train_effective_rank_percent']:.1f}%")
 
     # ========== Phase 2 ==========
-    print_flush(f"    Phase 2 starting...")
+    print_flush("    Phase 2 starting...")
     phase2_start = time.time()
 
     config.phase2_epochs = PHASE2_EPOCHS
@@ -439,7 +439,7 @@ def main():
     print_flush(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
 
     # パラメータ表示
-    print_flush(f"\nSearch space:")
+    print_flush("\nSearch space:")
     print_flush(f"  num_input_tokens: {NUM_INPUT_TOKENS_LIST}")
     print_flush(f"  context_multiplier: {CONTEXT_MULTIPLIER_LIST}")
     print_flush(f"  sample_sizes: {SAMPLE_SIZES}")

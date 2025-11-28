@@ -79,7 +79,7 @@ class ResidualConfig:
     # - C*の事前計算不要、context_stability_loss不要
     skip_phase1 = False             # Phase 1を実行（Colab実験用）
     skip_phase2 = False             # Phase 2を実行（実装完了）
-    phase2_learning_rate = 0.002    # トークン予測の学習率 (Phase 1と同じ)
+    phase2_learning_rate = 0.001    # トークン予測の学習率 (Phase 1と同じ)
     phase2_epochs = 10              # 訓練エポック数
     phase2_patience = 2             # Early stopping patience
     phase2_batch_size = 512         # ミニバッチサイズ（分離アーキテクチャは逐次処理のため小さめ）

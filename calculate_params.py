@@ -162,48 +162,48 @@ def main():
     print("\n" + "=" * 70)
     print("CVFPモデル パラメータ数計算（Weight Tying有効、等差減少設計）")
     print("=" * 70)
-    print(f"\n【設定】")
+    print("\n【設定】")
     print(f"  num_layers:       {params['num_layers']}")
     print(f"  context_dim:      {params['context_dim']}")
     print(f"  embed_dim:        {params['embed_dim']}")
     print(f"  num_input_tokens: {params['num_input_tokens']}")
     print(f"  vocab_size:       {params['vocab_size']:,}")
 
-    print(f"\n【等差減少設計】")
+    print("\n【等差減少設計】")
     print(f"  ContextBlock次元: {' → '.join(map(str, params['context_dims']))}")
     print(f"  TokenBlock次元:   {' → '.join(map(str, params['token_dims']))}")
 
-    print(f"\n【パラメータ内訳】")
+    print("\n【パラメータ内訳】")
     print(f"  Token Embedding:          {params['embedding']:>12,} ({format_number(params['embedding'])}) ← GPT-2事前学習（凍結）")
     print(f"  Embed Norm:               {params['embed_norm']:>12,} ({format_number(params['embed_norm'])})")
     print(f"  ContextBlock ({params['num_layers']}層):      {params['context_block']:>12,} ({format_number(params['context_block'])})")
     print(f"  TokenBlock ({params['num_layers']}層):        {params['token_block']:>12,} ({format_number(params['token_block'])})")
     print(f"  Output Head:              {params['output_head']:>12,} (Weight Tying: 共有)")
 
-    print(f"\n【合計】")
+    print("\n【合計】")
     print(f"  全体:             {params['total']:>12,} ({format_number(params['total'])})")
     print(f"  Phase 1 学習対象: {params['trainable_phase1']:>12,} ({format_number(params['trainable_phase1'])})")
-    print(f"  Phase 2 学習対象:")
+    print("  Phase 2 学習対象:")
     print(f"    Embedding凍結時:  {params['trainable_phase2_frozen_embed']:>10,} ({format_number(params['trainable_phase2_frozen_embed'])}) [推奨]")
     print(f"    Embedding学習時:  {params['trainable_phase2']:>10,} ({format_number(params['trainable_phase2'])}) [非推奨]")
 
     # Chinchilla則
     ultrachat_tokens = 200_000_000
 
-    print(f"\n【Chinchilla則】")
+    print("\n【Chinchilla則】")
     print(f"  UltraChatトークン数: {format_number(ultrachat_tokens)}")
 
     # Embedding凍結時（推奨）
     optimal_tokens_frozen = params['trainable_phase2_frozen_embed'] * 20
     ratio_frozen = optimal_tokens_frozen / ultrachat_tokens
-    print(f"\n  ◆ Embedding凍結時 [推奨]:")
+    print("\n  ◆ Embedding凍結時 [推奨]:")
     print(f"    最適トークン数: {format_number(optimal_tokens_frozen)} (= {format_number(params['trainable_phase2_frozen_embed'])} × 20)")
     print(f"    UltraChat比:    {ratio_frozen:.1f}x → {'データ不足' if ratio_frozen > 1 else '適切'}")
 
     # Embedding学習時（非推奨）
     optimal_tokens = params['trainable_phase2'] * 20
     ratio = optimal_tokens / ultrachat_tokens
-    print(f"\n  ◆ Embedding学習時 [非推奨]:")
+    print("\n  ◆ Embedding学習時 [非推奨]:")
     print(f"    最適トークン数: {format_number(optimal_tokens)} (= {format_number(params['trainable_phase2'])} × 20)")
     print(f"    UltraChat比:    {ratio:.1f}x → データ不足")
     print("=" * 70)

@@ -8,7 +8,6 @@ UltraChatデータセットをストリーミングでダウンロードし、
 import os
 import json
 import torch
-import numpy as np
 from typing import Optional, Dict, Any
 from tqdm import tqdm
 from datasets import load_dataset
