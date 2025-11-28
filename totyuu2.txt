@@ -1,0 +1,203 @@
+remote: Enumerating objects: 5, done.
+remote: Counting objects: 100% (5/5), done.
+remote: Compressing objects: 100% (1/1), done.
+remote: Total 3 (delta 2), reused 3 (delta 2), pack-reused 0 (from 0)
+Unpacking objects: 100% (3/3), 776 bytes | 776.00 KiB/s, done.
+From https://github.com/rato-tokyo/new-llm
+ * branch            main       -> FETCH_HEAD
+   045a088..39d98ec  main       -> origin/main
+Updating 045a088..39d98ec
+Fast-forward
+ colab_freeze_embedding_test.py | 21 ++++++++++++---------
+ 1 file changed, 12 insertions(+), 9 deletions(-)
+======================================================================
+EMBEDDING FREEZE EXPERIMENT
+Compare with previous results (Embedding trained)
+======================================================================
+Start time: 2025-11-27 14:09:10
+GPU: NVIDIA L4 (23.8GB)
+
+======================================================================
+EXPERIMENT: 500 samples, freeze_embedding=True
+======================================================================
+  Loading 550 samples from UltraChat...
+  Total tokens: 276,329
+  Train tokens: 251,208
+  Val tokens: 25,121
+2025-11-27 14:09:25.358148: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-11-27 14:09:25.373539: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1764252565.394890   79769 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764252565.401322   79769 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764252565.417477   79769 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764252565.417507   79769 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764252565.417510   79769 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764252565.417512   79769 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-11-27 14:09:25.422371: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  num_input_tokens: 1
+✓ Weight Tying enabled: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+  Phase 1 starting...
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train
+======================================================================
+  Mode: Memory (GPU-optimized)
+  Tokens: 251,208
+  Max iterations: 10
+  Learning rate: 0.002
+  Diversity weight: 0.5
+  ContextBlock params: 7,091,712
+Iteration 1/10: シーケンシャル [212.50s]
+Iteration 2/10: 収束=100.0% | Loss=-0.195067 | CVFP=0.002029 | Div=-0.392164 [3.89s]
+Iteration 3/10: 収束=0.0% | Loss=0.077563 | CVFP=0.565135 | Div=-0.410009 [3.66s]
+Iteration 4/10: 収束=0.0% | Loss=-0.014801 | CVFP=0.390638 | Div=-0.420239 [3.45s]
+Iteration 5/10: 収束=0.0% | Loss=-0.148836 | CVFP=0.123242 | Div=-0.420914 [3.45s]
+Iteration 6/10: 収束=26.6% | Loss=-0.191309 | CVFP=0.040700 | Div=-0.423318 [3.39s]
+Iteration 7/10: 収束=99.8% | Loss=-0.206169 | CVFP=0.012382 | Div=-0.424721 [3.44s]
+  → Early stopping (min_iterations=3 satisfied)
+
+Phase 1 完了: 250715/251208 トークン収束
+
+  Phase 1 done: 3.9min, Train ER=76.3%
+  Phase 2 starting (freeze_embedding=True)...
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 7,093,248/52,782,336 parameters
+
+======================================================================
+PHASE 2: Next-Token Prediction Training (E案 - レイヤー対応版)
+======================================================================
+
+Training tokens: 251,208
+Validation tokens: 25,121
+Epochs: 10
+Batch size: 512
+Learning rate: 0.002
+Gradient clip: 1.0
+Early stopping patience: 2
+
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN (Phase 1で学習済み)
+  - TokenBlock: TRAINING
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+Epoch 1/10 [1129.0s]:
+  Train Loss: 6.3691 | Train PPL: 583.51
+  Val Loss: 5.9604 | Val PPL: 387.75 | Val Acc: 17.52%
+  ✓ New best validation loss: 5.9604
+
+Epoch 2/10 [1129.1s]:
+  Train Loss: 5.4994 | Train PPL: 244.55
+  Val Loss: 5.8121 | Val PPL: 334.31 | Val Acc: 18.88%
+  ✓ New best validation loss: 5.8121
+
+Epoch 3/10 [1131.1s]:
+  Train Loss: 4.9591 | Train PPL: 142.46
+  Val Loss: 5.8638 | Val PPL: 352.07 | Val Acc: 19.03%
+  ⚠️ No improvement (1/2)
+
+Epoch 4/10 [1129.7s]:
+  Train Loss: 4.4603 | Train PPL: 86.51
+  Val Loss: 6.0198 | Val PPL: 411.51 | Val Acc: 18.49%
+  ⚠️ No improvement (2/2)
+
+⛔ Early stopping triggered at epoch 4
+   Val loss hasn't improved for 2 epochs
+======================================================================
+Phase 2 Training Complete
+======================================================================
+
+Best epoch: 2
+Best validation loss: 5.8121
+Best validation PPL: 334.31
+Best validation accuracy: 18.88%
+Early stopped at epoch: 4
+
+
+  RESULT: Val PPL=334.31, Val Acc=18.88%
+  Total time: 79.6min
+
+======================================================================
+EXPERIMENT: 1000 samples, freeze_embedding=True
+======================================================================
+  Loading 1050 samples from UltraChat...
+  Total tokens: 527,623
+  Train tokens: 502,498
+  Val tokens: 25,125
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  num_input_tokens: 1
+✓ Weight Tying enabled: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+  Phase 1 starting...
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train
+======================================================================
+  Mode: Memory (GPU-optimized)
+  Tokens: 502,498
+  Max iterations: 10
+  Learning rate: 0.002
+  Diversity weight: 0.5
+  ContextBlock params: 7,091,712
+Iteration 1/10: シーケンシャル [423.49s]
+Iteration 2/10: 収束=100.0% | Loss=-0.193724 | CVFP=0.002083 | Div=-0.389531 [7.23s]
+Iteration 3/10: 収束=0.0% | Loss=0.071161 | CVFP=0.548937 | Div=-0.406615 [6.74s]
+Iteration 4/10: 収束=0.0% | Loss=-0.022237 | CVFP=0.372156 | Div=-0.416631 [6.79s]
+Iteration 5/10: 収束=0.0% | Loss=-0.151929 | CVFP=0.113518 | Div=-0.417377 [6.71s]
+Iteration 6/10: 収束=25.0% | Loss=-0.189059 | CVFP=0.041672 | Div=-0.419789 [6.70s]
+Iteration 7/10: 収束=98.8% | Loss=-0.203467 | CVFP=0.014473 | Div=-0.421407 [6.71s]
+  → Early stopping (min_iterations=3 satisfied)
+
+Phase 1 完了: 496683/502498 トークン収束
+
+  Phase 1 done: 7.8min, Train ER=76.6%
+  Phase 2 starting (freeze_embedding=True)...
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 7,093,248/52,782,336 parameters
+
+======================================================================
+PHASE 2: Next-Token Prediction Training (E案 - レイヤー対応版)
+======================================================================
+
+Training tokens: 502,498
+Validation tokens: 25,125
+Epochs: 10
+Batch size: 512
+Learning rate: 0.002
+Gradient clip: 1.0
+Early stopping patience: 2
+
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN (Phase 1で学習済み)
+  - TokenBlock: TRAINING
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+Epoch 1/10 [2206.3s]:
+  Train Loss: 6.0771 | Train PPL: 435.79
+  Val Loss: 5.7499 | Val PPL: 314.15 | Val Acc: 18.57%
+  ✓ New best validation loss: 5.7499
+
+Epoch 2/10 [2219.7s]:
+  Train Loss: 5.3595 | Train PPL: 212.61
+  Val Loss: 5.6358 | Val PPL: 280.27 | Val Acc: 19.91%
+  ✓ New best validation loss: 5.6358
+
+Epoch 3/10 [2219.3s]:
+  Train Loss: 4.9343 | Train PPL: 138.97
+  Val Loss: 5.6719 | Val PPL: 290.60 | Val Acc: 20.24%
+  ⚠️ No improvement (1/2)
+
