@@ -175,11 +175,14 @@ class Phase2Trainer:
                     token_embed = token_embed[0]
                 token_embed = self.model.embed_norm(token_embed)
 
-                # 履歴に追加
-                token_history.append(token_embed)
+                # 履歴に追加（勾配グラフを切断して保存）
+                token_history.append(token_embed.detach())
 
                 # 最新の num_input_tokens 個を結合
-                combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
+                # 履歴からは勾配なし、現在のトークンのみ勾配あり
+                history_tokens = token_history[-num_input_tokens:-1]  # 過去のトークン（勾配なし）
+                current_token = token_embed  # 現在のトークン（勾配あり）
+                combined_tokens = torch.cat(history_tokens + [current_token], dim=-1)
                 # combined_tokens: [1, embed_dim * num_input_tokens]
 
                 # Step 1: ContextBlock（frozen）- 各レイヤーの出力を取得（E案）
@@ -190,6 +193,7 @@ class Phase2Trainer:
                     # context_outputs = [context_1, context_2, ..., context_N]
 
                 # Step 2: TokenBlock（学習）- 対応するレイヤーのcontextを使用（E案）
+                # combined_tokensを再構築（ContextBlockで使ったものと同じだが、勾配計算のため）
                 token_out = self.model.forward_token_e(context_outputs, combined_tokens)
 
                 # Step 3: 予測
