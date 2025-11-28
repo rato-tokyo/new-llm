@@ -3,6 +3,20 @@ Phase 2 Trainer: Next-Token Prediction with Separated Architecture (E案)
 
 Phase 1で学習したContextBlockを固定（freeze）し、TokenBlockのみを学習する。
 
+## キャッシュ方式による高速化
+
+### 従来の問題点
+- 各トークンごとにContextBlockをforward（遅い）
+- バッチ処理が1トークンずつ（GPU効率が悪い）
+
+### 新方式: ContextBlockキャッシュ
+1. 全トークンのContextBlock出力を事前計算しキャッシュ
+2. TokenBlockはキャッシュを参照してバッチ並列処理
+
+### 期待される高速化
+- ContextBlock計算: エポックごとに1回のみ（従来: トークン数×エポック回）
+- TokenBlock: 真のバッチ並列処理（GPU効率大幅向上）
+
 ## 分離アーキテクチャ（E案）- レイヤー対応版
 
 ### ContextBlock（Phase 1で学習済み、Phase 2でfreeze）
@@ -15,56 +29,22 @@ Phase 1で学習したContextBlockを固定（freeze）し、TokenBlockのみを
 - 入力: [context_i, token_{i-1}]
 - 出力: token_i
 - 最終token_Nから次トークンを予測
-
-## E案のアーキテクチャ
-
-```
-ContextBlock (frozen):
-  Layer 1: [context_0, token_embed] → context_1
-  Layer 2: [context_1, token_embed] → context_2
-  Layer 3: [context_2, token_embed] → context_3 (= C*)
-
-TokenBlock (学習):
-  Layer 1: [context_1, token_embed] → token_1
-  Layer 2: [context_2, token_1]     → token_2
-  Layer 3: [context_3, token_2]     → token_3 (= token_out)
-```
-
-## 設計の利点
-
-1. **段階的文脈情報**: 浅いレイヤーでは浅い文脈、深いレイヤーでは深い文脈を使用
-2. **C*の保持**: ContextBlockはfrozenなので、Phase 1で学習した文脈表現が維持
-3. **Transformerとの類似性**: 各レイヤーで異なる深さの表現を参照
-4. **物理的分離維持**: ContextBlockとTokenBlockは別の重み行列のまま
-
-## 処理フロー（E案）
-
-```python
-# 各トークンの処理
-token_embed = get_embedding(token_id)
-
-# Step 1: ContextBlock（frozen）- 各レイヤーの出力を取得
-with torch.no_grad():
-    context_outputs = context_block.forward_with_intermediates(context, token_embed)
-    # context_outputs = [context_1, context_2, context_3]
-
-# Step 2: TokenBlock（学習）- 対応するレイヤーのcontextを使用
-token_out = token_block.forward_with_contexts(context_outputs, token_embed)
-
-# Step 3: 予測
-logits = token_output(token_out)
-loss = CrossEntropy(logits, target)
-```
 """
 
 import torch
 import torch.nn as nn
 import time
+import sys
+
+
+def print_flush(msg: str):
+    print(msg, flush=True)
+    sys.stdout.flush()
 
 
 class Phase2Trainer:
     """
-    Phase 2 Trainer: TokenBlockのみを学習
+    Phase 2 Trainer: TokenBlockのみを学習（キャッシュ方式）
 
     分離アーキテクチャ:
     - ContextBlock: frozen（Phase 1で学習済み）
@@ -99,15 +79,15 @@ class Phase2Trainer:
             total_params = sum(p.numel() for p in model.parameters())
 
             if freeze_embedding:
-                print(f"✓ Training TokenBlock only: {num_trainable:,}/{total_params:,} parameters")
+                print_flush(f"✓ Training TokenBlock only: {num_trainable:,}/{total_params:,} parameters")
             else:
-                print(f"✓ Training TokenBlock + token_output: {num_trainable:,}/{total_params:,} parameters")
+                print_flush(f"✓ Training TokenBlock + token_output: {num_trainable:,}/{total_params:,} parameters")
         else:
             # Legacy: token_outputのみ
             trainable_params = list(model.token_output.parameters())
             num_trainable = sum(p.numel() for p in trainable_params)
             total_params = sum(p.numel() for p in model.parameters())
-            print(f"✓ Training token_output only (legacy): {num_trainable:,}/{total_params:,} parameters")
+            print_flush(f"✓ Training token_output only (legacy): {num_trainable:,}/{total_params:,} parameters")
 
         # Optimizer
         self.optimizer = torch.optim.Adam(
@@ -118,14 +98,71 @@ class Phase2Trainer:
         # Loss function
         self.criterion = nn.CrossEntropyLoss(reduction='mean')
 
+    def _build_context_cache(self, token_ids, device):
+        """
+        全トークンのContextBlock出力をキャッシュ構築
+
+        Args:
+            token_ids: トークンID [seq_len]
+            device: デバイス
+
+        Returns:
+            context_cache: List of context_outputs for each token
+                           各要素は [context_1, ..., context_N] のリスト
+            token_embeds: 全トークンの埋め込み [num_tokens, embed_dim * num_input_tokens]
+        """
+        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+        input_ids = token_ids[:-1]  # 最後のトークン以外
+        num_tokens = len(input_ids)
+
+        # 結果格納用
+        context_cache = []  # 各トークンのcontext_outputs
+        token_embeds_list = []  # combined_tokens
+
+        with torch.no_grad():
+            context = torch.zeros(1, self.model.context_dim, device=device)
+
+            # トークン履歴を初期化（ゼロベクトルで埋める）
+            token_history = [torch.zeros(1, self.model.embed_dim, device=device)
+                             for _ in range(num_input_tokens - 1)]
+
+            for i in range(num_tokens):
+                token_id = input_ids[i]
+
+                # トークン埋め込み
+                token_embed = self.model.token_embedding(token_id.unsqueeze(0))
+                if isinstance(token_embed, tuple):
+                    token_embed = token_embed[0]
+                token_embed = self.model.embed_norm(token_embed)
+
+                # 履歴に追加
+                token_history.append(token_embed)
+
+                # 最新の num_input_tokens 個を結合
+                combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
+                token_embeds_list.append(combined_tokens)
+
+                # ContextBlock forward
+                context_outputs = self.model.forward_context_with_intermediates(
+                    context, combined_tokens
+                )
+                context_cache.append(context_outputs)
+
+                # コンテキスト更新
+                context = context_outputs[-1]
+
+        # token_embedsをテンソルに変換 [num_tokens, embed_dim * num_input_tokens]
+        token_embeds = torch.cat(token_embeds_list, dim=0)
+
+        return context_cache, token_embeds
+
     def train_epoch(self, token_ids, device, batch_size=None):
         """
-        1エポックの訓練（ミニバッチ処理）- E案
+        1エポックの訓練（キャッシュ方式）
 
-        E案の処理フロー:
-        1. ContextBlock(frozen): 各レイヤーの出力を取得 [context_1, ..., context_N]
-        2. TokenBlock(学習): Layer i は context_i を参照して token を更新
-        3. Prediction: token_out → logits
+        処理フロー:
+        1. ContextBlock出力を全トークン分キャッシュ（1回のみ）
+        2. TokenBlockをバッチ並列処理
 
         Args:
             token_ids: トークンID [seq_len]
@@ -141,70 +178,40 @@ class Phase2Trainer:
         if batch_size is None:
             batch_size = self.config.phase2_batch_size
 
-        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+        target_ids = token_ids[1:]  # 最初のトークン以外（次トークン予測の正解）
+        num_tokens = len(target_ids)
 
-        # Input: all tokens except last
-        # Target: all tokens except first (next token prediction)
-        input_ids = token_ids[:-1]
-        target_ids = token_ids[1:]
+        # Step 1: ContextBlockキャッシュ構築
+        context_cache, token_embeds = self._build_context_cache(token_ids, device)
 
-        num_tokens = len(input_ids)
+        # Step 2: TokenBlockバッチ並列処理
         total_loss = 0.0
-
-        # シーケンシャル処理でコンテキストを伝播
-        context = torch.zeros(1, self.model.context_dim, device=device)
-
-        # トークン履歴を初期化（ゼロベクトルで埋める）
-        token_history = [torch.zeros(1, self.model.embed_dim, device=device)
-                         for _ in range(num_input_tokens - 1)]
+        num_layers = self.model.num_layers
 
         for batch_start in range(0, num_tokens, batch_size):
             batch_end = min(batch_start + batch_size, num_tokens)
             batch_len = batch_end - batch_start
 
-            # バッチ内のトークンを処理
-            batch_logits_list = []
+            # バッチ内のデータを取得
             batch_targets = target_ids[batch_start:batch_end]
+            batch_token_embeds = token_embeds[batch_start:batch_end]  # [batch, embed_dim * num_input_tokens]
 
-            for i in range(batch_start, batch_end):
-                token_id = input_ids[i]
+            # バッチ内のcontext_outputsを構築
+            # context_cache[i] = [context_1, ..., context_N] (各 [1, context_dim])
+            # バッチ用に [batch, context_dim] に変換
+            batch_context_list = []
+            for layer_idx in range(num_layers):
+                layer_contexts = torch.cat(
+                    [context_cache[i][layer_idx] for i in range(batch_start, batch_end)],
+                    dim=0
+                )  # [batch, context_dim]
+                batch_context_list.append(layer_contexts)
 
-                # トークン埋め込み
-                token_embed = self.model.token_embedding(token_id.unsqueeze(0))
-                if isinstance(token_embed, tuple):
-                    token_embed = token_embed[0]
-                token_embed = self.model.embed_norm(token_embed)
+            # TokenBlock forward（バッチ並列）
+            batch_token_out = self.model.forward_token_e(batch_context_list, batch_token_embeds)
 
-                # 履歴に追加（勾配グラフを切断して保存）
-                token_history.append(token_embed.detach())
-
-                # 最新の num_input_tokens 個を結合
-                # 履歴からは勾配なし、現在のトークンのみ勾配あり
-                history_tokens = token_history[-num_input_tokens:-1]  # 過去のトークン（勾配なし）
-                current_token = token_embed  # 現在のトークン（勾配あり）
-                combined_tokens = torch.cat(history_tokens + [current_token], dim=-1)
-                # combined_tokens: [1, embed_dim * num_input_tokens]
-
-                # Step 1: ContextBlock（frozen）- 各レイヤーの出力を取得（E案）
-                with torch.no_grad():
-                    context_outputs = self.model.forward_context_with_intermediates(
-                        context, combined_tokens
-                    )
-                    # context_outputs = [context_1, context_2, ..., context_N]
-
-                # Step 2: TokenBlock（学習）- 対応するレイヤーのcontextを使用（E案）
-                # combined_tokensを再構築（ContextBlockで使ったものと同じだが、勾配計算のため）
-                token_out = self.model.forward_token_e(context_outputs, combined_tokens)
-
-                # Step 3: 予測
-                logits = self.model.token_output(token_out)
-                batch_logits_list.append(logits)
-
-                # コンテキストを更新（最終レイヤーの出力を使用、detachして勾配切断）
-                context = context_outputs[-1].detach()
-
-            # バッチのlogitsを結合
-            batch_logits = torch.cat(batch_logits_list, dim=0)
+            # 予測
+            batch_logits = self.model.token_output(batch_token_out)
 
             # 損失計算と更新
             self.optimizer.zero_grad()
@@ -231,7 +238,7 @@ class Phase2Trainer:
 
     def evaluate(self, token_ids, device):
         """
-        評価（検証データ）- E案
+        評価（検証データ）- キャッシュ方式
 
         Args:
             token_ids: トークンID [seq_len]
@@ -244,61 +251,39 @@ class Phase2Trainer:
         """
         self.model.eval()
 
-        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
-
-        input_ids = token_ids[:-1]
         target_ids = token_ids[1:]
-        num_tokens = len(input_ids)
+        num_tokens = len(target_ids)
+
+        # ContextBlockキャッシュ構築
+        context_cache, token_embeds = self._build_context_cache(token_ids, device)
 
         total_loss = 0.0
         correct = 0
+        num_layers = self.model.num_layers
 
         with torch.no_grad():
-            context = torch.zeros(1, self.model.context_dim, device=device)
+            # 全トークンを一括処理（メモリが許す場合）
+            # context_listを構築
+            context_list = []
+            for layer_idx in range(num_layers):
+                layer_contexts = torch.cat(
+                    [context_cache[i][layer_idx] for i in range(num_tokens)],
+                    dim=0
+                )  # [num_tokens, context_dim]
+                context_list.append(layer_contexts)
 
-            # トークン履歴を初期化（ゼロベクトルで埋める）
-            token_history = [torch.zeros(1, self.model.embed_dim, device=device)
-                             for _ in range(num_input_tokens - 1)]
+            # TokenBlock forward（全トークン並列）
+            token_out = self.model.forward_token_e(context_list, token_embeds)
 
-            for i in range(num_tokens):
-                token_id = input_ids[i]
+            # 予測
+            logits = self.model.token_output(token_out)  # [num_tokens, vocab_size]
 
-                # トークン埋め込み
-                token_embed = self.model.token_embedding(token_id.unsqueeze(0))
-                if isinstance(token_embed, tuple):
-                    token_embed = token_embed[0]
-                token_embed = self.model.embed_norm(token_embed)
+            # 損失（全体）
+            total_loss = self.criterion(logits, target_ids).item() * num_tokens
 
-                # 履歴に追加
-                token_history.append(token_embed)
-
-                # 最新の num_input_tokens 個を結合
-                combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
-                # combined_tokens: [1, embed_dim * num_input_tokens]
-
-                # Step 1: ContextBlock - 各レイヤーの出力を取得（E案）
-                context_outputs = self.model.forward_context_with_intermediates(
-                    context, combined_tokens
-                )
-
-                # Step 2: TokenBlock - 対応するレイヤーのcontextを使用（E案）
-                token_out = self.model.forward_token_e(context_outputs, combined_tokens)
-
-                # Step 3: 予測
-                logits = self.model.token_output(token_out)
-
-                # 損失
-                target = target_ids[i].unsqueeze(0)
-                loss = self.criterion(logits, target)
-                total_loss += loss.item()
-
-                # 正解率
-                pred = torch.argmax(logits, dim=-1)
-                if pred.item() == target.item():
-                    correct += 1
-
-                # コンテキスト更新（最終レイヤーの出力を使用）
-                context = context_outputs[-1]
+            # 正解率
+            preds = torch.argmax(logits, dim=-1)
+            correct = (preds == target_ids).sum().item()
 
         avg_loss = total_loss / num_tokens
         perplexity = torch.exp(torch.tensor(avg_loss)).item()
@@ -328,30 +313,30 @@ class Phase2Trainer:
         if batch_size is None:
             batch_size = self.config.phase2_batch_size
 
-        print(f"\n{'='*70}")
-        print("PHASE 2: Next-Token Prediction Training (E案 - レイヤー対応版)")
-        print(f"{'='*70}\n")
+        print_flush(f"\n{'='*70}")
+        print_flush("PHASE 2: Next-Token Prediction Training (キャッシュ方式)")
+        print_flush(f"{'='*70}\n")
 
-        print(f"Training tokens: {len(train_token_ids):,}")
-        print(f"Validation tokens: {len(val_token_ids):,}")
-        print(f"Epochs: {epochs}")
-        print(f"Batch size: {batch_size}")
-        print(f"Learning rate: {self.learning_rate}")
-        print(f"Gradient clip: {self.gradient_clip}")
-        print(f"Early stopping patience: {patience}")
-        print()
+        print_flush(f"Training tokens: {len(train_token_ids):,}")
+        print_flush(f"Validation tokens: {len(val_token_ids):,}")
+        print_flush(f"Epochs: {epochs}")
+        print_flush(f"Batch size: {batch_size}")
+        print_flush(f"Learning rate: {self.learning_rate}")
+        print_flush(f"Gradient clip: {self.gradient_clip}")
+        print_flush(f"Early stopping patience: {patience}")
+        print_flush("")
 
         if self.model.use_separated_architecture:
-            print("Architecture: E案 (ContextBlock + TokenBlock Layer-wise)")
-            print("  - ContextBlock: FROZEN (Phase 1で学習済み)")
-            print("  - TokenBlock: TRAINING")
-            print("  - token_output: TRAINING")
-            print("  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照")
+            print_flush("Architecture: E案 (ContextBlock + TokenBlock Layer-wise)")
+            print_flush("  - ContextBlock: FROZEN + CACHED (エポックごとに1回計算)")
+            print_flush("  - TokenBlock: TRAINING (バッチ並列処理)")
+            print_flush("  - token_output: TRAINING")
+            print_flush("  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照")
         else:
-            print("Architecture: Legacy CVFP")
-            print("  - CVFP blocks: FROZEN")
-            print("  - token_output: TRAINING")
-        print()
+            print_flush("Architecture: Legacy CVFP")
+            print_flush("  - CVFP blocks: FROZEN")
+            print_flush("  - token_output: TRAINING")
+        print_flush("")
 
         history = {
             'train_loss': [],
@@ -389,42 +374,42 @@ class Phase2Trainer:
             history['val_acc'].append(val_acc)
 
             # Print progress
-            print(f"Epoch {epoch}/{epochs} [{elapsed:.1f}s]:")
-            print(f"  Train Loss: {train_loss:.4f} | Train PPL: {train_ppl:.2f}")
-            print(f"  Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f} | Val Acc: {val_acc*100:.2f}%")
+            print_flush(f"Epoch {epoch}/{epochs} [{elapsed:.1f}s]:")
+            print_flush(f"  Train Loss: {train_loss:.4f} | Train PPL: {train_ppl:.2f}")
+            print_flush(f"  Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f} | Val Acc: {val_acc*100:.2f}%")
 
             # Track best model and early stopping
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_epoch = epoch
                 patience_counter = 0
-                print(f"  ✓ New best validation loss: {best_val_loss:.4f}")
+                print_flush(f"  ✓ New best validation loss: {best_val_loss:.4f}")
             else:
                 patience_counter += 1
-                print(f"  ⚠️ No improvement ({patience_counter}/{patience})")
+                print_flush(f"  ⚠️ No improvement ({patience_counter}/{patience})")
 
-            print()
+            print_flush("")
 
             # Early stopping check
             if patience_counter >= patience:
-                print(f"⛔ Early stopping triggered at epoch {epoch}")
-                print(f"   Val loss hasn't improved for {patience} epochs")
+                print_flush(f"⛔ Early stopping triggered at epoch {epoch}")
+                print_flush(f"   Val loss hasn't improved for {patience} epochs")
                 history['early_stopped'] = True
                 history['stopped_epoch'] = epoch
                 break
 
         history['best_epoch'] = best_epoch
 
-        print(f"{'='*70}")
-        print("Phase 2 Training Complete")
-        print(f"{'='*70}\n")
-        print(f"Best epoch: {best_epoch}")
-        print(f"Best validation loss: {best_val_loss:.4f}")
-        print(f"Best validation PPL: {history['val_ppl'][best_epoch-1]:.2f}")
-        print(f"Best validation accuracy: {history['val_acc'][best_epoch-1]*100:.2f}%")
+        print_flush(f"{'='*70}")
+        print_flush("Phase 2 Training Complete")
+        print_flush(f"{'='*70}\n")
+        print_flush(f"Best epoch: {best_epoch}")
+        print_flush(f"Best validation loss: {best_val_loss:.4f}")
+        print_flush(f"Best validation PPL: {history['val_ppl'][best_epoch-1]:.2f}")
+        print_flush(f"Best validation accuracy: {history['val_acc'][best_epoch-1]*100:.2f}%")
         if history['early_stopped']:
-            print(f"Early stopped at epoch: {history['stopped_epoch']}\n")
+            print_flush(f"Early stopped at epoch: {history['stopped_epoch']}\n")
         else:
-            print(f"Completed all {epochs} epochs\n")
+            print_flush(f"Completed all {epochs} epochs\n")
 
         return history
