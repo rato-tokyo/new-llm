@@ -70,7 +70,7 @@ class ResidualConfig:
                                          # 0.004: 等差減少設計で収束しない場合
                                          # 0.002: 標準（等差減少なしの場合）
                                          # 0.001: 安定的
-    phase1_batch_size = 4096            # 並列処理のバッチサイズ（L4 GPU 24GB対応）
+    phase1_batch_size = 8000            # 並列処理のバッチサイズ（L4 GPU 24GB対応）
     phase1_gradient_clip = 1.0           # 勾配クリッピング値
 
     # ========== Phase 2: トークン予測（分離アーキテクチャ） ==========
@@ -82,7 +82,7 @@ class ResidualConfig:
     phase2_learning_rate = 0.001    # トークン予測の学習率 (Phase 1と同じ)
     phase2_epochs = 10              # 訓練エポック数
     phase2_patience = 1             # Early stopping patience
-    phase2_batch_size = 512         # ミニバッチサイズ（分離アーキテクチャは逐次処理のため小さめ）
+    phase2_batch_size = 1024         # ミニバッチサイズ（分離アーキテクチャは逐次処理のため小さめ）
                                     # 512: 推奨
                                     # 256: メモリ不足時
                                     # 1024: メモリに余裕がある場合
