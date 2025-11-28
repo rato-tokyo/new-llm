@@ -20,32 +20,39 @@ class ContextLayer(nn.Module):
     """
     Context Layer - 文脈処理専用レイヤー
 
-    入力: [context, token_embeds]
+    入力: [context] または [context, token_embeds]（最初のレイヤーのみ）
     出力: context_out（contextのみ、tokenは出力しない）
 
+    等差減少設計: 入力context次元から出力context次元へ段階的に縮小
+
     Args:
-        context_dim: Context vector dimension
-        embed_dim: Token embedding dimension (単一トークンの次元)
-        num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
+        context_input_dim: Input context dimension
+        context_output_dim: Output context dimension
+        token_input_dim: Token input dimension (0 = no token input)
     """
 
-    def __init__(self, context_dim, embed_dim, num_input_tokens=1):
+    def __init__(self, context_input_dim, context_output_dim, token_input_dim=0):
         super().__init__()
 
-        self.context_dim = context_dim
-        self.embed_dim = embed_dim
-        self.num_input_tokens = num_input_tokens
+        self.context_input_dim = context_input_dim
+        self.context_output_dim = context_output_dim
+        self.token_input_dim = token_input_dim
 
-        # FNN: [context + token_embeds] -> context_dim
-        # token_embeds の次元は embed_dim * num_input_tokens
-        input_dim = context_dim + embed_dim * num_input_tokens
+        # FNN: [context (+ token_embeds)] -> context_output_dim
+        input_dim = context_input_dim + token_input_dim
         self.fnn = nn.Sequential(
-            nn.Linear(input_dim, context_dim),
+            nn.Linear(input_dim, context_output_dim),
             nn.ReLU()
         )
 
         # LayerNorm（必須：数値安定性のため）
-        self.context_norm = nn.LayerNorm(context_dim)
+        self.context_norm = nn.LayerNorm(context_output_dim)
+
+        # 残差接続用の射影レイヤー（次元が異なる場合のみ）
+        if context_input_dim != context_output_dim:
+            self.residual_proj = nn.Linear(context_input_dim, context_output_dim)
+        else:
+            self.residual_proj = None
 
         self._init_weights()
 
@@ -57,26 +64,35 @@ class ContextLayer(nn.Module):
                 if module.bias is not None:
                     nn.init.normal_(module.bias, mean=0.0, std=0.01)
 
-    def forward(self, context, token_embeds):
+    def forward(self, context, token_embeds=None):
         """
         Forward pass: Update context only
 
         Args:
-            context: Current context [batch, context_dim]
-            token_embeds: Token embeddings [batch, embed_dim * num_input_tokens]
-                          （複数トークンが結合済み）
+            context: Current context [batch, context_input_dim]
+            token_embeds: Token embeddings [batch, token_input_dim] (optional)
+                          最初のレイヤーのみ使用、それ以外はNone
 
         Returns:
-            new_context: Updated context [batch, context_dim]
+            new_context: Updated context [batch, context_output_dim]
         """
         # Concatenate inputs
-        fnn_input = torch.cat([context, token_embeds], dim=-1)
+        if token_embeds is not None and self.token_input_dim > 0:
+            fnn_input = torch.cat([context, token_embeds], dim=-1)
+        else:
+            fnn_input = context
 
         # FNN forward -> delta_context
         delta_context = self.fnn(fnn_input)
 
+        # 残差接続（次元が異なる場合は射影）
+        if self.residual_proj is not None:
+            residual = self.residual_proj(context)
+        else:
+            residual = context
+
         # Residual connection + LayerNorm
-        new_context = self.context_norm(context + delta_context)
+        new_context = self.context_norm(residual + delta_context)
 
         return new_context
 
@@ -164,9 +180,23 @@ class ContextBlock(nn.Module):
 
     Phase 1で学習、Phase 2でfreeze
 
+    等差減少設計:
+        入力: context_dim + embed_dim * num_input_tokens（最初のレイヤーのみ）
+        出力: context_dim
+        各レイヤーで等差的に次元を減少させる
+        2番目以降のレイヤーはtoken入力なし
+
+    例: num_input_tokens=2, num_layers=6, context_dim=768, embed_dim=768
+        Layer 0: context(768) + token(1536) → 2176  (token入力あり)
+        Layer 1: 2176 → 1894                         (token入力なし)
+        Layer 2: 1894 → 1613
+        Layer 3: 1613 → 1331
+        Layer 4: 1331 → 1050
+        Layer 5: 1050 → 768
+
     Args:
         num_layers: Number of context layers
-        context_dim: Context vector dimension
+        context_dim: Final context vector dimension
         embed_dim: Token embedding dimension (単一トークンの次元)
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
     """
@@ -176,16 +206,39 @@ class ContextBlock(nn.Module):
 
         self.num_layers = num_layers
         self.num_input_tokens = num_input_tokens
+        self.context_dim = context_dim
+        self.embed_dim = embed_dim
+
+        # 等差減少の次元計算
+        # 最初のレイヤー入力: context_dim + token_dim
+        # 最終出力: context_dim
+        token_input_dim = embed_dim * num_input_tokens
+        input_context_dim = context_dim + token_input_dim  # 最初のレイヤー後の次元
+        output_context_dim = context_dim
+        total_reduction = input_context_dim - output_context_dim
+
+        # 各レイヤーの入出力次元を計算
+        self.context_dims = []
+        for i in range(num_layers + 1):
+            # 線形補間: input_dim から output_dim へ
+            dim = input_context_dim - (total_reduction * i) // num_layers
+            self.context_dims.append(dim)
 
         # Stack of Context layers
-        self.layers = nn.ModuleList([
-            ContextLayer(
-                context_dim=context_dim,
-                embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens
+        self.layers = nn.ModuleList()
+        for i in range(num_layers):
+            # 最初のレイヤーのみtoken入力あり
+            layer_token_dim = token_input_dim if i == 0 else 0
+            # 最初のレイヤーはcontext_dimから開始
+            layer_input_dim = context_dim if i == 0 else self.context_dims[i]
+
+            self.layers.append(
+                ContextLayer(
+                    context_input_dim=layer_input_dim,
+                    context_output_dim=self.context_dims[i + 1],
+                    token_input_dim=layer_token_dim
+                )
             )
-            for _ in range(num_layers)
-        ])
 
     def forward(self, context, token_embeds):
         """
@@ -193,13 +246,16 @@ class ContextBlock(nn.Module):
 
         Args:
             context: [batch, context_dim]
-            token_embeds: [batch, embed_dim * num_input_tokens] (参照のみ、更新されない)
+            token_embeds: [batch, embed_dim * num_input_tokens] (最初のレイヤーのみ使用)
 
         Returns:
             context: Updated context [batch, context_dim]
         """
-        for layer in self.layers:
-            context = layer(context, token_embeds)
+        for i, layer in enumerate(self.layers):
+            if i == 0:
+                context = layer(context, token_embeds)
+            else:
+                context = layer(context)
 
         return context
 
@@ -212,15 +268,18 @@ class ContextBlock(nn.Module):
 
         Args:
             context: [batch, context_dim] (初期コンテキスト)
-            token_embeds: [batch, embed_dim * num_input_tokens] (参照のみ、更新されない)
+            token_embeds: [batch, embed_dim * num_input_tokens] (最初のレイヤーのみ使用)
 
         Returns:
             outputs: List of context outputs [context_1, context_2, ..., context_N]
                      len(outputs) == num_layers
         """
         outputs = []
-        for layer in self.layers:
-            context = layer(context, token_embeds)
+        for i, layer in enumerate(self.layers):
+            if i == 0:
+                context = layer(context, token_embeds)
+            else:
+                context = layer(context)
             outputs.append(context)
         return outputs
 
@@ -236,29 +295,35 @@ class TokenBlock(nn.Module):
         出力: embed_dim
         各レイヤーで等差的に次元を減少させる
 
+    E案対応:
+        各レイヤーはContextBlockの対応するレイヤーの出力を参照
+        ContextBlockの出力次元もレイヤーごとに異なる
+
     例: num_input_tokens=2, num_layers=6, embed_dim=768
-        Layer 0: 1536 → 1408
-        Layer 1: 1408 → 1280
-        Layer 2: 1280 → 1152
-        Layer 3: 1152 → 1024
-        Layer 4: 1024 → 896
-        Layer 5: 896  → 768
+        Layer 0: token(1536) + context(2048) → 1408
+        Layer 1: token(1408) + context(1792) → 1280
+        Layer 2: token(1280) + context(1536) → 1152
+        Layer 3: token(1152) + context(1280) → 1024
+        Layer 4: token(1024) + context(1024) → 896
+        Layer 5: token(896)  + context(768)  → 768
 
     Args:
         num_layers: Number of token layers
-        context_dim: Context vector dimension
+        context_dim: Final context vector dimension
         embed_dim: Token embedding dimension (最終出力次元)
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
+        context_dims_list: List of context dimensions from ContextBlock (for E案)
     """
 
-    def __init__(self, num_layers, context_dim, embed_dim, num_input_tokens=1):
+    def __init__(self, num_layers, context_dim, embed_dim, num_input_tokens=1,
+                 context_dims_list=None):
         super().__init__()
 
         self.num_layers = num_layers
         self.num_input_tokens = num_input_tokens
         self.embed_dim = embed_dim
 
-        # 等差減少の次元計算
+        # 等差減少の次元計算（トークン側）
         # 入力次元: embed_dim * num_input_tokens
         # 出力次元: embed_dim
         input_token_dim = embed_dim * num_input_tokens
@@ -272,12 +337,20 @@ class TokenBlock(nn.Module):
             dim = input_token_dim - (total_reduction * i) // num_layers
             self.token_dims.append(dim)
 
+        # ContextBlockからの次元リスト（E案用）
+        # context_dims_listはContextBlockのcontext_dims[1:]に相当
+        if context_dims_list is None:
+            # 後方互換性: 固定次元
+            self.context_dims_list = [context_dim] * num_layers
+        else:
+            self.context_dims_list = context_dims_list
+
         # Stack of Token layers
         self.layers = nn.ModuleList()
         for i in range(num_layers):
             self.layers.append(
                 TokenLayer(
-                    context_dim=context_dim,
+                    context_dim=self.context_dims_list[i],
                     token_input_dim=self.token_dims[i],
                     token_output_dim=self.token_dims[i + 1]
                 )
@@ -395,11 +468,15 @@ class LLM(nn.Module):
         )
 
         # TokenBlock: トークン処理専用
+        # E案: ContextBlockの各レイヤー出力次元をTokenBlockに渡す
+        # context_dims[1:]は各レイヤーの出力次元
+        context_dims_for_token = self.context_block.context_dims[1:]
         self.token_block = TokenBlock(
             num_layers=num_layers,
             context_dim=context_dim,
             embed_dim=embed_dim,
-            num_input_tokens=num_input_tokens
+            num_input_tokens=num_input_tokens,
+            context_dims_list=context_dims_for_token
         )
 
         # ========== Output Head ==========
