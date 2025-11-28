@@ -45,7 +45,35 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         return contexts
 
-    def train(self, token_ids: torch.Tensor, label: str = "Train") -> torch.Tensor:
+    def train(
+        self,
+        token_ids: torch.Tensor,
+        label: str = "Train",
+        data_provider=None
+    ) -> torch.Tensor:
+        """
+        Phase 1訓練
+
+        Args:
+            token_ids: トークンID（分割なしの場合）
+            label: ラベル
+            data_provider: データプロバイダー（分割訓練用）
+
+        Returns:
+            コンテキスト [num_tokens, context_dim]
+        """
+        # 分割数を取得
+        num_splits = getattr(self.config, 'num_context_splits', 1)
+
+        if num_splits > 1 and data_provider is not None:
+            # 分割訓練モード
+            return self._train_split_mode(data_provider, label)
+        else:
+            # 通常モード
+            return self._train_single(token_ids, label)
+
+    def _train_single(self, token_ids: torch.Tensor, label: str = "Train") -> torch.Tensor:
+        """通常の単一訓練"""
         self.model.train()
         num_tokens = len(token_ids)
 
@@ -415,3 +443,271 @@ class MemoryPhase1Trainer(Phase1Trainer):
     @property
     def is_streaming(self) -> bool:
         return False
+
+    def _train_split_mode(self, data_provider, label: str = "Train") -> torch.Tensor:
+        """
+        分割訓練モード: 各splitを順番に訓練
+
+        Args:
+            data_provider: MemoryDataProvider（get_split_token_ids対応）
+            label: ラベル
+
+        Returns:
+            結合されたコンテキスト [num_tokens, context_dim]
+        """
+        num_splits = self.config.num_context_splits
+        split_context_dim = self.config.split_context_dim
+
+        print_flush(f"\n{'='*70}")
+        print_flush(f"PHASE 1: 分割訓練モード - {label}")
+        print_flush(f"{'='*70}")
+        print_flush(f"  num_context_splits: {num_splits}")
+        print_flush(f"  split_context_dim: {split_context_dim}")
+
+        # 各splitのコンテキストを保存
+        all_split_contexts = []
+
+        for split_id in range(num_splits):
+            print_flush(f"\n--- Split {split_id + 1}/{num_splits} ---")
+
+            # このsplit用のトークンを取得
+            split_token_ids = data_provider.get_split_token_ids(split_id, num_splits, self.device)
+            num_tokens = len(split_token_ids)
+            print_flush(f"  Tokens for split {split_id}: {num_tokens:,}")
+
+            # このsplit用のパラメータのみを学習
+            split_block = self.model.context_block.blocks[split_id]
+            split_params = list(split_block.parameters())
+            optimizer = torch.optim.Adam(split_params, lr=self.config.phase1_learning_rate)
+            print_flush(f"  Split ContextBlock params: {sum(p.numel() for p in split_params):,}")
+
+            # トークン埋め込み（1回のみ計算）
+            is_cuda = str(self.device) == 'cuda' or (hasattr(self.device, 'type') and self.device.type == 'cuda')
+
+            with torch.no_grad():
+                token_embeds_gpu = self.model.token_embedding(split_token_ids.unsqueeze(0).to(self.device))
+                token_embeds_gpu = self.model.embed_norm(token_embeds_gpu).squeeze(0)
+                token_embeds = token_embeds_gpu.cpu()
+                del token_embeds_gpu
+                if is_cuda:
+                    torch.cuda.empty_cache()
+
+            previous_contexts: Optional[torch.Tensor] = None
+            final_convergence_rate = 0.0
+
+            for iteration in range(self.config.phase1_max_iterations):
+                import time
+                start_time = time.time()
+
+                if iteration == 0:
+                    # Iteration 0: シーケンシャル（学習なし）
+                    token_embeds_gpu = token_embeds.to(self.device)
+                    contexts = self._forward_sequential_split(
+                        token_embeds_gpu, None, split_block, split_context_dim
+                    )
+                    previous_contexts = contexts.detach().cpu()
+                    del token_embeds_gpu, contexts
+                    if is_cuda:
+                        torch.cuda.empty_cache()
+                    elapsed = time.time() - start_time
+                    print_flush(f"  Iteration 1/{self.config.phase1_max_iterations}: シーケンシャル [{elapsed:.2f}s]")
+                    continue
+
+                # Iteration 1+: 勾配累積付き並列処理
+                assert previous_contexts is not None
+                token_embeds_gpu = token_embeds.to(self.device)
+                previous_contexts_gpu = previous_contexts.to(self.device)
+
+                contexts, total_loss, cvfp_loss, diversity_loss = self._forward_parallel_split(
+                    token_embeds_gpu, previous_contexts_gpu, optimizer,
+                    split_block, split_context_dim
+                )
+
+                # 収束率
+                convergence_rate = self._compute_convergence_rate(contexts, previous_contexts_gpu, num_tokens)
+
+                # CPUに保存
+                previous_contexts = contexts.detach().cpu()
+                final_convergence_rate = convergence_rate
+
+                del token_embeds_gpu, previous_contexts_gpu, contexts
+                if is_cuda:
+                    torch.cuda.empty_cache()
+
+                elapsed = time.time() - start_time
+                print_flush(
+                    f"  Iteration {iteration+1}/{self.config.phase1_max_iterations}: "
+                    f"収束={convergence_rate*100:.1f}% | "
+                    f"Loss={total_loss:.6f} [{elapsed:.2f}s]"
+                )
+
+                # 早期停止
+                min_iterations = getattr(self.config, 'phase1_min_iterations', 3)
+                if iteration + 1 >= min_iterations and convergence_rate >= self.config.phase1_min_converged_ratio:
+                    print_flush(f"  → Early stopping")
+                    break
+
+            print_flush(f"  Split {split_id} 完了: {int(final_convergence_rate * num_tokens)}/{num_tokens} トークン収束")
+
+            # このsplitのコンテキストを保存
+            assert previous_contexts is not None
+            all_split_contexts.append(previous_contexts)
+
+        # 全データに対して推論モードでコンテキストを計算（結合用）
+        print_flush("\n--- 全データで推論（結合用） ---")
+        all_token_ids = data_provider.get_all_train_tokens(self.device)
+        contexts = self._inference_all_splits(all_token_ids, data_provider)
+
+        print_flush(f"\nPhase 1 分割訓練完了: {len(contexts)} トークン\n")
+        return contexts
+
+    def _forward_sequential_split(
+        self,
+        token_embeds: torch.Tensor,
+        previous_contexts: Optional[torch.Tensor],
+        split_block,
+        split_context_dim: int
+    ) -> torch.Tensor:
+        """分割ブロック用シーケンシャル処理"""
+        num_tokens = len(token_embeds)
+        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+
+        contexts = torch.zeros(num_tokens, split_context_dim, device=self.device)
+
+        if previous_contexts is None:
+            context = torch.zeros(1, split_context_dim, device=self.device)
+        else:
+            context = previous_contexts[-1].unsqueeze(0).detach()
+
+        token_history = [torch.zeros(self.model.embed_dim, device=self.device)
+                         for _ in range(num_input_tokens - 1)]
+
+        with torch.no_grad():
+            for i, token_embed in enumerate(token_embeds):
+                token_history.append(token_embed)
+                combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
+
+                context = split_block(context, combined_tokens.unsqueeze(0))
+                contexts[i] = context.squeeze(0)
+
+                if len(token_history) > num_input_tokens:
+                    token_history = token_history[-num_input_tokens:]
+
+        return contexts
+
+    def _forward_parallel_split(
+        self,
+        token_embeds: torch.Tensor,
+        previous_contexts: torch.Tensor,
+        optimizer: torch.optim.Optimizer,
+        split_block,
+        split_context_dim: int
+    ) -> tuple:
+        """分割ブロック用並列処理（勾配累積）"""
+        num_tokens = len(token_embeds)
+        batch_size = self.config.phase1_batch_size
+        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+        num_batches = (num_tokens + batch_size - 1) // batch_size
+        context_noise = self.config.phase1_context_noise
+
+        is_cuda = str(self.device) == 'cuda' or (hasattr(self.device, 'type') and self.device.type == 'cuda')
+
+        optimizer.zero_grad()
+
+        all_contexts_cpu = []
+        total_cvfp_loss = 0.0
+        total_diversity_loss = 0.0
+        total_loss_sum = 0.0
+
+        last_context = previous_contexts[-1].detach()
+
+        for start_idx in range(0, num_tokens, batch_size):
+            end_idx = min(start_idx + batch_size, num_tokens)
+            current_batch_size = end_idx - start_idx
+
+            if start_idx == 0:
+                batch_contexts = torch.zeros(current_batch_size, split_context_dim, device=self.device)
+                batch_contexts[0] = last_context
+                if current_batch_size > 1:
+                    batch_contexts[1:] = previous_contexts[:end_idx-1].detach()
+            else:
+                batch_contexts = previous_contexts[start_idx-1:end_idx-1].detach().clone()
+
+            if context_noise > 0 and self.model.training:
+                noise = torch.randn_like(batch_contexts) * context_noise
+                batch_contexts = batch_contexts + noise
+
+            batch_combined = self._build_combined_tokens_batch(
+                token_embeds, num_input_tokens, start_idx, end_idx
+            )
+
+            batch_output = split_block(batch_contexts, batch_combined)
+
+            batch_prev = previous_contexts[start_idx:end_idx].detach()
+            cvfp_loss = F.mse_loss(batch_output, batch_prev)
+            diversity_loss = self._compute_diversity_loss(batch_output)
+            batch_loss = (1 - self.config.dist_reg_weight) * cvfp_loss + self.config.dist_reg_weight * diversity_loss
+
+            scaled_loss = batch_loss / num_batches
+
+            if not torch.isnan(scaled_loss) and not torch.isinf(scaled_loss):
+                scaled_loss.backward()
+
+            all_contexts_cpu.append(batch_output.detach().cpu())
+
+            total_cvfp_loss += cvfp_loss.item() * current_batch_size
+            total_diversity_loss += diversity_loss.item() * current_batch_size
+            total_loss_sum += batch_loss.item() * current_batch_size
+
+            del batch_combined, batch_output, batch_loss, scaled_loss, batch_contexts, batch_prev
+
+            if is_cuda:
+                torch.cuda.empty_cache()
+
+        torch.nn.utils.clip_grad_norm_(split_block.parameters(), max_norm=self.config.phase1_gradient_clip)
+        optimizer.step()
+
+        contexts = torch.cat(all_contexts_cpu, dim=0).to(self.device)
+        del all_contexts_cpu
+
+        avg_cvfp_loss = total_cvfp_loss / num_tokens
+        avg_diversity_loss = total_diversity_loss / num_tokens
+        avg_total_loss = total_loss_sum / num_tokens
+
+        return contexts, avg_total_loss, avg_cvfp_loss, avg_diversity_loss
+
+    def _inference_all_splits(self, token_ids: torch.Tensor, data_provider) -> torch.Tensor:
+        """
+        全splitを使って全データのコンテキストを計算（結合モード）
+
+        推論時は全splitを実行して出力を連結
+        """
+        self.model.eval()
+        num_tokens = len(token_ids)
+        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+
+        with torch.no_grad():
+            token_embeds = self.model.token_embedding(token_ids.unsqueeze(0).to(self.device))
+            token_embeds = self.model.embed_norm(token_embeds).squeeze(0)
+
+        # 結合されたコンテキストを計算
+        contexts = torch.zeros(num_tokens, self.model.context_dim, device=self.device)
+        context = torch.zeros(1, self.model.context_dim, device=self.device)
+
+        token_history = [torch.zeros(self.model.embed_dim, device=self.device)
+                         for _ in range(num_input_tokens - 1)]
+
+        with torch.no_grad():
+            for i, token_embed in enumerate(token_embeds):
+                token_history.append(token_embed)
+                combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
+
+                # SplitContextBlock.forward (split_id=None) で全splitを実行して連結
+                context = self.model.context_block(context, combined_tokens.unsqueeze(0))
+                contexts[i] = context.squeeze(0)
+
+                if len(token_history) > num_input_tokens:
+                    token_history = token_history[-num_input_tokens:]
+
+        self.model.train()
+        return contexts

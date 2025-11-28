@@ -36,6 +36,23 @@ class ResidualConfig:
                                     # 2: 直前2トークン [token_{t-1}, token_t]
                                     # N: 直前Nトークン [token_{t-N+1}, ..., token_t]
 
+    # ========== ContextBlock分割 ==========
+    num_context_splits = 1          # ContextBlockの分割数
+                                    # 1: 分割なし（従来動作）
+                                    # N: N分割（各ブロックがcontext_dim/Nを出力、連結して結合）
+                                    # 効果: 計算量・パラメータが約1/Nに削減
+                                    # 訓練: 各ブロックは異なるサンプルで訓練（sample_id % N）
+
+    @property
+    def split_context_dim(self):
+        """分割後の各ContextBlockのcontext_dim"""
+        if self.context_dim % self.num_context_splits != 0:
+            raise ValueError(
+                f"context_dim ({self.context_dim}) must be divisible by "
+                f"num_context_splits ({self.num_context_splits})"
+            )
+        return self.context_dim // self.num_context_splits
+
     # ========== Diversity Regularization (Per-Dimension Usage Tracking) ==========
     # LayerNorm + Per-Dimension Variance Tracking (EMA-based) による多様性確保
     # 実装: 各次元の使用頻度を追跡し、使用頻度が低い次元を優先的に活性化

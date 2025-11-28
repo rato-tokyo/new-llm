@@ -31,6 +31,7 @@ class MemoryDataProvider(DataProvider):
         self._train_token_ids: Optional[torch.Tensor] = None
         self._val_token_ids: Optional[torch.Tensor] = None
         self._sample_order: Optional[List[int]] = None
+        self._sample_boundaries: Optional[List[Tuple[int, int]]] = None  # サンプル境界情報
         self._loaded = False
 
     def load_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -44,12 +45,12 @@ class MemoryDataProvider(DataProvider):
         tokenizer.pad_token = tokenizer.eos_token
 
         print_flush("Loading training data...")
-        self._train_token_ids, self._sample_order = self._load_train_data(tokenizer)
+        self._train_token_ids, self._sample_order, self._sample_boundaries = self._load_train_data(tokenizer)
 
         print_flush("Loading validation data...")
         self._val_token_ids = self._load_val_data(tokenizer)
 
-        print_flush(f"  Train: {len(self._train_token_ids)} tokens")
+        print_flush(f"  Train: {len(self._train_token_ids)} tokens ({len(self._sample_boundaries)} samples)")
         print_flush(f"  Val:   {len(self._val_token_ids)} tokens")
         if self.shuffle_samples:
             print_flush(f"  Shuffle: enabled (seed={self.shuffle_seed})")
@@ -57,7 +58,7 @@ class MemoryDataProvider(DataProvider):
         self._loaded = True
         return self._train_token_ids, self._val_token_ids
 
-    def _load_train_data(self, tokenizer) -> Tuple[torch.Tensor, List[int]]:
+    def _load_train_data(self, tokenizer) -> Tuple[torch.Tensor, List[int], List[Tuple[int, int]]]:
         """訓練データをロード（UltraChat）"""
         shuffle_suffix = f"_shuffle{self.shuffle_seed}" if self.shuffle_samples else ""
         cache_file = os.path.join(
@@ -69,9 +70,22 @@ class MemoryDataProvider(DataProvider):
             print_flush(f"  Loading from cache: {cache_file}")
             cached = torch.load(cache_file)
             if isinstance(cached, dict):
-                return cached['token_ids'], cached['sample_order']
+                token_ids = cached['token_ids']
+                sample_order = cached['sample_order']
+                # サンプル境界情報（キャッシュに含まれていない場合は再計算が必要）
+                if 'sample_boundaries' in cached:
+                    sample_boundaries = cached['sample_boundaries']
+                else:
+                    # 古いキャッシュの場合、境界情報なし → 再生成が必要
+                    print_flush("  Warning: Cache missing sample boundaries, regenerating...")
+                    os.remove(cache_file)
+                    return self._load_train_data(tokenizer)
+                return token_ids, sample_order, sample_boundaries
             else:
-                return cached, list(range(self.config.num_samples))
+                # 非常に古いキャッシュ形式
+                print_flush("  Warning: Old cache format, regenerating...")
+                os.remove(cache_file)
+                return self._load_train_data(tokenizer)
 
         print_flush(f"  Loading {self.config.num_samples} samples from UltraChat...")
         dataset = load_dataset(
@@ -90,6 +104,9 @@ class MemoryDataProvider(DataProvider):
             print_flush(f"  Shuffled {num_samples} samples with seed {self.shuffle_seed}")
 
         all_token_ids = []
+        sample_boundaries = []  # 各サンプルの(start, end)インデックス
+        current_pos = 0
+
         for idx in sample_order:
             messages = dataset[idx]["messages"]
             text = "\n".join([msg["content"] for msg in messages])
@@ -99,15 +116,25 @@ class MemoryDataProvider(DataProvider):
                 truncation=False,
                 return_tensors="pt"
             )
-            all_token_ids.append(tokens["input_ids"].squeeze(0))
+            sample_tokens = tokens["input_ids"].squeeze(0)
+            all_token_ids.append(sample_tokens)
+
+            # サンプル境界を記録
+            sample_len = len(sample_tokens)
+            sample_boundaries.append((current_pos, current_pos + sample_len))
+            current_pos += sample_len
 
         token_ids = torch.cat(all_token_ids)
 
         os.makedirs(self.config.cache_dir, exist_ok=True)
-        torch.save({'token_ids': token_ids, 'sample_order': sample_order}, cache_file)
+        torch.save({
+            'token_ids': token_ids,
+            'sample_order': sample_order,
+            'sample_boundaries': sample_boundaries
+        }, cache_file)
         print_flush(f"  Cached to: {cache_file}")
 
-        return token_ids, sample_order
+        return token_ids, sample_order, sample_boundaries
 
     def _load_val_data(self, tokenizer) -> torch.Tensor:
         """検証データをロード（テキストファイル）"""
@@ -130,6 +157,48 @@ class MemoryDataProvider(DataProvider):
     def get_sample_order(self) -> Optional[List[int]]:
         """現在のサンプル順序を取得"""
         return self._sample_order
+
+    def get_sample_boundaries(self) -> Optional[List[Tuple[int, int]]]:
+        """サンプル境界情報を取得
+
+        Returns:
+            List of (start, end) tuples for each sample
+            例: [(0, 128), (128, 256), ...]
+        """
+        if not self._loaded:
+            self.load_data()
+        return self._sample_boundaries
+
+    def get_split_token_ids(self, split_id: int, num_splits: int, device: torch.device) -> torch.Tensor:
+        """
+        指定されたsplit用のトークンIDを取得
+
+        サンプル単位で分割: sample_id % num_splits == split_id のサンプルのみ
+
+        Args:
+            split_id: 分割ID (0 to num_splits-1)
+            num_splits: 総分割数
+            device: デバイス
+
+        Returns:
+            該当するサンプルのトークンID
+        """
+        if not self._loaded:
+            self.load_data()
+
+        if self._sample_boundaries is None:
+            raise ValueError("Sample boundaries not available")
+
+        # このsplitに属するサンプルを抽出
+        split_tokens = []
+        for sample_idx, (start, end) in enumerate(self._sample_boundaries):
+            if sample_idx % num_splits == split_id:
+                split_tokens.append(self._train_token_ids[start:end])
+
+        if len(split_tokens) == 0:
+            raise ValueError(f"No samples found for split_id={split_id}")
+
+        return torch.cat(split_tokens).to(device)
 
     def reshuffle(self, new_seed: Optional[int] = None) -> torch.Tensor:
         """
@@ -192,4 +261,5 @@ class MemoryDataProvider(DataProvider):
         self._train_token_ids = None
         self._val_token_ids = None
         self._sample_order = None
+        self._sample_boundaries = None
         self._loaded = False

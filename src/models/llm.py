@@ -280,6 +280,130 @@ class ContextBlock(nn.Module):
         return outputs
 
 
+class SplitContextBlock(nn.Module):
+    """
+    Split Context Block - 分割されたContextBlockのコンテナ
+
+    N分割されたContextBlockを管理し、推論時に出力を連結する。
+    各ブロックは異なるサンプルで訓練され、推論時は全ブロックを実行して
+    出力を連結することで、元のcontext_dimと同じ次元の出力を生成。
+
+    効果:
+        - 計算量: 約 1/N に削減 (context_dim² → (context_dim/N)² × N)
+        - パラメータ: 約 1/N に削減
+
+    Args:
+        num_splits: Number of splits
+        num_layers: Number of layers per split block
+        context_dim: Total context dimension (will be split into context_dim/N per block)
+        embed_dim: Token embedding dimension (not split, full size to each block)
+        num_input_tokens: Number of input tokens
+    """
+
+    def __init__(self, num_splits, num_layers, context_dim, embed_dim, num_input_tokens=1):
+        super().__init__()
+
+        self.num_splits = num_splits
+        self.num_layers = num_layers
+        self.context_dim = context_dim
+        self.embed_dim = embed_dim
+        self.num_input_tokens = num_input_tokens
+
+        # 分割後の各ブロックのcontext_dim
+        if context_dim % num_splits != 0:
+            raise ValueError(
+                f"context_dim ({context_dim}) must be divisible by "
+                f"num_splits ({num_splits})"
+            )
+        self.split_context_dim = context_dim // num_splits
+
+        # 各分割ブロックを作成
+        self.blocks = nn.ModuleList([
+            ContextBlock(
+                num_layers=num_layers,
+                context_dim=self.split_context_dim,
+                embed_dim=embed_dim,
+                num_input_tokens=num_input_tokens
+            )
+            for _ in range(num_splits)
+        ])
+
+        # E案用: 各レイヤーの出力次元（結合後）
+        # 各ブロックのcontext_dims[1:]を結合
+        self.context_dims = self._compute_merged_context_dims()
+
+    def _compute_merged_context_dims(self):
+        """各レイヤーの結合後の出力次元を計算"""
+        # 全ブロックの最初のブロックから次元情報を取得
+        # 各ブロックは同じ構造なので、最初のブロックの次元 × num_splits
+        base_dims = self.blocks[0].context_dims
+        merged_dims = [dim * self.num_splits for dim in base_dims]
+        return merged_dims
+
+    def forward(self, context, token_embeds, split_id=None):
+        """
+        Forward pass
+
+        Args:
+            context: [batch, context_dim] or [batch, split_context_dim] (split_id指定時)
+            token_embeds: [batch, embed_dim * num_input_tokens]
+            split_id: None = 全ブロック実行して連結（推論用）
+                      int = 指定ブロックのみ実行（訓練用）
+
+        Returns:
+            context: [batch, context_dim] (split_id=None)
+                     [batch, split_context_dim] (split_id指定時)
+        """
+        if split_id is not None:
+            # 訓練: 特定の分割のみ実行
+            return self.blocks[split_id](context, token_embeds)
+        else:
+            # 推論: 全分割を実行して連結
+            outputs = []
+            for i, block in enumerate(self.blocks):
+                start = i * self.split_context_dim
+                end = (i + 1) * self.split_context_dim
+                split_context = context[:, start:end]
+                outputs.append(block(split_context, token_embeds))
+            return torch.cat(outputs, dim=-1)
+
+    def forward_with_intermediates(self, context, token_embeds, split_id=None):
+        """
+        Forward pass with intermediate outputs (E案用)
+
+        Args:
+            context: [batch, context_dim] or [batch, split_context_dim]
+            token_embeds: [batch, embed_dim * num_input_tokens]
+            split_id: None = 全ブロックの出力を連結
+                      int = 指定ブロックのみ
+
+        Returns:
+            outputs: List of context outputs [context_1, ..., context_N]
+                     split_id=None: 各要素は結合された次元
+                     split_id指定: 各要素は分割された次元
+        """
+        if split_id is not None:
+            # 訓練: 特定の分割のみ
+            return self.blocks[split_id].forward_with_intermediates(context, token_embeds)
+        else:
+            # 推論: 全分割の出力を連結
+            all_intermediates = []
+            for i, block in enumerate(self.blocks):
+                start = i * self.split_context_dim
+                end = (i + 1) * self.split_context_dim
+                split_context = context[:, start:end]
+                intermediates = block.forward_with_intermediates(split_context, token_embeds)
+                all_intermediates.append(intermediates)
+
+            # レイヤーごとに連結
+            num_layers = len(all_intermediates[0])
+            merged = []
+            for layer_idx in range(num_layers):
+                layer_outputs = [all_intermediates[s][layer_idx] for s in range(self.num_splits)]
+                merged.append(torch.cat(layer_outputs, dim=-1))
+            return merged
+
+
 class TokenBlock(nn.Module):
     """
     Token Block - トークン処理ブロック（複数レイヤー）
@@ -408,12 +532,18 @@ class LLM(nn.Module):
 
     E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
 
+    ContextBlock分割機能:
+    - num_context_splits > 1 の場合、ContextBlockを分割
+    - 各ブロックは異なるサンプルで訓練
+    - 推論時は出力を連結
+
     Args:
         vocab_size: Vocabulary size
         embed_dim: Token embedding dimension (単一トークンの次元)
         context_dim: Context vector dimension
         num_layers: Number of layers in both ContextBlock and TokenBlock
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
+        num_context_splits: Number of ContextBlock splits (1 = no split)
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
         use_weight_tying: Whether to tie token_embedding and token_output weights
                           (reduces parameters by ~38M, GPT-2 style)
@@ -426,6 +556,7 @@ class LLM(nn.Module):
         context_dim,
         num_layers=6,
         num_input_tokens=1,
+        num_context_splits=1,
         use_pretrained_embeddings=True,
         use_weight_tying=False
     ):
@@ -437,6 +568,7 @@ class LLM(nn.Module):
         self.context_dim = context_dim
         self.num_layers = num_layers
         self.num_input_tokens = num_input_tokens
+        self.num_context_splits = num_context_splits
         self.use_separated_architecture = True  # Always true now
         self.use_weight_tying = use_weight_tying
 
@@ -453,12 +585,25 @@ class LLM(nn.Module):
         print(f"  num_input_tokens: {num_input_tokens}")
 
         # ContextBlock: 文脈処理専用
-        self.context_block = ContextBlock(
-            num_layers=num_layers,
-            context_dim=context_dim,
-            embed_dim=embed_dim,
-            num_input_tokens=num_input_tokens
-        )
+        if num_context_splits > 1:
+            # 分割モード: SplitContextBlockを使用
+            print(f"  num_context_splits: {num_context_splits} (split mode)")
+            print(f"    → Each split: context_dim={context_dim // num_context_splits}")
+            self.context_block = SplitContextBlock(
+                num_splits=num_context_splits,
+                num_layers=num_layers,
+                context_dim=context_dim,
+                embed_dim=embed_dim,
+                num_input_tokens=num_input_tokens
+            )
+        else:
+            # 通常モード: 従来のContextBlockを使用
+            self.context_block = ContextBlock(
+                num_layers=num_layers,
+                context_dim=context_dim,
+                embed_dim=embed_dim,
+                num_input_tokens=num_input_tokens
+            )
 
         # TokenBlock: トークン処理専用
         # E案: ContextBlockの各レイヤー出力次元をTokenBlockに渡す
