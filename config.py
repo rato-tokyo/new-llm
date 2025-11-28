@@ -31,7 +31,7 @@ class ResidualConfig:
     # LayerNorm: 常に有効（数値安定性のため必須）
 
     # ========== 複数トークン入力 ==========
-    num_input_tokens =2            # 入力するトークン数
+    num_input_tokens = 1            # 入力するトークン数
                                     # 1: 現在のトークンのみ（現状維持）
                                     # 2: 直前2トークン [token_{t-1}, token_t]
                                     # N: 直前Nトークン [token_{t-N+1}, ..., token_t]
