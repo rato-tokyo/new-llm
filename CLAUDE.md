@@ -503,13 +503,14 @@ def compute_diversity_loss(contexts):
 
 **訓練データ**:
 - ソース: UltraChat (HuggingFaceH4/ultrachat_200k)
-- サンプル数: 50
-- トークン数: 6400
-- キャッシュ: `./cache/ultrachat_50samples_128len.pt`
+- サンプル数: 設定による（config.num_samples）
+- トークン化: `truncation=False`（全長使用、切り詰めなし）
+- キャッシュ: `./cache/ultrachat_{num_samples}samples_full.pt`
+
+⚠️ **注意**: 古いキャッシュファイル（`*_128len.pt`）は `max_length=128` で切り詰められており、現在の設定と互換性がありません。
 
 **検証データ** (絶対仕様):
 - ソース: 訓練データの最後20%から生成
-- トークン数: 1280
 - ファイル: `./data/example_val.txt`
 - **必須条件**: 全トークンが訓練データに存在すること
 - 生成スクリプト: `scripts/create_val_from_train.py`
