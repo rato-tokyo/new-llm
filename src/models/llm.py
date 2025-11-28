@@ -238,14 +238,18 @@ class TokenBlock(nn.Module):
         self.embed_dim = embed_dim
 
         # Stack of Token layers
-        self.layers = nn.ModuleList([
-            TokenLayer(
-                context_dim=context_dim,
-                embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens
+        # 最初のレイヤーのみ num_input_tokens を使用
+        # 2番目以降のレイヤーは前のレイヤーからの単一トークン出力を受け取る
+        self.layers = nn.ModuleList()
+        for i in range(num_layers):
+            layer_input_tokens = num_input_tokens if i == 0 else 1
+            self.layers.append(
+                TokenLayer(
+                    context_dim=context_dim,
+                    embed_dim=embed_dim,
+                    num_input_tokens=layer_input_tokens
+                )
             )
-            for _ in range(num_layers)
-        ])
 
     def forward(self, context, token_embeds):
         """
@@ -373,7 +377,7 @@ class LLM(nn.Module):
             self.token_output = nn.Linear(embed_dim, vocab_size, bias=False)
             # 重み共有（転置の関係: embedding [vocab, embed] → output [embed, vocab].T）
             self.token_output.weight = self.token_embedding.weight
-            print(f"✓ Weight Tying enabled: token_output shares weights with token_embedding")
+            print("✓ Weight Tying enabled: token_output shares weights with token_embedding")
             print(f"  → Saved ~{vocab_size * embed_dim / 1e6:.2f}M parameters")
         else:
             self.token_output = nn.Linear(embed_dim, vocab_size)
