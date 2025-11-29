@@ -180,74 +180,41 @@ class ContextBlock(nn.Module):
 
     Phase 1で学習、Phase 2でfreeze
 
-    2つのモード:
-    1. token_input_all_layers=True (旧構造):
-       - 全レイヤーでtoken入力
-       - 次元: context_dim → context_dim（全レイヤー同じ）
-       - 高いEffective Rank（66%+）
-       - 11/27実験でα=-0.72を達成
-
-    2. token_input_all_layers=False (等差減少設計):
-       - 最初のレイヤーのみtoken入力
-       - 次元: 等差的に減少
-       - Effective Rankが低下する傾向（9%程度）
+    token継ぎ足し方式（2025-11-29に一本化）:
+    - 全レイヤーでtoken入力
+    - 次元: context_dim → context_dim（全レイヤー同じ）
+    - PPL 334 vs 536（38%改善）
+    - Acc 18.9% vs 15.4%（23%向上）
 
     Args:
         num_layers: Number of context layers
         context_dim: Final context vector dimension
         embed_dim: Token embedding dimension (単一トークンの次元)
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
-        token_input_all_layers: True = 全レイヤーでtoken入力（旧構造）
     """
 
-    def __init__(self, num_layers, context_dim, embed_dim, num_input_tokens=1,
-                 token_input_all_layers=False):
+    def __init__(self, num_layers, context_dim, embed_dim, num_input_tokens=1):
         super().__init__()
 
         self.num_layers = num_layers
         self.num_input_tokens = num_input_tokens
         self.context_dim = context_dim
         self.embed_dim = embed_dim
-        self.token_input_all_layers = token_input_all_layers
 
         token_input_dim = embed_dim * num_input_tokens
 
-        if token_input_all_layers:
-            # 旧構造: 全レイヤーでtoken入力、次元は固定
-            self.context_dims = [context_dim] * (num_layers + 1)
+        # token継ぎ足し方式: 全レイヤーでtoken入力、次元は固定
+        self.context_dims = [context_dim] * (num_layers + 1)
 
-            self.layers = nn.ModuleList()
-            for i in range(num_layers):
-                self.layers.append(
-                    ContextLayer(
-                        context_input_dim=context_dim,
-                        context_output_dim=context_dim,
-                        token_input_dim=token_input_dim  # 全レイヤーでtoken入力
-                    )
+        self.layers = nn.ModuleList()
+        for i in range(num_layers):
+            self.layers.append(
+                ContextLayer(
+                    context_input_dim=context_dim,
+                    context_output_dim=context_dim,
+                    token_input_dim=token_input_dim  # 全レイヤーでtoken入力
                 )
-        else:
-            # 等差減少設計: 最初のレイヤーのみtoken入力
-            input_context_dim = context_dim + token_input_dim
-            output_context_dim = context_dim
-            total_reduction = input_context_dim - output_context_dim
-
-            self.context_dims = []
-            for i in range(num_layers + 1):
-                dim = input_context_dim - (total_reduction * i) // num_layers
-                self.context_dims.append(dim)
-
-            self.layers = nn.ModuleList()
-            for i in range(num_layers):
-                layer_token_dim = token_input_dim if i == 0 else 0
-                layer_input_dim = context_dim if i == 0 else self.context_dims[i]
-
-                self.layers.append(
-                    ContextLayer(
-                        context_input_dim=layer_input_dim,
-                        context_output_dim=self.context_dims[i + 1],
-                        token_input_dim=layer_token_dim
-                    )
-                )
+            )
 
     def forward(self, context, token_embeds):
         """
@@ -260,18 +227,9 @@ class ContextBlock(nn.Module):
         Returns:
             context: Updated context [batch, context_dim]
         """
-        if self.token_input_all_layers:
-            # 旧構造: 全レイヤーでtoken入力
-            for layer in self.layers:
-                context = layer(context, token_embeds)
-        else:
-            # 等差減少設計: 最初のレイヤーのみtoken入力
-            for i, layer in enumerate(self.layers):
-                if i == 0:
-                    context = layer(context, token_embeds)
-                else:
-                    context = layer(context)
-
+        # token継ぎ足し方式: 全レイヤーでtoken入力
+        for layer in self.layers:
+            context = layer(context, token_embeds)
         return context
 
     def forward_with_intermediates(self, context, token_embeds):
@@ -290,19 +248,10 @@ class ContextBlock(nn.Module):
                      len(outputs) == num_layers
         """
         outputs = []
-        if self.token_input_all_layers:
-            # 旧構造: 全レイヤーでtoken入力
-            for layer in self.layers:
-                context = layer(context, token_embeds)
-                outputs.append(context)
-        else:
-            # 等差減少設計: 最初のレイヤーのみtoken入力
-            for i, layer in enumerate(self.layers):
-                if i == 0:
-                    context = layer(context, token_embeds)
-                else:
-                    context = layer(context)
-                outputs.append(context)
+        # token継ぎ足し方式: 全レイヤーでtoken入力
+        for layer in self.layers:
+            context = layer(context, token_embeds)
+            outputs.append(context)
         return outputs
 
     def forward_with_intermediates_batch(self, contexts, token_embeds):
@@ -328,21 +277,11 @@ class ContextBlock(nn.Module):
             device=device, dtype=contexts.dtype
         )
 
-        if self.token_input_all_layers:
-            # 旧構造: 全レイヤーでtoken入力
-            current_context = contexts
-            for layer_idx, layer in enumerate(self.layers):
-                current_context = layer(current_context, token_embeds)
-                outputs[layer_idx] = current_context
-        else:
-            # 等差減少設計: 最初のレイヤーのみtoken入力
-            current_context = contexts
-            for layer_idx, layer in enumerate(self.layers):
-                if layer_idx == 0:
-                    current_context = layer(current_context, token_embeds)
-                else:
-                    current_context = layer(current_context)
-                outputs[layer_idx] = current_context
+        # token継ぎ足し方式: 全レイヤーでtoken入力
+        current_context = contexts
+        for layer_idx, layer in enumerate(self.layers):
+            current_context = layer(current_context, token_embeds)
+            outputs[layer_idx] = current_context
 
         return outputs
 
@@ -599,6 +538,10 @@ class LLM(nn.Module):
 
     E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
 
+    token継ぎ足し方式（2025-11-29に一本化）:
+    - 全レイヤーでtoken入力
+    - PPL 334 vs 536（38%改善）
+
     ContextBlock分割機能:
     - num_context_splits > 1 の場合、ContextBlockを分割
     - 各ブロックは異なるサンプルで訓練
@@ -614,8 +557,6 @@ class LLM(nn.Module):
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
         use_weight_tying: Whether to tie token_embedding and token_output weights
                           (reduces parameters by ~38M, GPT-2 style)
-        token_input_all_layers: True = 全レイヤーでtoken入力（旧構造、高ER）
-                                False = 最初のレイヤーのみ（等差減少設計）
     """
 
     def __init__(
@@ -627,8 +568,7 @@ class LLM(nn.Module):
         num_input_tokens=1,
         num_context_splits=1,
         use_pretrained_embeddings=True,
-        use_weight_tying=False,
-        token_input_all_layers=False
+        use_weight_tying=False
     ):
         super().__init__()
 
@@ -641,7 +581,6 @@ class LLM(nn.Module):
         self.num_context_splits = num_context_splits
         self.use_separated_architecture = True  # Always true now
         self.use_weight_tying = use_weight_tying
-        self.token_input_all_layers = token_input_all_layers
 
         # ========== Token Embeddings ==========
         if use_pretrained_embeddings:
@@ -654,10 +593,7 @@ class LLM(nn.Module):
         # ========== Separated Architecture ==========
         print(f"Using E案 architecture: ContextBlock({num_layers} layers) + TokenBlock({num_layers} layers)")
         print(f"  num_input_tokens: {num_input_tokens}")
-        if token_input_all_layers:
-            print("  token_input_all_layers: True (旧構造、高ER)")
-        else:
-            print("  token_input_all_layers: False (等差減少設計)")
+        print("  token継ぎ足し方式: 全レイヤーでtoken入力")
 
         # ContextBlock: 文脈処理専用
         if num_context_splits > 1:
@@ -670,8 +606,6 @@ class LLM(nn.Module):
                 context_dim=context_dim,
                 embed_dim=embed_dim,
                 num_input_tokens=num_input_tokens
-                # Note: SplitContextBlockは内部でContextBlockを作成
-                # token_input_all_layersの対応は別途必要
             )
         else:
             # 通常モード: 従来のContextBlockを使用
@@ -679,8 +613,7 @@ class LLM(nn.Module):
                 num_layers=num_layers,
                 context_dim=context_dim,
                 embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens,
-                token_input_all_layers=token_input_all_layers
+                num_input_tokens=num_input_tokens
             )
 
         # TokenBlock: トークン処理専用

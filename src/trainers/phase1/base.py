@@ -10,7 +10,8 @@ import torch
 from src.evaluation import ConvergenceResult
 
 # Phase 2キャッシュ用の型定義
-ContextCache = Union[torch.Tensor, List[torch.Tensor]]
+# token継ぎ足し方式: 全レイヤー同じcontext_dimなのでテンソル形式のみ
+ContextCache = torch.Tensor
 TrainResult = Union[torch.Tensor, Tuple[torch.Tensor, ContextCache, torch.Tensor]]
 EvalResult = Union[ConvergenceResult, torch.Tensor, Tuple[torch.Tensor, ContextCache, torch.Tensor]]
 

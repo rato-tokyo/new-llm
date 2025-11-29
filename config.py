@@ -37,10 +37,9 @@ class ResidualConfig:
                                     # N: 直前Nトークン [token_{t-N+1}, ..., token_t]
 
     # ========== ContextBlock構造 ==========
-    token_input_all_layers = True   # 全レイヤーでトークン入力するか（11/27実験再現用）
-                                    # True: 全レイヤーでtoken入力（旧構造、高ER、α=-0.72達成時の設定）
-                                    # False: 最初のレイヤーのみtoken入力（等差減少設計、低ER）
-                                    # ⚠️ Trueの場合、等差減少は無効化される
+    # token継ぎ足し方式（全レイヤーでtoken入力）に一本化
+    # PPL 334 vs 536（38%改善）、Acc 18.9% vs 15.4%（23%向上）
+    # 等差減少設計は廃止（2025-11-29）
 
     # ========== ContextBlock分割 ==========
     num_context_splits = 1          # ContextBlockの分割数

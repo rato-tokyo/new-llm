@@ -311,25 +311,14 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         if collect_all_layers:
             # Phase 2用キャッシュ形式で初期化
+            # token継ぎ足し方式: 全レイヤー同じcontext_dim
             num_layers = self.model.num_layers
             context_dim = self.model.context_dim
-            token_input_all_layers = getattr(self.model, 'token_input_all_layers', True)
 
-            if hasattr(self.model, 'context_block'):
-                context_dims = getattr(self.model.context_block, 'context_dims', None)
-            else:
-                context_dims = None
-
-            if token_input_all_layers or context_dims is None:
-                context_cache = torch.zeros(
-                    num_layers, num_tokens, context_dim,
-                    device=self.device, dtype=torch.float32
-                )
-            else:
-                context_cache = [
-                    torch.zeros(num_tokens, context_dims[i + 1], device=self.device, dtype=torch.float32)
-                    for i in range(num_layers)
-                ]
+            context_cache = torch.zeros(
+                num_layers, num_tokens, context_dim,
+                device=self.device, dtype=torch.float32
+            )
 
             token_embeds_combined = torch.zeros(
                 num_tokens, self.model.embed_dim * num_input_tokens,
@@ -354,10 +343,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
                     for layer_idx, ctx_out in enumerate(context_outputs):
                         assert context_cache is not None
-                        if isinstance(context_cache, list):
-                            context_cache[layer_idx][i] = ctx_out.squeeze(0)
-                        else:
-                            context_cache[layer_idx, i] = ctx_out.squeeze(0)
+                        context_cache[layer_idx, i] = ctx_out.squeeze(0)
 
                     context = context_outputs[-1]
                     contexts[i] = context.squeeze(0)

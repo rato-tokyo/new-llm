@@ -184,8 +184,7 @@ def main():
         num_input_tokens=config.num_input_tokens,
         num_context_splits=getattr(config, 'num_context_splits', 1),
         use_pretrained_embeddings=config.use_pretrained_embeddings,
-        use_weight_tying=config.use_weight_tying,
-        token_input_all_layers=getattr(config, 'token_input_all_layers', False)
+        use_weight_tying=config.use_weight_tying
     )
     model.to(device)
 

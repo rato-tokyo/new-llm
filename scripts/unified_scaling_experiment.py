@@ -44,7 +44,7 @@ CONTEXT_DIM = 768
 EMBED_DIM = 768
 NUM_INPUT_TOKENS = 1
 EMBEDDING_FREEZE = False  # 11/27実験再現: Embedding凍結なし
-TOKEN_INPUT_ALL_LAYERS = False  # False: 継ぎ足さない（等差減少設計）
+# token継ぎ足し方式: 全レイヤーでtoken入力に一本化（2025-11-29）
 DIST_REG_WEIGHT = 0.8  # 多様性正則化の重み
 RANDOM_SEED = 42
 
@@ -125,7 +125,7 @@ def run_experiment(
     config.embed_dim = EMBED_DIM
     config.num_input_tokens = NUM_INPUT_TOKENS
     config.phase2_freeze_embedding = EMBEDDING_FREEZE
-    config.token_input_all_layers = TOKEN_INPUT_ALL_LAYERS
+    # token継ぎ足し方式に一本化（2025-11-29）
     config.dist_reg_weight = DIST_REG_WEIGHT
     config.num_samples = num_samples
 
@@ -203,7 +203,7 @@ def run_experiment(
 
     print_flush(f"  Data: {len(train_token_ids):,} train / {len(val_token_ids):,} val tokens")
 
-    # モデル作成
+    # モデル作成（token継ぎ足し方式に一本化）
     model = LLM(
         vocab_size=config.vocab_size,
         embed_dim=config.embed_dim,
@@ -212,8 +212,7 @@ def run_experiment(
         num_input_tokens=config.num_input_tokens,
         num_context_splits=getattr(config, 'num_context_splits', 1),
         use_pretrained_embeddings=config.use_pretrained_embeddings,
-        use_weight_tying=config.use_weight_tying,
-        token_input_all_layers=getattr(config, 'token_input_all_layers', False)
+        use_weight_tying=config.use_weight_tying
     )
     model.to(device)
 
@@ -386,7 +385,7 @@ def main():
             'context_dim': CONTEXT_DIM,
             'embed_dim': EMBED_DIM,
             'num_input_tokens': NUM_INPUT_TOKENS,
-            'token_input_all_layers': TOKEN_INPUT_ALL_LAYERS,
+            'token_input_all_layers': True,  # 一本化（2025-11-29）
             'dist_reg_weight': DIST_REG_WEIGHT,
             'embedding_freeze': EMBEDDING_FREEZE,
             'tokenization': 'truncation=False (full length)',
