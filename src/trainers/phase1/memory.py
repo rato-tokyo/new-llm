@@ -166,7 +166,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             return final_contexts
 
         # return_all_layers=True: Phase 2キャッシュ用に全レイヤー出力を収集
-        # 並列処理版: 確定済みcontextを使ってバッチ処理
+        # 並列処理版: 確定済みcontextを使ってバッチ処理（OOM対策でバッチ分割）
         cache_start = time.time()
         print_flush("  Collecting cache (parallel)...")
         self.model.eval()
@@ -174,7 +174,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         # Phase 2用に最後のトークンを除く
         input_token_embeds = token_embeds_gpu[:-1]
-        num_input_tokens = len(input_token_embeds)
+        num_input_tokens_total = len(input_token_embeds)
 
         # Phase 2では token i の処理に previous_contexts[i-1] を使用
         # → 1つずらしたcontextを準備
@@ -184,25 +184,53 @@ class MemoryPhase1Trainer(Phase1Trainer):
         shifted_contexts = torch.cat([
             initial_context,
             previous_contexts[:-2].to(self.device)  # -2: 最後の2つを除く（-1でtokenに合わせ、さらに-1でずらし）
-        ], dim=0)  # [num_input_tokens, context_dim]
+        ], dim=0)  # [num_input_tokens_total, context_dim]
 
-        # バッチ並列で全レイヤー出力を計算
+        # バッチ分割で全レイヤー出力を計算（OOM対策）
+        # GPU空きメモリに基づいてバッチサイズを決定
+        cache_batch_size = 50000  # 50kトークンずつ処理（安全なサイズ）
+        if is_cuda:
+            torch.cuda.empty_cache()
+            free_mem_gb = (torch.cuda.get_device_properties(0).total_memory
+                          - torch.cuda.memory_allocated()) / (1024**3)
+            # 1トークンあたり約30KB（6層×768dim×4bytes×安全係数）
+            cache_batch_size = min(cache_batch_size, int(free_mem_gb * 1024 * 1024 / 30))
+            cache_batch_size = max(cache_batch_size, 10000)  # 最低10k
+
+        num_layers = self.model.num_layers
+        all_layer_contexts = torch.zeros(
+            num_layers, num_input_tokens_total, self.model.context_dim,
+            device='cpu', dtype=torch.float32  # CPUに保存してGPUメモリ節約
+        )
+
         with torch.no_grad():
-            all_layer_contexts = self.model.context_block.forward_with_intermediates_batch(
-                shifted_contexts, input_token_embeds
-            )  # [num_layers, num_tokens, context_dim]
+            for batch_start in range(0, num_input_tokens_total, cache_batch_size):
+                batch_end = min(batch_start + cache_batch_size, num_input_tokens_total)
+                batch_contexts = shifted_contexts[batch_start:batch_end]
+                batch_embeds = input_token_embeds[batch_start:batch_end]
+
+                batch_results = self.model.context_block.forward_with_intermediates_batch(
+                    batch_contexts, batch_embeds
+                )  # [num_layers, batch_size, context_dim]
+
+                all_layer_contexts[:, batch_start:batch_end, :] = batch_results.cpu()
+
+                # メモリ解放
+                del batch_results
+                if is_cuda:
+                    torch.cuda.empty_cache()
 
         # token_embeds_combined を準備（num_input_tokens対応）
         num_input_tokens_config = getattr(self.config, 'num_input_tokens', 1)
         if num_input_tokens_config == 1:
-            token_embeds_combined = input_token_embeds
+            token_embeds_combined = input_token_embeds.cpu()  # CPUに保存
         else:
             # 複数トークン入力の場合（履歴を結合）
             token_embeds_combined = torch.zeros(
-                num_input_tokens, self.model.embed_dim * num_input_tokens_config,
-                device=self.device, dtype=input_token_embeds.dtype
+                num_input_tokens_total, self.model.embed_dim * num_input_tokens_config,
+                device='cpu', dtype=input_token_embeds.dtype
             )
-            for i in range(num_input_tokens):
+            for i in range(num_input_tokens_total):
                 start_idx = max(0, i - num_input_tokens_config + 1)
                 token_window = input_token_embeds[start_idx:i+1]
                 if len(token_window) < num_input_tokens_config:
@@ -212,7 +240,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
                         device=self.device
                     )
                     token_window = torch.cat([padding, token_window], dim=0)
-                token_embeds_combined[i] = token_window.flatten()
+                token_embeds_combined[i] = token_window.flatten().cpu()
 
         cache_elapsed = time.time() - cache_start
         print_flush(f"  Cache collected (parallel) [{cache_elapsed:.1f}s]")
