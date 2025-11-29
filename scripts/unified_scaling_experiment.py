@@ -43,7 +43,7 @@ NUM_LAYERS = 6
 CONTEXT_DIM = 768
 EMBED_DIM = 768
 NUM_INPUT_TOKENS = 1
-EMBEDDING_FREEZE = False  # 11/27実験再現: Embedding凍結なし
+EMBEDDING_FREEZE = True  # 最高性能設定: Embedding凍結
 # token継ぎ足し方式: 全レイヤーでtoken入力に一本化（2025-11-29）
 DIST_REG_WEIGHT = 0.8  # 多様性正則化の重み
 RANDOM_SEED = 42
