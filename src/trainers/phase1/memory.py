@@ -124,7 +124,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 # Iteration 0: シーケンシャル（学習なし）
                 # token_embedsをGPUに移動して処理
                 token_embeds_gpu = token_embeds.to(self.device)
-                contexts = self._forward_sequential(token_embeds_gpu, None)
+                contexts, _, _ = self._forward_sequential(token_embeds_gpu, None)
                 previous_contexts = contexts.detach().cpu()  # CPUに保存
                 del token_embeds_gpu, contexts
                 if is_cuda:
@@ -184,12 +184,28 @@ class MemoryPhase1Trainer(Phase1Trainer):
         if not return_all_layers:
             return final_contexts
 
-        # return_all_layers=True: Phase 2キャッシュ用に全レイヤー出力を計算
-        print_flush("Building all-layer context cache for Phase 2...")
-        all_layer_contexts, token_embeds_combined = self._build_all_layer_cache(
-            token_ids, token_embeds
+        # return_all_layers=True: Phase 2キャッシュ用に全レイヤー出力を収集
+        # 訓練完了後、推論モードで1回だけシーケンシャル処理して全レイヤー出力を取得
+        print_flush("Collecting all-layer outputs for Phase 2 cache...")
+        self.model.eval()
+        token_embeds_gpu = token_embeds.to(self.device)
+
+        # Phase 2用に最後のトークンを除く
+        input_token_embeds = token_embeds_gpu[:-1]
+
+        _, all_layer_contexts, token_embeds_combined = self._forward_sequential(
+            input_token_embeds, None, collect_all_layers=True
         )
-        print_flush(f"Cache built: {len(all_layer_contexts)} layers")
+
+        self.model.train()
+        del token_embeds_gpu
+        if is_cuda:
+            torch.cuda.empty_cache()
+
+        assert all_layer_contexts is not None
+        assert token_embeds_combined is not None
+        cache_layers = len(all_layer_contexts) if isinstance(all_layer_contexts, list) else all_layer_contexts.shape[0]
+        print_flush(f"Cache collected: {cache_layers} layers")
 
         return final_contexts, all_layer_contexts, token_embeds_combined
 
@@ -238,16 +254,31 @@ class MemoryPhase1Trainer(Phase1Trainer):
         contexts = result.contexts
 
         if return_all_layers:
-            # Phase 2キャッシュ用に全レイヤー出力を計算
-            print_flush("Building all-layer context cache for Phase 2 (val)...")
-            # token_embedsを計算
+            # Phase 2キャッシュ用に全レイヤー出力を収集
+            print_flush("Collecting all-layer outputs for Phase 2 cache (val)...")
+            self.model.eval()
+
+            # トークン埋め込みを計算
             with torch.no_grad():
                 token_embeds_gpu = self.model.token_embedding(token_ids.unsqueeze(0).to(self.device))
-                token_embeds_cpu = self.model.embed_norm(token_embeds_gpu).squeeze(0).cpu()
-            all_layer_contexts, token_embeds_combined = self._build_all_layer_cache(
-                token_ids, token_embeds_cpu
+                token_embeds_gpu = self.model.embed_norm(token_embeds_gpu).squeeze(0)
+
+            # Phase 2用に最後のトークンを除く
+            input_token_embeds = token_embeds_gpu[:-1]
+
+            _, all_layer_contexts, token_embeds_combined = self._forward_sequential(
+                input_token_embeds, None, collect_all_layers=True
             )
-            print_flush(f"Cache built: {len(all_layer_contexts)} layers")
+
+            del token_embeds_gpu
+            is_cuda = str(self.device) == 'cuda' or (hasattr(self.device, 'type') and self.device.type == 'cuda')
+            if is_cuda:
+                torch.cuda.empty_cache()
+
+            assert all_layer_contexts is not None
+            assert token_embeds_combined is not None
+            cache_layers = len(all_layer_contexts) if isinstance(all_layer_contexts, list) else all_layer_contexts.shape[0]
+            print_flush(f"Cache collected: {cache_layers} layers")
             return contexts, all_layer_contexts, token_embeds_combined
 
         if return_contexts_only:
@@ -255,8 +286,24 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         return result
 
-    def _forward_sequential(self, token_embeds: torch.Tensor, previous_contexts: Optional[torch.Tensor]) -> torch.Tensor:
-        """シーケンシャル処理（Iteration 0用）- 勾配なし"""
+    def _forward_sequential(
+        self,
+        token_embeds: torch.Tensor,
+        previous_contexts: Optional[torch.Tensor],
+        collect_all_layers: bool = False
+    ) -> tuple[torch.Tensor, Optional[ContextCache], Optional[torch.Tensor]]:
+        """
+        シーケンシャル処理（Iteration 0用 or 全レイヤー収集用）- 勾配なし
+
+        Args:
+            token_embeds: トークン埋め込み [num_tokens, embed_dim]
+            previous_contexts: 前回のコンテキスト（Noneの場合はゼロ初期化）
+            collect_all_layers: 全レイヤー出力を収集するか
+
+        Returns:
+            collect_all_layers=False: (contexts, None, None)
+            collect_all_layers=True: (contexts, context_cache, token_embeds_combined)
+        """
         num_tokens = len(token_embeds)
         num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
 
@@ -272,117 +319,72 @@ class MemoryPhase1Trainer(Phase1Trainer):
         token_history = [torch.zeros(self.model.embed_dim, device=self.device)
                          for _ in range(num_input_tokens - 1)]
 
-        # 勾配なしで処理（Iteration 0は学習なし）
+        # 全レイヤー収集用の変数を初期化
+        context_cache: Optional[ContextCache] = None
+        token_embeds_combined: Optional[torch.Tensor] = None
+
+        if collect_all_layers:
+            # Phase 2用キャッシュ形式で初期化
+            num_layers = self.model.num_layers
+            context_dim = self.model.context_dim
+            token_input_all_layers = getattr(self.model, 'token_input_all_layers', True)
+
+            if hasattr(self.model, 'context_block'):
+                context_dims = getattr(self.model.context_block, 'context_dims', None)
+            else:
+                context_dims = None
+
+            if token_input_all_layers or context_dims is None:
+                context_cache = torch.zeros(
+                    num_layers, num_tokens, context_dim,
+                    device=self.device, dtype=torch.float32
+                )
+            else:
+                context_cache = [
+                    torch.zeros(num_tokens, context_dims[i + 1], device=self.device, dtype=torch.float32)
+                    for i in range(num_layers)
+                ]
+
+            token_embeds_combined = torch.zeros(
+                num_tokens, self.model.embed_dim * num_input_tokens,
+                device=self.device, dtype=torch.float32
+            )
+
+        # 勾配なしで処理
         with torch.no_grad():
             for i, token_embed in enumerate(token_embeds):
                 # 履歴 + 現在のトークンを結合
                 token_history.append(token_embed)
                 combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
 
-                context = self.model.context_block(context, combined_tokens.unsqueeze(0))
-                contexts[i] = context.squeeze(0)
+                if collect_all_layers:
+                    # 全レイヤー出力を取得
+                    assert token_embeds_combined is not None
+                    token_embeds_combined[i] = combined_tokens
+
+                    context_outputs = self.model.forward_context_with_intermediates(
+                        context, combined_tokens.unsqueeze(0)
+                    )
+
+                    for layer_idx, ctx_out in enumerate(context_outputs):
+                        assert context_cache is not None
+                        if isinstance(context_cache, list):
+                            context_cache[layer_idx][i] = ctx_out.squeeze(0)
+                        else:
+                            context_cache[layer_idx, i] = ctx_out.squeeze(0)
+
+                    context = context_outputs[-1]
+                    contexts[i] = context.squeeze(0)
+                else:
+                    # 通常処理（最終レイヤーのみ）
+                    context = self.model.context_block(context, combined_tokens.unsqueeze(0))
+                    contexts[i] = context.squeeze(0)
 
                 # メモリ効率: 古い履歴を削除
                 if len(token_history) > num_input_tokens:
                     token_history = token_history[-num_input_tokens:]
 
-        return contexts
-
-    def _build_all_layer_cache(
-        self,
-        token_ids: torch.Tensor,
-        token_embeds_cpu: torch.Tensor
-    ) -> tuple[ContextCache, torch.Tensor]:
-        """
-        全レイヤー出力のキャッシュを構築（Phase 2用）
-
-        Phase 2の_build_context_cacheと同じ形式で出力する。
-        Phase 1の訓練完了後に1回だけ呼ばれる。
-
-        Args:
-            token_ids: トークンID [seq_len]
-            token_embeds_cpu: トークン埋め込み [seq_len, embed_dim] (CPU)
-
-        Returns:
-            context_cache: レイヤーごとの出力
-                - token_input_all_layers=True: テンソル [num_layers, num_tokens, context_dim]
-                - token_input_all_layers=False: リスト [num_tokens, layer_dim] × num_layers
-            token_embeds: 結合トークン埋め込み [num_tokens, embed_dim * num_input_tokens]
-        """
-        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
-        input_ids = token_ids[:-1]  # 最後のトークン以外
-        num_tokens = len(input_ids)
-        num_layers = self.model.num_layers
-        context_dim = self.model.context_dim
-
-        # token_input_all_layersかどうかでキャッシュ形式を分岐
-        token_input_all_layers = getattr(self.model, 'token_input_all_layers', True)
-
-        # context_blockの次元リストを取得
-        if hasattr(self.model, 'context_block'):
-            context_dims = getattr(self.model.context_block, 'context_dims', None)
-        else:
-            context_dims = None
-
-        context_cache: ContextCache
-        if token_input_all_layers or context_dims is None:
-            # 旧構造: 全レイヤー同じ次元 → 単一テンソル
-            context_cache = torch.zeros(
-                num_layers, num_tokens, context_dim,
-                device=self.device, dtype=torch.float32
-            )
-        else:
-            # 等差減少設計: 各レイヤーで次元が異なる → リスト
-            context_cache = [
-                torch.zeros(num_tokens, context_dims[i + 1], device=self.device, dtype=torch.float32)
-                for i in range(num_layers)
-            ]
-
-        token_embeds_combined = torch.zeros(
-            num_tokens, self.model.embed_dim * num_input_tokens,
-            device=self.device, dtype=torch.float32
-        )
-
-        # トークン埋め込みをGPUに移動
-        token_embeds_gpu = token_embeds_cpu.to(self.device)
-
-        with torch.no_grad():
-            context = torch.zeros(1, context_dim, device=self.device)
-
-            # トークン履歴を初期化
-            token_history = [torch.zeros(self.model.embed_dim, device=self.device)
-                             for _ in range(num_input_tokens - 1)]
-
-            for i in range(num_tokens):
-                token_embed = token_embeds_gpu[i]
-
-                # 履歴に追加
-                token_history.append(token_embed)
-
-                # 最新の num_input_tokens 個を結合
-                combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
-                token_embeds_combined[i] = combined_tokens
-
-                # ContextBlock forward（全レイヤー出力を取得）
-                context_outputs = self.model.forward_context_with_intermediates(
-                    context, combined_tokens.unsqueeze(0)
-                )
-
-                # 各レイヤーの出力を格納
-                for layer_idx, ctx_out in enumerate(context_outputs):
-                    if isinstance(context_cache, list):
-                        context_cache[layer_idx][i] = ctx_out.squeeze(0)
-                    else:
-                        context_cache[layer_idx, i] = ctx_out.squeeze(0)
-
-                # コンテキスト更新
-                context = context_outputs[-1]
-
-                # メモリ効率: 古い履歴を削除
-                if len(token_history) > num_input_tokens:
-                    token_history = token_history[-num_input_tokens:]
-
-        return context_cache, token_embeds_combined
+        return contexts, context_cache, token_embeds_combined
 
     def _forward_parallel_with_grad_accum(
         self,
