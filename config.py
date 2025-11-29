@@ -76,7 +76,7 @@ class ResidualConfig:
                                          # 0.1: バランスの取れた閾値
                                          # 0.05: やや厳格（以前の設定）
                                          # 0.01: 非常に厳格
-    phase1_min_converged_ratio = 0.95    # 早期停止を無効化（101%以上 = 不可能）
+    phase1_min_converged_ratio = 0.99    # 早期停止を無効化（101%以上 = 不可能）
 
     # 検証データ収束判定
     val_convergence_trials = 4              # 検証データの収束判定イテレーション回数
