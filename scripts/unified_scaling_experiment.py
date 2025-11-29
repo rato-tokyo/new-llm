@@ -229,8 +229,12 @@ def run_experiment(
     # 訓練データのEffective Rank
     train_metrics = analyze_fixed_points(train_contexts, label="Train")
 
-    # 検証データの評価
-    val_contexts = phase1_trainer.evaluate(val_token_ids, label=f"Val ({num_samples} samples)")
+    # 検証データの評価（return_contexts_only=Trueでテンソルを取得）
+    val_contexts = phase1_trainer.evaluate(
+        val_token_ids,
+        label=f"Val ({num_samples} samples)",
+        return_contexts_only=True
+    )
     val_metrics = analyze_fixed_points(val_contexts, label="Val")
 
     phase1_time = time.time() - phase1_start
