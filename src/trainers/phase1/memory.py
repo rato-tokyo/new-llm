@@ -10,7 +10,6 @@ import torch
 import torch.nn.functional as F
 
 from .base import Phase1Trainer, print_flush, TrainResult, EvalResult, ContextCache
-from src.evaluation import check_convergence
 
 
 class MemoryPhase1Trainer(Phase1Trainer):
@@ -218,55 +217,39 @@ class MemoryPhase1Trainer(Phase1Trainer):
         return_all_layers: bool = False
     ) -> EvalResult:
         """
-        検証データを評価（収束判定）
+        検証データを評価
 
-        複数回イテレーションして、CVFP損失が収束するかを判定。
+        1回のシーケンシャル処理でコンテキストを計算。
+        return_all_layers=Trueの場合、Phase 2キャッシュ用に全レイヤー出力も収集。
 
         Args:
             token_ids: トークンID
             label: ラベル
-            num_trials: イテレーション回数（Noneの場合はconfig.val_convergence_trialsを使用）
-            return_contexts_only: Trueの場合はコンテキストのみ返す（後方互換性）
+            num_trials: 未使用（後方互換性のため残す）
+            return_contexts_only: 未使用（後方互換性のため残す）
             return_all_layers: Trueの場合、全レイヤー出力も返す（Phase 2キャッシュ用）
 
         Returns:
-            return_all_layers=False:
-                return_contexts_only=True: contexts
-                return_contexts_only=False: ConvergenceResult
             return_all_layers=True: (contexts, all_layer_contexts, token_embeds)
+            return_all_layers=False: contexts
         """
-        if num_trials is None:
-            num_trials = getattr(self.config, 'val_convergence_trials', 10)
+        print_flush(f"\nEvaluating {label} data ({len(token_ids):,} tokens)...")
 
-        print_flush(f"\nEvaluating {label} data...")
+        self.model.eval()
 
-        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+        # トークン埋め込みを計算
+        with torch.no_grad():
+            token_embeds_gpu = self.model.token_embedding(token_ids.unsqueeze(0).to(self.device))
+            token_embeds_gpu = self.model.embed_norm(token_embeds_gpu).squeeze(0)
 
-        result = check_convergence(
-            model=self.model,
-            token_ids=token_ids,
-            device=self.device,
-            num_trials=num_trials,
-            verbose=True,
-            num_input_tokens=num_input_tokens
-        )
-
-        contexts = result.contexts
+        # Phase 2用に最後のトークンを除く
+        input_token_embeds = token_embeds_gpu[:-1]
 
         if return_all_layers:
             # Phase 2キャッシュ用に全レイヤー出力を収集
             print_flush("Collecting all-layer outputs for Phase 2 cache (val)...")
-            self.model.eval()
 
-            # トークン埋め込みを計算
-            with torch.no_grad():
-                token_embeds_gpu = self.model.token_embedding(token_ids.unsqueeze(0).to(self.device))
-                token_embeds_gpu = self.model.embed_norm(token_embeds_gpu).squeeze(0)
-
-            # Phase 2用に最後のトークンを除く
-            input_token_embeds = token_embeds_gpu[:-1]
-
-            _, all_layer_contexts, token_embeds_combined = self._forward_sequential(
+            contexts, all_layer_contexts, token_embeds_combined = self._forward_sequential(
                 input_token_embeds, None, collect_all_layers=True
             )
 
@@ -281,10 +264,18 @@ class MemoryPhase1Trainer(Phase1Trainer):
             print_flush(f"Cache collected: {cache_layers} layers")
             return contexts, all_layer_contexts, token_embeds_combined
 
-        if return_contexts_only:
-            return contexts
+        # return_all_layers=False: コンテキストのみ計算
+        contexts, _, _ = self._forward_sequential(
+            input_token_embeds, None, collect_all_layers=False
+        )
 
-        return result
+        del token_embeds_gpu
+        is_cuda = str(self.device) == 'cuda' or (hasattr(self.device, 'type') and self.device.type == 'cuda')
+        if is_cuda:
+            torch.cuda.empty_cache()
+
+        print_flush(f"Evaluation complete: {len(contexts):,} contexts")
+        return contexts
 
     def _forward_sequential(
         self,
