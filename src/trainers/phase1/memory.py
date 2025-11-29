@@ -214,26 +214,22 @@ class MemoryPhase1Trainer(Phase1Trainer):
         label: str = "Val",
         num_trials: Optional[int] = None,
         return_contexts_only: bool = False,
-        return_all_layers: bool = False
+        return_all_layers: bool = True
     ) -> EvalResult:
         """
-        検証データを評価
-
-        1回のシーケンシャル処理でコンテキストを計算。
-        return_all_layers=Trueの場合、Phase 2キャッシュ用に全レイヤー出力も収集。
+        検証データのPhase 2キャッシュを収集
 
         Args:
             token_ids: トークンID
             label: ラベル
-            num_trials: 未使用（後方互換性のため残す）
-            return_contexts_only: 未使用（後方互換性のため残す）
-            return_all_layers: Trueの場合、全レイヤー出力も返す（Phase 2キャッシュ用）
+            num_trials: 未使用
+            return_contexts_only: 未使用
+            return_all_layers: 必ずTrue（Phase 2キャッシュ用）
 
         Returns:
-            return_all_layers=True: (contexts, all_layer_contexts, token_embeds)
-            return_all_layers=False: contexts
+            (contexts, all_layer_contexts, token_embeds)
         """
-        print_flush(f"\nEvaluating {label} data ({len(token_ids):,} tokens)...")
+        print_flush(f"\nCollecting {label} cache ({len(token_ids):,} tokens)...")
 
         self.model.eval()
 
@@ -245,28 +241,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
         # Phase 2用に最後のトークンを除く
         input_token_embeds = token_embeds_gpu[:-1]
 
-        if return_all_layers:
-            # Phase 2キャッシュ用に全レイヤー出力を収集
-            print_flush("Collecting all-layer outputs for Phase 2 cache (val)...")
-
-            contexts, all_layer_contexts, token_embeds_combined = self._forward_sequential(
-                input_token_embeds, None, collect_all_layers=True
-            )
-
-            del token_embeds_gpu
-            is_cuda = str(self.device) == 'cuda' or (hasattr(self.device, 'type') and self.device.type == 'cuda')
-            if is_cuda:
-                torch.cuda.empty_cache()
-
-            assert all_layer_contexts is not None
-            assert token_embeds_combined is not None
-            cache_layers = len(all_layer_contexts) if isinstance(all_layer_contexts, list) else all_layer_contexts.shape[0]
-            print_flush(f"Cache collected: {cache_layers} layers")
-            return contexts, all_layer_contexts, token_embeds_combined
-
-        # return_all_layers=False: コンテキストのみ計算
-        contexts, _, _ = self._forward_sequential(
-            input_token_embeds, None, collect_all_layers=False
+        # Phase 2キャッシュ用に全レイヤー出力を収集
+        contexts, all_layer_contexts, token_embeds_combined = self._forward_sequential(
+            input_token_embeds, None, collect_all_layers=True
         )
 
         del token_embeds_gpu
@@ -274,8 +251,11 @@ class MemoryPhase1Trainer(Phase1Trainer):
         if is_cuda:
             torch.cuda.empty_cache()
 
-        print_flush(f"Evaluation complete: {len(contexts):,} contexts")
-        return contexts
+        assert all_layer_contexts is not None
+        assert token_embeds_combined is not None
+        cache_layers = len(all_layer_contexts) if isinstance(all_layer_contexts, list) else all_layer_contexts.shape[0]
+        print_flush(f"Cache collected: {cache_layers} layers")
+        return contexts, all_layer_contexts, token_embeds_combined
 
     def _forward_sequential(
         self,
