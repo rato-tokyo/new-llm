@@ -61,6 +61,34 @@ def set_seed(seed=42):
     torch.backends.cudnn.benchmark = False
 
 
+def create_val_data_from_train(train_token_ids: torch.Tensor, tokenizer, val_file_path: str, val_ratio: float = 0.1):
+    """
+    訓練データから検証データを生成
+
+    Args:
+        train_token_ids: 訓練データのトークンID
+        tokenizer: トークナイザー
+        val_file_path: 検証データの保存先パス
+        val_ratio: 検証データの割合（デフォルト10%）
+    """
+    # 訓練データの最後の一部を検証データとして使用
+    val_size = int(len(train_token_ids) * val_ratio)
+    val_token_ids = train_token_ids[-val_size:]
+
+    # トークンをテキストに変換
+    val_text = tokenizer.decode(val_token_ids.tolist())
+
+    # ディレクトリ作成
+    os.makedirs(os.path.dirname(val_file_path), exist_ok=True)
+
+    # ファイルに保存
+    with open(val_file_path, 'w', encoding='utf-8') as f:
+        f.write(val_text)
+
+    print_flush(f"  Created val data: {val_file_path} ({val_size} tokens)")
+    return val_size
+
+
 def run_experiment(
     num_samples: int,
     device: torch.device,
@@ -81,6 +109,7 @@ def run_experiment(
     from src.trainers.phase1 import MemoryPhase1Trainer
     from src.trainers.phase2 import Phase2Trainer
     from src.evaluation.metrics import analyze_fixed_points
+    from transformers import AutoTokenizer
 
     print_flush(f"\n{'='*70}")
     print_flush(f"Experiment: {num_samples} samples")
@@ -97,6 +126,67 @@ def run_experiment(
     config.num_input_tokens = NUM_INPUT_TOKENS
     config.phase2_freeze_embedding = EMBEDDING_FREEZE
     config.num_samples = num_samples
+
+    # 検証データファイルパスをサンプル数に応じて設定
+    val_file_path = f"./data/ultrachat_{num_samples}samples_val.txt"
+    config.val_text_file = val_file_path
+
+    # 検証データが存在しない場合は生成
+    if not os.path.exists(val_file_path):
+        print_flush(f"\n  Generating validation data...")
+        # まず訓練データをロードするために一時的にMemoryDataProviderを使用
+        # 但し、val_dataロード前に止める必要があるため、直接UltraChatからロード
+        tokenizer = AutoTokenizer.from_pretrained(
+            config.tokenizer_name,
+            cache_dir=os.path.join(config.cache_dir, "tokenizer")
+        )
+        tokenizer.pad_token = tokenizer.eos_token
+
+        # 訓練データをキャッシュからロード（または生成）
+        cache_file = os.path.join(
+            config.cache_dir,
+            f"ultrachat_{num_samples}samples_full.pt"
+        )
+
+        if os.path.exists(cache_file):
+            cached = torch.load(cache_file)
+            train_tokens_for_val = cached['token_ids']
+        else:
+            # キャッシュがない場合はデータをロードして生成
+            from datasets import load_dataset
+            dataset = load_dataset(
+                config.dataset_name,
+                split=config.dataset_split,
+                cache_dir=os.path.join(config.cache_dir, "datasets")
+            )
+
+            all_token_ids = []
+            sample_boundaries = []
+            current_pos = 0
+
+            for idx in range(num_samples):
+                messages = dataset[idx]["messages"]
+                text = "\n".join([msg["content"] for msg in messages])
+                tokens = tokenizer(text, truncation=False, return_tensors="pt")
+                sample_tokens = tokens["input_ids"].squeeze(0)
+                all_token_ids.append(sample_tokens)
+                sample_len = len(sample_tokens)
+                sample_boundaries.append((current_pos, current_pos + sample_len))
+                current_pos += sample_len
+
+            train_tokens_for_val = torch.cat(all_token_ids)
+
+            # キャッシュ保存
+            os.makedirs(config.cache_dir, exist_ok=True)
+            torch.save({
+                'token_ids': train_tokens_for_val,
+                'sample_order': list(range(num_samples)),
+                'sample_boundaries': sample_boundaries
+            }, cache_file)
+            print_flush(f"  Cached to: {cache_file}")
+
+        # 検証データを生成
+        create_val_data_from_train(train_tokens_for_val, tokenizer, val_file_path)
 
     # データロード（サンプル数に応じたデータ）
     print_flush(f"\n  Loading {num_samples} samples...")
