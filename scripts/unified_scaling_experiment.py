@@ -37,14 +37,15 @@ import torch
 import numpy as np
 from scipy import stats
 
-# 設定（11/27実験再現用）
-# SAMPLE_SIZES = [50, 100, 200, 500]  # 全実験
-SAMPLE_SIZES = [500]  # 500 samplesのみ実行（1-3は完了済み）
+# 設定（実験用）
+SAMPLE_SIZES = [50, 100, 200, 500]  # 全実験
 NUM_LAYERS = 6
 CONTEXT_DIM = 768
 EMBED_DIM = 768
 NUM_INPUT_TOKENS = 1
 EMBEDDING_FREEZE = False  # 11/27実験再現: Embedding凍結なし
+TOKEN_INPUT_ALL_LAYERS = False  # False: 継ぎ足さない（等差減少設計）
+DIST_REG_WEIGHT = 0.8  # 多様性正則化の重み
 RANDOM_SEED = 42
 
 
@@ -126,6 +127,8 @@ def run_experiment(
     config.embed_dim = EMBED_DIM
     config.num_input_tokens = NUM_INPUT_TOKENS
     config.phase2_freeze_embedding = EMBEDDING_FREEZE
+    config.token_input_all_layers = TOKEN_INPUT_ALL_LAYERS
+    config.dist_reg_weight = DIST_REG_WEIGHT
     config.num_samples = num_samples
 
     # 検証データファイルパスをサンプル数に応じて設定
@@ -331,6 +334,8 @@ def main():
     print_flush(f"  Sample sizes: {SAMPLE_SIZES}")
     print_flush(f"  Model: {NUM_LAYERS} layers, {CONTEXT_DIM} dim")
     print_flush(f"  num_input_tokens: {NUM_INPUT_TOKENS}")
+    print_flush(f"  token_input_all_layers: {TOKEN_INPUT_ALL_LAYERS}")
+    print_flush(f"  dist_reg_weight: {DIST_REG_WEIGHT}")
     print_flush(f"  Embedding freeze: {EMBEDDING_FREEZE}")
     print_flush("  Tokenization: truncation=False (full length)")
     print_flush(f"  Random seed: {RANDOM_SEED}")
@@ -412,6 +417,8 @@ def main():
             'context_dim': CONTEXT_DIM,
             'embed_dim': EMBED_DIM,
             'num_input_tokens': NUM_INPUT_TOKENS,
+            'token_input_all_layers': TOKEN_INPUT_ALL_LAYERS,
+            'dist_reg_weight': DIST_REG_WEIGHT,
             'embedding_freeze': EMBEDDING_FREEZE,
             'tokenization': 'truncation=False (full length)',
             'random_seed': RANDOM_SEED,
