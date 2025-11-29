@@ -15,17 +15,16 @@ def print_flush(msg):
     sys.stdout.flush()
 
 
-def analyze_fixed_points(contexts, label="", verbose=True, max_samples=5000):
+def analyze_fixed_points(contexts, label="", verbose=True):
     """
     Analyze fixed-point contexts for quality metrics.
 
-    高速版: ペアワイズ分析（O(n²)）を削除し、Effective Rankのみ計算。
+    Effective Rank（SVDベース）のみ計算。
 
     Args:
         contexts: Fixed-point contexts [num_tokens, context_dim]
         label: Label for display (e.g., "Train", "Val")
         verbose: If True, print detailed analysis
-        max_samples: 未使用（後方互換性のため残す）
 
     Returns:
         dict: Analysis metrics including effective rank

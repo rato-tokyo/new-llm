@@ -35,11 +35,6 @@ class ResidualConfig:
                                     # 2: 直前2トークン [token_{t-1}, token_t]
                                     # N: 直前Nトークン [token_{t-N+1}, ..., token_t]
 
-    # ========== ContextBlock構造 ==========
-    # token継ぎ足し方式（全レイヤーでtoken入力）に一本化
-    # PPL 334 vs 536（38%改善）、Acc 18.9% vs 15.4%（23%向上）
-    # 等差減少設計は廃止（2025-11-29）
-
     # ========== ContextBlock分割 ==========
     num_context_splits = 1          # ContextBlockの分割数
                                     # 1: 分割なし（従来動作）

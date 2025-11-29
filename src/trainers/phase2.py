@@ -83,29 +83,21 @@ class Phase2Trainer:
         # ContextBlockをfreeze
         self.model.freeze_context_block()
 
-        # Embedding凍結オプション
-        freeze_embedding = getattr(config, 'phase2_freeze_embedding', False)
+        # Embedding凍結（標準設定）
+        freeze_embedding = config.phase2_freeze_embedding
 
         # token_outputを有効化（Embedding凍結オプション付き）
         self.model.unfreeze_token_output(freeze_embedding=freeze_embedding)
 
         # 学習対象パラメータの確認
-        if model.use_separated_architecture:
-            # 実際に学習されるパラメータを計算
-            trainable_params = [p for p in model.parameters() if p.requires_grad]
-            num_trainable = sum(p.numel() for p in trainable_params)
-            total_params = sum(p.numel() for p in model.parameters())
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+        num_trainable = sum(p.numel() for p in trainable_params)
+        total_params = sum(p.numel() for p in model.parameters())
 
-            if freeze_embedding:
-                print_flush(f"✓ Training TokenBlock only: {num_trainable:,}/{total_params:,} parameters")
-            else:
-                print_flush(f"✓ Training TokenBlock + token_output: {num_trainable:,}/{total_params:,} parameters")
+        if freeze_embedding:
+            print_flush(f"✓ Training TokenBlock only: {num_trainable:,}/{total_params:,} parameters")
         else:
-            # Legacy: token_outputのみ
-            trainable_params = list(model.token_output.parameters())
-            num_trainable = sum(p.numel() for p in trainable_params)
-            total_params = sum(p.numel() for p in model.parameters())
-            print_flush(f"✓ Training token_output only (legacy): {num_trainable:,}/{total_params:,} parameters")
+            print_flush(f"✓ Training TokenBlock + Embedding: {num_trainable:,}/{total_params:,} parameters")
 
         # Optimizer
         self.optimizer = torch.optim.Adam(

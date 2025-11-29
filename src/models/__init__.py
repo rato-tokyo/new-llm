@@ -1,9 +1,17 @@
-"""New-LLM Models - Residual Standard Architecture Only
+"""New-LLM Models - CVFP Architecture
 
-Unified to Residual Standard architecture with CVFP (Context Vector Fixed-Point) training.
-All other architectures (Sequential, Layerwise, Flexible) have been deprecated.
+CVFP (Context Vector Fixed-Point) architecture with token継ぎ足し方式.
 """
 
 from .llm import LLM
+from .layers import ContextLayer, TokenLayer
+from .blocks import ContextBlock, TokenBlock, SplitContextBlock
 
-__all__ = ['LLM']
+__all__ = [
+    'LLM',
+    'ContextLayer',
+    'TokenLayer',
+    'ContextBlock',
+    'TokenBlock',
+    'SplitContextBlock',
+]

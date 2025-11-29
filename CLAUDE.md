@@ -92,8 +92,7 @@ phase2_trainer.train_full(
 
 ### メモリ使用量
 
-- 500サンプル（53万トークン）: 約9.3GB（従来と同じ）
-- `token_input_all_layers=False`の場合: 約6.5GB（等差減少で削減）
+- 500サンプル（53万トークン）: 約9.3GB
 
 ### ✅ キャッシュ収集の並列化 (2025-11-29 更新)
 
@@ -114,29 +113,22 @@ all_layer_outputs = model.forward_with_intermediates_batch(shifted_contexts, tok
 
 ---
 
-## 🎯 TOKEN継ぎ足しが本質的 (2025-11-29)
+## 🎯 TOKEN継ぎ足し方式（標準採用）
 
-**`token_input_all_layers=True`（全レイヤーでtoken入力）がパフォーマンスに本質的。**
+**全レイヤーでtoken入力する方式を標準採用。**
 
-### 比較データ（500サンプル）
+### 実験結果（500サンプル）
 
-| 設定 | token_input_all_layers | ER | Val PPL | Val Acc |
-|------|------------------------|-----|---------|---------|
-| 旧構造 | **True** | 76.3% | **334** | **18.9%** |
-| 等差減少 | False | 8.6% | 536 | 15.4% |
+| 指標 | 値 |
+|------|-----|
+| Val PPL | **324** |
+| Val Acc | **19.0%** |
+| Effective Rank | 76% |
 
 ### 結論
 
-- token継ぎ足しありでPPL 38%改善、Acc 23%向上
+- token継ぎ足しによって情報が豊富になりパフォーマンス向上
 - **Effective Rank（ER）はtoken継ぎ足しの副産物**
-- ERが高いからパフォーマンスが良いのではなく、token継ぎ足しによって情報が豊富になる
-
-### 推奨設定
-
-```python
-# config.py
-token_input_all_layers = True  # 推奨（パフォーマンス重視）
-```
 
 ---
 
@@ -293,7 +285,7 @@ Iteration 10/10: 収束=XX%    ← 最終結果を見る
 ```python
 # config.py
 phase1_min_iterations = 5   # 最低5イテレーション保証（早期停止防止）
-phase1_max_iterations = 20  # 等差減少設計では多めに
+phase1_max_iterations = 40  # 最大イテレーション数
 ```
 
 ---
@@ -933,9 +925,10 @@ set_seed(42)
 - `scripts/create_val_from_train.py` - 検証データ生成（訓練データから）
 
 **Core Implementation**:
-- `src/training/phase1_trainer.py` - Phase 1訓練ロジック（Dimension Usage Statistics）
-- `src/models/new_llm_residual.py` - モデルアーキテクチャ
-- `src/data/loader.py` - データローダー（auto_split禁止ロジック）
+- `src/trainers/phase1/memory.py` - Phase 1訓練ロジック（並列処理版）
+- `src/trainers/phase2.py` - Phase 2訓練ロジック（キャッシュ方式）
+- `src/models/llm.py` - モデルアーキテクチャ（CVFP）
+- `src/providers/data/` - データプロバイダー
 
 ---
 
@@ -1100,36 +1093,33 @@ current_contexts[t] = context.squeeze(0).detach()  # Detach for convergence trac
 
 ### Core Components
 
-**1. CVFPLayer (Context Vector Fixed-Point Layer)**
-- Location: [src/models/new_llm_residual.py:15-102](src/models/new_llm_residual.py#L15-L102)
-- Input: `context [batch, context_dim]`, `token_embed [batch, embed_dim]`
-- Output: `new_context [batch, context_dim]`, `new_token [batch, embed_dim]`
-- Architecture:
-  - FNN: `[context + token] → [hidden_dim]` with ReLU
-  - Split: `hidden_dim → delta_context + delta_token`
-  - Residual: `new_context = context + delta_context`
-  - LayerNorm: Optional mixing with `layernorm_mix` parameter
+**1. ContextLayer / TokenLayer**
+- Location: [src/models/llm.py](src/models/llm.py)
+- ContextLayer: 文脈処理専用（token継ぎ足し方式）
+- TokenLayer: トークン処理専用
 
-**2. CVFPBlock (Multiple Layers)**
-- Location: [src/models/new_llm_residual.py:105-150](src/models/new_llm_residual.py#L105-L150)
-- Sequential execution of `num_layers` CVFPLayer instances
-- Passes context and token through all layers
+**2. ContextBlock / TokenBlock**
+- 複数レイヤーの順次実行
+- ContextBlock: Phase 1で学習、Phase 2でfreeze
+- TokenBlock: Phase 2で学習
 
-**3. NewLLMResidual (Main Model)**
-- Location: [src/models/new_llm_residual.py:153-314](src/models/new_llm_residual.py#L153-L314)
-- Token Embedding: GPT-2 pretrained (768-dim, frozen)
-- CVFP Blocks: 6 blocks (configurable via `layer_structure`)
-- Output Head: Linear layer `context_dim → vocab_size`
+**3. LLM (Main Model)**
+- Token Embedding: GPT-2 pretrained (768-dim, frozen in Phase 2)
+- Weight Tying: token_output shares weights with token_embedding
+- Output Head: Linear layer `embed_dim → vocab_size`
 
-**4. Phase1Trainer (CVFP Fixed-Point Learning)**
-- Location: [src/training/phase1_trainer.py](src/training/phase1_trainer.py)
-- Training loop: Iterative refinement until convergence
+**4. MemoryPhase1Trainer (CVFP Fixed-Point Learning)**
+- Location: [src/trainers/phase1/memory.py](src/trainers/phase1/memory.py)
+- 並列処理版（23x高速化）
 - Loss function:
   - CVFP Loss: `MSE(context_t, context_{t-1})` - **NO normalization**
-  - Diversity Loss: EMA-based per-dimension variance tracking
+  - Diversity Loss: Global mean-based tracking
   - Total: `(1-w) * cvfp_loss + w * diversity_loss`
-- Convergence: MSE < threshold (0.1) for 95% of tokens
-- Early stopping: When 95% converged (training only)
+
+**5. Phase2Trainer (Next-Token Prediction)**
+- Location: [src/trainers/phase2.py](src/trainers/phase2.py)
+- キャッシュ方式による高速化
+- ContextBlock出力を事前キャッシュし、TokenBlockをバッチ並列処理
 
 ### Key Design Decisions
 
@@ -1166,4 +1156,4 @@ current_contexts[t] = context.squeeze(0).detach()  # Detach for convergence trac
 
 ---
 
-Last Updated: 2025-11-29 (Phase 2 Cache Reuse + Memory Optimization)
+Last Updated: 2025-11-29 (Refactoring: 後方互換性コード削除、ドキュメント整理)
