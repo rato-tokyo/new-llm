@@ -114,7 +114,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 # Iteration 0: 小さなランダム値で初期化（シーケンシャル処理を省略）
                 # context ≈ 0 なので、Iteration 1で各トークンがほぼ独立に処理される
                 previous_contexts = torch.randn(num_tokens, self.model.context_dim) * 0.01
-                print_flush(f"  Iter 1: random init")
+                print_flush("  Iter 1: random init")
                 continue
 
             # Iteration 1+: 勾配累積付き並列処理
@@ -168,7 +168,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         # return_all_layers=True: Phase 2キャッシュ用に全レイヤー出力を収集
         # 注意: シーケンシャル処理必須（因果的依存のため並列化不可）
         cache_start = time.time()
-        print_flush(f"  Collecting cache...")
+        print_flush("  Collecting cache...")
         self.model.eval()
         token_embeds_gpu = token_embeds.to(self.device)
 
