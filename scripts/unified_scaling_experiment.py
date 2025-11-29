@@ -113,9 +113,7 @@ def run_experiment(
     from src.evaluation.metrics import analyze_fixed_points
     from transformers import AutoTokenizer
 
-    print_flush(f"\n{'='*70}")
-    print_flush(f"Experiment: {num_samples} samples")
-    print_flush(f"{'='*70}")
+    print_flush(f"\n--- {num_samples} samples ---")
 
     # シードを固定（各実験で同じ初期化）
     set_seed(RANDOM_SEED)
@@ -193,7 +191,6 @@ def run_experiment(
         create_val_data_from_train(train_tokens_for_val, tokenizer, val_file_path)
 
     # データロード（サンプル数に応じたデータ）
-    print_flush(f"\n  Loading {num_samples} samples...")
     data_provider = MemoryDataProvider(config, shuffle_samples=False)
     full_train_token_ids, val_token_ids = data_provider.load_data()
 
@@ -204,9 +201,7 @@ def run_experiment(
     train_token_ids = train_token_ids.to(device)
     val_token_ids = val_token_ids.to(device)
 
-    print_flush(f"  Full data tokens: {len(full_train_token_ids):,}")
-    print_flush(f"  Train tokens (excluding val): {len(train_token_ids):,}")
-    print_flush(f"  Val tokens: {len(val_token_ids):,}")
+    print_flush(f"  Data: {len(train_token_ids):,} train / {len(val_token_ids):,} val tokens")
 
     # モデル作成
     model = LLM(
@@ -222,11 +217,7 @@ def run_experiment(
     )
     model.to(device)
 
-    total_params = sum(p.numel() for p in model.parameters())
-    print_flush(f"  Model parameters: {total_params:,}")
-
     # Phase 1: CVFP固定点学習（全レイヤー出力も取得してPhase 2に渡す）
-    print_flush("\n  Phase 1 starting...")
     phase1_start = time.time()
 
     phase1_trainer = MemoryPhase1Trainer(model, config, device)
@@ -258,12 +249,8 @@ def run_experiment(
     # Effective Rankの比率を計算（effective_rank / context_dim）
     train_er_ratio = train_metrics['effective_rank'] / CONTEXT_DIM
     val_er_ratio = val_metrics['effective_rank'] / CONTEXT_DIM
-    print_flush(f"\n  Phase 1 completed: {phase1_time/60:.1f}min")
-    print_flush(f"  Train ER: {train_er_ratio*100:.1f}%")
-    print_flush(f"  Val ER: {val_er_ratio*100:.1f}%")
 
     # Phase 2: Next-Token Prediction（Phase 1のキャッシュを再利用）
-    print_flush("\n  Phase 2 starting...")
     phase2_start = time.time()
 
     phase2_trainer = Phase2Trainer(model=model, config=config)
@@ -286,9 +273,12 @@ def run_experiment(
     best_val_ppl = phase2_history['val_ppl'][best_epoch - 1]
     best_val_acc = phase2_history['val_acc'][best_epoch - 1]
 
-    print_flush(f"\n  Phase 2 completed: {phase2_time/60:.1f}min")
-    print_flush(f"  Best Val PPL: {best_val_ppl:.2f}")
-    print_flush(f"  Best Val Acc: {best_val_acc*100:.2f}%")
+    # サマリー
+    total_time = phase1_time + phase2_time
+    print_flush(
+        f"\n  ✓ {num_samples} samples: PPL={best_val_ppl:.1f}, Acc={best_val_acc*100:.1f}%, "
+        f"ER={val_er_ratio*100:.1f}%, Time={total_time/60:.1f}min"
+    )
 
     # クリーンアップ
     data_provider.close()
@@ -337,19 +327,10 @@ def calculate_scaling_law(results: list):
 
 
 def main():
-    print_flush("=" * 70)
-    print_flush("UNIFIED SCALING EXPERIMENT")
-    print_flush("=" * 70)
-    print_flush(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print_flush("\nSettings:")
-    print_flush(f"  Sample sizes: {SAMPLE_SIZES}")
-    print_flush(f"  Model: {NUM_LAYERS} layers, {CONTEXT_DIM} dim")
-    print_flush(f"  num_input_tokens: {NUM_INPUT_TOKENS}")
-    print_flush(f"  token_input_all_layers: {TOKEN_INPUT_ALL_LAYERS}")
-    print_flush(f"  dist_reg_weight: {DIST_REG_WEIGHT}")
-    print_flush(f"  Embedding freeze: {EMBEDDING_FREEZE}")
-    print_flush("  Tokenization: truncation=False (full length)")
-    print_flush(f"  Random seed: {RANDOM_SEED}")
+    print_flush("=" * 60)
+    print_flush("SCALING EXPERIMENT")
+    print_flush("=" * 60)
+    print_flush(f"Samples: {SAMPLE_SIZES} | Model: {NUM_LAYERS}L/{CONTEXT_DIM}D | Seed: {RANDOM_SEED}")
 
     # シード固定
     set_seed(RANDOM_SEED)
@@ -359,14 +340,7 @@ def main():
     if torch.cuda.is_available():
         gpu_name = torch.cuda.get_device_name(0)
         gpu_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
-        print_flush(f"\nGPU: {gpu_name} ({gpu_mem:.1f}GB)")
-    else:
-        print_flush("\nUsing CPU")
-
-    # 実験実行
-    print_flush("\n" + "=" * 70)
-    print_flush("Running experiments...")
-    print_flush("=" * 70)
+        print_flush(f"GPU: {gpu_name} ({gpu_mem:.1f}GB)")
 
     results = []
     total_start = time.time()
@@ -376,7 +350,6 @@ def main():
     os.makedirs(output_dir, exist_ok=True)
 
     for i, num_samples in enumerate(SAMPLE_SIZES):
-        print_flush(f"\n[{i+1}/{len(SAMPLE_SIZES)}] {num_samples} samples")
         result = run_experiment(num_samples, device)
         results.append(result)
 
@@ -387,38 +360,23 @@ def main():
 
     total_time = time.time() - total_start
 
-    # スケーリング則計算
-    print_flush("\n" + "=" * 70)
-    print_flush("SCALING LAW ANALYSIS")
-    print_flush("=" * 70)
-
     scaling = calculate_scaling_law(results)
 
-    print_flush(f"\nPPL = {scaling['A']:.2f} × tokens^({scaling['alpha']:.4f})")
-    print_flush(f"α = {scaling['alpha']:.4f}")
-    print_flush(f"R² = {scaling['r_squared']:.4f}")
-    print_flush(f"p-value = {scaling['p_value']:.6f}")
-
-    # 結果表示
-    print_flush("\n" + "=" * 70)
-    print_flush("RESULTS SUMMARY")
-    print_flush("=" * 70)
-
-    header = f"{'Samples':>8} | {'Tokens':>10} | {'Val PPL':>10} | {'Val Acc':>10}"
-    header += f" | {'Train ER':>10} | {'Val ER':>10}"
-    print_flush(f"\n{header}")
-    print_flush("-" * 80)
+    # 結果サマリー
+    print_flush("\n" + "=" * 60)
+    print_flush("RESULTS")
+    print_flush("=" * 60)
+    print_flush(f"{'Samples':>8} {'Tokens':>10} {'Val PPL':>10} {'Val Acc':>8} {'Val ER':>8}")
+    print_flush("-" * 50)
     for r in results:
         print_flush(
-            f"{r['num_samples']:>8} | "
-            f"{r['train_tokens']:>10,} | "
-            f"{r['val_ppl']:>10.2f} | "
-            f"{r['val_acc']*100:>9.2f}% | "
-            f"{r['train_effective_rank']*100:>9.1f}% | "
-            f"{r['val_effective_rank']*100:>9.1f}%"
+            f"{r['num_samples']:>8} {r['train_tokens']:>10,} "
+            f"{r['val_ppl']:>10.1f} {r['val_acc']*100:>7.1f}% "
+            f"{r['val_effective_rank']*100:>7.1f}%"
         )
 
-    print_flush(f"\nTotal time: {total_time/60:.1f} minutes")
+    print_flush(f"\nScaling: α={scaling['alpha']:.3f} (R²={scaling['r_squared']:.3f})")
+    print_flush(f"Total: {total_time/60:.1f} min")
 
     # 結果保存
     output = {
@@ -444,35 +402,7 @@ def main():
     with open(output_file, 'w') as f:
         json.dump(output, f, indent=2)
 
-    print_flush(f"\nResults saved to: {output_file}")
-
-    # スケーリング則の解釈
-    print_flush("\n" + "=" * 70)
-    print_flush("SCALING LAW INTERPRETATION")
-    print_flush("=" * 70)
-
-    # 2倍のデータでどれだけPPLが下がるか
-    ppl_reduction = 1 - 2 ** scaling['alpha']
-    print_flush(f"\nα = {scaling['alpha']:.4f}")
-    print_flush(f"→ 2倍のデータで {ppl_reduction*100:.1f}% PPL削減")
-
-    # 過去の実験との比較
-    print_flush("\n" + "=" * 70)
-    print_flush("COMPARISON WITH PREVIOUS EXPERIMENTS")
-    print_flush("=" * 70)
-
-    print_flush("\n| Experiment | α | Interpretation |")
-    print_flush("|------------|------|----------------|")
-    print_flush("| 11/27 (max_length=128) | -0.7463 | 2倍データで40%PPL削減 |")
-    print_flush("| 11/28 v2 (truncation=False) | -0.2926 | 2倍データで22%PPL削減 |")
-    print_flush(f"| This experiment | {scaling['alpha']:.4f} | 2倍データで{ppl_reduction*100:.1f}%PPL削減 |")
-
-    if scaling['alpha'] < -0.5:
-        print_flush("\n✅ 良好なスケーリング効率（α < -0.5）")
-    elif scaling['alpha'] < -0.2:
-        print_flush("\n⚠️ 標準的なスケーリング効率（-0.5 < α < -0.2）")
-    else:
-        print_flush("\n⚠️ 低いスケーリング効率（α > -0.2）")
+    print_flush(f"Saved: {output_file}")
 
 
 if __name__ == '__main__':

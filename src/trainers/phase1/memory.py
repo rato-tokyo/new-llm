@@ -86,18 +86,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
         self.model.train()
         num_tokens = len(token_ids)
 
-        print_flush(f"\n{'='*70}")
-        print_flush(f"PHASE 1: 固定点コンテキスト学習 - {label}")
-        print_flush(f"{'='*70}")
-        print_flush("  Mode: Memory (GPU-optimized)")
-        print_flush(f"  Tokens: {num_tokens:,}")
-        print_flush(f"  Max iterations: {self.config.phase1_max_iterations}")
-        print_flush(f"  Learning rate: {self.config.phase1_learning_rate}")
-        print_flush(f"  Diversity weight: {self.config.dist_reg_weight}")
-
         # ContextBlockのパラメータのみ学習
         context_params = list(self.model.context_block.parameters())
-        print_flush(f"  ContextBlock params: {sum(p.numel() for p in context_params):,}")
+        print_flush(f"\n[Phase 1] {label}: {num_tokens:,} tokens, {self.config.phase1_max_iterations} iterations")
         optimizer = torch.optim.Adam(context_params, lr=self.config.phase1_learning_rate)
 
         # トークン埋め込み（1回のみ計算、CPUに保存）
@@ -129,7 +120,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 if is_cuda:
                     torch.cuda.empty_cache()
                 elapsed = time.time() - start_time
-                print_flush(f"Iteration 1/{self.config.phase1_max_iterations}: シーケンシャル [{elapsed:.2f}s]")
+                print_flush(f"  Iter 1: sequential [{elapsed:.1f}s]")
                 continue
 
             # Iteration 1+: 勾配累積付き並列処理
@@ -155,17 +146,14 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
             elapsed = time.time() - start_time
             print_flush(
-                f"Iteration {iteration+1}/{self.config.phase1_max_iterations}: "
-                f"収束={convergence_rate*100:.1f}% | "
-                f"Loss={total_loss:.6f} | "
-                f"CVFP={cvfp_loss:.6f} | "
-                f"Div={diversity_loss:.6f} [{elapsed:.2f}s]"
+                f"  Iter {iteration+1}: conv={convergence_rate*100:.0f}% "
+                f"loss={total_loss:.4f} [{elapsed:.1f}s]"
             )
 
             # 早期停止: 最小イテレーション数を超え、かつ収束率が閾値以上
             min_iterations = getattr(self.config, 'phase1_min_iterations', 3)
             if iteration + 1 >= min_iterations and convergence_rate >= self.config.phase1_min_converged_ratio:
-                print_flush(f"  → Early stopping (min_iterations={min_iterations} satisfied)")
+                print_flush(f"  → Converged at iter {iteration+1}")
                 break
 
         self._training_stats = {
@@ -174,7 +162,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             'num_tokens': num_tokens,
         }
 
-        print_flush(f"\nPhase 1 完了: {int(final_convergence_rate * num_tokens)}/{num_tokens} トークン収束\n")
+        print_flush(f"  Done: {final_convergence_rate*100:.0f}% converged")
 
         # 最終結果をGPUに戻す
         assert previous_contexts is not None  # 必ず1回以上iterationが実行される
@@ -184,8 +172,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
             return final_contexts
 
         # return_all_layers=True: Phase 2キャッシュ用に全レイヤー出力を収集
-        # 訓練完了後、推論モードで1回だけシーケンシャル処理して全レイヤー出力を取得
-        print_flush("Collecting all-layer outputs for Phase 2 cache...")
         self.model.eval()
         token_embeds_gpu = token_embeds.to(self.device)
 
@@ -203,8 +189,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         assert all_layer_contexts is not None
         assert token_embeds_combined is not None
-        cache_layers = len(all_layer_contexts) if isinstance(all_layer_contexts, list) else all_layer_contexts.shape[0]
-        print_flush(f"Cache collected: {cache_layers} layers")
 
         return final_contexts, all_layer_contexts, token_embeds_combined
 
@@ -229,7 +213,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         Returns:
             (contexts, all_layer_contexts, token_embeds)
         """
-        print_flush(f"\nCollecting {label} cache ({len(token_ids):,} tokens)...")
 
         self.model.eval()
 
@@ -253,8 +236,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         assert all_layer_contexts is not None
         assert token_embeds_combined is not None
-        cache_layers = len(all_layer_contexts) if isinstance(all_layer_contexts, list) else all_layer_contexts.shape[0]
-        print_flush(f"Cache collected: {cache_layers} layers")
         return contexts, all_layer_contexts, token_embeds_combined
 
     def _forward_sequential(

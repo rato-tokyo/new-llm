@@ -198,10 +198,6 @@ def calculate_optimal_batch_size(
     gpu_info = get_gpu_memory_info()
     free_gb = gpu_info['free_gb']
 
-    print_flush(f"  GPU Memory: total={gpu_info['total_gb']:.1f}GB, "
-                f"allocated={gpu_info['allocated_gb']:.1f}GB, "
-                f"free={free_gb:.1f}GB")
-
     # backward時に必要なメモリを正確に見積もり
     # logits: batch_size × vocab_size × 4bytes
     # gradients: logitsと同サイズ
@@ -214,12 +210,8 @@ def calculate_optimal_batch_size(
     available_mb = free_gb * 1024 * safety_factor * 0.5  # 追加で50%マージン
     safe_batch_size = int(available_mb / per_token_mb)
 
-    print_flush(f"  Per-token memory: {per_token_mb:.2f}MB, available: {available_mb:.1f}MB")
-
     # 範囲制限
     safe_batch_size = max(min_batch_size, min(safe_batch_size, min(initial_batch_size, max_batch_size)))
-
-    print_flush(f"  Batch size: {safe_batch_size} tokens")
 
     return safe_batch_size
 

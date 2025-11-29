@@ -415,45 +415,7 @@ class Phase2Trainer:
         train_tokens = len(train_token_ids)
         val_tokens = len(val_token_ids)
 
-        print_flush(f"\n{'='*70}")
-        print_flush("PHASE 2: Next-Token Prediction Training (キャッシュ方式)")
-        print_flush(f"{'='*70}\n")
-
-        # メモリ事前見積もり
-        memory_estimate = self._estimate_memory_requirements(train_tokens, val_tokens, device)
-        print_flush("Memory Estimation:")
-        print_flush(f"  Train cache: {memory_estimate['train_cache_gb']:.2f}GB")
-        print_flush(f"  Val cache: {memory_estimate['val_cache_gb']:.2f}GB")
-        print_flush(f"  Available GPU: {memory_estimate['available_gb']:.1f}GB")
-        if not memory_estimate['fits']:
-            print_flush(f"  ⚠️ WARNING: {memory_estimate['recommendation']}")
-        else:
-            print_flush(f"  ✓ {memory_estimate['recommendation']}")
-        print_flush("")
-
-        print_flush(f"Training tokens: {train_tokens:,}")
-        print_flush(f"Validation tokens: {val_tokens:,}")
-        print_flush(f"Epochs: {epochs}")
-        print_flush(f"Initial batch size: {batch_size}")
-        print_flush(f"Learning rate: {self.learning_rate}")
-        print_flush(f"Gradient clip: {self.gradient_clip}")
-        print_flush(f"Early stopping patience: {patience}")
-        print_flush("")
-
-        if self.model.use_separated_architecture:
-            print_flush("Architecture: E案 (ContextBlock + TokenBlock Layer-wise)")
-            print_flush("  - ContextBlock: FROZEN + CACHED (エポックごとに1回計算)")
-            print_flush("  - TokenBlock: TRAINING (バッチ並列処理)")
-            print_flush("  - token_output: TRAINING")
-            print_flush("  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照")
-        else:
-            print_flush("Architecture: Legacy CVFP")
-            print_flush("  - CVFP blocks: FROZEN")
-            print_flush("  - token_output: TRAINING")
-        print_flush("")
-
-        # キャッシュはPhase 1から必ず渡される（必須引数）
-        print_flush("Using pre-built context cache from Phase 1")
+        print_flush(f"\n[Phase 2] {train_tokens:,} train / {val_tokens:,} val tokens, {epochs} epochs")
 
         # 実際のキャッシュサイズを計算
         def _calc_cache_size(cache):
@@ -466,16 +428,10 @@ class Phase2Trainer:
         train_cache_mb = _calc_cache_size(train_context_cache)
         val_cache_mb = _calc_cache_size(val_context_cache)
         total_cache_gb = (train_cache_mb + val_cache_mb) / 1024
-        print_flush(f"Actual cache size: train={train_cache_mb:.1f}MB, val={val_cache_mb:.1f}MB (total={total_cache_gb:.2f}GB)")
 
         # キャッシュ構築後にバッチサイズを自動調整
-        print_flush("\nCalculating optimal batch size...")
         optimal_batch_size = self._calculate_optimal_batch_size(device, batch_size, total_cache_gb)
-        if optimal_batch_size != batch_size:
-            print_flush(f"⚠️ Auto-adjusting batch_size: {batch_size} → {optimal_batch_size}")
         batch_size = optimal_batch_size
-        print_flush(f"Effective batch size: {batch_size}")
-        print_flush("")
 
         history = {
             'train_loss': [],
@@ -516,43 +472,33 @@ class Phase2Trainer:
             history['val_ppl'].append(val_ppl)
             history['val_acc'].append(val_acc)
 
-            # Print progress
-            print_flush(f"Epoch {epoch}/{epochs} [{elapsed:.1f}s]:")
-            print_flush(f"  Train Loss: {train_loss:.4f} | Train PPL: {train_ppl:.2f}")
-            print_flush(f"  Val Loss: {val_loss:.4f} | Val PPL: {val_ppl:.2f} | Val Acc: {val_acc*100:.2f}%")
-
-            # Track best model and early stopping
+            # Print progress (1行で)
+            best_marker = ""
             if val_loss < best_val_loss:
                 best_val_loss = val_loss
                 best_epoch = epoch
                 patience_counter = 0
-                print_flush(f"  ✓ New best validation loss: {best_val_loss:.4f}")
+                best_marker = " ★"
             else:
                 patience_counter += 1
-                print_flush(f"  ⚠️ No improvement ({patience_counter}/{patience})")
 
-            print_flush("")
+            print_flush(
+                f"  Epoch {epoch}: train_ppl={train_ppl:.1f} val_ppl={val_ppl:.1f} "
+                f"acc={val_acc*100:.1f}% [{elapsed:.1f}s]{best_marker}"
+            )
 
             # Early stopping check
             if patience_counter >= patience:
-                print_flush(f"⛔ Early stopping triggered at epoch {epoch}")
-                print_flush(f"   Val loss hasn't improved for {patience} epochs")
+                print_flush(f"  → Early stop at epoch {epoch}")
                 history['early_stopped'] = True
                 history['stopped_epoch'] = epoch
                 break
 
         history['best_epoch'] = best_epoch
 
-        print_flush(f"{'='*70}")
-        print_flush("Phase 2 Training Complete")
-        print_flush(f"{'='*70}\n")
-        print_flush(f"Best epoch: {best_epoch}")
-        print_flush(f"Best validation loss: {best_val_loss:.4f}")
-        print_flush(f"Best validation PPL: {history['val_ppl'][best_epoch-1]:.2f}")
-        print_flush(f"Best validation accuracy: {history['val_acc'][best_epoch-1]*100:.2f}%")
-        if history['early_stopped']:
-            print_flush(f"Early stopped at epoch: {history['stopped_epoch']}\n")
-        else:
-            print_flush(f"Completed all {epochs} epochs\n")
+        print_flush(
+            f"  Best: epoch {best_epoch}, ppl={history['val_ppl'][best_epoch-1]:.1f}, "
+            f"acc={history['val_acc'][best_epoch-1]*100:.1f}%"
+        )
 
         return history
