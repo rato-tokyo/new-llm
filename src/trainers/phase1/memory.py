@@ -111,16 +111,10 @@ class MemoryPhase1Trainer(Phase1Trainer):
             start_time = time.time()
 
             if iteration == 0:
-                # Iteration 0: シーケンシャル（学習なし）
-                # token_embedsをGPUに移動して処理
-                token_embeds_gpu = token_embeds.to(self.device)
-                contexts, _, _ = self._forward_sequential(token_embeds_gpu, None)
-                previous_contexts = contexts.detach().cpu()  # CPUに保存
-                del token_embeds_gpu, contexts
-                if is_cuda:
-                    torch.cuda.empty_cache()
-                elapsed = time.time() - start_time
-                print_flush(f"  Iter 1: sequential [{elapsed:.1f}s]")
+                # Iteration 0: 小さなランダム値で初期化（シーケンシャル処理を省略）
+                # context ≈ 0 なので、Iteration 1で各トークンがほぼ独立に処理される
+                previous_contexts = torch.randn(num_tokens, self.model.context_dim) * 0.01
+                print_flush(f"  Iter 1: random init")
                 continue
 
             # Iteration 1+: 勾配累積付き並列処理
