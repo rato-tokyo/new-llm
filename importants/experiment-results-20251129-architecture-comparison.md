@@ -175,9 +175,16 @@ A値は「切片」であり、**少ないデータ量での性能**に影響す
 - shallow_wide追加実験: 13.9分（4実験）
 - 合計: 約49分
 
+## グラフ
+
+![Scaling Law Comparison](scaling_law_comparison.png)
+
+左図: スケーリング則の比較（対数スケール）。shallow_wide（紫）が最も急峻な傾斜。
+右図: α値の比較。α = -0.5 を超えているのはshallow_wideのみ。
+
 ## ログファイル
 
-- 4アーキテクチャ比較: [importants/logs/1129.txt](logs/1129.txt)
-- shallow_wide実験: [importants/logs/1129_v2.txt](logs/1129_v2.txt)
+- 4アーキテクチャ比較: [logs/1129.txt](logs/1129.txt)
+- shallow_wide実験: [logs/1129_v2.txt](logs/1129_v2.txt)
 - JSON結果: `results/architecture_comparison_20251129_141133/summary.json`
 - JSON結果: `results/shallow_wide_20251129_145900/results.json`

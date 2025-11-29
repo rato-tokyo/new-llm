@@ -9,12 +9,13 @@ New-LLM explores the idea that meaningful context representations emerge through
 ## Features
 
 - **Two-Phase Training**: Separate fixed-point learning and token prediction
-- **Token Input All Layers**: `token_input_all_layers=True` is essential for performance (PPL 334 vs 536)
+- **Shallow & Wide Architecture**: 3 layers, 1536 context_dim, 2 input tokens (best performance)
+- **Best Scaling Law**: α = **-0.5402** (R² = 0.977), PPL 197.0, Acc 22.9%
+- **Token Input All Layers**: `token_input_all_layers=True` is essential for performance
 - **Parallel Cache Collection**: 51s → few seconds with batch processing (context similarity 99.7%)
 - **Phase 2 Cache Reuse**: Pass cache from Phase 1 to Phase 2, saving 627s (40% faster)
 - **Parallel Processing**: **23x speedup** (265s → 11s) with parallel batch processing
 - **Auto Batch Size**: GPU memory-based batch size calculation with OOM prevention
-- **Scaling Law**: α = -0.403 (R² = 0.992), PPL improves with more tokens (token継ぎ足し方式)
 - **Diversity Regularization**: Global mean-based tracking for parallel processing
 - **Function-Based Architecture**: Clean, efficient implementation in [src/trainers/phase1/memory.py](src/trainers/phase1/memory.py)
 - **Flexible Data Loading**: Supports UltraChat, text files, and custom datasets
@@ -151,30 +152,34 @@ See `CLAUDE.md` for:
 
 ## Current Status
 
-**Key Findings (2025-11-29):**
-- ✅ **Token input all layers is essential**: `token_input_all_layers=True` gives PPL 334 vs 536 (38% better)
-- ✅ **Effective Rank is a byproduct**: ER doesn't directly affect performance; token input does
-- ✅ **Parallel ≈ Sequential**: Context vectors have 99.7% cosine similarity
-- ✅ **Parallel cache collection**: 51s → few seconds with `forward_with_intermediates_batch()`
-- ✅ **Scaling law**: α = -0.403 (R² = 0.992) with token継ぎ足し方式, PPL 324 at 500 samples
+**Architecture Comparison Results (2025-11-29):**
 
-**Recent Achievements (2025-11-29):**
-- ✅ **Phase 2 cache reuse**: Pass cache from Phase 1, skip 627s rebuild (40% faster)
-- ✅ **Auto batch size**: GPU memory-based calculation with OOM prevention
-- ✅ **Memory optimization**: Unified memory management in `src/utils/memory.py`
-- ✅ **Parallel processing**: 23x speedup (265s → 11s)
+| Config | Layers | context_dim | input_tokens | α | Best PPL | Best Acc |
+|--------|--------|-------------|--------------|------|----------|----------|
+| baseline | 6 | 768 | 1 | -0.4860 | 249.3 | 21.3% |
+| input_tokens_2 | 6 | 768 | 2 | -0.4702 | 198.1 | 22.5% |
+| context_dim_1152 | 6 | 1152 | 1 | -0.4988 | 246.9 | 21.4% |
+| layers_9 | 9 | 768 | 1 | -0.4818 | 256.8 | 21.1% |
+| **shallow_wide** | **3** | **1536** | **2** | **-0.5402** | **197.0** | **22.9%** |
 
-**Recent Achievements (2025-11-27):**
-- ✅ **Embedding freeze**: 71.9% PPL reduction with frozen GPT-2 embeddings
-- ✅ **Weight tying**: 42% parameter reduction (91M → 53M)
+**Key Discovery: CVFP benefits from input richness over depth**
+- shallow_wide achieves best α (-0.5402) with only 3 layers
+- Doubling context_dim (768→1536) + 2 input tokens is optimal
+- 9 layers provides no benefit over 6 layers (unlike Transformers)
 
-**Design Decisions:**
-- **token_input_all_layers = True**: Essential for performance (recommended)
-- **Phase 2 cache reuse**: `return_all_layers=True` in Phase 1, pass to Phase 2
-- **Parallel cache collection**: Use `forward_with_intermediates_batch()` with shifted contexts
-- **Validation data**: Must be subset of training data (auto_split forbidden)
+See [importants/experiment-results-20251129-architecture-comparison.md](importants/experiment-results-20251129-architecture-comparison.md) for full analysis.
+
+**Recommended Configuration:**
+```python
+num_layers = 3
+context_dim = 1536
+num_input_tokens = 2
+embed_dim = 768
+```
 
 **Working:**
+- ✅ Shallow & wide architecture (3L/1536d/2tok)
+- ✅ Best scaling law α = -0.5402
 - ✅ Parallel cache collection (51s → few seconds)
 - ✅ Phase 2 cache reuse (skip 627s rebuild)
 - ✅ Auto batch size with OOM prevention
@@ -185,9 +190,9 @@ See `CLAUDE.md` for:
 - ✅ Deterministic training (seed=42)
 
 **Next Steps:**
-- 🎯 Re-run experiments with `token_input_all_layers=True`
-- 🎯 Scale to 1000+ samples
-- 🎯 Improve scaling efficiency (target α < -0.5)
+- 🎯 Scale to 1000+ samples with shallow_wide config
+- 🎯 Test even wider architectures (context_dim=2048+)
+- 🎯 Explore num_input_tokens=3
 
 ## License
 
