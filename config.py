@@ -112,9 +112,15 @@ class ResidualConfig:
     phase2_patience = 1             # Early stopping patience
     phase2_batch_size = None        # ミニバッチサイズ（Noneで自動計算）
                                     # None: GPUメモリに基づいて自動設定
-                                    #       L4(24GB)→9600, T4(16GB)→6400, CPU→512
-                                    # 手動指定も可能
+                                    #       キャッシュ構築後の空きメモリから最適値を計算
+                                    # 手動指定も可能（ただし自動調整される場合あり）
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
+    phase2_memory_safety_factor = 0.5  # メモリ安全係数（0.0-1.0）
+                                       # 0.5: 推奨（空きメモリの50%を使用）
+                                       # 0.7: 積極的（OOMリスク増）
+                                       # 0.3: 保守的（遅いが安全）
+    phase2_min_batch_size = 256     # 最小バッチサイズ
+    phase2_max_batch_size = 16384   # 最大バッチサイズ
     phase2_freeze_embedding = False # Embedding凍結オプション（11/27実験再現用: False）
                                     # True: Embedding凍結（TokenBlockのみ、7.09Mパラメータ）[推奨]
                                     #       → PPL 66-72%改善、Accuracy 53-63%改善

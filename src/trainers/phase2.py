@@ -29,12 +29,32 @@ Phase 1で学習したContextBlockを固定（freeze）し、TokenBlockのみを
 - 入力: [context_i, token_{i-1}]
 - 出力: token_i
 - 最終token_Nから次トークンを予測
+
+## 自動メモリ管理 (2025-11-29)
+
+- サンプル数に応じたキャッシュサイズの事前見積もり
+- GPU空きメモリに基づくバッチサイズ自動調整
+- OOM防止のための安全係数
 """
 
 import torch
 import torch.nn as nn
 import time
 import sys
+from typing import Optional, Tuple, Dict, Any
+
+# メモリユーティリティをインポート（オプショナル）
+try:
+    from src.utils.memory import (
+        get_gpu_memory_info,
+        estimate_cache_size,
+        calculate_safe_batch_size,
+        can_fit_in_memory,
+        print_memory_report
+    )
+    MEMORY_UTILS_AVAILABLE = True
+except ImportError:
+    MEMORY_UTILS_AVAILABLE = False
 
 
 def print_flush(msg: str):
@@ -303,9 +323,100 @@ class Phase2Trainer:
 
         return avg_loss, perplexity, accuracy
 
+    def _estimate_memory_requirements(
+        self,
+        train_tokens: int,
+        val_tokens: int,
+        device
+    ) -> Dict[str, Any]:
+        """
+        メモリ要件を事前見積もり
+
+        Args:
+            train_tokens: 訓練トークン数
+            val_tokens: 検証トークン数
+            device: デバイス
+
+        Returns:
+            dict: メモリ見積もり情報
+        """
+        num_layers = self.model.num_layers
+        context_dim = self.model.context_dim
+        embed_dim = self.model.embed_dim
+        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+
+        if MEMORY_UTILS_AVAILABLE:
+            return can_fit_in_memory(
+                train_tokens, val_tokens,
+                num_layers, context_dim, embed_dim, num_input_tokens
+            )
+
+        # フォールバック: 簡易計算
+        # context_cache: [num_layers, num_tokens, context_dim] (float32)
+        train_cache_gb = (num_layers * train_tokens * context_dim * 4) / (1024**3)
+        val_cache_gb = (num_layers * val_tokens * context_dim * 4) / (1024**3)
+
+        if torch.cuda.is_available():
+            total_gpu = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+            available = total_gpu * 0.8
+        else:
+            available = float('inf')
+
+        total_required = train_cache_gb + val_cache_gb + 1.0  # +1GB for model/batch
+
+        return {
+            'fits': total_required <= available,
+            'total_required_gb': total_required,
+            'available_gb': available,
+            'train_cache_gb': train_cache_gb,
+            'val_cache_gb': val_cache_gb,
+            'recommendation': f"Required: {total_required:.1f}GB, Available: {available:.1f}GB"
+        }
+
+    def _calculate_optimal_batch_size(self, device, initial_batch_size: int = 4096) -> int:
+        """
+        現在のGPUメモリ状態から最適なバッチサイズを計算
+
+        Args:
+            device: デバイス
+            initial_batch_size: 初期バッチサイズ
+
+        Returns:
+            int: 最適なバッチサイズ
+        """
+        # configから設定を取得
+        safety_factor = getattr(self.config, 'phase2_memory_safety_factor', 0.5)
+        min_batch = getattr(self.config, 'phase2_min_batch_size', 256)
+        max_batch = getattr(self.config, 'phase2_max_batch_size', 16384)
+
+        if not torch.cuda.is_available():
+            return min(initial_batch_size, 512)  # CPU: 固定値
+
+        torch.cuda.empty_cache()
+
+        if MEMORY_UTILS_AVAILABLE:
+            gpu_info = get_gpu_memory_info()
+            free_gb = gpu_info['free_gb']
+            return calculate_safe_batch_size(
+                free_gb,
+                vocab_size=self.config.vocab_size,
+                safety_factor=safety_factor,
+                min_batch_size=min_batch,
+                max_batch_size=min(initial_batch_size, max_batch)
+            )
+
+        # フォールバック: 簡易計算
+        total_memory = torch.cuda.get_device_properties(0).total_memory
+        allocated = torch.cuda.memory_allocated()
+        free_gb = (total_memory - allocated) / (1024**3)
+
+        # 1トークンあたり約0.4MB (logits + gradients)
+        safe_batch_size = int(free_gb * 1024 / 0.4 * safety_factor)
+        return max(min_batch, min(safe_batch_size, min(initial_batch_size, max_batch)))
+
     def train_full(self, train_token_ids, val_token_ids, device, epochs=None, patience=None, batch_size=None):
         """
-        フル訓練ループ（早期停止あり）
+        フル訓練ループ（早期停止あり + 自動メモリ管理）
 
         Args:
             train_token_ids: 訓練トークンID
@@ -313,7 +424,7 @@ class Phase2Trainer:
             device: デバイス
             epochs: エポック数
             patience: 早期停止の忍耐回数
-            batch_size: ミニバッチサイズ
+            batch_size: ミニバッチサイズ（Noneで自動計算）
 
         Returns:
             history: 訓練履歴
@@ -322,20 +433,36 @@ class Phase2Trainer:
             epochs = self.config.phase2_epochs
         if patience is None:
             patience = self.config.phase2_patience
+
+        # 初期バッチサイズ（後で調整される可能性あり）
         if batch_size is None:
-            # effective_phase2_batch_sizeプロパティを使用（自動計算対応）
             batch_size = getattr(self.config, 'effective_phase2_batch_size', None)
             if batch_size is None:
-                batch_size = self.config.phase2_batch_size or 1024
+                batch_size = self.config.phase2_batch_size or 4096
+
+        train_tokens = len(train_token_ids)
+        val_tokens = len(val_token_ids)
 
         print_flush(f"\n{'='*70}")
         print_flush("PHASE 2: Next-Token Prediction Training (キャッシュ方式)")
         print_flush(f"{'='*70}\n")
 
-        print_flush(f"Training tokens: {len(train_token_ids):,}")
-        print_flush(f"Validation tokens: {len(val_token_ids):,}")
+        # メモリ事前見積もり
+        memory_estimate = self._estimate_memory_requirements(train_tokens, val_tokens, device)
+        print_flush("Memory Estimation:")
+        print_flush(f"  Train cache: {memory_estimate['train_cache_gb']:.2f}GB")
+        print_flush(f"  Val cache: {memory_estimate['val_cache_gb']:.2f}GB")
+        print_flush(f"  Available GPU: {memory_estimate['available_gb']:.1f}GB")
+        if not memory_estimate['fits']:
+            print_flush(f"  ⚠️ WARNING: {memory_estimate['recommendation']}")
+        else:
+            print_flush(f"  ✓ {memory_estimate['recommendation']}")
+        print_flush("")
+
+        print_flush(f"Training tokens: {train_tokens:,}")
+        print_flush(f"Validation tokens: {val_tokens:,}")
         print_flush(f"Epochs: {epochs}")
-        print_flush(f"Batch size: {batch_size}")
+        print_flush(f"Initial batch size: {batch_size}")
         print_flush(f"Learning rate: {self.learning_rate}")
         print_flush(f"Gradient clip: {self.gradient_clip}")
         print_flush(f"Early stopping patience: {patience}")
@@ -361,22 +488,17 @@ class Phase2Trainer:
         cache_time = time.time() - cache_start
         print_flush(f"Cache built in {cache_time:.1f}s")
 
-        # キャッシュサイズ計算
+        # 実際のキャッシュサイズを計算
         train_cache_mb = (train_context_cache.numel() * 4) / (1024 * 1024)
         val_cache_mb = (val_context_cache.numel() * 4) / (1024 * 1024)
-        print_flush(f"Cache size: train={train_cache_mb:.1f}MB, val={val_cache_mb:.1f}MB")
+        total_cache_gb = (train_cache_mb + val_cache_mb) / 1024
+        print_flush(f"Actual cache size: train={train_cache_mb:.1f}MB, val={val_cache_mb:.1f}MB (total={total_cache_gb:.2f}GB)")
 
-        # キャッシュ構築後の利用可能メモリに基づいてバッチサイズを再計算
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-            free_memory_gb = (torch.cuda.get_device_properties(0).total_memory
-                              - torch.cuda.memory_allocated()) / (1024**3)
-            # 訓練に必要なメモリを確保（安全係数0.5）
-            # batch_size あたり: logits(50257 * 4) + gradients ≈ 0.4MB/token
-            safe_batch_size = int(free_memory_gb * 1024 / 0.4 * 0.5)
-            if batch_size > safe_batch_size:
-                print_flush(f"⚠️ Reducing batch_size: {batch_size} → {safe_batch_size} (free mem: {free_memory_gb:.1f}GB)")
-                batch_size = max(safe_batch_size, 512)  # 最小512
+        # キャッシュ構築後にバッチサイズを自動調整
+        optimal_batch_size = self._calculate_optimal_batch_size(device, batch_size)
+        if optimal_batch_size != batch_size:
+            print_flush(f"⚠️ Auto-adjusting batch_size: {batch_size} → {optimal_batch_size}")
+            batch_size = optimal_batch_size
         print_flush(f"Effective batch size: {batch_size}")
         print_flush("")
 
