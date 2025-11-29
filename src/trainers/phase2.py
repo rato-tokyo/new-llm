@@ -45,7 +45,7 @@ from typing import Dict, Any
 
 # メモリユーティリティをインポート（オプショナル）
 try:
-    from src.utils.memory import can_fit_in_memory  # noqa: F401
+    from src.utils.memory import can_fit_in_memory, calculate_optimal_batch_size
     MEMORY_UTILS_AVAILABLE = True
 except ImportError:
     MEMORY_UTILS_AVAILABLE = False
@@ -425,65 +425,63 @@ class Phase2Trainer:
         """
         現在のGPUメモリ状態から最適なバッチサイズを計算
 
+        memory.pyのcalculate_optimal_batch_size関数に委譲。
+
         Args:
             device: デバイス
             initial_batch_size: 初期バッチサイズ
-            actual_cache_gb: 実際に使用しているキャッシュサイズ (GB)
+            actual_cache_gb: 実際に使用しているキャッシュサイズ (GB) - 未使用
 
         Returns:
             int: 最適なバッチサイズ
         """
-        # configから設定を取得
+        if MEMORY_UTILS_AVAILABLE:
+            # memory.pyの関数を使用（一元化）
+            return calculate_optimal_batch_size(
+                vocab_size=getattr(self.config, 'vocab_size', 50257),
+                safety_factor=getattr(self.config, 'phase2_memory_safety_factor', 0.5),
+                min_batch_size=getattr(self.config, 'phase2_min_batch_size', 256),
+                max_batch_size=getattr(self.config, 'phase2_max_batch_size', 16384),
+                initial_batch_size=initial_batch_size,
+                verbose=True
+            )
+
+        # フォールバック: memory.pyがない場合の簡易実装
+        if not torch.cuda.is_available():
+            return min(initial_batch_size, 512)
+
+        # 簡易計算
         safety_factor = getattr(self.config, 'phase2_memory_safety_factor', 0.5)
         min_batch = getattr(self.config, 'phase2_min_batch_size', 256)
         max_batch = getattr(self.config, 'phase2_max_batch_size', 16384)
 
-        if not torch.cuda.is_available():
-            return min(initial_batch_size, 512)  # CPU: 固定値
-
-        # GPUメモリ情報を取得
-        torch.cuda.synchronize()  # GPU操作を同期
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
 
-        total_memory = torch.cuda.get_device_properties(0).total_memory
-        allocated = torch.cuda.memory_allocated()
-        reserved = torch.cuda.memory_reserved()
-
-        total_gb = total_memory / (1024**3)
-        allocated_gb = allocated / (1024**3)
-        reserved_gb = reserved / (1024**3)
-
-        # 利用可能メモリを計算
-        # 重要: backward時にlogits全体 + gradients が必要なため、
-        # 「現在のallocated」ではなく「total - 現在使用中のすべて」で計算
-        # さらに、backward時のピークメモリは forward時より大きい
+        total_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        allocated_gb = torch.cuda.memory_allocated() / (1024**3)
         free_gb = total_gb - allocated_gb
 
-        print_flush(f"  GPU Memory: total={total_gb:.1f}GB, allocated={allocated_gb:.1f}GB, reserved={reserved_gb:.1f}GB, free={free_gb:.1f}GB")
-
-        # backward時に必要なメモリを正確に見積もり
-        # logits: batch_size × vocab_size × 4bytes
-        # gradients: logitsと同サイズ
-        # intermediate buffers: 追加で50%程度
-        # → 合計: batch_size × vocab_size × 4 × 3.5
         vocab_size = getattr(self.config, 'vocab_size', 50257)
-        per_token_mb = vocab_size * 4 / (1024**2) * 3.5  # 3.5x for backward
-
-        # 利用可能メモリからバッチサイズを計算
-        # safety_factorをさらに厳格に適用
-        available_mb = free_gb * 1024 * safety_factor * 0.5  # 追加で50%マージン
+        per_token_mb = vocab_size * 4 / (1024**2) * 3.5
+        available_mb = free_gb * 1024 * safety_factor * 0.5
         safe_batch_size = int(available_mb / per_token_mb)
 
-        print_flush(f"  Per-token memory: {per_token_mb:.2f}MB, available: {available_mb:.1f}MB")
+        return max(min_batch, min(safe_batch_size, min(initial_batch_size, max_batch)))
 
-        # 範囲制限
-        safe_batch_size = max(min_batch, min(safe_batch_size, min(initial_batch_size, max_batch)))
-
-        print_flush(f"  Batch size calculation: free={free_gb:.1f}GB × safety={safety_factor} → {safe_batch_size} tokens")
-
-        return safe_batch_size
-
-    def train_full(self, train_token_ids, val_token_ids, device, epochs=None, patience=None, batch_size=None):
+    def train_full(
+        self,
+        train_token_ids,
+        val_token_ids,
+        device,
+        epochs=None,
+        patience=None,
+        batch_size=None,
+        train_context_cache=None,
+        train_token_embeds=None,
+        val_context_cache=None,
+        val_token_embeds=None
+    ):
         """
         フル訓練ループ（早期停止あり + 自動メモリ管理）
 
@@ -494,6 +492,10 @@ class Phase2Trainer:
             epochs: エポック数
             patience: 早期停止の忍耐回数
             batch_size: ミニバッチサイズ（Noneで自動計算）
+            train_context_cache: Phase 1から渡されたキャッシュ（オプション）
+            train_token_embeds: Phase 1から渡されたトークン埋め込み（オプション）
+            val_context_cache: Phase 1から渡されたキャッシュ（オプション）
+            val_token_embeds: Phase 1から渡されたトークン埋め込み（オプション）
 
         Returns:
             history: 訓練履歴
@@ -550,12 +552,25 @@ class Phase2Trainer:
         print_flush("")
 
         # キャッシュを事前構築（全エポックで再利用）
-        print_flush("Building context cache (one-time computation)...")
-        cache_start = time.time()
-        train_context_cache, train_token_embeds = self._build_context_cache(train_token_ids, device)
-        val_context_cache, val_token_embeds = self._build_context_cache(val_token_ids, device)
-        cache_time = time.time() - cache_start
-        print_flush(f"Cache built in {cache_time:.1f}s")
+        # Phase 1からキャッシュが渡された場合はスキップ
+        cache_reused = train_context_cache is not None and train_token_embeds is not None
+        if cache_reused:
+            print_flush("Using pre-built context cache from Phase 1 (skipping cache build)")
+            cache_time = 0.0
+            # 検証キャッシュも確認
+            if val_context_cache is None or val_token_embeds is None:
+                print_flush("Building val context cache...")
+                cache_start = time.time()
+                val_context_cache, val_token_embeds = self._build_context_cache(val_token_ids, device)
+                cache_time = time.time() - cache_start
+                print_flush(f"Val cache built in {cache_time:.1f}s")
+        else:
+            print_flush("Building context cache (one-time computation)...")
+            cache_start = time.time()
+            train_context_cache, train_token_embeds = self._build_context_cache(train_token_ids, device)
+            val_context_cache, val_token_embeds = self._build_context_cache(val_token_ids, device)
+            cache_time = time.time() - cache_start
+            print_flush(f"Cache built in {cache_time:.1f}s")
 
         # 実際のキャッシュサイズを計算
         def _calc_cache_size(cache):

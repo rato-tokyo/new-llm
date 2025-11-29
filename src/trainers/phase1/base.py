@@ -4,10 +4,15 @@ Phase1Trainer - CVFP固定点学習トレーナーの抽象基底クラス
 
 import sys
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Union
+from typing import Dict, Any, Optional, Union, Tuple, List
 import torch
 
 from src.evaluation import ConvergenceResult
+
+# Phase 2キャッシュ用の型定義
+ContextCache = Union[torch.Tensor, List[torch.Tensor]]
+TrainResult = Union[torch.Tensor, Tuple[torch.Tensor, ContextCache, torch.Tensor]]
+EvalResult = Union[ConvergenceResult, torch.Tensor, Tuple[torch.Tensor, ContextCache, torch.Tensor]]
 
 
 def print_flush(msg: str):
@@ -25,7 +30,13 @@ class Phase1Trainer(ABC):
         self._training_stats: Dict[str, Any] = {}
 
     @abstractmethod
-    def train(self, token_ids: torch.Tensor, label: str = "Train") -> torch.Tensor:
+    def train(
+        self,
+        token_ids: torch.Tensor,
+        label: str = "Train",
+        data_provider: Any = None,
+        return_all_layers: bool = False
+    ) -> TrainResult:
         pass
 
     @abstractmethod
@@ -34,8 +45,9 @@ class Phase1Trainer(ABC):
         token_ids: torch.Tensor,
         label: str = "Val",
         num_trials: Optional[int] = None,
-        return_contexts_only: bool = False
-    ) -> Union[ConvergenceResult, torch.Tensor]:
+        return_contexts_only: bool = False,
+        return_all_layers: bool = False
+    ) -> EvalResult:
         pass
 
     def get_training_stats(self) -> Dict[str, Any]:

@@ -225,26 +225,33 @@ def run_experiment(
     total_params = sum(p.numel() for p in model.parameters())
     print_flush(f"  Model parameters: {total_params:,}")
 
-    # Phase 1: CVFP固定点学習
+    # Phase 1: CVFP固定点学習（全レイヤー出力も取得してPhase 2に渡す）
     print_flush("\n  Phase 1 starting...")
     phase1_start = time.time()
 
     phase1_trainer = MemoryPhase1Trainer(model, config, device)
-    train_contexts = phase1_trainer.train(
+
+    # return_all_layers=True でPhase 2用のキャッシュも取得
+    train_result = phase1_trainer.train(
         train_token_ids,
         label=f"Train ({num_samples} samples)",
-        data_provider=data_provider
+        data_provider=data_provider,
+        return_all_layers=True
     )
+    train_contexts, train_context_cache, train_token_embeds = train_result
 
     # 訓練データのEffective Rank
     train_metrics = analyze_fixed_points(train_contexts, label="Train")
 
-    # 検証データの評価（return_contexts_only=Trueでテンソルを取得）
-    val_contexts = phase1_trainer.evaluate(
+    # 検証データの評価（return_all_layers=Trueで全レイヤー出力も取得）
+    val_result = phase1_trainer.evaluate(
         val_token_ids,
         label=f"Val ({num_samples} samples)",
-        return_contexts_only=True
+        return_all_layers=True
     )
+    # return_all_layers=Trueなので、結果は(contexts, cache, embeds)のタプル
+    assert isinstance(val_result, tuple), "Expected tuple from evaluate with return_all_layers=True"
+    val_contexts, val_context_cache, val_token_embeds = val_result
     val_metrics = analyze_fixed_points(val_contexts, label="Val")
 
     phase1_time = time.time() - phase1_start
@@ -255,17 +262,21 @@ def run_experiment(
     print_flush(f"  Train ER: {train_er_ratio*100:.1f}%")
     print_flush(f"  Val ER: {val_er_ratio*100:.1f}%")
 
-    # Phase 2: Next-Token Prediction（キャッシュ方式）
+    # Phase 2: Next-Token Prediction（Phase 1のキャッシュを再利用）
     print_flush("\n  Phase 2 starting...")
     phase2_start = time.time()
 
     phase2_trainer = Phase2Trainer(model=model, config=config)
 
-    # train_fullで訓練（早期停止あり）
+    # train_fullで訓練（Phase 1のキャッシュを渡してキャッシュ構築をスキップ）
     phase2_history = phase2_trainer.train_full(
         train_token_ids=train_token_ids,
         val_token_ids=val_token_ids,
-        device=device
+        device=device,
+        train_context_cache=train_context_cache,
+        train_token_embeds=train_token_embeds,
+        val_context_cache=val_context_cache,
+        val_token_embeds=val_token_embeds
     )
 
     phase2_time = time.time() - phase2_start
