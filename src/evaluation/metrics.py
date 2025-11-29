@@ -6,7 +6,7 @@ Fixed-point analysis, effective rank calculation, and other metrics.
 
 import sys
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # check_identity_mapping で使用
 
 
 def print_flush(msg):
@@ -19,111 +19,22 @@ def analyze_fixed_points(contexts, label="", verbose=True, max_samples=5000):
     """
     Analyze fixed-point contexts for quality metrics.
 
+    高速版: ペアワイズ分析（O(n²)）を削除し、Effective Rankのみ計算。
+
     Args:
         contexts: Fixed-point contexts [num_tokens, context_dim]
         label: Label for display (e.g., "Train", "Val")
         verbose: If True, print detailed analysis
-        max_samples: Maximum samples for pairwise analysis (memory optimization)
+        max_samples: 未使用（後方互換性のため残す）
 
     Returns:
         dict: Analysis metrics including effective rank
     """
-    if verbose:
-        print_flush(f"\n{'='*70}")
-        print_flush(f"FIXED-POINT ANALYSIS{' - ' + label if label else ''}")
-        print_flush(f"{'='*70}\n")
-
     device = contexts.device
     num_tokens = contexts.shape[0]
     context_dim = contexts.shape[1]
 
-    # Sample contexts for pairwise analysis if too many tokens (memory optimization)
-    if num_tokens > max_samples:
-        indices = torch.randperm(num_tokens, device=device)[:max_samples]
-        sampled_contexts = contexts[indices]
-        sample_size = max_samples
-        if verbose:
-            print_flush(f"(Sampling {max_samples}/{num_tokens} tokens for pairwise analysis)\n")
-    else:
-        sampled_contexts = contexts
-        sample_size = num_tokens
-
-    # 1. Global Attractor Detection
-    # Compute pairwise L2 distances on sampled data
-    distances = torch.cdist(sampled_contexts, sampled_contexts, p=2)
-    # Exclude diagonal (self-distances)
-    mask = ~torch.eye(sample_size, dtype=bool, device=device)
-    pairwise_distances = distances[mask]
-
-    avg_distance = pairwise_distances.mean().item()
-    min_distance = pairwise_distances.min().item()
-    max_distance = pairwise_distances.max().item()
-
-    # Cosine similarity
-    normalized = F.normalize(sampled_contexts, p=2, dim=1)
-    cosine_sim = torch.mm(normalized, normalized.t())
-    pairwise_cosine = cosine_sim[mask]
-
-    avg_cosine = pairwise_cosine.mean().item()
-    min_cosine = pairwise_cosine.min().item()
-    max_cosine = pairwise_cosine.max().item()
-
-    # Free memory
-    del distances, mask, pairwise_distances, normalized, cosine_sim, pairwise_cosine
-    if device.type == 'cuda':
-        torch.cuda.empty_cache()
-
-    if verbose:
-        print_flush("1. Global Attractor Detection:")
-        print_flush(f"  Avg L2 Distance: {avg_distance:.6f} (Range: [{min_distance:.6f}, {max_distance:.6f}])")
-        print_flush(f"  Avg Cosine Sim:  {avg_cosine:.6f} (Range: [{min_cosine:.6f}, {max_cosine:.6f}])")
-
-    # Global attractor detection
-    is_global_attractor = avg_distance < 0.1 and avg_cosine > 0.99
-    if is_global_attractor:
-        if verbose:
-            print_flush("  ⚠️ DEGENERATE: Global attractor detected (all contexts nearly identical)")
-    else:
-        if verbose:
-            print_flush("  ✅ Token-specific fixed points")
-
-    # 2. Zero Solution Detection
-    norms = torch.norm(contexts, dim=1)
-    avg_norm = norms.mean().item()
-    min_norm = norms.min().item()
-    max_norm = norms.max().item()
-
-    if verbose:
-        print_flush("\n2. Zero Solution Detection:")
-        print_flush(f"  Avg Norm: {avg_norm:.6f} (Range: [{min_norm:.6f}, {max_norm:.6f}])")
-
-    is_zero_solution = avg_norm < 0.1
-    if is_zero_solution:
-        if verbose:
-            print_flush("  ⚠️ DEGENERATE: Near-zero contexts")
-    else:
-        if verbose:
-            print_flush("  ✅ Non-zero contexts")
-
-    # 3. Distribution Statistics
-    norm_mean = norms.mean().item()
-    norm_median = norms.median().item()
-    norm_std = norms.std().item()
-
-    # Use already computed avg_distance for pairwise stats
-    pairwise_mean = avg_distance
-
-    # Sparsity
-    sparsity = (contexts.abs() < 0.01).float().mean().item()
-
-    if verbose:
-        print_flush("\n3. Distribution Statistics:")
-        print_flush(f"  Norm - Mean: {norm_mean:.4f}, Median: {norm_median:.4f}, Std: {norm_std:.4f}")
-        print_flush(f"  Pairwise Dist - Mean: {pairwise_mean:.4f}")
-        print_flush(f"  Sparsity: {sparsity*100:.2f}% of values < 0.01")
-
-    # 4. Information Content (Effective Rank)
-    # Use sampled contexts for SVD to save memory
+    # Effective Rank計算（SVD）
     max_svd_samples = 10000
     if num_tokens > max_svd_samples:
         svd_indices = torch.randperm(num_tokens, device=device)[:max_svd_samples]
@@ -134,8 +45,7 @@ def analyze_fixed_points(contexts, label="", verbose=True, max_samples=5000):
     # Compute SVD
     U, S, V = torch.svd(svd_contexts)
 
-    # Actual rank (number of non-zero singular values)
-    # Consider values > 1e-6 as non-zero to account for numerical precision
+    # Actual rank
     actual_rank = (S > 1e-6).sum().item()
 
     # Effective rank (entropy-based)
@@ -149,30 +59,12 @@ def analyze_fixed_points(contexts, label="", verbose=True, max_samples=5000):
         torch.cuda.empty_cache()
 
     if verbose:
-        print_flush("\n4. Information Content:")
-        print_flush(f"  Actual Rank: {actual_rank} / {context_dim} ({actual_rank/context_dim*100:.1f}%)")
-        print_flush(f"  Effective Rank: {effective_rank:.2f} / {context_dim} ({effective_rank/context_dim*100:.1f}%)")
-        print_flush(f"  Top 5 Singular Values: {S[:5].tolist()}")
-
-    # Determine quality
-    if effective_rank < context_dim * 0.3:
-        if verbose:
-            print_flush(f"  ⚠️ Low dimensional diversity (ER={effective_rank:.2f}/{context_dim})")
-    else:
-        if verbose:
-            print_flush("  ✅ Good diversity")
-
-    if verbose:
-        print_flush(f"{'='*70}\n")
+        er_ratio = effective_rank / context_dim * 100
+        print_flush(f"  {label} Effective Rank: {effective_rank:.2f}/{context_dim} ({er_ratio:.1f}%)")
 
     return {
         "actual_rank": actual_rank,
         "effective_rank": effective_rank,
-        "avg_distance": avg_distance,
-        "avg_cosine": avg_cosine,
-        "avg_norm": avg_norm,
-        "is_global_attractor": is_global_attractor,
-        "is_zero_solution": is_zero_solution,
         "singular_values": S.tolist()
     }
 
