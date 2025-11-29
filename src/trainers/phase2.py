@@ -125,7 +125,9 @@ class Phase2Trainer:
             device: デバイス
 
         Returns:
-            context_cache: テンソル [num_layers, num_tokens, context_dim]
+            context_cache: レイヤーごとのテンソルリスト
+                - token_input_all_layers=True: テンソル [num_layers, num_tokens, context_dim]
+                - token_input_all_layers=False: リスト [num_tokens, layer_dim] × num_layers
             token_embeds: 全トークンの埋め込み [num_tokens, embed_dim * num_input_tokens]
         """
         num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
@@ -134,11 +136,29 @@ class Phase2Trainer:
         num_layers = self.model.num_layers
         context_dim = self.model.context_dim
 
-        # 結果格納用テンソル（事前確保でメモリ効率化）
-        context_cache = torch.zeros(
-            num_layers, num_tokens, context_dim,
-            device=device, dtype=torch.float32
-        )
+        # token_input_all_layersかどうかでキャッシュ形式を分岐
+        token_input_all_layers = getattr(self.model, 'token_input_all_layers', True)
+
+        # context_blockの次元リストを取得
+        if hasattr(self.model, 'context_block'):
+            context_dims = getattr(self.model.context_block, 'context_dims', None)
+        else:
+            context_dims = None
+
+        if token_input_all_layers or context_dims is None:
+            # 旧構造: 全レイヤー同じ次元 → 単一テンソル
+            context_cache = torch.zeros(
+                num_layers, num_tokens, context_dim,
+                device=device, dtype=torch.float32
+            )
+        else:
+            # 等差減少設計: 各レイヤーで次元が異なる → リスト
+            # context_dims[1:]は各レイヤーの出力次元（context_dims[0]は入力次元）
+            context_cache = [
+                torch.zeros(num_tokens, context_dims[i + 1], device=device, dtype=torch.float32)
+                for i in range(num_layers)
+            ]
+
         token_embeds = torch.zeros(
             num_tokens, self.model.embed_dim * num_input_tokens,
             device=device, dtype=torch.float32
@@ -174,7 +194,10 @@ class Phase2Trainer:
 
                 # 各レイヤーの出力をテンソルに格納
                 for layer_idx, ctx_out in enumerate(context_outputs):
-                    context_cache[layer_idx, i] = ctx_out.squeeze(0)
+                    if isinstance(context_cache, list):
+                        context_cache[layer_idx][i] = ctx_out.squeeze(0)
+                    else:
+                        context_cache[layer_idx, i] = ctx_out.squeeze(0)
 
                 # コンテキスト更新
                 context = context_outputs[-1]
@@ -228,10 +251,13 @@ class Phase2Trainer:
             batch_token_embeds = token_embeds[batch_start:batch_end]  # [batch, embed_dim * num_input_tokens]
 
             # バッチ内のcontext_outputsを構築
-            # context_cache: [num_layers, num_tokens, context_dim]
+            # context_cache: テンソル [num_layers, num_tokens, context_dim] またはリスト
             batch_context_list = []
             for layer_idx in range(num_layers):
-                layer_contexts = context_cache[layer_idx, batch_start:batch_end]  # [batch, context_dim]
+                if isinstance(context_cache, list):
+                    layer_contexts = context_cache[layer_idx][batch_start:batch_end]
+                else:
+                    layer_contexts = context_cache[layer_idx, batch_start:batch_end]
                 batch_context_list.append(layer_contexts)
 
             # TokenBlock forward（バッチ並列）
@@ -305,10 +331,13 @@ class Phase2Trainer:
             for batch_start in range(0, num_tokens, eval_batch_size):
                 batch_end = min(batch_start + eval_batch_size, num_tokens)
 
-                # context_cache: [num_layers, num_tokens, context_dim]
+                # context_cache: テンソル [num_layers, num_tokens, context_dim] またはリスト
                 context_list = []
                 for layer_idx in range(num_layers):
-                    layer_contexts = context_cache[layer_idx, batch_start:batch_end]
+                    if isinstance(context_cache, list):
+                        layer_contexts = context_cache[layer_idx][batch_start:batch_end]
+                    else:
+                        layer_contexts = context_cache[layer_idx, batch_start:batch_end]
                     context_list.append(layer_contexts)
 
                 # バッチのトークン埋め込み
@@ -529,8 +558,15 @@ class Phase2Trainer:
         print_flush(f"Cache built in {cache_time:.1f}s")
 
         # 実際のキャッシュサイズを計算
-        train_cache_mb = (train_context_cache.numel() * 4) / (1024 * 1024)
-        val_cache_mb = (val_context_cache.numel() * 4) / (1024 * 1024)
+        def _calc_cache_size(cache):
+            """キャッシュサイズを計算（テンソルまたはリスト対応）"""
+            if isinstance(cache, list):
+                return sum(t.numel() for t in cache) * 4 / (1024 * 1024)
+            else:
+                return cache.numel() * 4 / (1024 * 1024)
+
+        train_cache_mb = _calc_cache_size(train_context_cache)
+        val_cache_mb = _calc_cache_size(val_context_cache)
         total_cache_gb = (train_cache_mb + val_cache_mb) / 1024
         print_flush(f"Actual cache size: train={train_cache_mb:.1f}MB, val={val_cache_mb:.1f}MB (total={total_cache_gb:.2f}GB)")
 

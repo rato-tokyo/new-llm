@@ -157,6 +157,73 @@ def calculate_safe_batch_size(
     return safe_batch_size
 
 
+def calculate_optimal_batch_size(
+    vocab_size: int = 50257,
+    safety_factor: float = 0.5,
+    min_batch_size: int = 256,
+    max_batch_size: int = 16384,
+    initial_batch_size: int = 4096,
+    verbose: bool = True
+) -> int:
+    """
+    現在のGPUメモリ状態から最適なバッチサイズを計算
+
+    backward時のメモリ要件を考慮（3.5x係数）
+
+    Args:
+        vocab_size: 語彙数
+        safety_factor: 安全係数 (0.0-1.0)
+        min_batch_size: 最小バッチサイズ
+        max_batch_size: 最大バッチサイズ
+        initial_batch_size: 初期バッチサイズ（上限として使用）
+        verbose: ログ出力するか
+
+    Returns:
+        int: 最適なバッチサイズ
+    """
+    import sys
+
+    def print_flush(msg):
+        if verbose:
+            print(msg, flush=True)
+            sys.stdout.flush()
+
+    if not torch.cuda.is_available():
+        return min(initial_batch_size, 512)  # CPU: 固定値
+
+    # GPUメモリ情報を取得
+    torch.cuda.synchronize()
+    torch.cuda.empty_cache()
+
+    gpu_info = get_gpu_memory_info()
+    free_gb = gpu_info['free_gb']
+
+    print_flush(f"  GPU Memory: total={gpu_info['total_gb']:.1f}GB, "
+                f"allocated={gpu_info['allocated_gb']:.1f}GB, "
+                f"free={free_gb:.1f}GB")
+
+    # backward時に必要なメモリを正確に見積もり
+    # logits: batch_size × vocab_size × 4bytes
+    # gradients: logitsと同サイズ
+    # intermediate buffers: 追加で50%程度
+    # → 合計: batch_size × vocab_size × 4 × 3.5
+    per_token_mb = vocab_size * 4 / (1024**2) * 3.5  # 3.5x for backward
+
+    # 利用可能メモリからバッチサイズを計算
+    # safety_factorをさらに厳格に適用
+    available_mb = free_gb * 1024 * safety_factor * 0.5  # 追加で50%マージン
+    safe_batch_size = int(available_mb / per_token_mb)
+
+    print_flush(f"  Per-token memory: {per_token_mb:.2f}MB, available: {available_mb:.1f}MB")
+
+    # 範囲制限
+    safe_batch_size = max(min_batch_size, min(safe_batch_size, min(initial_batch_size, max_batch_size)))
+
+    print_flush(f"  Batch size: {safe_batch_size} tokens")
+
+    return safe_batch_size
+
+
 def can_fit_in_memory(
     train_tokens: int,
     val_tokens: int,
