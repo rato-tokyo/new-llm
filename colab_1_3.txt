@@ -1,0 +1,878 @@
+
+
+======================================================================
+UNIFIED SCALING EXPERIMENT
+======================================================================
+Start time: 2025-11-29 03:12:47
+
+Settings:
+  Sample sizes: [50, 100, 200, 500]
+  Model: 6 layers, 768 dim
+  num_input_tokens: 1
+  Embedding freeze: False
+  Tokenization: truncation=False (full length)
+  Random seed: 42
+
+GPU: NVIDIA L4 (22.2GB)
+
+======================================================================
+Running experiments...
+======================================================================
+
+[1/4] 50 samples
+
+======================================================================
+Experiment: 50 samples
+======================================================================
+
+  Loading 50 samples...
+tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 173kB/s]
+config.json: 100% 665/665 [00:00<00:00, 5.41MB/s]
+vocab.json: 100% 1.04M/1.04M [00:00<00:00, 22.3MB/s]
+merges.txt: 100% 456k/456k [00:00<00:00, 2.12MB/s]
+tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 3.28MB/s]
+Loading training data...
+  Loading 50 samples from UltraChat...
+Generating train_sft split: 100% 207865/207865 [00:03<00:00, 54167.75 examples/s]
+Generating test_sft split: 100% 23110/23110 [00:00<00:00, 55675.27 examples/s]
+Generating train_gen split: 100% 256032/256032 [00:03<00:00, 72889.18 examples/s]
+Generating test_gen split: 100% 28304/28304 [00:00<00:00, 69752.85 examples/s]
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_50samples_full.pt
+Loading validation data...
+  Train: 62891 tokens (50 samples)
+  Val:   6289 tokens
+  Full data tokens: 62,891
+  Train tokens (excluding val): 56,602
+  Val tokens: 6,289
+2025-11-29 03:13:07.941544: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-11-29 03:13:07.957689: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1764385987.979084   19026 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764385987.985606   19026 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764385988.001853   19026 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764385988.001887   19026 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764385988.001890   19026 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764385988.001893   19026 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-11-29 03:13:08.006872: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  num_input_tokens: 1
+  token_input_all_layers: True (旧構造、高ER)
+  Model parameters: 91,429,969
+
+  Phase 1 starting...
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train (50 samples)
+======================================================================
+  Mode: Memory (GPU-optimized)
+  Tokens: 56,602
+  Max iterations: 40
+  Learning rate: 0.002
+  Diversity weight: 0.6
+  ContextBlock params: 7,091,712
+Iteration 1/40: シーケンシャル [50.61s]
+Iteration 2/40: 収束=100.0% | Loss=-0.170042 | CVFP=0.002156 | Div=-0.284840 [1.04s]
+Iteration 3/40: 収束=0.0% | Loss=0.042270 | CVFP=0.557439 | Div=-0.301176 [0.81s]
+Iteration 4/40: 収束=0.0% | Loss=-0.035493 | CVFP=0.372878 | Div=-0.307740 [0.80s]
+Iteration 5/40: 収束=0.0% | Loss=-0.140632 | CVFP=0.113039 | Div=-0.309746 [0.77s]
+Iteration 6/40: 収束=27.6% | Loss=-0.171215 | CVFP=0.039322 | Div=-0.311573 [0.74s]
+Iteration 7/40: 収束=99.3% | Loss=-0.182290 | CVFP=0.013928 | Div=-0.313102 [0.74s]
+  → Early stopping (min_iterations=5 satisfied)
+
+Phase 1 完了: 56204/56602 トークン収束
+
+
+======================================================================
+FIXED-POINT ANALYSIS - Train
+======================================================================
+
+(Sampling 5000/56602 tokens for pairwise analysis)
+
+1. Global Attractor Detection:
+  Avg L2 Distance: 38.301773 (Range: [0.291271, 45.315769])
+  Avg Cosine Sim:  0.046262 (Range: [-0.316555, 0.999946])
+  ✅ Token-specific fixed points
+
+2. Zero Solution Detection:
+  Avg Norm: 27.929131 (Range: [27.902033, 27.948540])
+  ✅ Non-zero contexts
+
+3. Distribution Statistics:
+  Norm - Mean: 27.9291, Median: 27.9291, Std: 0.0062
+  Pairwise Dist - Mean: 38.3018
+  Sparsity: 0.62% of values < 0.01
+
+4. Information Content:
+  Actual Rank: 768 / 768 (100.0%)
+  Effective Rank: 576.53 / 768 (75.1%)
+  Top 5 Singular Values: [1053.0382080078125, 671.1150512695312, 569.793212890625, 558.4432983398438, 518.1734008789062]
+  ✅ Good diversity
+======================================================================
+
+
+Evaluating Val (50 samples) data...
+
+======================================================================
+CVFP Convergence Check
+======================================================================
+  Tokens: 6,289
+  Trials: 4
+  num_input_tokens: 1
+
+======================================================================
+CVFP Loss Progression
+======================================================================
+
+Trial  1/4: CVFP Loss = N/A (baseline)
+Trial  2/4: CVFP Loss = 0.000012
+Trial  3/4: CVFP Loss = 0.000000
+Trial  4/4: CVFP Loss = 0.000000
+
+======================================================================
+Convergence Analysis
+======================================================================
+
+Statistics:
+  - Initial Loss: 0.000012
+  - Final Loss: 0.000000
+  - Reduction: +100.00%
+  - Slope: -0.000006
+
+Verdict: ✅ CONVERGED: Loss is stable - model has converged
+
+
+======================================================================
+FIXED-POINT ANALYSIS - Val
+======================================================================
+
+(Sampling 5000/6289 tokens for pairwise analysis)
+
+1. Global Attractor Detection:
+  Avg L2 Distance: 38.444653 (Range: [0.000000, 45.610661])
+  Avg Cosine Sim:  0.041545 (Range: [-0.329812, 1.000001])
+  ✅ Token-specific fixed points
+
+2. Zero Solution Detection:
+  Avg Norm: 27.975370 (Range: [27.948448, 27.994862])
+  ✅ Non-zero contexts
+
+3. Distribution Statistics:
+  Norm - Mean: 27.9754, Median: 27.9752, Std: 0.0069
+  Pairwise Dist - Mean: 38.4447
+  Sparsity: 0.62% of values < 0.01
+
+4. Information Content:
+  Actual Rank: 768 / 768 (100.0%)
+  Effective Rank: 550.25 / 768 (71.6%)
+  Top 5 Singular Values: [864.454345703125, 546.1212768554688, 466.3312072753906, 421.87933349609375, 401.3056335449219]
+  ✅ Good diversity
+======================================================================
+
+
+  Phase 1 completed: 1.3min
+  Train ER: 75.1%
+  Val ER: 71.6%
+
+  Phase 2 starting...
+✓ ContextBlock frozen
+✓ token_output layer unfrozen
+✓ Training TokenBlock + token_output: 45,740,881/91,429,969 parameters
+
+======================================================================
+PHASE 2: Next-Token Prediction Training (キャッシュ方式)
+======================================================================
+
+Training tokens: 56,602
+Validation tokens: 6,289
+Epochs: 10
+Batch size: 8864
+Learning rate: 0.001
+Gradient clip: 1.0
+Early stopping patience: 1
+
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN + CACHED (エポックごとに1回計算)
+  - TokenBlock: TRAINING (バッチ並列処理)
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+Building context cache (one-time computation)...
+Cache built in 68.3s
+Cache size: train=994.9MB, val=110.5MB
+
+Epoch 1/10 [1.9s]:
+  Train Loss: 9.8025 | Train PPL: 18078.31
+  Val Loss: 7.8230 | Val PPL: 2497.41 | Val Acc: 8.03%
+  ✓ New best validation loss: 7.8230
+
+Epoch 2/10 [2.0s]:
+  Train Loss: 6.7218 | Train PPL: 830.33
+  Val Loss: 7.3072 | Val PPL: 1491.06 | Val Acc: 9.45%
+  ✓ New best validation loss: 7.3072
+
+Epoch 3/10 [2.0s]:
+  Train Loss: 5.9855 | Train PPL: 397.62
+  Val Loss: 7.1184 | Val PPL: 1234.48 | Val Acc: 12.20%
+  ✓ New best validation loss: 7.1184
+
+Epoch 4/10 [2.0s]:
+  Train Loss: 5.5022 | Train PPL: 245.23
+  Val Loss: 6.9848 | Val PPL: 1080.11 | Val Acc: 13.60%
+  ✓ New best validation loss: 6.9848
+
+Epoch 5/10 [2.1s]:
+  Train Loss: 5.0245 | Train PPL: 152.10
+  Val Loss: 6.8750 | Val PPL: 967.81 | Val Acc: 15.25%
+  ✓ New best validation loss: 6.8750
+
+Epoch 6/10 [2.0s]:
+  Train Loss: 4.5799 | Train PPL: 97.50
+  Val Loss: 6.7323 | Val PPL: 839.11 | Val Acc: 16.51%
+  ✓ New best validation loss: 6.7323
+
+Epoch 7/10 [2.1s]:
+  Train Loss: 4.1720 | Train PPL: 64.84
+  Val Loss: 6.6839 | Val PPL: 799.42 | Val Acc: 17.11%
+  ✓ New best validation loss: 6.6839
+
+Epoch 8/10 [2.1s]:
+  Train Loss: 3.8181 | Train PPL: 45.52
+  Val Loss: 6.6910 | Val PPL: 805.11 | Val Acc: 17.95%
+  ⚠️ No improvement (1/1)
+
+⛔ Early stopping triggered at epoch 8
+   Val loss hasn't improved for 1 epochs
+======================================================================
+Phase 2 Training Complete
+======================================================================
+
+Best epoch: 7
+Best validation loss: 6.6839
+Best validation PPL: 799.42
+Best validation accuracy: 17.11%
+Early stopped at epoch: 8
+
+
+  Phase 2 completed: 1.4min
+  Best Val PPL: 799.42
+  Best Val Acc: 17.11%
+
+[2/4] 100 samples
+
+======================================================================
+Experiment: 100 samples
+======================================================================
+
+  Loading 100 samples...
+Loading training data...
+  Loading 100 samples from UltraChat...
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+  Train: 122795 tokens (100 samples)
+  Val:   12279 tokens
+  Full data tokens: 122,795
+  Train tokens (excluding val): 110,516
+  Val tokens: 12,279
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  num_input_tokens: 1
+  token_input_all_layers: True (旧構造、高ER)
+  Model parameters: 91,429,969
+
+  Phase 1 starting...
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train (100 samples)
+======================================================================
+  Mode: Memory (GPU-optimized)
+  Tokens: 110,516
+  Max iterations: 40
+  Learning rate: 0.002
+  Diversity weight: 0.6
+  ContextBlock params: 7,091,712
+Iteration 1/40: シーケンシャル [99.14s]
+Iteration 2/40: 収束=100.0% | Loss=-0.166368 | CVFP=0.002155 | Div=-0.278717 [1.50s]
+Iteration 3/40: 収束=0.0% | Loss=0.046850 | CVFP=0.559711 | Div=-0.295058 [1.55s]
+Iteration 4/40: 収束=0.0% | Loss=-0.028457 | CVFP=0.379793 | Div=-0.300624 [1.45s]
+Iteration 5/40: 収束=0.0% | Loss=-0.135318 | CVFP=0.114735 | Div=-0.302020 [1.47s]
+Iteration 6/40: 収束=27.2% | Loss=-0.166200 | CVFP=0.039648 | Div=-0.303432 [1.47s]
+Iteration 7/40: 収束=99.3% | Loss=-0.177242 | CVFP=0.014037 | Div=-0.304762 [1.45s]
+  → Early stopping (min_iterations=5 satisfied)
+
+Phase 1 完了: 109772/110516 トークン収束
+
+
+======================================================================
+FIXED-POINT ANALYSIS - Train
+======================================================================
+
+(Sampling 5000/110516 tokens for pairwise analysis)
+
+1. Global Attractor Detection:
+  Avg L2 Distance: 38.078796 (Range: [0.364769, 45.212463])
+  Avg Cosine Sim:  0.055011 (Range: [-0.313718, 0.999915])
+  ✅ Token-specific fixed points
+
+2. Zero Solution Detection:
+  Avg Norm: 27.893650 (Range: [27.862404, 27.918095])
+  ✅ Non-zero contexts
+
+3. Distribution Statistics:
+  Norm - Mean: 27.8937, Median: 27.8941, Std: 0.0064
+  Pairwise Dist - Mean: 38.0788
+  Sparsity: 0.63% of values < 0.01
+
+4. Information Content:
+  Actual Rank: 768 / 768 (100.0%)
+  Effective Rank: 580.36 / 768 (75.6%)
+  Top 5 Singular Values: [1072.4630126953125, 681.9251708984375, 595.677001953125, 563.7493896484375, 492.0238037109375]
+  ✅ Good diversity
+======================================================================
+
+
+Evaluating Val (100 samples) data...
+
+======================================================================
+CVFP Convergence Check
+======================================================================
+  Tokens: 12,279
+  Trials: 4
+  num_input_tokens: 1
+
+======================================================================
+CVFP Loss Progression
+======================================================================
+
+Trial  1/4: CVFP Loss = N/A (baseline)
+Trial  2/4: CVFP Loss = 0.000003
+Trial  3/4: CVFP Loss = 0.000000
+Trial  4/4: CVFP Loss = 0.000000
+
+======================================================================
+Convergence Analysis
+======================================================================
+
+Statistics:
+  - Initial Loss: 0.000003
+  - Final Loss: 0.000000
+  - Reduction: +100.00%
+  - Slope: -0.000002
+
+Verdict: ✅ CONVERGED: Loss is stable - model has converged
+
+
+======================================================================
+FIXED-POINT ANALYSIS - Val
+======================================================================
+
+(Sampling 5000/12279 tokens for pairwise analysis)
+
+1. Global Attractor Detection:
+  Avg L2 Distance: 38.227768 (Range: [0.000000, 45.478893])
+  Avg Cosine Sim:  0.051289 (Range: [-0.326042, 1.000001])
+  ✅ Token-specific fixed points
+
+2. Zero Solution Detection:
+  Avg Norm: 27.933037 (Range: [27.905476, 27.956568])
+  ✅ Non-zero contexts
+
+3. Distribution Statistics:
+  Norm - Mean: 27.9330, Median: 27.9331, Std: 0.0073
+  Pairwise Dist - Mean: 38.2278
+  Sparsity: 0.63% of values < 0.01
+
+4. Information Content:
+  Actual Rank: 768 / 768 (100.0%)
+  Effective Rank: 560.56 / 768 (73.0%)
+  Top 5 Singular Values: [1048.55810546875, 693.5049438476562, 589.7299194335938, 544.3743896484375, 481.6239013671875]
+  ✅ Good diversity
+======================================================================
+
+
+  Phase 1 completed: 2.5min
+  Train ER: 75.6%
+  Val ER: 73.0%
+
+  Phase 2 starting...
+✓ ContextBlock frozen
+✓ token_output layer unfrozen
+✓ Training TokenBlock + token_output: 45,740,881/91,429,969 parameters
+
+======================================================================
+PHASE 2: Next-Token Prediction Training (キャッシュ方式)
+======================================================================
+
+Training tokens: 110,516
+Validation tokens: 12,279
+Epochs: 10
+Batch size: 8864
+Learning rate: 0.001
+Gradient clip: 1.0
+Early stopping patience: 1
+
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN + CACHED (エポックごとに1回計算)
+  - TokenBlock: TRAINING (バッチ並列処理)
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+Building context cache (one-time computation)...
+Cache built in 137.3s
+Cache size: train=1942.6MB, val=215.8MB
+
+Epoch 1/10 [3.9s]:
+  Train Loss: 8.7555 | Train PPL: 6345.81
+  Val Loss: 7.4294 | Val PPL: 1684.76 | Val Acc: 8.80%
+  ✓ New best validation loss: 7.4294
+
+Epoch 2/10 [4.0s]:
+  Train Loss: 6.4065 | Train PPL: 605.77
+  Val Loss: 7.0128 | Val PPL: 1110.78 | Val Acc: 11.17%
+  ✓ New best validation loss: 7.0128
+
+Epoch 3/10 [4.0s]:
+  Train Loss: 5.7111 | Train PPL: 302.21
+  Val Loss: 6.7586 | Val PPL: 861.40 | Val Acc: 13.81%
+  ✓ New best validation loss: 6.7586
+
+Epoch 4/10 [4.0s]:
+  Train Loss: 5.1454 | Train PPL: 171.64
+  Val Loss: 6.6201 | Val PPL: 750.02 | Val Acc: 14.84%
+  ✓ New best validation loss: 6.6201
+
+Epoch 5/10 [4.0s]:
+  Train Loss: 4.6629 | Train PPL: 105.94
+  Val Loss: 6.5526 | Val PPL: 701.03 | Val Acc: 16.48%
+  ✓ New best validation loss: 6.5526
+
+Epoch 6/10 [4.0s]:
+  Train Loss: 4.2353 | Train PPL: 69.08
+  Val Loss: 6.5223 | Val PPL: 680.12 | Val Acc: 17.77%
+  ✓ New best validation loss: 6.5223
+
+Epoch 7/10 [4.0s]:
+  Train Loss: 3.8867 | Train PPL: 48.75
+  Val Loss: 6.5266 | Val PPL: 683.06 | Val Acc: 18.41%
+  ⚠️ No improvement (1/1)
+
+⛔ Early stopping triggered at epoch 7
+   Val loss hasn't improved for 1 epochs
+======================================================================
+Phase 2 Training Complete
+======================================================================
+
+Best epoch: 6
+Best validation loss: 6.5223
+Best validation PPL: 680.12
+Best validation accuracy: 17.77%
+Early stopped at epoch: 7
+
+
+  Phase 2 completed: 2.8min
+  Best Val PPL: 680.12
+  Best Val Acc: 17.77%
+
+[3/4] 200 samples
+
+======================================================================
+Experiment: 200 samples
+======================================================================
+
+  Loading 200 samples...
+Loading training data...
+  Loading 200 samples from UltraChat...
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_200samples_full.pt
+Loading validation data...
+  Train: 240132 tokens (200 samples)
+  Val:   24013 tokens
+  Full data tokens: 240,132
+  Train tokens (excluding val): 216,119
+  Val tokens: 24,013
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  num_input_tokens: 1
+  token_input_all_layers: True (旧構造、高ER)
+  Model parameters: 91,429,969
+
+  Phase 1 starting...
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train (200 samples)
+======================================================================
+  Mode: Memory (GPU-optimized)
+  Tokens: 216,119
+  Max iterations: 40
+  Learning rate: 0.002
+  Diversity weight: 0.6
+  ContextBlock params: 7,091,712
+Iteration 1/40: シーケンシャル [192.55s]
+Iteration 2/40: 収束=100.0% | Loss=-0.165943 | CVFP=0.002157 | Div=-0.278010 [2.91s]
+Iteration 3/40: 収束=0.0% | Loss=0.045341 | CVFP=0.554704 | Div=-0.294234 [2.89s]
+Iteration 4/40: 収束=0.0% | Loss=-0.029945 | CVFP=0.375307 | Div=-0.300112 [2.87s]
+Iteration 5/40: 収束=0.0% | Loss=-0.135450 | CVFP=0.114461 | Div=-0.302057 [2.84s]
+Iteration 6/40: 収束=26.6% | Loss=-0.166110 | CVFP=0.040347 | Div=-0.303748 [2.84s]
+Iteration 7/40: 収束=99.2% | Loss=-0.177416 | CVFP=0.014331 | Div=-0.305247 [2.84s]
+  → Early stopping (min_iterations=5 satisfied)
+
+Phase 1 完了: 214473/216119 トークン収束
+
+
+======================================================================
+FIXED-POINT ANALYSIS - Train
+======================================================================
+
+(Sampling 5000/216119 tokens for pairwise analysis)
+
+1. Global Attractor Detection:
+  Avg L2 Distance: 38.208565 (Range: [0.407974, 45.437477])
+  Avg Cosine Sim:  0.050624 (Range: [-0.324700, 0.999893])
+  ✅ Token-specific fixed points
+
+2. Zero Solution Detection:
+  Avg Norm: 27.922558 (Range: [27.894127, 27.943228])
+  ✅ Non-zero contexts
+
+3. Distribution Statistics:
+  Norm - Mean: 27.9226, Median: 27.9224, Std: 0.0062
+  Pairwise Dist - Mean: 38.2086
+  Sparsity: 0.62% of values < 0.01
+
+4. Information Content:
+  Actual Rank: 768 / 768 (100.0%)
+  Effective Rank: 585.62 / 768 (76.3%)
+  Top 5 Singular Values: [1062.6685791015625, 698.4264526367188, 581.9631958007812, 545.26123046875, 489.91680908203125]
+  ✅ Good diversity
+======================================================================
+
+
+Evaluating Val (200 samples) data...
+
+======================================================================
+CVFP Convergence Check
+======================================================================
+  Tokens: 24,013
+  Trials: 4
+  num_input_tokens: 1
+
+======================================================================
+CVFP Loss Progression
+======================================================================
+
+Trial  1/4: CVFP Loss = N/A (baseline)
+Trial  2/4: CVFP Loss = 0.000004
+Trial  3/4: CVFP Loss = 0.000000
+Trial  4/4: CVFP Loss = 0.000000
+
+======================================================================
+Convergence Analysis
+======================================================================
+
+Statistics:
+  - Initial Loss: 0.000004
+  - Final Loss: 0.000000
+  - Reduction: +100.00%
+  - Slope: -0.000002
+
+Verdict: ✅ CONVERGED: Loss is stable - model has converged
+
+
+======================================================================
+FIXED-POINT ANALYSIS - Val
+======================================================================
+
+(Sampling 5000/24013 tokens for pairwise analysis)
+
+1. Global Attractor Detection:
+  Avg L2 Distance: 38.350910 (Range: [0.000000, 45.527771])
+  Avg Cosine Sim:  0.044765 (Range: [-0.325721, 1.000001])
+  ✅ Token-specific fixed points
+
+2. Zero Solution Detection:
+  Avg Norm: 27.967690 (Range: [27.941570, 27.990944])
+  ✅ Non-zero contexts
+
+3. Distribution Statistics:
+  Norm - Mean: 27.9677, Median: 27.9672, Std: 0.0067
+  Pairwise Dist - Mean: 38.3509
+  Sparsity: 0.60% of values < 0.01
+
+4. Information Content:
+  Actual Rank: 768 / 768 (100.0%)
+  Effective Rank: 566.35 / 768 (73.7%)
+  Top 5 Singular Values: [1015.3416748046875, 734.8416137695312, 659.9813842773438, 600.4921875, 518.2354736328125]
+  ✅ Good diversity
+======================================================================
+
+
+  Phase 1 completed: 4.9min
+  Train ER: 76.3%
+  Val ER: 73.7%
+
+  Phase 2 starting...
+✓ ContextBlock frozen
+✓ token_output layer unfrozen
+✓ Training TokenBlock + token_output: 45,740,881/91,429,969 parameters
+
+======================================================================
+PHASE 2: Next-Token Prediction Training (キャッシュ方式)
+======================================================================
+
+Training tokens: 216,119
+Validation tokens: 24,013
+Epochs: 10
+Batch size: 8864
+Learning rate: 0.001
+Gradient clip: 1.0
+Early stopping patience: 1
+
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN + CACHED (エポックごとに1回計算)
+  - TokenBlock: TRAINING (バッチ並列処理)
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+Building context cache (one-time computation)...
+Cache built in 267.3s
+Cache size: train=3798.9MB, val=422.1MB
+
+Epoch 1/10 [7.8s]:
+  Train Loss: 7.9654 | Train PPL: 2879.68
+  Val Loss: 6.7501 | Val PPL: 854.15 | Val Acc: 15.44%
+  ✓ New best validation loss: 6.7501
+
+Epoch 2/10 [7.8s]:
+  Train Loss: 6.0720 | Train PPL: 433.54
+  Val Loss: 6.3845 | Val PPL: 592.62 | Val Acc: 17.80%
+  ✓ New best validation loss: 6.3845
+
+Epoch 3/10 [7.9s]:
+  Train Loss: 5.3756 | Train PPL: 216.07
+  Val Loss: 6.2678 | Val PPL: 527.32 | Val Acc: 19.90%
+  ✓ New best validation loss: 6.2678
+
+Epoch 4/10 [7.9s]:
+  Train Loss: 4.8344 | Train PPL: 125.76
+  Val Loss: 6.2148 | Val PPL: 500.12 | Val Acc: 20.81%
+  ✓ New best validation loss: 6.2148
+
+Epoch 5/10 [7.9s]:
+  Train Loss: 4.4012 | Train PPL: 81.55
+  Val Loss: 6.2295 | Val PPL: 507.49 | Val Acc: 21.21%
+  ⚠️ No improvement (1/1)
+
+⛔ Early stopping triggered at epoch 5
+   Val loss hasn't improved for 1 epochs
+======================================================================
+Phase 2 Training Complete
+======================================================================
+
+Best epoch: 4
+Best validation loss: 6.2148
+Best validation PPL: 500.12
+Best validation accuracy: 20.81%
+Early stopped at epoch: 5
+
+
+  Phase 2 completed: 5.1min
+  Best Val PPL: 500.12
+  Best Val Acc: 20.81%
+
+[4/4] 500 samples
+
+======================================================================
+Experiment: 500 samples
+======================================================================
+
+  Generating validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_500samples_full.pt
+  Created val data: ./data/ultrachat_500samples_val.txt (58797 tokens)
+
+  Loading 500 samples...
+Loading training data...
+  Loading from cache: ./cache/ultrachat_500samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (58797 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 587970 tokens (500 samples)
+  Val:   58797 tokens
+  Full data tokens: 587,970
+  Train tokens (excluding val): 529,173
+  Val tokens: 58,797
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(6 layers) + TokenBlock(6 layers)
+  num_input_tokens: 1
+  token_input_all_layers: True (旧構造、高ER)
+  Model parameters: 91,429,969
+
+  Phase 1 starting...
+
+======================================================================
+PHASE 1: 固定点コンテキスト学習 - Train (500 samples)
+======================================================================
+  Mode: Memory (GPU-optimized)
+  Tokens: 529,173
+  Max iterations: 40
+  Learning rate: 0.002
+  Diversity weight: 0.6
+  ContextBlock params: 7,091,712
+Iteration 1/40: シーケンシャル [466.21s]
+Iteration 2/40: 収束=100.0% | Loss=-0.165809 | CVFP=0.002154 | Div=-0.277784 [6.77s]
+Iteration 3/40: 収束=0.0% | Loss=0.047207 | CVFP=0.559093 | Div=-0.294051 [6.42s]
+Iteration 4/40: 収束=0.0% | Loss=-0.028143 | CVFP=0.379209 | Div=-0.299711 [6.43s]
+Iteration 5/40: 収束=0.0% | Loss=-0.134463 | CVFP=0.115425 | Div=-0.301055 [6.43s]
+Iteration 6/40: 収束=25.9% | Loss=-0.165322 | CVFP=0.040463 | Div=-0.302512 [6.43s]
+Iteration 7/40: 収束=99.2% | Loss=-0.176565 | CVFP=0.014346 | Div=-0.303839 [6.42s]
+  → Early stopping (min_iterations=5 satisfied)
+
+Phase 1 完了: 524777/529173 トークン収束
+
+
+======================================================================
+FIXED-POINT ANALYSIS - Train
+======================================================================
+
+(Sampling 5000/529173 tokens for pairwise analysis)
+
+1. Global Attractor Detection:
+  Avg L2 Distance: 38.140179 (Range: [0.335210, 45.223869])
+  Avg Cosine Sim:  0.052762 (Range: [-0.314383, 0.999927])
+  ✅ Token-specific fixed points
+
+2. Zero Solution Detection:
+  Avg Norm: 27.895723 (Range: [27.863201, 27.919367])
+  ✅ Non-zero contexts
+
+3. Distribution Statistics:
+  Norm - Mean: 27.8957, Median: 27.8959, Std: 0.0067
+  Pairwise Dist - Mean: 38.1402
+  Sparsity: 0.62% of values < 0.01
+
+4. Information Content:
+  Actual Rank: 768 / 768 (100.0%)
+  Effective Rank: 583.00 / 768 (75.9%)
+  Top 5 Singular Values: [1065.138671875, 696.0336303710938, 599.0383911132812, 576.7777709960938, 489.704833984375]
+  ✅ Good diversity
+======================================================================
+
+
+Evaluating Val (500 samples) data...
+
+======================================================================
+CVFP Convergence Check
+======================================================================
+  Tokens: 58,797
+  Trials: 4
+  num_input_tokens: 1
+
+======================================================================
+CVFP Loss Progression
+======================================================================
+
+Trial  1/4: CVFP Loss = N/A (baseline)
+Trial  2/4: CVFP Loss = 0.000000
+Trial  3/4: CVFP Loss = 0.000000
+Trial  4/4: CVFP Loss = 0.000000
+
+======================================================================
+Convergence Analysis
+======================================================================
+
+Statistics:
+  - Initial Loss: 0.000000
+  - Final Loss: 0.000000
+  - Reduction: +100.00%
+  - Slope: -0.000000
+
+Verdict: ✅ CONVERGED: Loss is stable - model has converged
+
+
+======================================================================
+FIXED-POINT ANALYSIS - Val
+======================================================================
+
+(Sampling 5000/58797 tokens for pairwise analysis)
+
+1. Global Attractor Detection:
+  Avg L2 Distance: 38.199417 (Range: [0.000000, 45.542194])
+  Avg Cosine Sim:  0.051556 (Range: [-0.329266, 1.000001])
+  ✅ Token-specific fixed points
+
+2. Zero Solution Detection:
+  Avg Norm: 27.936041 (Range: [27.906157, 27.963411])
+  ✅ Non-zero contexts
+
+3. Distribution Statistics:
+  Norm - Mean: 27.9360, Median: 27.9361, Std: 0.0074
+  Pairwise Dist - Mean: 38.1994
+  Sparsity: 0.62% of values < 0.01
+
+4. Information Content:
+  Actual Rank: 768 / 768 (100.0%)
+  Effective Rank: 580.05 / 768 (75.5%)
+  Top 5 Singular Values: [1060.0899658203125, 694.23681640625, 573.5112915039062, 543.9608154296875, 485.5927429199219]
+  ✅ Good diversity
+======================================================================
+
+
+  Phase 1 completed: 11.8min
+  Train ER: 75.9%
+  Val ER: 75.5%
+
+  Phase 2 starting...
+✓ ContextBlock frozen
+✓ token_output layer unfrozen
+✓ Training TokenBlock + token_output: 45,740,881/91,429,969 parameters
+
+======================================================================
+PHASE 2: Next-Token Prediction Training (キャッシュ方式)
+======================================================================
+
+Training tokens: 529,173
+Validation tokens: 58,797
+Epochs: 10
+Batch size: 8864
+Learning rate: 0.001
+Gradient clip: 1.0
+Early stopping patience: 1
+
+Architecture: E案 (ContextBlock + TokenBlock Layer-wise)
+  - ContextBlock: FROZEN + CACHED (エポックごとに1回計算)
+  - TokenBlock: TRAINING (バッチ並列処理)
+  - token_output: TRAINING
+  - E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+
+Building context cache (one-time computation)...
+Cache built in 646.1s
+Cache size: train=9301.9MB, val=1033.5MB
+
+Traceback (most recent call last):
+  File "/content/new-llm/scripts/unified_scaling_experiment.py", line 460, in <module>
+    main()
+  File "/content/new-llm/scripts/unified_scaling_experiment.py", line 363, in main
+    result = run_experiment(num_samples, device)
+             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/new-llm/scripts/unified_scaling_experiment.py", line 261, in run_experiment
+    phase2_history = phase2_trainer.train_full(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/content/new-llm/src/trainers/phase2.py", line 389, in train_full
+    train_loss, train_ppl = self.train_epoch(
+                            ^^^^^^^^^^^^^^^^^
+  File "/content/new-llm/src/trainers/phase2.py", line 232, in train_epoch
+    batch_loss.backward()
+  File "/usr/local/lib/python3.12/dist-packages/torch/_tensor.py", line 625, in backward
+    torch.autograd.backward(
+  File "/usr/local/lib/python3.12/dist-packages/torch/autograd/__init__.py", line 354, in backward
+    _engine_run_backward(
+  File "/usr/local/lib/python3.12/dist-packages/torch/autograd/graph.py", line 841, in _engine_run_backward
+    return Variable._execution_engine.run_backward(  # Calls into the C++ engine to run the backward pass
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+torch.OutOfMemoryError: CUDA out of memory. Tried to allocate 1.66 GiB. GPU 0 has a total capacity of 22.16 GiB of which 757.38 MiB is free. Process 222510 has 21.42 GiB memory in use. Of the allocated memory 19.80 GiB is allocated by PyTorch, and 1.35 GiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)

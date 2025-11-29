@@ -405,19 +405,27 @@ class Phase2Trainer:
         reserved_gb = reserved / (1024**3)
 
         # 利用可能メモリを計算
-        # reserved（PyTorchが確保済み）からallocated（実際に使用中）を引いた分 + 未予約分
-        free_gb = total_gb - reserved_gb
+        # 重要: backward時にlogits全体 + gradients が必要なため、
+        # 「現在のallocated」ではなく「total - 現在使用中のすべて」で計算
+        # さらに、backward時のピークメモリは forward時より大きい
+        free_gb = total_gb - allocated_gb
 
         print_flush(f"  GPU Memory: total={total_gb:.1f}GB, allocated={allocated_gb:.1f}GB, reserved={reserved_gb:.1f}GB, free={free_gb:.1f}GB")
 
-        # 訓練に必要なメモリ見積もり
-        # batch_size トークン × vocab_size × 4bytes (float32) × 2.5 (logits + gradients + buffer)
+        # backward時に必要なメモリを正確に見積もり
+        # logits: batch_size × vocab_size × 4bytes
+        # gradients: logitsと同サイズ
+        # intermediate buffers: 追加で50%程度
+        # → 合計: batch_size × vocab_size × 4 × 3.5
         vocab_size = getattr(self.config, 'vocab_size', 50257)
-        per_token_mb = vocab_size * 4 / (1024**2) * 2.5
+        per_token_mb = vocab_size * 4 / (1024**2) * 3.5  # 3.5x for backward
 
         # 利用可能メモリからバッチサイズを計算
-        available_mb = free_gb * 1024 * safety_factor
+        # safety_factorをさらに厳格に適用
+        available_mb = free_gb * 1024 * safety_factor * 0.5  # 追加で50%マージン
         safe_batch_size = int(available_mb / per_token_mb)
+
+        print_flush(f"  Per-token memory: {per_token_mb:.2f}MB, available: {available_mb:.1f}MB")
 
         # 範囲制限
         safe_batch_size = max(min_batch, min(safe_batch_size, min(initial_batch_size, max_batch)))
