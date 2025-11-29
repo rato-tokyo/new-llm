@@ -214,14 +214,12 @@ class Phase2Trainer:
         correct = 0
         num_layers = self.model.num_layers
 
-        # バッチサイズを計算（評価時も大きなデータでOOMを防ぐ）
-        # 評価時はbackwardがないので、訓練時より大きくできる
-        eval_batch_size = getattr(self, '_eval_batch_size', None)
+        # バッチサイズを取得（train_fullで設定された値を使用）
+        # 評価時はbackwardがないので訓練より少しだけ大きくできるが、安全のため同じ値を使用
+        eval_batch_size = getattr(self, '_effective_batch_size', None)
         if eval_batch_size is None:
-            # 訓練バッチサイズの2倍を評価バッチサイズとして使用
-            train_batch = getattr(self.config, 'phase2_batch_size', None) or 4096
-            eval_batch_size = min(train_batch * 2, 8192)
-            self._eval_batch_size = eval_batch_size
+            # train_fullで設定されていない場合のフォールバック
+            eval_batch_size = getattr(self.config, 'phase2_batch_size', None) or 2048
 
         with torch.no_grad():
             # バッチ処理で評価（大量トークンでのOOM防止）
@@ -432,6 +430,9 @@ class Phase2Trainer:
         # キャッシュ構築後にバッチサイズを自動調整
         optimal_batch_size = self._calculate_optimal_batch_size(device, batch_size, total_cache_gb)
         batch_size = optimal_batch_size
+
+        # evaluateメソッドでも同じバッチサイズを使用
+        self._effective_batch_size = batch_size
 
         history = {
             'train_loss': [],
