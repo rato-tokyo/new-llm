@@ -238,9 +238,12 @@ def run_experiment(
     val_metrics = analyze_fixed_points(val_contexts, label="Val")
 
     phase1_time = time.time() - phase1_start
+    # Effective Rankの比率を計算（effective_rank / context_dim）
+    train_er_ratio = train_metrics['effective_rank'] / CONTEXT_DIM
+    val_er_ratio = val_metrics['effective_rank'] / CONTEXT_DIM
     print_flush(f"\n  Phase 1 completed: {phase1_time/60:.1f}min")
-    print_flush(f"  Train ER: {train_metrics['effective_rank_ratio']*100:.1f}%")
-    print_flush(f"  Val ER: {val_metrics['effective_rank_ratio']*100:.1f}%")
+    print_flush(f"  Train ER: {train_er_ratio*100:.1f}%")
+    print_flush(f"  Val ER: {val_er_ratio*100:.1f}%")
 
     # Phase 2: Next-Token Prediction（キャッシュ方式）
     print_flush(f"\n  Phase 2 starting...")
@@ -276,8 +279,8 @@ def run_experiment(
         'num_samples': num_samples,
         'train_tokens': len(train_token_ids),
         'val_tokens': len(val_token_ids),
-        'train_effective_rank': train_metrics['effective_rank_ratio'],
-        'val_effective_rank': val_metrics['effective_rank_ratio'],
+        'train_effective_rank': train_er_ratio,
+        'val_effective_rank': val_er_ratio,
         'val_ppl': best_val_ppl,
         'val_acc': best_val_acc,
         'best_epoch': best_epoch,
