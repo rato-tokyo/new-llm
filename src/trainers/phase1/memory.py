@@ -179,10 +179,11 @@ class MemoryPhase1Trainer(Phase1Trainer):
         # Phase 2では token i の処理に previous_contexts[i-1] を使用
         # → 1つずらしたcontextを準備
         # token 0 は初期context（ゼロベクトル）を使用
+        # input_token_embedsと同じサイズになるように調整
         initial_context = torch.zeros(1, self.model.context_dim, device=self.device)
         shifted_contexts = torch.cat([
             initial_context,
-            previous_contexts[:-1].to(self.device)
+            previous_contexts[:-2].to(self.device)  # -2: 最後の2つを除く（-1でtokenに合わせ、さらに-1でずらし）
         ], dim=0)  # [num_input_tokens, context_dim]
 
         # バッチ並列で全レイヤー出力を計算
