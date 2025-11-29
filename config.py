@@ -25,9 +25,8 @@ class ResidualConfig:
     context_dim = embed_dim * context_multiplier  # コンテキストベクトル次元数（自動計算）
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
-    use_weight_tying = False        # Weight Tying: Token EmbeddingとOutput Headで重み共有
-                                    # True: GPT-2スタイル、パラメータ約38M削減、推奨
-                                    # False: 従来の独立した重み（11/27実験再現用）
+    use_weight_tying = True         # Weight Tying: Token EmbeddingとOutput Headで重み共有（標準採用）
+                                    # パラメータ約38M削減（91M → 53M）
     # LayerNorm: 常に有効（数値安定性のため必須）
 
     # ========== 複数トークン入力 ==========
@@ -88,10 +87,7 @@ class ResidualConfig:
                                          # 0.2: 強めのノイズ
 
     # 学習率
-    phase1_learning_rate = 0.002         # Phase 1の学習率
-                                         # 0.004: 等差減少設計で収束しない場合
-                                         # 0.002: 標準（等差減少なしの場合）
-                                         # 0.001: 安定的
+    phase1_learning_rate = 0.002         # Phase 1の学習率（0.001-0.004）
     phase1_batch_size = 8000            # 並列処理のバッチサイズ（L4 GPU 24GB対応）
     phase1_gradient_clip = 1.0           # 勾配クリッピング値
 
@@ -120,12 +116,9 @@ class ResidualConfig:
                                        # 0.3: 保守的（遅いが安全）
     phase2_min_batch_size = 256     # 最小バッチサイズ
     phase2_max_batch_size = 16384   # 最大バッチサイズ
-    phase2_freeze_embedding = False # Embedding凍結オプション（11/27実験再現用: False）
-                                    # True: Embedding凍結（TokenBlockのみ、7.09Mパラメータ）[推奨]
-                                    #       → PPL 66-72%改善、Accuracy 53-63%改善
-                                    # False: Embedding学習（49.2Mパラメータ）- 11/27実験再現用
-                                    #       → スケーリング効率（α値）が高くなる傾向
-                                    # ⚠️ Weight Tying時はOutput Headも凍結される
+    phase2_freeze_embedding = True  # Embedding凍結（標準採用）
+                                    # PPL 66-72%改善、Accuracy 53-63%改善
+                                    # Weight Tying時はOutput Headも凍結される
 
     @property
     def effective_phase2_batch_size(self):

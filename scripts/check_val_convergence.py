@@ -66,14 +66,14 @@ def load_checkpoint(checkpoint_path, config, device):
     model.to(device)
     model.eval()
 
-    print(f"  ✅ Model loaded successfully\n")
+    print("  ✅ Model loaded successfully\n")
     return model
 
 
 def check_convergence(model, val_token_ids, device, num_trials=10, num_input_tokens=1):
     """検証データの収束性をチェック"""
     print(f"{'='*70}")
-    print(f"Validation Convergence Check")
+    print("Validation Convergence Check")
     print(f"{'='*70}\n")
     print(f"Validation tokens: {len(val_token_ids)}")
     print(f"Number of trials: {num_trials}")
@@ -84,7 +84,7 @@ def check_convergence(model, val_token_ids, device, num_trials=10, num_input_tok
         val_token_embeds = model.embed_norm(val_token_embeds).squeeze(0)
 
     print(f"{'='*70}")
-    print(f"CVFP Loss Progression")
+    print("CVFP Loss Progression")
     print(f"{'='*70}\n")
 
     previous_contexts = None
@@ -104,7 +104,7 @@ def check_convergence(model, val_token_ids, device, num_trials=10, num_input_tok
             previous_contexts = contexts.detach().clone()
 
     print(f"\n{'='*70}")
-    print(f"Convergence Analysis")
+    print("Convergence Analysis")
     print(f"{'='*70}\n")
 
     return analyze_convergence_trend(loss_history)
@@ -140,7 +140,7 @@ def analyze_convergence_trend(losses):
         status, symbol = "UNSTABLE", "⚠️"
         message = "Loss is fluctuating - convergence unclear"
 
-    print(f"Statistics:")
+    print("Statistics:")
     print(f"  - Initial Loss: {initial_loss:.6f}")
     print(f"  - Final Loss: {final_loss:.6f}")
     print(f"  - Reduction: {reduction:+.2f}%")
@@ -167,7 +167,7 @@ def main():
     device = torch.device(config.device if torch.cuda.is_available() else "cpu")
 
     print(f"\n{'='*70}")
-    print(f"Validation Convergence Checker")
+    print("Validation Convergence Checker")
     print(f"{'='*70}\n")
     print(f"  Checkpoint: {args.checkpoint_path}")
     print(f"  Trials: {args.num_trials}")

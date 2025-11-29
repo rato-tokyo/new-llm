@@ -41,7 +41,7 @@ def main():
         cached = torch.load(cache_file)
         all_token_ids = cached['token_ids'] if isinstance(cached, dict) else cached
     else:
-        print(f"\n📥 Downloading UltraChat dataset...")
+        print("\n📥 Downloading UltraChat dataset...")
         dataset = load_dataset(
             config.dataset_name,
             split=config.dataset_split,
@@ -73,7 +73,7 @@ def main():
     train_token_ids = all_token_ids[:train_size]
     val_token_ids = all_token_ids[train_size:]
 
-    print(f"\n📊 Data Split:")
+    print("\n📊 Data Split:")
     print(f"   Total tokens: {len(all_token_ids):,}")
     print(f"   Train tokens: {len(train_token_ids):,} (80%)")
     print(f"   Val tokens:   {len(val_token_ids):,} (20%)")
@@ -82,7 +82,7 @@ def main():
     train_unique = set(train_token_ids.tolist())
     val_unique = set(val_token_ids.tolist())
 
-    print(f"\n📈 Unique Token Counts:")
+    print("\n📈 Unique Token Counts:")
     print(f"   Train unique tokens: {len(train_unique):,}")
     print(f"   Val unique tokens:   {len(val_unique):,}")
 
@@ -90,7 +90,7 @@ def main():
     val_tokens_in_train = val_unique.intersection(train_unique)
     val_tokens_not_in_train = val_unique - train_unique
 
-    print(f"\n🔍 Token Overlap Analysis:")
+    print("\n🔍 Token Overlap Analysis:")
     print(f"   Val tokens also in train:     {len(val_tokens_in_train):,} ({len(val_tokens_in_train)/len(val_unique)*100:.1f}%)")
     print(f"   Val tokens NOT in train:      {len(val_tokens_not_in_train):,} ({len(val_tokens_not_in_train)/len(val_unique)*100:.1f}%)")
 
@@ -101,37 +101,37 @@ def main():
     val_in_train_count = sum(1 for t in val_token_list if t in train_unique)
     val_not_in_train_count = len(val_token_list) - val_in_train_count
 
-    print(f"\n📌 Token Coverage (counting repetitions):")
+    print("\n📌 Token Coverage (counting repetitions):")
     print(f"   Val tokens covered by train:  {val_in_train_count:,} / {len(val_token_list):,} ({val_in_train_count/len(val_token_list)*100:.2f}%)")
     print(f"   Val tokens NOT covered:       {val_not_in_train_count:,} / {len(val_token_list):,} ({val_not_in_train_count/len(val_token_list)*100:.2f}%)")
 
     # Show examples of tokens not in train
     if val_tokens_not_in_train:
-        print(f"\n📝 Examples of val tokens NOT in train (first 10):")
+        print("\n📝 Examples of val tokens NOT in train (first 10):")
         for i, token_id in enumerate(list(val_tokens_not_in_train)[:10]):
             token_text = tokenizer.decode([token_id])
             # Count occurrences in val
             count_in_val = val_token_list.count(token_id)
             print(f"   {i+1}. Token ID {token_id}: '{token_text}' (appears {count_in_val}x in val)")
     else:
-        print(f"\n✅ All val tokens exist in train!")
+        print("\n✅ All val tokens exist in train!")
 
     # Summary
-    print(f"\n" + "=" * 60)
+    print("\n" + "=" * 60)
     print("SUMMARY")
     print("=" * 60)
 
     coverage_pct = val_in_train_count / len(val_token_list) * 100
 
     if coverage_pct == 100.0:
-        print(f"✅ PERFECT: 100% of val tokens exist in train")
+        print("✅ PERFECT: 100% of val tokens exist in train")
     elif coverage_pct >= 99.0:
         print(f"✅ EXCELLENT: {coverage_pct:.2f}% of val tokens exist in train")
     elif coverage_pct >= 95.0:
         print(f"⚠️  GOOD: {coverage_pct:.2f}% of val tokens exist in train")
     else:
         print(f"❌ WARNING: Only {coverage_pct:.2f}% of val tokens exist in train")
-        print(f"   This may affect validation accuracy!")
+        print("   This may affect validation accuracy!")
 
     print("=" * 60)
 

@@ -20,15 +20,13 @@ class ContextLayer(nn.Module):
     """
     Context Layer - 文脈処理専用レイヤー
 
-    入力: [context] または [context, token_embeds]（最初のレイヤーのみ）
-    出力: context_out（contextのみ、tokenは出力しない）
-
-    等差減少設計: 入力context次元から出力context次元へ段階的に縮小
+    入力: [context, token_embeds]（全レイヤーでtoken継ぎ足し）
+    出力: context_out
 
     Args:
         context_input_dim: Input context dimension
         context_output_dim: Output context dimension
-        token_input_dim: Token input dimension (0 = no token input)
+        token_input_dim: Token input dimension
     """
 
     def __init__(self, context_input_dim, context_output_dim, token_input_dim=0):
@@ -104,12 +102,10 @@ class TokenLayer(nn.Module):
     入力: [context, token_embeds]
     出力: token_out（tokenのみ更新、contextは参照のみ）
 
-    等差減少設計: 入力トークン次元から出力トークン次元へ段階的に縮小
-
     Args:
         context_dim: Context vector dimension
-        token_input_dim: Input token dimension (前のレイヤーからの出力次元)
-        token_output_dim: Output token dimension (このレイヤーの出力次元)
+        token_input_dim: Input token dimension
+        token_output_dim: Output token dimension
     """
 
     def __init__(self, context_dim, token_input_dim, token_output_dim):

@@ -493,43 +493,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         return contexts, avg_total_loss, avg_cvfp_loss, avg_diversity_loss
 
-    def _forward_parallel(self, token_embeds: torch.Tensor, previous_contexts: torch.Tensor) -> torch.Tensor:
-        """並列処理（Iteration 1+用）- 推論専用（勾配なし）"""
-        num_tokens = len(token_embeds)
-        batch_size = self.config.phase1_batch_size
-        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
-
-        # コンテキスト準備（既存ロジック）
-        contexts_for_batch = torch.zeros(num_tokens, self.model.context_dim, device=self.device)
-        contexts_for_batch[1:] = previous_contexts[:-1].detach()
-        contexts_for_batch[0] = previous_contexts[-1].detach()
-
-        if self.config.phase1_context_noise > 0 and self.model.training:
-            noise = torch.randn_like(contexts_for_batch) * self.config.phase1_context_noise
-            contexts_for_batch = contexts_for_batch + noise
-
-        # バッチ処理（メモリ効率: combined_tokensをバッチごとに作成）
-        all_contexts = []
-        with torch.no_grad():
-            for start_idx in range(0, num_tokens, batch_size):
-                end_idx = min(start_idx + batch_size, num_tokens)
-
-                # バッチ分のcombined_tokensを作成（メモリ効率化）
-                batch_combined = self._build_combined_tokens_batch(
-                    token_embeds, num_input_tokens, start_idx, end_idx
-                )
-
-                batch_output = self.model.context_block(
-                    contexts_for_batch[start_idx:end_idx],
-                    batch_combined
-                )
-                all_contexts.append(batch_output)
-
-                # メモリ解放
-                del batch_combined
-
-        return torch.cat(all_contexts, dim=0)
-
     def _build_combined_tokens_batch(
         self, token_embeds: torch.Tensor, num_input_tokens: int,
         start_idx: int, end_idx: int

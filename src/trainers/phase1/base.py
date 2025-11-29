@@ -4,7 +4,7 @@ Phase1Trainer - CVFP固定点学習トレーナーの抽象基底クラス
 
 import sys
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Union, Tuple, List
+from typing import Dict, Any, Optional, Union, Tuple
 import torch
 
 from src.evaluation import ConvergenceResult
