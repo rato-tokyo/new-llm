@@ -14,7 +14,7 @@ New-LLM explores the idea that meaningful context representations emerge through
 - **Phase 2 Cache Reuse**: Pass cache from Phase 1 to Phase 2, saving 627s (40% faster)
 - **Parallel Processing**: **23x speedup** (265s → 11s) with parallel batch processing
 - **Auto Batch Size**: GPU memory-based batch size calculation with OOM prevention
-- **Scaling Law**: α = -0.459 (R² = 0.993), PPL improves with more tokens
+- **Scaling Law**: α = -0.403 (R² = 0.992), PPL improves with more tokens (token継ぎ足し方式)
 - **Diversity Regularization**: Global mean-based tracking for parallel processing
 - **Function-Based Architecture**: Clean, efficient implementation in [src/trainers/phase1/memory.py](src/trainers/phase1/memory.py)
 - **Flexible Data Loading**: Supports UltraChat, text files, and custom datasets
@@ -156,7 +156,7 @@ See `CLAUDE.md` for:
 - ✅ **Effective Rank is a byproduct**: ER doesn't directly affect performance; token input does
 - ✅ **Parallel ≈ Sequential**: Context vectors have 99.7% cosine similarity
 - ✅ **Parallel cache collection**: 51s → few seconds with `forward_with_intermediates_batch()`
-- ✅ **Scaling law**: α = -0.459 (R² = 0.993), token count is the dominant factor
+- ✅ **Scaling law**: α = -0.403 (R² = 0.992) with token継ぎ足し方式, PPL 324 at 500 samples
 
 **Recent Achievements (2025-11-29):**
 - ✅ **Phase 2 cache reuse**: Pass cache from Phase 1, skip 627s rebuild (40% faster)
