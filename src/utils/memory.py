@@ -5,7 +5,7 @@ GPU/CPUメモリに基づく自動パラメータ調整
 """
 
 import torch
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 
 
 def get_gpu_memory_info() -> Dict[str, float]:

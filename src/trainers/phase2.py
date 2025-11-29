@@ -41,17 +41,11 @@ import torch
 import torch.nn as nn
 import time
 import sys
-from typing import Optional, Tuple, Dict, Any
+from typing import Dict, Any
 
 # メモリユーティリティをインポート（オプショナル）
 try:
-    from src.utils.memory import (
-        get_gpu_memory_info,
-        estimate_cache_size,
-        calculate_safe_batch_size,
-        can_fit_in_memory,
-        print_memory_report
-    )
+    from src.utils.memory import can_fit_in_memory  # noqa: F401
     MEMORY_UTILS_AVAILABLE = True
 except ImportError:
     MEMORY_UTILS_AVAILABLE = False
