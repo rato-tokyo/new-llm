@@ -291,25 +291,45 @@ class Phase2Trainer:
         correct = 0
         num_layers = self.model.num_layers
 
+        # バッチサイズを計算（評価時も大きなデータでOOMを防ぐ）
+        # 評価時はbackwardがないので、訓練時より大きくできる
+        eval_batch_size = getattr(self, '_eval_batch_size', None)
+        if eval_batch_size is None:
+            # 訓練バッチサイズの2倍を評価バッチサイズとして使用
+            train_batch = getattr(self.config, 'phase2_batch_size', None) or 4096
+            eval_batch_size = min(train_batch * 2, 8192)
+            self._eval_batch_size = eval_batch_size
+
         with torch.no_grad():
-            # context_cache: [num_layers, num_tokens, context_dim]
-            context_list = []
-            for layer_idx in range(num_layers):
-                layer_contexts = context_cache[layer_idx]  # [num_tokens, context_dim]
-                context_list.append(layer_contexts)
+            # バッチ処理で評価（大量トークンでのOOM防止）
+            for batch_start in range(0, num_tokens, eval_batch_size):
+                batch_end = min(batch_start + eval_batch_size, num_tokens)
 
-            # TokenBlock forward（全トークン並列）
-            token_out = self.model.forward_token_e(context_list, token_embeds)
+                # context_cache: [num_layers, num_tokens, context_dim]
+                context_list = []
+                for layer_idx in range(num_layers):
+                    layer_contexts = context_cache[layer_idx, batch_start:batch_end]
+                    context_list.append(layer_contexts)
 
-            # 予測
-            logits = self.model.token_output(token_out)  # [num_tokens, vocab_size]
+                # バッチのトークン埋め込み
+                batch_token_embeds = token_embeds[batch_start:batch_end]
 
-            # 損失（全体）
-            total_loss = self.criterion(logits, target_ids).item() * num_tokens
+                # TokenBlock forward（バッチ並列）
+                token_out = self.model.forward_token_e(context_list, batch_token_embeds)
 
-            # 正解率
-            preds = torch.argmax(logits, dim=-1)
-            correct = (preds == target_ids).sum().item()
+                # 予測
+                logits = self.model.token_output(token_out)  # [batch_size, vocab_size]
+
+                # バッチのターゲット
+                batch_targets = target_ids[batch_start:batch_end]
+
+                # 損失（バッチ）
+                batch_loss = self.criterion(logits, batch_targets).item()
+                total_loss += batch_loss * (batch_end - batch_start)
+
+                # 正解率
+                preds = torch.argmax(logits, dim=-1)
+                correct += (preds == batch_targets).sum().item()
 
         avg_loss = total_loss / num_tokens
         perplexity = torch.exp(torch.tensor(avg_loss)).item()
