@@ -365,6 +365,19 @@ class Phase2Trainer:
         train_cache_mb = (train_context_cache.numel() * 4) / (1024 * 1024)
         val_cache_mb = (val_context_cache.numel() * 4) / (1024 * 1024)
         print_flush(f"Cache size: train={train_cache_mb:.1f}MB, val={val_cache_mb:.1f}MB")
+
+        # キャッシュ構築後の利用可能メモリに基づいてバッチサイズを再計算
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            free_memory_gb = (torch.cuda.get_device_properties(0).total_memory
+                              - torch.cuda.memory_allocated()) / (1024**3)
+            # 訓練に必要なメモリを確保（安全係数0.5）
+            # batch_size あたり: logits(50257 * 4) + gradients ≈ 0.4MB/token
+            safe_batch_size = int(free_memory_gb * 1024 / 0.4 * 0.5)
+            if batch_size > safe_batch_size:
+                print_flush(f"⚠️ Reducing batch_size: {batch_size} → {safe_batch_size} (free mem: {free_memory_gb:.1f}GB)")
+                batch_size = max(safe_batch_size, 512)  # 最小512
+        print_flush(f"Effective batch size: {batch_size}")
         print_flush("")
 
         history = {
