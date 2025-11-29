@@ -36,16 +36,14 @@ for batch in batches:
 | TokenBlock forward | batch_size=1 | **真のバッチ並列** |
 | 予想高速化 | - | **5〜20倍** |
 
-### バッチサイズ自動計算（GPUメモリベース）
+### バッチサイズ自動計算（GPUメモリベース） - 2025-11-29 修正
 
 ```python
 # config.py
 phase2_batch_size = None  # GPUメモリに基づいて自動計算
-
-# 計算式: batch_size = GPU_memory_GB × 500 × 0.8
-# L4 (24GB) → 9,600
-# T4 (16GB) → 6,400
-# CPU → 512 (固定)
+phase2_memory_safety_factor = 0.5  # 安全係数
+phase2_min_batch_size = 256
+phase2_max_batch_size = 16384
 ```
 
 ### メモリ要件
@@ -53,6 +51,84 @@ phase2_batch_size = None  # GPUメモリに基づいて自動計算
 キャッシュサイズ = `num_tokens × num_layers × context_dim × 4bytes`
 
 例: 10万トークン、6層、768dim = **約1.84GB**
+
+---
+
+## 🚨 GPU OOM問題の教訓 - CRITICAL (2025-11-29)
+
+**500サンプル実験で繰り返し発生したOOMエラーから得た教訓**
+
+### 問題の本質
+
+PyTorchのGPUメモリ管理には複数の概念がある：
+
+| 用語 | 意味 | 取得方法 |
+|------|------|----------|
+| `total_memory` | GPU物理メモリ総量 | `torch.cuda.get_device_properties(0).total_memory` |
+| `memory_allocated` | 実際に使用中のテンソル | `torch.cuda.memory_allocated()` |
+| `memory_reserved` | PyTorchが確保済み（プール） | `torch.cuda.memory_reserved()` |
+
+**重要**: `reserved - allocated` は「PyTorchプール内の未使用領域」であり、新規アロケーションに使えるとは限らない。
+
+### OOMが発生した原因
+
+```
+500 samples:
+- キャッシュ: 10.3GB
+- モデル+勾配: 約11GB
+- allocated: 13.8GB
+- backward時に追加で1.65GB必要 → OOM
+```
+
+**誤った計算**（以前のコード）:
+```python
+free_gb = total_gb - reserved_gb  # ❌ 見かけ上8GB空きがある
+batch_size = free_gb × 500 × 0.8  # ❌ 8800トークン
+# → backward時にOOM
+```
+
+**正しい計算**（修正後）:
+```python
+free_gb = total_gb - allocated_gb  # ✅ 実際の空き
+per_token_mb = vocab_size × 4 × 3.5  # ✅ backward用に3.5倍
+available_mb = free_gb × 1024 × safety × 0.5  # ✅ さらに50%マージン
+batch_size = available_mb / per_token_mb  # ✅ ~3200トークン
+```
+
+### backward時のメモリ要件
+
+forward時より**大幅に多い**メモリが必要：
+
+1. **logits**: `batch_size × vocab_size × 4bytes` (約192MB @ batch=1000)
+2. **gradients**: logitsと同サイズ
+3. **中間バッファ**: 追加50%程度
+4. **合計**: `batch_size × vocab_size × 4 × 3.5`
+
+### 必須チェックリスト
+
+バッチサイズ計算時：
+- [ ] `memory_allocated()`を使用（`memory_reserved()`ではない）
+- [ ] `torch.cuda.synchronize()` + `empty_cache()` を先に実行
+- [ ] backward用に3.5倍のメモリを見積もる
+- [ ] safety_factor × 0.5 の追加マージンを適用
+- [ ] 計算結果をログに出力して確認可能に
+
+### Colab実行時の注意
+
+1. **ランタイム再起動が必須**: `git pull`後もPythonモジュールはキャッシュされる
+2. **確認コマンド**:
+   ```bash
+   !cd /content/new-llm && git fetch origin && git reset --hard origin/main
+   !grep "3.5" /content/new-llm/src/trainers/phase2.py  # 修正確認
+   ```
+3. **期待されるログ**:
+   ```
+   Calculating optimal batch size...
+     GPU Memory: total=22.2GB, allocated=13.8GB, reserved=XX.XGB, free=8.4GB
+     Per-token memory: 0.67MB, available: 2150.4MB
+     Batch size calculation: free=8.4GB × safety=0.5 → 3204 tokens
+   ⚠️ Auto-adjusting batch_size: 8864 → 3204
+   ```
 
 ---
 
