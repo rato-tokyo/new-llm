@@ -203,24 +203,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
             device='cpu', dtype=torch.float32  # CPUに保存してGPUメモリ節約
         )
 
-        with torch.no_grad():
-            for batch_start in range(0, num_input_tokens_total, cache_batch_size):
-                batch_end = min(batch_start + cache_batch_size, num_input_tokens_total)
-                batch_contexts = shifted_contexts[batch_start:batch_end]
-                batch_embeds = input_token_embeds[batch_start:batch_end]
-
-                batch_results = self.model.context_block.forward_with_intermediates_batch(
-                    batch_contexts, batch_embeds
-                )  # [num_layers, batch_size, context_dim]
-
-                all_layer_contexts[:, batch_start:batch_end, :] = batch_results.cpu()
-
-                # メモリ解放
-                del batch_results
-                if is_cuda:
-                    torch.cuda.empty_cache()
-
-        # token_embeds_combined を準備（num_input_tokens対応）
+        # token_embeds_combined を先に準備（num_input_tokens対応）
+        # forward_with_intermediates_batch でも使用するため
         num_input_tokens_config = getattr(self.config, 'num_input_tokens', 1)
         if num_input_tokens_config == 1:
             token_embeds_combined = input_token_embeds.cpu()  # CPUに保存
@@ -241,6 +225,24 @@ class MemoryPhase1Trainer(Phase1Trainer):
                     )
                     token_window = torch.cat([padding, token_window], dim=0)
                 token_embeds_combined[i] = token_window.flatten().cpu()
+
+        with torch.no_grad():
+            for batch_start in range(0, num_input_tokens_total, cache_batch_size):
+                batch_end = min(batch_start + cache_batch_size, num_input_tokens_total)
+                batch_contexts = shifted_contexts[batch_start:batch_end]
+                # num_input_tokens対応: token_embeds_combinedを使用
+                batch_embeds = token_embeds_combined[batch_start:batch_end].to(self.device)
+
+                batch_results = self.model.context_block.forward_with_intermediates_batch(
+                    batch_contexts, batch_embeds
+                )  # [num_layers, batch_size, context_dim]
+
+                all_layer_contexts[:, batch_start:batch_end, :] = batch_results.cpu()
+
+                # メモリ解放
+                del batch_results, batch_embeds
+                if is_cuda:
+                    torch.cuda.empty_cache()
 
         cache_elapsed = time.time() - cache_start
         print_flush(f"  Cache collected (parallel) [{cache_elapsed:.1f}s]")
