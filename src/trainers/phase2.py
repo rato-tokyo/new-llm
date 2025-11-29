@@ -62,6 +62,10 @@ class Phase2Trainer:
         self.learning_rate = config.phase2_learning_rate
         self.gradient_clip = config.phase2_gradient_clip
 
+        # キャッシュ（一度構築したら再利用）
+        self._train_cache = None
+        self._val_cache = None
+
         # ContextBlockをfreeze
         self.model.freeze_context_block()
 
@@ -100,27 +104,34 @@ class Phase2Trainer:
 
     def _build_context_cache(self, token_ids, device):
         """
-        全トークンのContextBlock出力をキャッシュ構築
+        全トークンのContextBlock出力をキャッシュ構築（メモリ効率化版）
 
         Args:
             token_ids: トークンID [seq_len]
             device: デバイス
 
         Returns:
-            context_cache: List of context_outputs for each token
-                           各要素は [context_1, ..., context_N] のリスト
+            context_cache: テンソル [num_layers, num_tokens, context_dim]
             token_embeds: 全トークンの埋め込み [num_tokens, embed_dim * num_input_tokens]
         """
         num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
         input_ids = token_ids[:-1]  # 最後のトークン以外
         num_tokens = len(input_ids)
+        num_layers = self.model.num_layers
+        context_dim = self.model.context_dim
 
-        # 結果格納用
-        context_cache = []  # 各トークンのcontext_outputs
-        token_embeds_list = []  # combined_tokens
+        # 結果格納用テンソル（事前確保でメモリ効率化）
+        context_cache = torch.zeros(
+            num_layers, num_tokens, context_dim,
+            device=device, dtype=torch.float32
+        )
+        token_embeds = torch.zeros(
+            num_tokens, self.model.embed_dim * num_input_tokens,
+            device=device, dtype=torch.float32
+        )
 
         with torch.no_grad():
-            context = torch.zeros(1, self.model.context_dim, device=device)
+            context = torch.zeros(1, context_dim, device=device)
 
             # トークン履歴を初期化（ゼロベクトルで埋める）
             token_history = [torch.zeros(1, self.model.embed_dim, device=device)
@@ -140,34 +151,36 @@ class Phase2Trainer:
 
                 # 最新の num_input_tokens 個を結合
                 combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
-                token_embeds_list.append(combined_tokens)
+                token_embeds[i] = combined_tokens.squeeze(0)
 
                 # ContextBlock forward
                 context_outputs = self.model.forward_context_with_intermediates(
                     context, combined_tokens
                 )
-                context_cache.append(context_outputs)
+
+                # 各レイヤーの出力をテンソルに格納
+                for layer_idx, ctx_out in enumerate(context_outputs):
+                    context_cache[layer_idx, i] = ctx_out.squeeze(0)
 
                 # コンテキスト更新
                 context = context_outputs[-1]
 
-        # token_embedsをテンソルに変換 [num_tokens, embed_dim * num_input_tokens]
-        token_embeds = torch.cat(token_embeds_list, dim=0)
-
         return context_cache, token_embeds
 
-    def train_epoch(self, token_ids, device, batch_size=None):
+    def train_epoch(self, token_ids, device, batch_size=None, context_cache=None, token_embeds=None):
         """
         1エポックの訓練（キャッシュ方式）
 
         処理フロー:
-        1. ContextBlock出力を全トークン分キャッシュ（1回のみ）
+        1. ContextBlock出力を全トークン分キャッシュ（初回のみ、以降は再利用）
         2. TokenBlockをバッチ並列処理
 
         Args:
             token_ids: トークンID [seq_len]
             device: デバイス
             batch_size: ミニバッチサイズ
+            context_cache: 事前構築済みキャッシュ（オプション）
+            token_embeds: 事前構築済みトークン埋め込み（オプション）
 
         Returns:
             avg_loss: 平均損失
@@ -184,8 +197,9 @@ class Phase2Trainer:
         target_ids = token_ids[1:]  # 最初のトークン以外（次トークン予測の正解）
         num_tokens = len(target_ids)
 
-        # Step 1: ContextBlockキャッシュ構築
-        context_cache, token_embeds = self._build_context_cache(token_ids, device)
+        # Step 1: ContextBlockキャッシュ構築（キャッシュがない場合のみ）
+        if context_cache is None or token_embeds is None:
+            context_cache, token_embeds = self._build_context_cache(token_ids, device)
 
         # Step 2: TokenBlockバッチ並列処理
         total_loss = 0.0
@@ -200,14 +214,10 @@ class Phase2Trainer:
             batch_token_embeds = token_embeds[batch_start:batch_end]  # [batch, embed_dim * num_input_tokens]
 
             # バッチ内のcontext_outputsを構築
-            # context_cache[i] = [context_1, ..., context_N] (各 [1, context_dim])
-            # バッチ用に [batch, context_dim] に変換
+            # context_cache: [num_layers, num_tokens, context_dim]
             batch_context_list = []
             for layer_idx in range(num_layers):
-                layer_contexts = torch.cat(
-                    [context_cache[i][layer_idx] for i in range(batch_start, batch_end)],
-                    dim=0
-                )  # [batch, context_dim]
+                layer_contexts = context_cache[layer_idx, batch_start:batch_end]  # [batch, context_dim]
                 batch_context_list.append(layer_contexts)
 
             # TokenBlock forward（バッチ並列）
@@ -239,13 +249,15 @@ class Phase2Trainer:
 
         return avg_loss, perplexity
 
-    def evaluate(self, token_ids, device):
+    def evaluate(self, token_ids, device, context_cache=None, token_embeds=None):
         """
         評価（検証データ）- キャッシュ方式
 
         Args:
             token_ids: トークンID [seq_len]
             device: デバイス
+            context_cache: 事前構築済みキャッシュ（オプション）
+            token_embeds: 事前構築済みトークン埋め込み（オプション）
 
         Returns:
             avg_loss: 平均損失
@@ -257,22 +269,19 @@ class Phase2Trainer:
         target_ids = token_ids[1:]
         num_tokens = len(target_ids)
 
-        # ContextBlockキャッシュ構築
-        context_cache, token_embeds = self._build_context_cache(token_ids, device)
+        # ContextBlockキャッシュ構築（キャッシュがない場合のみ）
+        if context_cache is None or token_embeds is None:
+            context_cache, token_embeds = self._build_context_cache(token_ids, device)
 
         total_loss = 0.0
         correct = 0
         num_layers = self.model.num_layers
 
         with torch.no_grad():
-            # 全トークンを一括処理（メモリが許す場合）
-            # context_listを構築
+            # context_cache: [num_layers, num_tokens, context_dim]
             context_list = []
             for layer_idx in range(num_layers):
-                layer_contexts = torch.cat(
-                    [context_cache[i][layer_idx] for i in range(num_tokens)],
-                    dim=0
-                )  # [num_tokens, context_dim]
+                layer_contexts = context_cache[layer_idx]  # [num_tokens, context_dim]
                 context_list.append(layer_contexts)
 
             # TokenBlock forward（全トークン並列）
@@ -344,6 +353,20 @@ class Phase2Trainer:
             print_flush("  - token_output: TRAINING")
         print_flush("")
 
+        # キャッシュを事前構築（全エポックで再利用）
+        print_flush("Building context cache (one-time computation)...")
+        cache_start = time.time()
+        train_context_cache, train_token_embeds = self._build_context_cache(train_token_ids, device)
+        val_context_cache, val_token_embeds = self._build_context_cache(val_token_ids, device)
+        cache_time = time.time() - cache_start
+        print_flush(f"Cache built in {cache_time:.1f}s")
+
+        # キャッシュサイズ計算
+        train_cache_mb = (train_context_cache.numel() * 4) / (1024 * 1024)
+        val_cache_mb = (val_context_cache.numel() * 4) / (1024 * 1024)
+        print_flush(f"Cache size: train={train_cache_mb:.1f}MB, val={val_cache_mb:.1f}MB")
+        print_flush("")
+
         history = {
             'train_loss': [],
             'train_ppl': [],
@@ -362,13 +385,17 @@ class Phase2Trainer:
         for epoch in range(1, epochs + 1):
             start_time = time.time()
 
-            # Train
+            # Train（キャッシュを再利用）
             train_loss, train_ppl = self.train_epoch(
-                train_token_ids, device, batch_size=batch_size
+                train_token_ids, device, batch_size=batch_size,
+                context_cache=train_context_cache, token_embeds=train_token_embeds
             )
 
-            # Validate
-            val_loss, val_ppl, val_acc = self.evaluate(val_token_ids, device)
+            # Validate（キャッシュを再利用）
+            val_loss, val_ppl, val_acc = self.evaluate(
+                val_token_ids, device,
+                context_cache=val_context_cache, token_embeds=val_token_embeds
+            )
 
             elapsed = time.time() - start_time
 
