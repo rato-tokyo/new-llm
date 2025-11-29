@@ -133,7 +133,7 @@ def run_experiment(
 
     # 検証データが存在しない場合は生成
     if not os.path.exists(val_file_path):
-        print_flush(f"\n  Generating validation data...")
+        print_flush("\n  Generating validation data...")
         # まず訓練データをロードするために一時的にMemoryDataProviderを使用
         # 但し、val_dataロード前に止める必要があるため、直接UltraChatからロード
         tokenizer = AutoTokenizer.from_pretrained(
@@ -216,7 +216,7 @@ def run_experiment(
     print_flush(f"  Model parameters: {total_params:,}")
 
     # Phase 1: CVFP固定点学習
-    print_flush(f"\n  Phase 1 starting...")
+    print_flush("\n  Phase 1 starting...")
     phase1_start = time.time()
 
     phase1_trainer = MemoryPhase1Trainer(model, config, device)
@@ -246,7 +246,7 @@ def run_experiment(
     print_flush(f"  Val ER: {val_er_ratio*100:.1f}%")
 
     # Phase 2: Next-Token Prediction（キャッシュ方式）
-    print_flush(f"\n  Phase 2 starting...")
+    print_flush("\n  Phase 2 starting...")
     phase2_start = time.time()
 
     phase2_trainer = Phase2Trainer(model=model, config=config)
@@ -320,12 +320,12 @@ def main():
     print_flush("UNIFIED SCALING EXPERIMENT")
     print_flush("=" * 70)
     print_flush(f"Start time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-    print_flush(f"\nSettings:")
+    print_flush("\nSettings:")
     print_flush(f"  Sample sizes: {SAMPLE_SIZES}")
     print_flush(f"  Model: {NUM_LAYERS} layers, {CONTEXT_DIM} dim")
     print_flush(f"  num_input_tokens: {NUM_INPUT_TOKENS}")
     print_flush(f"  Embedding freeze: {EMBEDDING_FREEZE}")
-    print_flush(f"  Tokenization: truncation=False (full length)")
+    print_flush("  Tokenization: truncation=False (full length)")
     print_flush(f"  Random seed: {RANDOM_SEED}")
 
     # シード固定
