@@ -1,5 +1,25 @@
 # New-LLM Project Guidelines
 
+## 🔧 開発環境のLint/Type Check (2025-11-29)
+
+**pyenv環境ではruffやmypyを直接実行できないため、`python3 -m` で実行する。**
+
+```bash
+# Lint (ruff)
+python3 -m ruff check src/
+
+# Type check (mypy)
+python3 -m mypy src/ --ignore-missing-imports
+
+# 特定ファイルのみ
+python3 -m ruff check src/trainers/phase1/memory.py src/experiments/runner.py
+python3 -m mypy src/trainers/phase1/memory.py src/experiments/runner.py --ignore-missing-imports
+```
+
+**注意**: `ruff` や `mypy` を直接実行すると `command not found` エラーになる。
+
+---
+
 ## ⚠️ COLAB環境リセット対策 (2025-11-29)
 
 **Colabは頻繁に環境がリセットされるため、以下のファイルが消失する可能性がある。**
