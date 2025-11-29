@@ -95,20 +95,62 @@ phase2_trainer.train_full(
 - 500サンプル（53万トークン）: 約9.3GB（従来と同じ）
 - `token_input_all_layers=False`の場合: 約6.5GB（等差減少で削減）
 
-### ⚠️ キャッシュ収集は並列化不可
+### ✅ キャッシュ収集の並列化 (2025-11-29 更新)
 
-Phase 2キャッシュの収集（`_forward_sequential`）は**シーケンシャル処理が必須**。
+**Phase 1で確定したcontextを使えば、全レイヤー出力の計算は並列化可能。**
 
-**理由**: Token i のコンテキストを計算するには Token 0〜i-1 の処理結果が必要（因果的依存）
+**発見**: 並列処理とシーケンシャル処理のcontextは**コサイン類似度99.7%**でほぼ同一。
 
+```python
+# 並列キャッシュ収集（新方式）: 数秒で完了
+shifted_contexts = [initial_context] + previous_contexts[:-1]  # 1つずらし
+all_layer_outputs = model.forward_with_intermediates_batch(shifted_contexts, token_embeds)
 ```
-Token 0 → context_0
-Token 1 + context_0 → context_1
-Token 2 + context_1 → context_2
-...
+
+**ポイント**:
+- Phase 2では token i の処理に `previous_contexts[i-1]` を使用（1つずらし）
+- token 0 は初期context（ゼロベクトル）を使用
+- 51秒 → 数秒に高速化
+
+---
+
+## 🎯 TOKEN継ぎ足しが本質的 (2025-11-29)
+
+**`token_input_all_layers=True`（全レイヤーでtoken入力）がパフォーマンスに本質的。**
+
+### 比較データ（500サンプル）
+
+| 設定 | token_input_all_layers | ER | Val PPL | Val Acc |
+|------|------------------------|-----|---------|---------|
+| 旧構造 | **True** | 76.3% | **334** | **18.9%** |
+| 等差減少 | False | 8.6% | 536 | 15.4% |
+
+### 結論
+
+- token継ぎ足しありでPPL 38%改善、Acc 23%向上
+- **Effective Rank（ER）はtoken継ぎ足しの副産物**
+- ERが高いからパフォーマンスが良いのではなく、token継ぎ足しによって情報が豊富になる
+
+### 推奨設定
+
+```python
+# config.py
+token_input_all_layers = True  # 推奨（パフォーマンス重視）
 ```
 
-この依存関係は並列化不可能。500サンプル（53万トークン）で約56秒かかるが、現在の設計では避けられない。
+---
+
+## 🔬 並列vs シーケンシャルのcontext差は無視可能 (2025-11-29)
+
+**実験結果**: 56,602トークンでの比較
+
+| 指標 | 値 |
+|------|-----|
+| コサイン類似度（平均） | **0.9969** |
+| コサイン類似度（最小） | 0.9890 |
+| MSE | 0.006156 |
+
+**結論**: Phase 1の並列処理は品質を犠牲にしていない。
 
 ---
 

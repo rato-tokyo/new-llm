@@ -9,11 +9,12 @@ New-LLM explores the idea that meaningful context representations emerge through
 ## Features
 
 - **Two-Phase Training**: Separate fixed-point learning and token prediction
+- **Token Input All Layers**: `token_input_all_layers=True` is essential for performance (PPL 334 vs 536)
+- **Parallel Cache Collection**: 51s → few seconds with batch processing (context similarity 99.7%)
 - **Phase 2 Cache Reuse**: Pass cache from Phase 1 to Phase 2, saving 627s (40% faster)
 - **Parallel Processing**: **23x speedup** (265s → 11s) with parallel batch processing
-- **High Effective Rank**: Achieves **55.9% (val) / ~60% (train) Effective Rank** with parallel optimization
 - **Auto Batch Size**: GPU memory-based batch size calculation with OOM prevention
-- **Optimized Loss Weight**: `dist_reg_weight = 0.9` compensates information delay with diversity enhancement
+- **Scaling Law**: α = -0.459 (R² = 0.993), PPL improves with more tokens
 - **Diversity Regularization**: Global mean-based tracking for parallel processing
 - **Function-Based Architecture**: Clean, efficient implementation in [src/trainers/phase1/memory.py](src/trainers/phase1/memory.py)
 - **Flexible Data Loading**: Supports UltraChat, text files, and custom datasets
@@ -150,36 +151,41 @@ See `CLAUDE.md` for:
 
 ## Current Status
 
+**Key Findings (2025-11-29):**
+- ✅ **Token input all layers is essential**: `token_input_all_layers=True` gives PPL 334 vs 536 (38% better)
+- ✅ **Effective Rank is a byproduct**: ER doesn't directly affect performance; token input does
+- ✅ **Parallel ≈ Sequential**: Context vectors have 99.7% cosine similarity
+- ✅ **Parallel cache collection**: 51s → few seconds with `forward_with_intermediates_batch()`
+- ✅ **Scaling law**: α = -0.459 (R² = 0.993), token count is the dominant factor
+
 **Recent Achievements (2025-11-29):**
 - ✅ **Phase 2 cache reuse**: Pass cache from Phase 1, skip 627s rebuild (40% faster)
 - ✅ **Auto batch size**: GPU memory-based calculation with OOM prevention
 - ✅ **Memory optimization**: Unified memory management in `src/utils/memory.py`
 - ✅ **Parallel processing**: 23x speedup (265s → 11s)
-- ✅ **Scaling experiments**: Confirmed α=-0.29 to -0.41 scaling law
 
 **Recent Achievements (2025-11-27):**
 - ✅ **Embedding freeze**: 71.9% PPL reduction with frozen GPT-2 embeddings
 - ✅ **Weight tying**: 42% parameter reduction (91M → 53M)
-- ✅ **Equal decrease design**: `token_input_all_layers=False` for parameter efficiency
 
 **Design Decisions:**
+- **token_input_all_layers = True**: Essential for performance (recommended)
 - **Phase 2 cache reuse**: `return_all_layers=True` in Phase 1, pass to Phase 2
-- **dist_reg_weight = 0.8**: Diversity optimization for effective rank
-- **Parallel processing**: Iteration 0 sequential + Iteration 1+ parallel
+- **Parallel cache collection**: Use `forward_with_intermediates_batch()` with shifted contexts
 - **Validation data**: Must be subset of training data (auto_split forbidden)
 
 **Working:**
+- ✅ Parallel cache collection (51s → few seconds)
 - ✅ Phase 2 cache reuse (skip 627s rebuild)
 - ✅ Auto batch size with OOM prevention
 - ✅ Parallel batch processing (23x speedup)
-- ✅ High Effective Rank (55.9% val / ~60% train)
 - ✅ Two-phase training pipeline
 - ✅ GPT-2 pre-trained embeddings (768-dim, frozen in Phase 2)
 - ✅ Weight tying (embedding = output head)
 - ✅ Deterministic training (seed=42)
 
 **Next Steps:**
-- 🎯 Test cache reuse on Colab
+- 🎯 Re-run experiments with `token_input_all_layers=True`
 - 🎯 Scale to 1000+ samples
 - 🎯 Improve scaling efficiency (target α < -0.5)
 
