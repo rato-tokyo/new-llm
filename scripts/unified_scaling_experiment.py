@@ -191,12 +191,17 @@ def run_experiment(
     # データロード（サンプル数に応じたデータ）
     print_flush(f"\n  Loading {num_samples} samples...")
     data_provider = MemoryDataProvider(config, shuffle_samples=False)
-    train_token_ids, val_token_ids = data_provider.load_data()
+    full_train_token_ids, val_token_ids = data_provider.load_data()
+
+    # 🚨 重要: 訓練データから検証部分を除外（データリーク防止）
+    val_size = len(val_token_ids)
+    train_token_ids = full_train_token_ids[:-val_size]  # 検証部分を除外
 
     train_token_ids = train_token_ids.to(device)
     val_token_ids = val_token_ids.to(device)
 
-    print_flush(f"  Train tokens: {len(train_token_ids):,}")
+    print_flush(f"  Full data tokens: {len(full_train_token_ids):,}")
+    print_flush(f"  Train tokens (excluding val): {len(train_token_ids):,}")
     print_flush(f"  Val tokens: {len(val_token_ids):,}")
 
     # モデル作成
