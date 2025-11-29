@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 """
-アーキテクチャ比較実験スクリプト
+アーキテクチャ比較実験スクリプト（スケーリング則計算付き）
 
-3つの設定を比較:
+4つの設定を複数サンプル数で比較し、α値を算出:
 1. Baseline: 6層、768次元、1トークン入力
 2. Exp1: 6層、768次元、2トークン入力 (num_input_tokens=2)
 3. Exp2: 6層、1152次元、1トークン入力 (context_dim*1.5)
 4. Exp3: 9層、768次元、1トークン入力 (num_layers=9)
+
+スケーリング則: PPL = A × tokens^α
+- α値が小さい（より負）ほど、データ効率が良い
 
 Colab実行用:
     !cd /content/new-llm && python3 scripts/architecture_comparison_experiment.py
@@ -23,16 +26,20 @@ from datetime import datetime
 
 import numpy as np
 import torch
+from scipy import stats
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import ResidualConfig
 from src.models import LLM
 from src.trainers.phase1.memory import MemoryPhase1Trainer
 from src.trainers.phase2 import Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
-from src.providers.data import load_data
+from src.providers.data import MemoryDataProvider
+
+# 実験設定
+SAMPLE_SIZES = [50, 100, 200, 500]  # スケーリング則計算用
+RANDOM_SEED = 42
 
 
 def print_flush(msg):
@@ -86,27 +93,65 @@ def calculate_params(num_layers, context_dim, embed_dim, num_input_tokens, vocab
     }
 
 
-def run_experiment(config_name, num_layers, context_dim, embed_dim, num_input_tokens,
-                   train_token_ids, val_token_ids, device, output_dir):
-    """単一の実験を実行"""
-    print_flush(f"\n{'='*70}")
-    print_flush(f"実験: {config_name}")
-    print_flush(f"  num_layers={num_layers}, context_dim={context_dim}, "
-                f"embed_dim={embed_dim}, num_input_tokens={num_input_tokens}")
-    print_flush(f"{'='*70}")
+def calculate_scaling_law(results: list):
+    """スケーリング則を計算: PPL = A × tokens^α"""
+    if len(results) < 2:
+        return {'alpha': None, 'A': None, 'r_squared': None, 'p_value': None, 'std_err': None}
 
-    set_seed(42)
+    tokens = np.array([r['train_tokens'] for r in results])
+    ppl = np.array([r['val_ppl'] for r in results])
 
-    # パラメータ数計算
-    params = calculate_params(
-        num_layers=num_layers,
-        context_dim=context_dim,
-        embed_dim=embed_dim,
-        num_input_tokens=num_input_tokens,
-        vocab_size=50257
+    # 対数変換
+    log_tokens = np.log(tokens)
+    log_ppl = np.log(ppl)
+
+    # 線形回帰
+    slope, intercept, r_value, p_value, std_err = stats.linregress(log_tokens, log_ppl)
+
+    alpha = slope  # 負の値が期待される
+    A = np.exp(intercept)
+    r_squared = r_value ** 2
+
+    return {
+        'alpha': alpha,
+        'A': A,
+        'r_squared': r_squared,
+        'p_value': p_value,
+        'std_err': std_err,
+    }
+
+
+def create_val_data_from_train(train_token_ids, tokenizer, val_file_path, val_ratio=0.1):
+    """訓練データから検証データを生成"""
+    val_size = int(len(train_token_ids) * val_ratio)
+    val_token_ids = train_token_ids[-val_size:]
+    val_text = tokenizer.decode(val_token_ids.tolist())
+    os.makedirs(os.path.dirname(val_file_path), exist_ok=True)
+    with open(val_file_path, 'w', encoding='utf-8') as f:
+        f.write(val_text)
+    return val_size
+
+
+def run_single_experiment(config_name, num_layers, context_dim, embed_dim, num_input_tokens,
+                          num_samples, device, base_config):
+    """単一設定・単一サンプル数での実験"""
+    set_seed(RANDOM_SEED)
+
+    # データ読み込み
+    from transformers import GPT2Tokenizer
+    tokenizer = GPT2Tokenizer.from_pretrained('gpt2')
+
+    provider = MemoryDataProvider(
+        dataset_name="HuggingFaceH4/ultrachat_200k",
+        dataset_split="train_sft",
+        num_samples=num_samples,
+        tokenizer_name="gpt2",
+        cache_dir="./cache",
+        val_ratio=0.1
     )
-    print_flush(f"  Phase1 params: {params['trainable_phase1']/1e6:.2f}M")
-    print_flush(f"  Phase2 params: {params['trainable_phase2']/1e6:.2f}M")
+    train_token_ids, val_token_ids = provider.get_data(device)
+    train_tokens = len(train_token_ids)
+    val_tokens = len(val_token_ids)
 
     # モデル作成
     model = LLM(
@@ -119,31 +164,27 @@ def run_experiment(config_name, num_layers, context_dim, embed_dim, num_input_to
         use_weight_tying=True
     ).to(device)
 
-    # Phase 1用の設定を作成
+    # Phase 1用の設定
     class Phase1Config:
-        def __init__(self, base_config, ctx_dim, n_layers, n_input_tokens):
+        def __init__(self, base, ctx_dim, n_layers, n_input_tokens):
             self.context_dim = ctx_dim
-            self.embed_dim = base_config.embed_dim
+            self.embed_dim = base.embed_dim
             self.num_layers = n_layers
             self.num_input_tokens = n_input_tokens
-            self.phase1_learning_rate = base_config.phase1_learning_rate
-            self.phase1_max_iterations = base_config.phase1_max_iterations
-            self.phase1_min_iterations = base_config.phase1_min_iterations
-            self.phase1_convergence_threshold = base_config.phase1_convergence_threshold
-            self.phase1_min_converged_ratio = base_config.phase1_min_converged_ratio
-            self.phase1_context_noise = base_config.phase1_context_noise
-            self.phase1_batch_size = base_config.phase1_batch_size
-            self.phase1_gradient_clip = base_config.phase1_gradient_clip
-            self.dist_reg_weight = base_config.dist_reg_weight
+            self.phase1_learning_rate = base.phase1_learning_rate
+            self.phase1_max_iterations = base.phase1_max_iterations
+            self.phase1_min_iterations = base.phase1_min_iterations
+            self.phase1_convergence_threshold = base.phase1_convergence_threshold
+            self.phase1_min_converged_ratio = base.phase1_min_converged_ratio
+            self.phase1_context_noise = base.phase1_context_noise
+            self.phase1_batch_size = base.phase1_batch_size
+            self.phase1_gradient_clip = base.phase1_gradient_clip
+            self.dist_reg_weight = base.dist_reg_weight
             self.device = device
 
-    base_config = ResidualConfig()
     phase1_config = Phase1Config(base_config, context_dim, num_layers, num_input_tokens)
 
     # Phase 1 実行
-    print_flush("\n--- Phase 1: CVFP Learning ---")
-    start_time = time.time()
-
     phase1_trainer = MemoryPhase1Trainer(model, phase1_config)
     train_contexts, train_context_cache, train_token_embeds = phase1_trainer.train(
         train_token_ids, return_all_layers=True
@@ -152,45 +193,33 @@ def run_experiment(config_name, num_layers, context_dim, embed_dim, num_input_to
         val_token_ids, return_all_layers=True
     )
 
-    phase1_time = time.time() - start_time
-    print_flush(f"  Phase 1 time: {phase1_time:.1f}s")
-
     # Effective Rank計算
     train_metrics = analyze_fixed_points(train_contexts, label="Train", verbose=False)
     val_metrics = analyze_fixed_points(val_contexts, label="Val", verbose=False)
+    train_er = train_metrics['effective_rank'] / context_dim
+    val_er = val_metrics['effective_rank'] / context_dim
 
-    train_er = train_metrics['effective_rank']
-    val_er = val_metrics['effective_rank']
-    train_er_pct = train_er / context_dim * 100
-    val_er_pct = val_er / context_dim * 100
-
-    print_flush(f"  Train ER: {train_er:.1f}/{context_dim} ({train_er_pct:.1f}%)")
-    print_flush(f"  Val ER: {val_er:.1f}/{context_dim} ({val_er_pct:.1f}%)")
-
-    # Phase 2用の設定を作成
+    # Phase 2用の設定
     class Phase2Config:
-        def __init__(self, base_config, ctx_dim, n_layers, n_input_tokens):
+        def __init__(self, base, ctx_dim, n_layers, n_input_tokens):
             self.context_dim = ctx_dim
-            self.embed_dim = base_config.embed_dim
+            self.embed_dim = base.embed_dim
             self.num_layers = n_layers
             self.num_input_tokens = n_input_tokens
-            self.phase2_learning_rate = base_config.phase2_learning_rate
-            self.phase2_epochs = base_config.phase2_epochs
-            self.phase2_patience = base_config.phase2_patience
-            self.phase2_batch_size = base_config.phase2_batch_size
-            self.phase2_gradient_clip = base_config.phase2_gradient_clip
-            self.phase2_freeze_embedding = base_config.phase2_freeze_embedding
-            self.phase2_memory_safety_factor = base_config.phase2_memory_safety_factor
-            self.phase2_min_batch_size = base_config.phase2_min_batch_size
-            self.phase2_max_batch_size = base_config.phase2_max_batch_size
+            self.phase2_learning_rate = base.phase2_learning_rate
+            self.phase2_epochs = base.phase2_epochs
+            self.phase2_patience = base.phase2_patience
+            self.phase2_batch_size = base.phase2_batch_size
+            self.phase2_gradient_clip = base.phase2_gradient_clip
+            self.phase2_freeze_embedding = base.phase2_freeze_embedding
+            self.phase2_memory_safety_factor = base.phase2_memory_safety_factor
+            self.phase2_min_batch_size = base.phase2_min_batch_size
+            self.phase2_max_batch_size = base.phase2_max_batch_size
             self.device = device
 
     phase2_config = Phase2Config(base_config, context_dim, num_layers, num_input_tokens)
 
     # Phase 2 実行
-    print_flush("\n--- Phase 2: Token Prediction ---")
-    start_time = time.time()
-
     phase2_trainer = Phase2Trainer(model, phase2_config)
     history = phase2_trainer.train_full(
         train_token_ids=train_token_ids,
@@ -201,48 +230,9 @@ def run_experiment(config_name, num_layers, context_dim, embed_dim, num_input_to
         val_token_embeds=val_token_embeds
     )
 
-    phase2_time = time.time() - start_time
-    print_flush(f"  Phase 2 time: {phase2_time:.1f}s")
-
-    # 結果取得
     best_epoch = history['best_epoch']
     best_ppl = history['val_ppl'][best_epoch - 1]
-    best_acc = history['val_acc'][best_epoch - 1] * 100
-
-    print_flush(f"\n  Best Results (epoch {best_epoch}):")
-    print_flush(f"    Val PPL: {best_ppl:.1f}")
-    print_flush(f"    Val Acc: {best_acc:.1f}%")
-
-    # 結果を保存
-    result = {
-        'config_name': config_name,
-        'num_layers': num_layers,
-        'context_dim': context_dim,
-        'embed_dim': embed_dim,
-        'num_input_tokens': num_input_tokens,
-        'params': params,
-        'phase1_time': phase1_time,
-        'phase2_time': phase2_time,
-        'total_time': phase1_time + phase2_time,
-        'train_effective_rank': train_er,
-        'train_effective_rank_pct': train_er_pct,
-        'val_effective_rank': val_er,
-        'val_effective_rank_pct': val_er_pct,
-        'best_epoch': best_epoch,
-        'best_val_ppl': best_ppl,
-        'best_val_acc': best_acc,
-        'history': {
-            'train_loss': history['train_loss'],
-            'val_ppl': history['val_ppl'],
-            'val_acc': [a * 100 for a in history['val_acc']],
-        }
-    }
-
-    # 個別結果を保存
-    result_file = os.path.join(output_dir, f'{config_name}.json')
-    with open(result_file, 'w') as f:
-        json.dump(result, f, indent=2)
-    print_flush(f"  Saved: {result_file}")
+    best_acc = history['val_acc'][best_epoch - 1]
 
     # メモリ解放
     del model, phase1_trainer, phase2_trainer
@@ -252,13 +242,89 @@ def run_experiment(config_name, num_layers, context_dim, embed_dim, num_input_to
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-    return result
+    return {
+        'num_samples': num_samples,
+        'train_tokens': train_tokens,
+        'val_tokens': val_tokens,
+        'val_ppl': best_ppl,
+        'val_acc': best_acc,
+        'train_effective_rank': train_er,
+        'val_effective_rank': val_er,
+        'best_epoch': best_epoch,
+    }
+
+
+def run_architecture_experiment(config_name, num_layers, context_dim, embed_dim, num_input_tokens,
+                                 device, base_config, output_dir):
+    """単一アーキテクチャで複数サンプル数の実験を実行"""
+    print_flush(f"\n{'='*70}")
+    print_flush(f"Architecture: {config_name}")
+    print_flush(f"  num_layers={num_layers}, context_dim={context_dim}, num_input_tokens={num_input_tokens}")
+    print_flush(f"{'='*70}")
+
+    # パラメータ数計算
+    params = calculate_params(
+        num_layers=num_layers,
+        context_dim=context_dim,
+        embed_dim=embed_dim,
+        num_input_tokens=num_input_tokens,
+        vocab_size=50257
+    )
+    print_flush(f"  Phase1 params: {params['trainable_phase1']/1e6:.2f}M")
+    print_flush(f"  Phase2 params: {params['trainable_phase2']/1e6:.2f}M")
+
+    results = []
+    start_time = time.time()
+
+    for num_samples in SAMPLE_SIZES:
+        print_flush(f"\n  --- {num_samples} samples ---")
+        result = run_single_experiment(
+            config_name=config_name,
+            num_layers=num_layers,
+            context_dim=context_dim,
+            embed_dim=embed_dim,
+            num_input_tokens=num_input_tokens,
+            num_samples=num_samples,
+            device=device,
+            base_config=base_config
+        )
+        results.append(result)
+        print_flush(f"    Tokens: {result['train_tokens']:,}, PPL: {result['val_ppl']:.1f}, "
+                   f"Acc: {result['val_acc']*100:.1f}%, ER: {result['val_effective_rank']*100:.1f}%")
+
+    total_time = time.time() - start_time
+
+    # スケーリング則計算
+    scaling = calculate_scaling_law(results)
+
+    print_flush(f"\n  Scaling Law: α = {scaling['alpha']:.4f} (R² = {scaling['r_squared']:.4f})")
+
+    # 結果をまとめる
+    arch_result = {
+        'config_name': config_name,
+        'num_layers': num_layers,
+        'context_dim': context_dim,
+        'embed_dim': embed_dim,
+        'num_input_tokens': num_input_tokens,
+        'params': params,
+        'total_time': total_time,
+        'sample_results': results,
+        'scaling_law': scaling,
+    }
+
+    # 個別結果を保存
+    result_file = os.path.join(output_dir, f'{config_name}.json')
+    with open(result_file, 'w') as f:
+        json.dump(arch_result, f, indent=2)
+
+    return arch_result
 
 
 def main():
     print_flush("="*70)
-    print_flush("アーキテクチャ比較実験")
+    print_flush("Architecture Comparison Experiment (Scaling Law)")
     print_flush("="*70)
+    print_flush(f"Sample sizes: {SAMPLE_SIZES}")
 
     # 出力ディレクトリ
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -274,12 +340,9 @@ def main():
         gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         print_flush(f"  GPU: {gpu_name} ({gpu_mem:.1f}GB)")
 
-    # データロード
-    print_flush("\nLoading data...")
-    config = ResidualConfig()
-    train_token_ids, val_token_ids = load_data(config, device)
-    print_flush(f"  Train tokens: {len(train_token_ids):,}")
-    print_flush(f"  Val tokens: {len(val_token_ids):,}")
+    # ベース設定を読み込み
+    from config import ResidualConfig
+    base_config = ResidualConfig()
 
     # 実験設定
     experiments = [
@@ -314,54 +377,71 @@ def main():
     ]
 
     # 実験実行
-    results = []
+    all_results = []
     total_start = time.time()
 
     for exp in experiments:
-        result = run_experiment(
+        result = run_architecture_experiment(
             config_name=exp['name'],
             num_layers=exp['num_layers'],
             context_dim=exp['context_dim'],
             embed_dim=exp['embed_dim'],
             num_input_tokens=exp['num_input_tokens'],
-            train_token_ids=train_token_ids,
-            val_token_ids=val_token_ids,
             device=device,
+            base_config=base_config,
             output_dir=output_dir
         )
-        results.append(result)
+        all_results.append(result)
 
     total_time = time.time() - total_start
 
     # サマリー出力
     print_flush("\n" + "="*70)
-    print_flush("実験結果サマリー")
+    print_flush("SUMMARY: Scaling Law Comparison")
     print_flush("="*70)
 
-    print_flush(f"\n{'Config':<20} {'Phase1':>10} {'P1 Time':>8} {'Val ER':>8} {'Val PPL':>10} {'Val Acc':>10}")
+    print_flush(f"\n{'Config':<20} {'Phase1 Params':>14} {'α (slope)':>12} {'R²':>8} {'Best PPL':>10}")
     print_flush("-"*70)
 
-    for r in results:
+    for r in all_results:
+        # 500サンプルでの最良PPL
+        best_ppl = r['sample_results'][-1]['val_ppl'] if r['sample_results'] else 0
+        alpha = r['scaling_law']['alpha']
+        r2 = r['scaling_law']['r_squared']
         print_flush(
             f"{r['config_name']:<20} "
-            f"{r['params']['trainable_phase1']/1e6:>8.2f}M "
-            f"{r['phase1_time']:>7.0f}s "
-            f"{r['val_effective_rank_pct']:>7.1f}% "
-            f"{r['best_val_ppl']:>10.1f} "
-            f"{r['best_val_acc']:>9.1f}%"
+            f"{r['params']['trainable_phase1']/1e6:>12.2f}M "
+            f"{alpha:>12.4f} "
+            f"{r2:>8.4f} "
+            f"{best_ppl:>10.1f}"
         )
 
     print_flush("-"*70)
-    print_flush(f"Total time: {total_time/60:.1f} min")
+    print_flush(f"\nTotal time: {total_time/60:.1f} min")
+
+    # α値の解釈
+    print_flush("\n" + "="*70)
+    print_flush("INTERPRETATION")
+    print_flush("="*70)
+    print_flush("Scaling Law: PPL = A × tokens^α")
+    print_flush("  - より負のα → データ効率が良い（少ないデータでPPL低下）")
+    print_flush("  - R² > 0.9 → スケーリング則への適合度が高い")
+
+    # ランキング
+    sorted_results = sorted(all_results, key=lambda x: x['scaling_law']['alpha'] or 0)
+    print_flush("\nRanking by α (better = more negative):")
+    for i, r in enumerate(sorted_results, 1):
+        alpha = r['scaling_law']['alpha']
+        if alpha is not None:
+            print_flush(f"  {i}. {r['config_name']}: α = {alpha:.4f}")
 
     # 全結果を保存
     summary = {
         'timestamp': timestamp,
+        'sample_sizes': SAMPLE_SIZES,
         'total_time_sec': total_time,
         'device': device,
-        'train_tokens': len(train_token_ids),
-        'val_tokens': len(val_token_ids),
-        'results': results
+        'results': all_results
     }
 
     summary_file = os.path.join(output_dir, 'summary.json')
