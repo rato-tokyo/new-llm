@@ -25,9 +25,9 @@ class ResidualConfig:
     context_dim = embed_dim * context_multiplier  # コンテキストベクトル次元数（自動計算）
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
-    use_weight_tying = True         # Weight Tying: Token EmbeddingとOutput Headで重み共有
+    use_weight_tying = False        # Weight Tying: Token EmbeddingとOutput Headで重み共有
                                     # True: GPT-2スタイル、パラメータ約38M削減、推奨
-                                    # False: 従来の独立した重み
+                                    # False: 従来の独立した重み（11/27実験再現用）
     # LayerNorm: 常に有効（数値安定性のため必須）
 
     # ========== 複数トークン入力 ==========
@@ -109,11 +109,11 @@ class ResidualConfig:
                                     #       L4(24GB)→9600, T4(16GB)→6400, CPU→512
                                     # 手動指定も可能
     phase2_gradient_clip = 1.0      # 勾配クリッピング値
-    phase2_freeze_embedding = True  # Embedding凍結オプション [推奨: True]
+    phase2_freeze_embedding = False # Embedding凍結オプション（11/27実験再現用: False）
                                     # True: Embedding凍結（TokenBlockのみ、7.09Mパラメータ）[推奨]
                                     #       → PPL 66-72%改善、Accuracy 53-63%改善
-                                    # False: Embedding学習（49.2Mパラメータ）[非推奨]
-                                    #       → 過学習しやすく、汎化性能が低下
+                                    # False: Embedding学習（49.2Mパラメータ）- 11/27実験再現用
+                                    #       → スケーリング効率（α値）が高くなる傾向
                                     # ⚠️ Weight Tying時はOutput Headも凍結される
 
     @property
