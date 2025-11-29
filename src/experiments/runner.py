@@ -5,10 +5,9 @@ ExperimentRunner - 実験実行の統一インターフェース
 """
 
 import os
-import sys
 import random
-from dataclasses import dataclass, field
-from typing import Optional, Dict, Any
+from dataclasses import dataclass
+from typing import Optional, Dict, Any, Union
 
 import numpy as np
 import torch
@@ -61,11 +60,11 @@ class ExperimentConfig:
     random_seed: int = 42
     verbose: bool = True
 
-    def get_phase1_config(self, base_config: ResidualConfig, device: str):
+    def get_phase1_config(self, base_config: ResidualConfig, device: Union[str, torch.device]):
         """Phase 1用の設定オブジェクトを生成"""
         return _Phase1Config(self, base_config, device)
 
-    def get_phase2_config(self, base_config: ResidualConfig, device: str):
+    def get_phase2_config(self, base_config: ResidualConfig, device: Union[str, torch.device]):
         """Phase 2用の設定オブジェクトを生成"""
         return _Phase2Config(self, base_config, device)
 
@@ -77,7 +76,7 @@ class ExperimentConfig:
 class _Phase1Config:
     """Phase 1 Trainer用の設定ラッパー"""
 
-    def __init__(self, exp: ExperimentConfig, base: ResidualConfig, device: str):
+    def __init__(self, exp: ExperimentConfig, base: ResidualConfig, device: Union[str, torch.device]):
         self.context_dim = exp.context_dim
         self.embed_dim = exp.embed_dim
         self.num_layers = exp.num_layers
@@ -97,7 +96,7 @@ class _Phase1Config:
 class _Phase2Config:
     """Phase 2 Trainer用の設定ラッパー"""
 
-    def __init__(self, exp: ExperimentConfig, base: ResidualConfig, device: str):
+    def __init__(self, exp: ExperimentConfig, base: ResidualConfig, device: Union[str, torch.device]):
         self.context_dim = exp.context_dim
         self.embed_dim = exp.embed_dim
         self.num_layers = exp.num_layers
@@ -124,7 +123,9 @@ class _DataConfig:
         self.cache_dir = base.cache_dir
         self.num_samples = exp.num_samples
         self.val_data_source = base.val_data_source
-        self.val_text_file = base.val_text_file
+        # 汎用の検証ファイルを使用（example_val.txt）
+        # サンプル数に依存しない固定の検証データ
+        self.val_text_file = "./data/example_val.txt"
 
 
 class ExperimentRunner:
@@ -136,15 +137,56 @@ class ExperimentRunner:
             device: 'cuda' or 'cpu' (Noneで自動検出)
             base_config: ベース設定（Noneで新規作成）
         """
-        self.device = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        device_str = device or ("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(device_str)
         self.base_config = base_config or ResidualConfig()
 
-        if self.device == "cuda" and torch.cuda.is_available():
+        if self.device.type == "cuda" and torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
             gpu_mem = torch.cuda.get_device_properties(0).total_memory / (1024**3)
             print_flush(f"Device: {self.device} ({gpu_name}, {gpu_mem:.1f}GB)")
         else:
             print_flush(f"Device: {self.device}")
+
+        # 検証ファイルの存在確認と自動生成
+        self._ensure_val_file()
+
+    def _ensure_val_file(self):
+        """検証ファイルが存在しない場合は自動生成"""
+        val_file = "./data/example_val.txt"
+        if os.path.exists(val_file):
+            return
+
+        print_flush(f"Validation file not found, generating: {val_file}")
+        os.makedirs("./data", exist_ok=True)
+
+        # UltraChatから検証データを生成
+        from transformers import AutoTokenizer
+        from datasets import load_dataset
+
+        tokenizer = AutoTokenizer.from_pretrained(
+            self.base_config.tokenizer_name,
+            cache_dir=os.path.join(self.base_config.cache_dir, "tokenizer")
+        )
+        tokenizer.pad_token = tokenizer.eos_token
+
+        dataset = load_dataset(
+            self.base_config.dataset_name,
+            split=self.base_config.dataset_split,
+            cache_dir=os.path.join(self.base_config.cache_dir, "datasets")
+        )
+
+        # 1000番目以降のサンプルから検証データを生成（訓練データと重複しない）
+        val_texts = []
+        for idx in range(1000, min(1020, len(dataset))):
+            messages = dataset[idx]["messages"]
+            text = "\n".join([msg["content"] for msg in messages])
+            val_texts.append(text)
+
+        with open(val_file, 'w', encoding='utf-8') as f:
+            f.write("\n\n".join(val_texts))
+
+        print_flush(f"  Generated {len(val_texts)} validation samples")
 
     def run(self, config: ExperimentConfig) -> Dict[str, Any]:
         """
@@ -190,14 +232,14 @@ class ExperimentRunner:
 
         # Phase 1 実行
         phase1_config = config.get_phase1_config(self.base_config, self.device)
-        phase1_trainer = MemoryPhase1Trainer(model, phase1_config)
+        phase1_trainer = MemoryPhase1Trainer(model, phase1_config, self.device)
 
-        train_contexts, train_context_cache, train_token_embeds = phase1_trainer.train(
-            train_token_ids, return_all_layers=True
-        )
-        val_contexts, val_context_cache, val_token_embeds = phase1_trainer.evaluate(
-            val_token_ids, return_all_layers=True
-        )
+        train_result = phase1_trainer.train(train_token_ids, return_all_layers=True)
+        train_contexts, train_context_cache, train_token_embeds = train_result
+
+        val_result = phase1_trainer.evaluate(val_token_ids, return_all_layers=True)
+        assert isinstance(val_result, tuple), "evaluate with return_all_layers=True must return tuple"
+        val_contexts, val_context_cache, val_token_embeds = val_result
 
         # Effective Rank計算
         train_metrics = analyze_fixed_points(train_contexts, label="Train", verbose=False)
@@ -215,6 +257,7 @@ class ExperimentRunner:
         history = phase2_trainer.train_full(
             train_token_ids=train_token_ids,
             val_token_ids=val_token_ids,
+            device=self.device,
             train_context_cache=train_context_cache,
             train_token_embeds=train_token_embeds,
             val_context_cache=val_context_cache,
