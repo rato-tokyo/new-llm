@@ -38,7 +38,8 @@ import numpy as np
 from scipy import stats
 
 # 設定（11/27実験再現用）
-SAMPLE_SIZES = [50, 100, 200, 500]  # 11/27実験と同じサンプル数
+# SAMPLE_SIZES = [50, 100, 200, 500]  # 全実験
+SAMPLE_SIZES = [500]  # 500 samplesのみ実行（1-3は完了済み）
 NUM_LAYERS = 6
 CONTEXT_DIM = 768
 EMBED_DIM = 768
