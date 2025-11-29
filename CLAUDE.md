@@ -1,20 +1,64 @@
 # New-LLM Project Guidelines
 
-## ⚡ PHASE 2 CACHE MODE - キャッシュ方式高速化 (2025-11-28)
+## 🚀 PHASE 2 CACHE REUSE - Phase 1キャッシュ再利用 (2025-11-29)
 
-**Phase 2でContextBlockキャッシュ方式を採用し、5〜20倍の高速化を実現しました。**
+**Phase 1で計算した全レイヤー出力をPhase 2で再利用し、627秒のキャッシュ再構築を省略。**
 
 ### 従来の問題点
 
-- 各トークンごとにContextBlockをforward（遅い）
-- バッチ処理が1トークンずつ（GPU効率が悪い）
+```python
+# Phase 1で取得済み（使われていなかった！）
+train_contexts = phase1_trainer.train(...)  # 最終レイヤーのみ
 
-### 新方式: ContextBlockキャッシュ
+# Phase 2で再計算（627秒かかっていた）
+phase2_trainer.train_full(...)  # _build_context_cache で全レイヤー出力を再計算
+```
+
+### 新方式: Phase 1からキャッシュを渡す
 
 ```python
-# Step 1: ContextBlock出力を全トークン分キャッシュ（エポックごとに1回のみ）
+# Phase 1: return_all_layers=True で全レイヤー出力も取得
+train_contexts, train_context_cache, train_token_embeds = phase1_trainer.train(
+    ..., return_all_layers=True
+)
+val_contexts, val_context_cache, val_token_embeds = phase1_trainer.evaluate(
+    ..., return_all_layers=True
+)
+
+# Phase 2: キャッシュを受け取り、再構築をスキップ
+phase2_trainer.train_full(
+    ...,
+    train_context_cache=train_context_cache,
+    train_token_embeds=train_token_embeds,
+    val_context_cache=val_context_cache,
+    val_token_embeds=val_token_embeds
+)
+# → "Using pre-built context cache from Phase 1 (skipping cache build)" と表示
+```
+
+### 期待される効果
+
+| 処理 | 従来 | 新方式 |
+|------|------|--------|
+| Phase 2 キャッシュ構築 | 627秒 | **0秒（スキップ）** |
+| 全体時間 (500 samples) | 24分 | **約14分（40%短縮）** |
+
+### メモリ使用量
+
+- 500サンプル（53万トークン）: 約9.3GB（従来と同じ）
+- `token_input_all_layers=False`の場合: 約6.5GB（等差減少で削減）
+
+---
+
+## ⚡ PHASE 2 CACHE MODE - キャッシュ方式高速化 (2025-11-28)
+
+**Phase 2でContextBlockキャッシュ方式を採用し、5〜20倍の高速化を実現。**
+
+### キャッシュ方式の概要
+
+```python
+# Step 1: ContextBlock出力を全トークン分キャッシュ（1回のみ）
 with torch.no_grad():
-    context_cache = []
     for token in tokens:
         context_outputs = context_block(context, token)
         context_cache.append(context_outputs)
@@ -22,19 +66,9 @@ with torch.no_grad():
 
 # Step 2: TokenBlockをバッチ並列処理
 for batch in batches:
-    batch_contexts = context_cache[batch_start:batch_end]
-    batch_token_out = token_block(batch_contexts, batch_tokens)  # 真のバッチ並列
-    loss = CrossEntropy(logits, targets)
+    batch_token_out = token_block(batch_contexts, batch_tokens)
     loss.backward()
 ```
-
-### 高速化の効果
-
-| 処理 | 従来 | 新方式 |
-|------|------|--------|
-| ContextBlock forward | tokens × epochs | **epochs のみ** |
-| TokenBlock forward | batch_size=1 | **真のバッチ並列** |
-| 予想高速化 | - | **5〜20倍** |
 
 ### バッチサイズ自動計算（GPUメモリベース） - 2025-11-29 修正
 
@@ -1028,4 +1062,4 @@ current_contexts[t] = context.squeeze(0).detach()  # Detach for convergence trac
 
 ---
 
-Last Updated: 2025-11-24 (Bug Fixes + Architecture Documentation)
+Last Updated: 2025-11-29 (Phase 2 Cache Reuse + Memory Optimization)
