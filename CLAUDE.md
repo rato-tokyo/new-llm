@@ -6,31 +6,39 @@
 
 ### 自動生成されるファイル
 
-| ファイル | 用途 | 自動生成 |
+| ファイル | 用途 | 自動生成元 |
 |----------|------|----------|
-| `./data/example_val.txt` | 検証データ | ✅ `ExperimentRunner`が自動生成 |
-| `./cache/ultrachat_*samples_full.pt` | 訓練データキャッシュ | ✅ `MemoryDataProvider`が自動生成 |
+| `./data/example_val.txt` | 検証データ | `MemoryDataProvider._generate_val_file()` |
+| `./cache/ultrachat_*samples_full.pt` | 訓練データキャッシュ | `MemoryDataProvider._load_train_data()` |
 
-### ExperimentRunnerの自動生成機能
+### データ生成ロジックの場所
 
-`ExperimentRunner`は初期化時に`./data/example_val.txt`の存在を確認し、存在しない場合はUltraChatから自動生成する：
+**すべてのデータ生成ロジックは`src/providers/data/memory.py`に集約:**
 
 ```python
-# src/experiments/runner.py
-def _ensure_val_file(self):
-    """検証ファイルが存在しない場合は自動生成"""
-    val_file = "./data/example_val.txt"
-    if os.path.exists(val_file):
-        return
-    # UltraChatのサンプル1000-1020から生成（訓練データと重複しない）
-    ...
+# src/providers/data/memory.py
+class MemoryDataProvider:
+    def _load_train_data(self, tokenizer):
+        """訓練データをロード（キャッシュなければ生成）"""
+        ...
+
+    def _load_val_data(self, tokenizer):
+        """検証データをロード（ファイルなければ自動生成）"""
+        if not os.path.exists(file_path):
+            self._generate_val_file(file_path, tokenizer)
+        ...
+
+    def _generate_val_file(self, file_path, tokenizer):
+        """検証データファイルを自動生成（UltraChatのサンプル1000-1020）"""
+        # 訓練データ（0-999）と重複しない範囲から生成
+        ...
 ```
 
 ### 検証ファイルの仕様
 
 - **固定ファイル**: `./data/example_val.txt`（サンプル数に依存しない）
 - **ソース**: UltraChatのインデックス1000-1020（訓練データと重複しない領域）
-- **自動生成**: `ExperimentRunner`初期化時に自動生成
+- **自動生成**: データロード時にファイルが存在しなければ自動生成
 
 ### Colabでの推奨手順
 
@@ -41,11 +49,6 @@ def _ensure_val_file(self):
 # 2. 実験実行（検証ファイルは自動生成される）
 !cd /content/new-llm && python3 scripts/architecture_comparison_experiment.py
 ```
-
-### 注意事項
-
-- ⚠️ `FileNotFoundError: Validation file not found`が発生した場合、`ExperimentRunner`を使用していない可能性がある
-- ⚠️ 古いスクリプトは`ExperimentRunner`を使用するように更新する必要がある
 
 ---
 

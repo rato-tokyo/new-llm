@@ -4,7 +4,6 @@ ExperimentRunner - 実験実行の統一インターフェース
 スクリプトからは設定のみを渡し、データ読み込み・訓練・評価を一括実行。
 """
 
-import os
 import random
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Union
@@ -147,46 +146,6 @@ class ExperimentRunner:
             print_flush(f"Device: {self.device} ({gpu_name}, {gpu_mem:.1f}GB)")
         else:
             print_flush(f"Device: {self.device}")
-
-        # 検証ファイルの存在確認と自動生成
-        self._ensure_val_file()
-
-    def _ensure_val_file(self):
-        """検証ファイルが存在しない場合は自動生成"""
-        val_file = "./data/example_val.txt"
-        if os.path.exists(val_file):
-            return
-
-        print_flush(f"Validation file not found, generating: {val_file}")
-        os.makedirs("./data", exist_ok=True)
-
-        # UltraChatから検証データを生成
-        from transformers import AutoTokenizer
-        from datasets import load_dataset
-
-        tokenizer = AutoTokenizer.from_pretrained(
-            self.base_config.tokenizer_name,
-            cache_dir=os.path.join(self.base_config.cache_dir, "tokenizer")
-        )
-        tokenizer.pad_token = tokenizer.eos_token
-
-        dataset = load_dataset(
-            self.base_config.dataset_name,
-            split=self.base_config.dataset_split,
-            cache_dir=os.path.join(self.base_config.cache_dir, "datasets")
-        )
-
-        # 1000番目以降のサンプルから検証データを生成（訓練データと重複しない）
-        val_texts = []
-        for idx in range(1000, min(1020, len(dataset))):
-            messages = dataset[idx]["messages"]
-            text = "\n".join([msg["content"] for msg in messages])
-            val_texts.append(text)
-
-        with open(val_file, 'w', encoding='utf-8') as f:
-            f.write("\n\n".join(val_texts))
-
-        print_flush(f"  Generated {len(val_texts)} validation samples")
 
     def run(self, config: ExperimentConfig) -> Dict[str, Any]:
         """

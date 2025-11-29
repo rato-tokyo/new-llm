@@ -140,7 +140,7 @@ class MemoryDataProvider(DataProvider):
         return token_ids, sample_order, sample_boundaries
 
     def _load_val_data(self, tokenizer) -> torch.Tensor:
-        """検証データをロード（テキストファイル）"""
+        """検証データをロード（テキストファイル、存在しない場合は自動生成）"""
         if self.config.val_data_source == "auto_split":
             raise ValueError(
                 "auto_split is FORBIDDEN for validation data!\n"
@@ -149,13 +149,42 @@ class MemoryDataProvider(DataProvider):
 
         file_path = self.config.val_text_file
         if not os.path.exists(file_path):
-            raise FileNotFoundError(f"Validation file not found: {file_path}")
+            self._generate_val_file(file_path, tokenizer)
 
         with open(file_path, 'r', encoding='utf-8') as f:
             text = f.read()
 
         tokens = tokenizer(text, truncation=False, return_tensors="pt")
         return tokens["input_ids"].squeeze(0)
+
+    def _generate_val_file(self, file_path: str, tokenizer) -> None:
+        """検証データファイルを自動生成（UltraChatのサンプル1000-1020）"""
+        print_flush(f"  Validation file not found, generating: {file_path}")
+
+        # ディレクトリ作成
+        os.makedirs(os.path.dirname(file_path) or ".", exist_ok=True)
+
+        # UltraChatから検証データを生成
+        dataset = load_dataset(
+            self.config.dataset_name,
+            split=self.config.dataset_split,
+            cache_dir=os.path.join(self.config.cache_dir, "datasets")
+        )
+
+        # サンプル1000-1020を使用（訓練データ0-999と重複しない）
+        val_start_idx = 1000
+        val_end_idx = min(1020, len(dataset))
+
+        val_texts = []
+        for idx in range(val_start_idx, val_end_idx):
+            messages = dataset[idx]["messages"]
+            text = "\n".join([msg["content"] for msg in messages])
+            val_texts.append(text)
+
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write("\n\n".join(val_texts))
+
+        print_flush(f"  Generated {len(val_texts)} validation samples (indices {val_start_idx}-{val_end_idx-1})")
 
     def get_sample_order(self) -> Optional[List[int]]:
         """現在のサンプル順序を取得"""
