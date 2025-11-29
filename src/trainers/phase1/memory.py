@@ -166,6 +166,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
             return final_contexts
 
         # return_all_layers=True: Phase 2キャッシュ用に全レイヤー出力を収集
+        # 注意: シーケンシャル処理必須（因果的依存のため並列化不可）
+        cache_start = time.time()
+        print_flush(f"  Collecting cache...")
         self.model.eval()
         token_embeds_gpu = token_embeds.to(self.device)
 
@@ -175,6 +178,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
         _, all_layer_contexts, token_embeds_combined = self._forward_sequential(
             input_token_embeds, None, collect_all_layers=True
         )
+
+        cache_elapsed = time.time() - cache_start
+        print_flush(f"  Cache collected [{cache_elapsed:.1f}s]")
 
         self.model.train()
         del token_embeds_gpu

@@ -95,6 +95,21 @@ phase2_trainer.train_full(
 - 500サンプル（53万トークン）: 約9.3GB（従来と同じ）
 - `token_input_all_layers=False`の場合: 約6.5GB（等差減少で削減）
 
+### ⚠️ キャッシュ収集は並列化不可
+
+Phase 2キャッシュの収集（`_forward_sequential`）は**シーケンシャル処理が必須**。
+
+**理由**: Token i のコンテキストを計算するには Token 0〜i-1 の処理結果が必要（因果的依存）
+
+```
+Token 0 → context_0
+Token 1 + context_0 → context_1
+Token 2 + context_1 → context_2
+...
+```
+
+この依存関係は並列化不可能。500サンプル（53万トークン）で約56秒かかるが、現在の設計では避けられない。
+
 ---
 
 ## ⚡ PHASE 2 CACHE MODE - キャッシュ方式高速化 (2025-11-28)
