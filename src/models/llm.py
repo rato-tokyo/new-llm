@@ -180,61 +180,74 @@ class ContextBlock(nn.Module):
 
     Phase 1で学習、Phase 2でfreeze
 
-    等差減少設計:
-        入力: context_dim + embed_dim * num_input_tokens（最初のレイヤーのみ）
-        出力: context_dim
-        各レイヤーで等差的に次元を減少させる
-        2番目以降のレイヤーはtoken入力なし
+    2つのモード:
+    1. token_input_all_layers=True (旧構造):
+       - 全レイヤーでtoken入力
+       - 次元: context_dim → context_dim（全レイヤー同じ）
+       - 高いEffective Rank（66%+）
+       - 11/27実験でα=-0.72を達成
 
-    次元計算（動的）:
-        Layer 0: context_dim + token_input_dim → first_output_dim (token入力あり)
-        Layer 1+: 等差減少 → context_dim (token入力なし)
+    2. token_input_all_layers=False (等差減少設計):
+       - 最初のレイヤーのみtoken入力
+       - 次元: 等差的に減少
+       - Effective Rankが低下する傾向（9%程度）
 
     Args:
         num_layers: Number of context layers
         context_dim: Final context vector dimension
         embed_dim: Token embedding dimension (単一トークンの次元)
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
+        token_input_all_layers: True = 全レイヤーでtoken入力（旧構造）
     """
 
-    def __init__(self, num_layers, context_dim, embed_dim, num_input_tokens=1):
+    def __init__(self, num_layers, context_dim, embed_dim, num_input_tokens=1,
+                 token_input_all_layers=False):
         super().__init__()
 
         self.num_layers = num_layers
         self.num_input_tokens = num_input_tokens
         self.context_dim = context_dim
         self.embed_dim = embed_dim
+        self.token_input_all_layers = token_input_all_layers
 
-        # 等差減少の次元計算
-        # 最初のレイヤー入力: context_dim + token_dim
-        # 最終出力: context_dim
         token_input_dim = embed_dim * num_input_tokens
-        input_context_dim = context_dim + token_input_dim  # 最初のレイヤー後の次元
-        output_context_dim = context_dim
-        total_reduction = input_context_dim - output_context_dim
 
-        # 各レイヤーの入出力次元を計算
-        self.context_dims = []
-        for i in range(num_layers + 1):
-            # 線形補間: input_dim から output_dim へ
-            dim = input_context_dim - (total_reduction * i) // num_layers
-            self.context_dims.append(dim)
+        if token_input_all_layers:
+            # 旧構造: 全レイヤーでtoken入力、次元は固定
+            self.context_dims = [context_dim] * (num_layers + 1)
 
-        # Stack of Context layers
-        self.layers = nn.ModuleList()
-        for i in range(num_layers):
-            # 最初のレイヤーのみtoken入力あり
-            layer_token_dim = token_input_dim if i == 0 else 0
-            # 最初のレイヤーはcontext_dimから開始
-            layer_input_dim = context_dim if i == 0 else self.context_dims[i]
-
-            self.layers.append(
-                ContextLayer(
-                    context_input_dim=layer_input_dim,
-                    context_output_dim=self.context_dims[i + 1],
-                    token_input_dim=layer_token_dim
+            self.layers = nn.ModuleList()
+            for i in range(num_layers):
+                self.layers.append(
+                    ContextLayer(
+                        context_input_dim=context_dim,
+                        context_output_dim=context_dim,
+                        token_input_dim=token_input_dim  # 全レイヤーでtoken入力
+                    )
                 )
-            )
+        else:
+            # 等差減少設計: 最初のレイヤーのみtoken入力
+            input_context_dim = context_dim + token_input_dim
+            output_context_dim = context_dim
+            total_reduction = input_context_dim - output_context_dim
+
+            self.context_dims = []
+            for i in range(num_layers + 1):
+                dim = input_context_dim - (total_reduction * i) // num_layers
+                self.context_dims.append(dim)
+
+            self.layers = nn.ModuleList()
+            for i in range(num_layers):
+                layer_token_dim = token_input_dim if i == 0 else 0
+                layer_input_dim = context_dim if i == 0 else self.context_dims[i]
+
+                self.layers.append(
+                    ContextLayer(
+                        context_input_dim=layer_input_dim,
+                        context_output_dim=self.context_dims[i + 1],
+                        token_input_dim=layer_token_dim
+                    )
+                )
 
     def forward(self, context, token_embeds):
         """
@@ -242,16 +255,22 @@ class ContextBlock(nn.Module):
 
         Args:
             context: [batch, context_dim]
-            token_embeds: [batch, embed_dim * num_input_tokens] (最初のレイヤーのみ使用)
+            token_embeds: [batch, embed_dim * num_input_tokens]
 
         Returns:
             context: Updated context [batch, context_dim]
         """
-        for i, layer in enumerate(self.layers):
-            if i == 0:
+        if self.token_input_all_layers:
+            # 旧構造: 全レイヤーでtoken入力
+            for layer in self.layers:
                 context = layer(context, token_embeds)
-            else:
-                context = layer(context)
+        else:
+            # 等差減少設計: 最初のレイヤーのみtoken入力
+            for i, layer in enumerate(self.layers):
+                if i == 0:
+                    context = layer(context, token_embeds)
+                else:
+                    context = layer(context)
 
         return context
 
@@ -264,19 +283,26 @@ class ContextBlock(nn.Module):
 
         Args:
             context: [batch, context_dim] (初期コンテキスト)
-            token_embeds: [batch, embed_dim * num_input_tokens] (最初のレイヤーのみ使用)
+            token_embeds: [batch, embed_dim * num_input_tokens]
 
         Returns:
             outputs: List of context outputs [context_1, context_2, ..., context_N]
                      len(outputs) == num_layers
         """
         outputs = []
-        for i, layer in enumerate(self.layers):
-            if i == 0:
+        if self.token_input_all_layers:
+            # 旧構造: 全レイヤーでtoken入力
+            for layer in self.layers:
                 context = layer(context, token_embeds)
-            else:
-                context = layer(context)
-            outputs.append(context)
+                outputs.append(context)
+        else:
+            # 等差減少設計: 最初のレイヤーのみtoken入力
+            for i, layer in enumerate(self.layers):
+                if i == 0:
+                    context = layer(context, token_embeds)
+                else:
+                    context = layer(context)
+                outputs.append(context)
         return outputs
 
 
@@ -547,6 +573,8 @@ class LLM(nn.Module):
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
         use_weight_tying: Whether to tie token_embedding and token_output weights
                           (reduces parameters by ~38M, GPT-2 style)
+        token_input_all_layers: True = 全レイヤーでtoken入力（旧構造、高ER）
+                                False = 最初のレイヤーのみ（等差減少設計）
     """
 
     def __init__(
@@ -558,7 +586,8 @@ class LLM(nn.Module):
         num_input_tokens=1,
         num_context_splits=1,
         use_pretrained_embeddings=True,
-        use_weight_tying=False
+        use_weight_tying=False,
+        token_input_all_layers=False
     ):
         super().__init__()
 
@@ -571,6 +600,7 @@ class LLM(nn.Module):
         self.num_context_splits = num_context_splits
         self.use_separated_architecture = True  # Always true now
         self.use_weight_tying = use_weight_tying
+        self.token_input_all_layers = token_input_all_layers
 
         # ========== Token Embeddings ==========
         if use_pretrained_embeddings:
@@ -583,6 +613,10 @@ class LLM(nn.Module):
         # ========== Separated Architecture ==========
         print(f"Using E案 architecture: ContextBlock({num_layers} layers) + TokenBlock({num_layers} layers)")
         print(f"  num_input_tokens: {num_input_tokens}")
+        if token_input_all_layers:
+            print("  token_input_all_layers: True (旧構造、高ER)")
+        else:
+            print("  token_input_all_layers: False (等差減少設計)")
 
         # ContextBlock: 文脈処理専用
         if num_context_splits > 1:
@@ -595,6 +629,8 @@ class LLM(nn.Module):
                 context_dim=context_dim,
                 embed_dim=embed_dim,
                 num_input_tokens=num_input_tokens
+                # Note: SplitContextBlockは内部でContextBlockを作成
+                # token_input_all_layersの対応は別途必要
             )
         else:
             # 通常モード: 従来のContextBlockを使用
@@ -602,7 +638,8 @@ class LLM(nn.Module):
                 num_layers=num_layers,
                 context_dim=context_dim,
                 embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens
+                num_input_tokens=num_input_tokens,
+                token_input_all_layers=token_input_all_layers
             )
 
         # TokenBlock: トークン処理専用
