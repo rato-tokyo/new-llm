@@ -147,18 +147,18 @@ class Phase2Trainer:
             batch_end = min(batch_start + batch_size, num_tokens)
             batch_len = batch_end - batch_start
 
-            # バッチ内のデータを取得
-            batch_targets = target_ids[batch_start:batch_end]
-            batch_token_embeds = token_embeds[batch_start:batch_end]  # [batch, embed_dim * num_input_tokens]
+            # バッチ内のデータを取得（GPUに転送）
+            batch_targets = target_ids[batch_start:batch_end].to(device)
+            batch_token_embeds = token_embeds[batch_start:batch_end].to(device)  # [batch, embed_dim * num_input_tokens]
 
-            # バッチ内のcontext_outputsを構築
+            # バッチ内のcontext_outputsを構築（GPUに転送）
             # context_cache: テンソル [num_layers, num_tokens, context_dim] またはリスト
             batch_context_list = []
             for layer_idx in range(num_layers):
                 if isinstance(context_cache, list):
-                    layer_contexts = context_cache[layer_idx][batch_start:batch_end]
+                    layer_contexts = context_cache[layer_idx][batch_start:batch_end].to(device)
                 else:
-                    layer_contexts = context_cache[layer_idx, batch_start:batch_end]
+                    layer_contexts = context_cache[layer_idx, batch_start:batch_end].to(device)
                 batch_context_list.append(layer_contexts)
 
             # TokenBlock forward（バッチ並列）
@@ -226,17 +226,17 @@ class Phase2Trainer:
             for batch_start in range(0, num_tokens, eval_batch_size):
                 batch_end = min(batch_start + eval_batch_size, num_tokens)
 
-                # context_cache: テンソル [num_layers, num_tokens, context_dim] またはリスト
+                # context_cache: テンソル [num_layers, num_tokens, context_dim] またはリスト（GPUに転送）
                 context_list = []
                 for layer_idx in range(num_layers):
                     if isinstance(context_cache, list):
-                        layer_contexts = context_cache[layer_idx][batch_start:batch_end]
+                        layer_contexts = context_cache[layer_idx][batch_start:batch_end].to(device)
                     else:
-                        layer_contexts = context_cache[layer_idx, batch_start:batch_end]
+                        layer_contexts = context_cache[layer_idx, batch_start:batch_end].to(device)
                     context_list.append(layer_contexts)
 
-                # バッチのトークン埋め込み
-                batch_token_embeds = token_embeds[batch_start:batch_end]
+                # バッチのトークン埋め込み（GPUに転送）
+                batch_token_embeds = token_embeds[batch_start:batch_end].to(device)
 
                 # TokenBlock forward（バッチ並列）
                 token_out = self.model.forward_token_e(context_list, batch_token_embeds)
@@ -244,8 +244,8 @@ class Phase2Trainer:
                 # 予測
                 logits = self.model.token_output(token_out)  # [batch_size, vocab_size]
 
-                # バッチのターゲット
-                batch_targets = target_ids[batch_start:batch_end]
+                # バッチのターゲット（GPUに転送）
+                batch_targets = target_ids[batch_start:batch_end].to(device)
 
                 # 損失（バッチ）
                 batch_loss = self.criterion(logits, batch_targets).item()
