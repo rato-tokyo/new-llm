@@ -373,13 +373,19 @@ class Phase2Trainer:
             'recommendation': f"Required: {total_required:.1f}GB, Available: {available:.1f}GB"
         }
 
-    def _calculate_optimal_batch_size(self, device, initial_batch_size: int = 4096) -> int:
+    def _calculate_optimal_batch_size(
+        self,
+        device,
+        initial_batch_size: int = 4096,
+        actual_cache_gb: float = 0.0
+    ) -> int:
         """
         現在のGPUメモリ状態から最適なバッチサイズを計算
 
         Args:
             device: デバイス
             initial_batch_size: 初期バッチサイズ
+            actual_cache_gb: 実際に使用しているキャッシュサイズ (GB)
 
         Returns:
             int: 最適なバッチサイズ
@@ -392,27 +398,39 @@ class Phase2Trainer:
         if not torch.cuda.is_available():
             return min(initial_batch_size, 512)  # CPU: 固定値
 
+        # GPUメモリ情報を取得
+        torch.cuda.synchronize()  # GPU操作を同期
         torch.cuda.empty_cache()
 
-        if MEMORY_UTILS_AVAILABLE:
-            gpu_info = get_gpu_memory_info()
-            free_gb = gpu_info['free_gb']
-            return calculate_safe_batch_size(
-                free_gb,
-                vocab_size=self.config.vocab_size,
-                safety_factor=safety_factor,
-                min_batch_size=min_batch,
-                max_batch_size=min(initial_batch_size, max_batch)
-            )
-
-        # フォールバック: 簡易計算
         total_memory = torch.cuda.get_device_properties(0).total_memory
         allocated = torch.cuda.memory_allocated()
-        free_gb = (total_memory - allocated) / (1024**3)
+        reserved = torch.cuda.memory_reserved()
 
-        # 1トークンあたり約0.4MB (logits + gradients)
-        safe_batch_size = int(free_gb * 1024 / 0.4 * safety_factor)
-        return max(min_batch, min(safe_batch_size, min(initial_batch_size, max_batch)))
+        total_gb = total_memory / (1024**3)
+        allocated_gb = allocated / (1024**3)
+        reserved_gb = reserved / (1024**3)
+
+        # 利用可能メモリを計算
+        # reserved（PyTorchが確保済み）からallocated（実際に使用中）を引いた分 + 未予約分
+        free_gb = total_gb - reserved_gb
+
+        print_flush(f"  GPU Memory: total={total_gb:.1f}GB, allocated={allocated_gb:.1f}GB, reserved={reserved_gb:.1f}GB, free={free_gb:.1f}GB")
+
+        # 訓練に必要なメモリ見積もり
+        # batch_size トークン × vocab_size × 4bytes (float32) × 2.5 (logits + gradients + buffer)
+        vocab_size = getattr(self.config, 'vocab_size', 50257)
+        per_token_mb = vocab_size * 4 / (1024**2) * 2.5
+
+        # 利用可能メモリからバッチサイズを計算
+        available_mb = free_gb * 1024 * safety_factor
+        safe_batch_size = int(available_mb / per_token_mb)
+
+        # 範囲制限
+        safe_batch_size = max(min_batch, min(safe_batch_size, min(initial_batch_size, max_batch)))
+
+        print_flush(f"  Batch size calculation: free={free_gb:.1f}GB × safety={safety_factor} → {safe_batch_size} tokens")
+
+        return safe_batch_size
 
     def train_full(self, train_token_ids, val_token_ids, device, epochs=None, patience=None, batch_size=None):
         """
@@ -495,10 +513,11 @@ class Phase2Trainer:
         print_flush(f"Actual cache size: train={train_cache_mb:.1f}MB, val={val_cache_mb:.1f}MB (total={total_cache_gb:.2f}GB)")
 
         # キャッシュ構築後にバッチサイズを自動調整
-        optimal_batch_size = self._calculate_optimal_batch_size(device, batch_size)
+        print_flush("\nCalculating optimal batch size...")
+        optimal_batch_size = self._calculate_optimal_batch_size(device, batch_size, total_cache_gb)
         if optimal_batch_size != batch_size:
             print_flush(f"⚠️ Auto-adjusting batch_size: {batch_size} → {optimal_batch_size}")
-            batch_size = optimal_batch_size
+        batch_size = optimal_batch_size
         print_flush(f"Effective batch size: {batch_size}")
         print_flush("")
 
