@@ -166,21 +166,55 @@ class MemoryPhase1Trainer(Phase1Trainer):
             return final_contexts
 
         # return_all_layers=True: Phase 2キャッシュ用に全レイヤー出力を収集
-        # 注意: シーケンシャル処理必須（因果的依存のため並列化不可）
+        # 並列処理版: 確定済みcontextを使ってバッチ処理
         cache_start = time.time()
-        print_flush("  Collecting cache...")
+        print_flush("  Collecting cache (parallel)...")
         self.model.eval()
         token_embeds_gpu = token_embeds.to(self.device)
 
         # Phase 2用に最後のトークンを除く
         input_token_embeds = token_embeds_gpu[:-1]
+        num_input_tokens = len(input_token_embeds)
 
-        _, all_layer_contexts, token_embeds_combined = self._forward_sequential(
-            input_token_embeds, None, collect_all_layers=True
-        )
+        # Phase 2では token i の処理に previous_contexts[i-1] を使用
+        # → 1つずらしたcontextを準備
+        # token 0 は初期context（ゼロベクトル）を使用
+        initial_context = torch.zeros(1, self.model.context_dim, device=self.device)
+        shifted_contexts = torch.cat([
+            initial_context,
+            previous_contexts[:-1].to(self.device)
+        ], dim=0)  # [num_input_tokens, context_dim]
+
+        # バッチ並列で全レイヤー出力を計算
+        with torch.no_grad():
+            all_layer_contexts = self.model.context_block.forward_with_intermediates_batch(
+                shifted_contexts, input_token_embeds
+            )  # [num_layers, num_tokens, context_dim]
+
+        # token_embeds_combined を準備（num_input_tokens対応）
+        num_input_tokens_config = getattr(self.config, 'num_input_tokens', 1)
+        if num_input_tokens_config == 1:
+            token_embeds_combined = input_token_embeds
+        else:
+            # 複数トークン入力の場合（履歴を結合）
+            token_embeds_combined = torch.zeros(
+                num_input_tokens, self.model.embed_dim * num_input_tokens_config,
+                device=self.device, dtype=input_token_embeds.dtype
+            )
+            for i in range(num_input_tokens):
+                start_idx = max(0, i - num_input_tokens_config + 1)
+                token_window = input_token_embeds[start_idx:i+1]
+                if len(token_window) < num_input_tokens_config:
+                    padding = torch.zeros(
+                        num_input_tokens_config - len(token_window),
+                        self.model.embed_dim,
+                        device=self.device
+                    )
+                    token_window = torch.cat([padding, token_window], dim=0)
+                token_embeds_combined[i] = token_window.flatten()
 
         cache_elapsed = time.time() - cache_start
-        print_flush(f"  Cache collected [{cache_elapsed:.1f}s]")
+        print_flush(f"  Cache collected (parallel) [{cache_elapsed:.1f}s]")
 
         self.model.train()
         del token_embeds_gpu

@@ -305,6 +305,47 @@ class ContextBlock(nn.Module):
                 outputs.append(context)
         return outputs
 
+    def forward_with_intermediates_batch(self, contexts, token_embeds):
+        """
+        バッチ並列で全レイヤーの中間出力を計算
+
+        Phase 1で確定したcontextsを入力として、各レイヤーの出力を並列計算。
+        シーケンシャル処理と異なり、全トークンを同時に処理できる。
+
+        Args:
+            contexts: [num_tokens, context_dim] - 確定済みのcontext（Phase 1の出力）
+            token_embeds: [num_tokens, embed_dim * num_input_tokens]
+
+        Returns:
+            outputs: [num_layers, num_tokens, context_dim] - 各レイヤーの出力
+        """
+        num_tokens = contexts.shape[0]
+        device = contexts.device
+
+        # 結果を格納するテンソル
+        outputs = torch.zeros(
+            self.num_layers, num_tokens, self.context_dim,
+            device=device, dtype=contexts.dtype
+        )
+
+        if self.token_input_all_layers:
+            # 旧構造: 全レイヤーでtoken入力
+            current_context = contexts
+            for layer_idx, layer in enumerate(self.layers):
+                current_context = layer(current_context, token_embeds)
+                outputs[layer_idx] = current_context
+        else:
+            # 等差減少設計: 最初のレイヤーのみtoken入力
+            current_context = contexts
+            for layer_idx, layer in enumerate(self.layers):
+                if layer_idx == 0:
+                    current_context = layer(current_context, token_embeds)
+                else:
+                    current_context = layer(current_context)
+                outputs[layer_idx] = current_context
+
+        return outputs
+
 
 class SplitContextBlock(nn.Module):
     """
