@@ -1,5 +1,54 @@
 # New-LLM Project Guidelines
 
+## ⚠️ COLAB環境リセット対策 (2025-11-29)
+
+**Colabは頻繁に環境がリセットされるため、以下のファイルが消失する可能性がある。**
+
+### 自動生成されるファイル
+
+| ファイル | 用途 | 自動生成 |
+|----------|------|----------|
+| `./data/example_val.txt` | 検証データ | ✅ `ExperimentRunner`が自動生成 |
+| `./cache/ultrachat_*samples_full.pt` | 訓練データキャッシュ | ✅ `MemoryDataProvider`が自動生成 |
+
+### ExperimentRunnerの自動生成機能
+
+`ExperimentRunner`は初期化時に`./data/example_val.txt`の存在を確認し、存在しない場合はUltraChatから自動生成する：
+
+```python
+# src/experiments/runner.py
+def _ensure_val_file(self):
+    """検証ファイルが存在しない場合は自動生成"""
+    val_file = "./data/example_val.txt"
+    if os.path.exists(val_file):
+        return
+    # UltraChatのサンプル1000-1020から生成（訓練データと重複しない）
+    ...
+```
+
+### 検証ファイルの仕様
+
+- **固定ファイル**: `./data/example_val.txt`（サンプル数に依存しない）
+- **ソース**: UltraChatのインデックス1000-1020（訓練データと重複しない領域）
+- **自動生成**: `ExperimentRunner`初期化時に自動生成
+
+### Colabでの推奨手順
+
+```bash
+# 1. リポジトリ更新
+!cd /content/new-llm && git pull
+
+# 2. 実験実行（検証ファイルは自動生成される）
+!cd /content/new-llm && python3 scripts/architecture_comparison_experiment.py
+```
+
+### 注意事項
+
+- ⚠️ `FileNotFoundError: Validation file not found`が発生した場合、`ExperimentRunner`を使用していない可能性がある
+- ⚠️ 古いスクリプトは`ExperimentRunner`を使用するように更新する必要がある
+
+---
+
 ## 🚨 CRITICAL: 後方互換性コード禁止 (2025-11-29)
 
 **古い機能を残すことは厳禁。後方互換性を意識したコードは絶対に書かない。**
