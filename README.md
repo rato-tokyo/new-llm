@@ -51,6 +51,24 @@ Edit `config.py` to adjust:
 - Data sources and preprocessing
 - Distribution regularization settings
 
+### Scaling Experiments
+
+```bash
+# Standard scaling law experiment
+python3 scripts/scaling_experiment.py --input-tokens 1 --layers 1 --context-dim 768
+
+# 9-config matrix (input_tokens × layers)
+python3 scripts/scaling_experiment.py --matrix
+
+# Alpha progression analysis: measure how α changes with more data
+# Generates sample sizes: [50, 100, 200, 400, 800]
+# Window 1: [50-400] → α₁, Window 2: [100-800] → α₂
+python3 scripts/scaling_experiment.py --alpha-scaling \
+  --init-samples 50 --multiplier 2 --window-size 4 --num-windows 2
+```
+
+**Alpha Scaling Mode**: Measures how scaling efficiency (α) changes as data amount increases. Uses sliding window analysis to track α progression.
+
 ## Project Structure
 
 ```
@@ -76,7 +94,7 @@ new-llm/
 │       ├── metrics.py             # Analysis and metrics
 │       └── diagnostics.py         # Identity mapping check
 ├── scripts/
-│   ├── unified_scaling_experiment.py  # Scaling law experiments
+│   ├── scaling_experiment.py      # Scaling law experiments (with alpha progression)
 │   └── create_val_from_train.py   # Generate validation data
 ├── data/
 │   └── ultrachat_*samples_val.txt # Validation data files
