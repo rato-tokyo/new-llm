@@ -10,13 +10,17 @@
   python3 scripts/scaling_experiment.py --input-tokens 2 --layers 3 --context-dim 1536
 
   # 9設定マトリックス（関係式導出用）
+  # context_dim=768固定、input_tokens=[1,2,3], layers=[1,2,3]
   python3 scripts/scaling_experiment.py --matrix
 
-  # カスタムマトリックス
-  python3 scripts/scaling_experiment.py --input-tokens 1 2 3 --layers 1 2 3
+  # カスタムマトリックス（context_dim固定）
+  python3 scripts/scaling_experiment.py --input-tokens 1 2 3 --layers 1 2 3 --context-dim 768
+
+  # context_dimも変えたい場合（等倍: 768, 1536, 2304 推奨）
+  python3 scripts/scaling_experiment.py --input-tokens 1 2 --layers 1 2 --context-dim 768 1536
 
   # サンプルサイズ指定
-  python3 scripts/scaling_experiment.py --input-tokens 2 --layers 3 --samples 50 100 200 500
+  python3 scripts/scaling_experiment.py --input-tokens 2 --layers 3 --context-dim 1536 --samples 50 100 200 500
 
 Colab実行用:
   !cd /content/new-llm && python3 scripts/scaling_experiment.py --matrix
@@ -203,11 +207,11 @@ def main():
   # 単一設定
   python3 scripts/scaling_experiment.py --input-tokens 2 --layers 3 --context-dim 1536
 
-  # 9設定マトリックス（推奨: 関係式導出用）
+  # 9設定マトリックス（context_dim=768固定）
   python3 scripts/scaling_experiment.py --matrix
 
-  # カスタムマトリックス
-  python3 scripts/scaling_experiment.py --input-tokens 1 2 3 --layers 1 2 3
+  # カスタムマトリックス（context_dim固定）
+  python3 scripts/scaling_experiment.py --input-tokens 1 2 3 --layers 1 2 3 --context-dim 768
         """
     )
 
@@ -215,22 +219,22 @@ def main():
                         help='num_input_tokens の値（複数指定可）')
     parser.add_argument('--layers', type=int, nargs='+', default=[3],
                         help='num_layers の値（複数指定可）')
-    parser.add_argument('--context-dim', type=int, nargs='+', default=None,
-                        help='context_dim の値（指定なし: 768×num_input_tokens）')
+    parser.add_argument('--context-dim', type=int, nargs='+', default=[768],
+                        help='context_dim の値（複数指定可、デフォルト: 768）')
     parser.add_argument('--samples', type=int, nargs='+', default=DEFAULT_SAMPLE_SIZES,
                         help=f'サンプルサイズ（デフォルト: {DEFAULT_SAMPLE_SIZES}）')
     parser.add_argument('--matrix', action='store_true',
-                        help='9設定マトリックス実行（input_tokens=[1,2,3], layers=[1,2,3]）')
+                        help='9設定マトリックス実行（context_dim=768固定、input_tokens=[1,2,3], layers=[1,2,3]）')
     parser.add_argument('--output-dir', type=str, default=None,
                         help='出力ディレクトリ（デフォルト: results/scaling_YYYYMMDD_HHMMSS）')
 
     args = parser.parse_args()
 
-    # マトリックスモード
+    # マトリックスモード: context_dim=768固定、input_tokens×layers
     if args.matrix:
         input_tokens_list = [1, 2, 3]
         layers_list = [1, 2, 3]
-        context_dim_list = None  # 自動計算
+        context_dim_list = [768]  # 固定
     else:
         input_tokens_list = args.input_tokens
         layers_list = args.layers
@@ -246,14 +250,8 @@ def main():
 
     # 実験設定の生成
     configs = []
-    for input_tokens, layers in product(input_tokens_list, layers_list):
-        if context_dim_list:
-            for context_dim in context_dim_list:
-                configs.append((input_tokens, layers, context_dim))
-        else:
-            # context_dim = 768 × num_input_tokens
-            context_dim = DEFAULT_EMBED_DIM * input_tokens
-            configs.append((input_tokens, layers, context_dim))
+    for input_tokens, layers, context_dim in product(input_tokens_list, layers_list, context_dim_list):
+        configs.append((input_tokens, layers, context_dim))
 
     # 実験情報表示
     print_flush("=" * 70)
