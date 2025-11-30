@@ -13,30 +13,18 @@ CRITICAL CHECKS (3つの必須チェック):
 
 from config import ResidualConfig
 import torch
-import numpy as np
-import random
+import time
 from src.models.llm import LLM
 from src.providers.data.memory import MemoryDataProvider
 from src.trainers.phase1.memory import MemoryPhase1Trainer
 from src.evaluation.metrics import analyze_fixed_points, check_identity_mapping
 from src.evaluation.convergence import forward_sequential
-import time
+from src.utils.seed import set_seed
 
 
 # ============================================================
 # SEED FIXING - 完全な再現性保証
 # ============================================================
-def set_seed(seed=42):
-    """全ての乱数生成器のシードを固定"""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    # 決定的動作を保証
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
 set_seed(42)
 print("\n✅ Random seed fixed: 42 (完全な再現性保証)")
 
@@ -53,7 +41,6 @@ print(f"  - num_samples: {config.num_samples}")
 print(f"  - num_layers: {config.num_layers}")
 print(f"  - context_dim: {config.context_dim}")
 print(f"  - embed_dim: {config.embed_dim}")
-print(f"  - context_multiplier: {config.context_multiplier}")
 print(f"  - num_input_tokens: {config.num_input_tokens}")
 print(f"  - num_context_splits: {config.num_context_splits}")
 print(f"  - dist_reg_weight: {config.dist_reg_weight}")

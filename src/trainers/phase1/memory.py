@@ -202,7 +202,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         # token_embeds_combined を先に準備（num_input_tokens対応）
         # forward_with_intermediates_batch でも使用するため
-        num_input_tokens_config = getattr(self.config, 'num_input_tokens', 1)
+        num_input_tokens_config = self.config.num_input_tokens
         if num_input_tokens_config == 1:
             token_embeds_combined = input_token_embeds.cpu()  # CPUに保存
         else:
@@ -315,7 +315,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             collect_all_layers=True: (contexts, context_cache, token_embeds_combined)
         """
         num_tokens = len(token_embeds)
-        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+        num_input_tokens = self.config.num_input_tokens
 
         # 結果を格納するテンソルを事前確保（メモリ効率）
         contexts = torch.zeros(num_tokens, self.model.context_dim, device=self.device)
@@ -399,7 +399,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         """
         num_tokens = len(token_embeds)
         batch_size = self.config.phase1_batch_size
-        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+        num_input_tokens = self.config.num_input_tokens
         num_batches = (num_tokens + batch_size - 1) // batch_size
         context_noise = self.config.phase1_context_noise
 
@@ -587,7 +587,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
             final_convergence_rate = 0.0
 
             for iteration in range(self.config.phase1_max_iterations):
-                import time
                 start_time = time.time()
 
                 if iteration == 0:
@@ -659,7 +658,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
     ) -> torch.Tensor:
         """分割ブロック用シーケンシャル処理"""
         num_tokens = len(token_embeds)
-        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+        num_input_tokens = self.config.num_input_tokens
 
         contexts = torch.zeros(num_tokens, split_context_dim, device=self.device)
 
@@ -695,7 +694,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         """分割ブロック用並列処理（勾配累積）"""
         num_tokens = len(token_embeds)
         batch_size = self.config.phase1_batch_size
-        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+        num_input_tokens = self.config.num_input_tokens
         num_batches = (num_tokens + batch_size - 1) // batch_size
         context_noise = self.config.phase1_context_noise
 
@@ -769,7 +768,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         """
         self.model.eval()
         num_tokens = len(token_ids)
-        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+        num_input_tokens = self.config.num_input_tokens
 
         with torch.no_grad():
             token_embeds = self.model.token_embedding(token_ids.unsqueeze(0).to(self.device))

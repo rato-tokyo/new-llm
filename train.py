@@ -11,8 +11,6 @@ import sys
 import torch
 import time
 import argparse
-import random
-import numpy as np
 
 # Add project root to path
 project_root = os.path.dirname(os.path.abspath(__file__))
@@ -26,16 +24,7 @@ from src.trainers.phase2 import Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
 from src.utils.io import print_flush
-
-
-def set_seed(seed=42):
-    """全ての乱数生成器のシードを固定（完全な再現性保証）"""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+from src.utils.seed import set_seed
 
 
 def main():
@@ -88,8 +77,8 @@ def main():
         embed_dim=config.embed_dim,
         context_dim=config.context_dim,
         num_layers=config.num_layers,
-        num_input_tokens=getattr(config, 'num_input_tokens', 1),
-        num_context_splits=getattr(config, 'num_context_splits', 1),
+        num_input_tokens=config.num_input_tokens,
+        num_context_splits=config.num_context_splits,
         use_pretrained_embeddings=config.use_pretrained_embeddings,
         use_weight_tying=config.use_weight_tying
     )
@@ -184,7 +173,7 @@ def main():
             device=device,
             num_samples=config.identity_check_samples,
             threshold=config.identity_mapping_threshold,
-            num_input_tokens=getattr(config, 'num_input_tokens', 1)
+            num_input_tokens=config.num_input_tokens
         )
         is_identity = print_identity_mapping_warning(identity_check)
 

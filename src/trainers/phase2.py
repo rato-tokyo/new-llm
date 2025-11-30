@@ -270,7 +270,7 @@ class Phase2Trainer:
         num_layers = self.model.num_layers
         context_dim = self.model.context_dim
         embed_dim = self.model.embed_dim
-        num_input_tokens = getattr(self.config, 'num_input_tokens', 1)
+        num_input_tokens = self.config.num_input_tokens
 
         if MEMORY_UTILS_AVAILABLE:
             return can_fit_in_memory(

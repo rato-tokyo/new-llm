@@ -4,11 +4,9 @@ ExperimentRunner - 実験実行の統一インターフェース
 スクリプトからは設定のみを渡し、データ読み込み・訓練・評価を一括実行。
 """
 
-import random
 from dataclasses import dataclass
 from typing import Optional, Dict, Any, Union
 
-import numpy as np
 import torch
 
 from config import ResidualConfig
@@ -19,17 +17,7 @@ from src.evaluation.metrics import analyze_fixed_points
 from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
-
-
-def set_seed(seed: int):
-    """再現性のためのシード固定"""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+from src.utils.seed import set_seed
 
 
 @dataclass
