@@ -25,10 +25,10 @@ baseline_768d = {
     "best_train_ppl": 108.3,
     "best_val_er": 0.775,
     "samples_data": [
-        {"samples": 50, "tokens": 62891, "val_ppl": 683.9, "train_ppl": 170.6, "val_er": 0.776},
-        {"samples": 100, "tokens": 122795, "val_ppl": 415.8, "train_ppl": 150.8, "val_er": 0.775},
-        {"samples": 200, "tokens": 240132, "val_ppl": 294.5, "train_ppl": 129.0, "val_er": 0.775},
-        {"samples": 500, "tokens": 587970, "val_ppl": 198.2, "train_ppl": 108.3, "val_er": 0.775},
+        {"samples": 50, "tokens": 62891, "val_ppl": 683.9, "train_ppl": 170.6, "val_er": 0.776, "train_er": 0.779, "p1_iter": 40, "final_conv": 0.76, "val_acc": 0.173},
+        {"samples": 100, "tokens": 122795, "val_ppl": 415.8, "train_ppl": 150.8, "val_er": 0.775, "train_er": 0.783, "p1_iter": 40, "final_conv": 0.75, "val_acc": 0.191},
+        {"samples": 200, "tokens": 240132, "val_ppl": 294.5, "train_ppl": 129.0, "val_er": 0.775, "train_er": 0.784, "p1_iter": 40, "final_conv": 0.74, "val_acc": 0.201},
+        {"samples": 500, "tokens": 587970, "val_ppl": 198.2, "train_ppl": 108.3, "val_er": 0.775, "train_er": 0.786, "p1_iter": 40, "final_conv": 0.76, "val_acc": 0.226},
     ]
 }
 
@@ -45,10 +45,10 @@ data_1200d = {
     "best_train_ppl": 100.6,
     "best_val_er": 0.724,
     "samples_data": [
-        {"samples": 50, "tokens": 62891, "val_ppl": 639.1, "train_ppl": 154.9, "val_er": 0.726},
-        {"samples": 100, "tokens": 122795, "val_ppl": 407.0, "train_ppl": 139.5, "val_er": 0.724},
-        {"samples": 200, "tokens": 240132, "val_ppl": 296.6, "train_ppl": 117.7, "val_er": 0.725},
-        {"samples": 500, "tokens": 587970, "val_ppl": 199.5, "train_ppl": 100.6, "val_er": 0.724},
+        {"samples": 50, "tokens": 62891, "val_ppl": 639.1, "train_ppl": 154.9, "val_er": 0.726, "train_er": 0.732, "p1_iter": 40, "final_conv": 0.71, "val_acc": 0.172},
+        {"samples": 100, "tokens": 122795, "val_ppl": 407.0, "train_ppl": 139.5, "val_er": 0.724, "train_er": 0.735, "p1_iter": 40, "final_conv": 0.71, "val_acc": 0.192},
+        {"samples": 200, "tokens": 240132, "val_ppl": 296.6, "train_ppl": 117.7, "val_er": 0.725, "train_er": 0.738, "p1_iter": 40, "final_conv": 0.64, "val_acc": 0.207},
+        {"samples": 500, "tokens": 587970, "val_ppl": 199.5, "train_ppl": 100.6, "val_er": 0.724, "train_er": 0.739, "p1_iter": 40, "final_conv": 0.69, "val_acc": 0.231},
     ]
 }
 
@@ -65,10 +65,10 @@ data_1537d = {
     "best_train_ppl": 98.3,
     "best_val_er": 0.686,
     "samples_data": [
-        {"samples": 50, "tokens": 62891, "val_ppl": 632.6, "train_ppl": 160.9, "val_er": 0.689},
-        {"samples": 100, "tokens": 122795, "val_ppl": 400.2, "train_ppl": 139.9, "val_er": 0.687},
-        {"samples": 200, "tokens": 240132, "val_ppl": 294.6, "train_ppl": 116.6, "val_er": 0.689},
-        {"samples": 500, "tokens": 587970, "val_ppl": 198.3, "train_ppl": 98.3, "val_er": 0.686},
+        {"samples": 50, "tokens": 62891, "val_ppl": 632.6, "train_ppl": 160.9, "val_er": 0.689, "train_er": 0.696, "p1_iter": 40, "final_conv": 0.75, "val_acc": 0.171},
+        {"samples": 100, "tokens": 122795, "val_ppl": 400.2, "train_ppl": 139.9, "val_er": 0.687, "train_er": 0.702, "p1_iter": 40, "final_conv": 0.75, "val_acc": 0.190},
+        {"samples": 200, "tokens": 240132, "val_ppl": 294.6, "train_ppl": 116.6, "val_er": 0.689, "train_er": 0.705, "p1_iter": 40, "final_conv": 0.70, "val_acc": 0.202},
+        {"samples": 500, "tokens": 587970, "val_ppl": 198.3, "train_ppl": 98.3, "val_er": 0.686, "train_er": 0.705, "p1_iter": 40, "final_conv": 0.74, "val_acc": 0.230},
     ]
 }
 
@@ -244,5 +244,51 @@ print("2. A値は大きいcontext_dimで低い → 少データでの初期性�
 print("3. 最終PPLはほぼ同等 (198-199) → パラメータ増加の効果は限定的")
 print("4. Effective Rankは768dが最高 → 大きいcontext_dimは次元を活用しきれていない")
 print("5. パラメータ効率は768dが圧倒的に良い")
+
+# Detailed results table (all sample sizes)
+print("\n" + "="*120)
+print("DETAILED RESULTS (All Sample Sizes)")
+print("="*120)
+header = f"{'Config':<15} {'Samples':>8} {'Tokens':>10} {'P1 Iter':>8} {'Conv':>6} {'Train ER':>9} {'Val ER':>8} {'Train PPL':>10} {'Val PPL':>9} {'Val Acc':>8}"
+print(header)
+print("-"*120)
+
+for config in all_configs:
+    for data in config["samples_data"]:
+        print(f"{config['config_name']:<15} "
+              f"{data['samples']:>8} "
+              f"{data['tokens']:>10,} "
+              f"{data['p1_iter']:>8} "
+              f"{data['final_conv']*100:>5.0f}% "
+              f"{data['train_er']*100:>8.1f}% "
+              f"{data['val_er']*100:>7.1f}% "
+              f"{data['train_ppl']:>10.1f} "
+              f"{data['val_ppl']:>9.1f} "
+              f"{data['val_acc']*100:>7.1f}%")
+    print()  # Empty line between configs
+
+# Summary comparison at 500 samples
+print("="*120)
+print("SUMMARY COMPARISON (500 Samples)")
+print("="*120)
+header = f"{'Config':<15} {'context_dim':>10} {'Params':>10} {'P1 Iter':>8} {'Conv':>6} {'Val ER':>8} {'Train PPL':>10} {'Val PPL':>9} {'Val Acc':>8} {'α':>8}"
+print(header)
+print("-"*120)
+
+for config in all_configs:
+    p = (config["context_dim"] + embed_dim) * config["context_dim"] + 3*config["context_dim"]
+    data_500 = [d for d in config["samples_data"] if d["samples"] == 500][0]
+    print(f"{config['config_name']:<15} "
+          f"{config['context_dim']:>10} "
+          f"{p/1e6:>9.2f}M "
+          f"{data_500['p1_iter']:>8} "
+          f"{data_500['final_conv']*100:>5.0f}% "
+          f"{data_500['val_er']*100:>7.1f}% "
+          f"{data_500['train_ppl']:>10.1f} "
+          f"{data_500['val_ppl']:>9.1f} "
+          f"{config['best_acc']*100:>7.1f}% "
+          f"{config['alpha']:>8.4f}")
+
+print("="*120)
 
 plt.show()
