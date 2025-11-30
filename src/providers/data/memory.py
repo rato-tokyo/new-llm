@@ -11,7 +11,8 @@ import torch
 from transformers import AutoTokenizer
 from datasets import load_dataset
 
-from .base import DataProvider, print_flush
+from .base import DataProvider
+from src.utils.io import print_flush
 
 
 class MemoryDataProvider(DataProvider):

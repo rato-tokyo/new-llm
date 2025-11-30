@@ -317,7 +317,7 @@ def main():
             print_flush(f"Device: cuda ({gpu_name}, {gpu_mem:.1f}GB)")
         else:
             print_flush("Device: cpu")
-    except:
+    except Exception:
         print_flush("Device: unknown")
 
     # 設定一覧
@@ -342,7 +342,7 @@ def main():
         all_results.append(result)
 
     # サマリー表示
-    summary = print_summary(all_results, output_dir)
+    print_summary(all_results, output_dir)
 
     # 実行時間
     elapsed = time.time() - start_time
@@ -354,8 +354,8 @@ def main():
         'elapsed_seconds': elapsed,
         'sample_sizes': args.samples,
         'configs': [
-            {'input_tokens': it, 'layers': l, 'context_dim': cd}
-            for it, l, cd in configs
+            {'input_tokens': it, 'layers': layers, 'context_dim': cd}
+            for it, layers, cd in configs
         ],
     }
     with open(os.path.join(output_dir, 'metadata.json'), 'w') as f:
