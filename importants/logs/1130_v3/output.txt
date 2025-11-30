@@ -1,0 +1,420 @@
+remote: Enumerating objects: 13, done.
+remote: Counting objects: 100% (13/13), done.
+remote: Compressing objects: 100% (3/3), done.
+remote: Total 8 (delta 6), reused 7 (delta 5), pack-reused 0 (from 0)
+Unpacking objects: 100% (8/8), 2.51 KiB | 513.00 KiB/s, done.
+From https://github.com/rato-tokyo/new-llm
+   1d31558..ead0b4c  main       -> origin/main
+Updating 1d31558..ead0b4c
+Fast-forward
+ CLAUDE.md                     | 52 +++++++++++++++++++++++++++++++++++++++++++
+ README.md                     | 20 ++++++++++++++++-
+ scripts/scaling_experiment.py |  2 +-
+ 3 files changed, 72 insertions(+), 2 deletions(-)
+======================================================================
+ALPHA SCALING EXPERIMENT (Data Amount Dependency)
+======================================================================
+Configurations: 1
+Sample sizes: [50, 100, 200, 400, 800]
+Window size: 4 points
+Number of windows: 2
+Multiplier: 2.0x
+Total experiments: 5
+Output: results/alpha_scaling_20251130_073711
+Device: cuda (NVIDIA L4, 23.8GB)
+
+Configurations:
+  1. 1L_768d_2tok
+Device: cuda (NVIDIA L4, 22.2GB)
+
+======================================================================
+Config: 1L_768d_2tok
+  num_layers=1, context_dim=768, num_input_tokens=2
+======================================================================
+
+  --- 50 samples ---
+
+--- Experiment: 50 samples, 1L, 768d, 2tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_50samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 62891 tokens (50 samples)
+  Val:   31024 tokens
+  Data: 62,891 train, 31,024 val tokens
+2025-11-30 07:37:13.655532: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-11-30 07:37:13.671253: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1764488233.691636   70852 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764488233.698200   70852 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764488233.714735   70852 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764488233.714763   70852 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764488233.714766   70852 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764488233.714768   70852 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-11-30 07:37:13.719587: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 2
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 62,891 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.2118 [3.3s]
+  Iter 3: conv=0% loss=-0.2591 [2.9s]
+  Iter 4: conv=0% loss=-0.2939 [2.8s]
+  Iter 5: conv=0% loss=-0.3174 [2.8s]
+  Iter 6: conv=0% loss=-0.3315 [2.8s]
+  Iter 7: conv=1% loss=-0.3388 [2.8s]
+  Iter 8: conv=2% loss=-0.3431 [2.9s]
+  Iter 9: conv=3% loss=-0.3468 [2.9s]
+  Iter 10: conv=5% loss=-0.3503 [2.8s]
+  Iter 11: conv=7% loss=-0.3530 [2.8s]
+  Iter 12: conv=14% loss=-0.3549 [2.8s]
+  Iter 13: conv=33% loss=-0.3562 [2.8s]
+  Iter 14: conv=60% loss=-0.3573 [2.9s]
+  Iter 15: conv=79% loss=-0.3585 [2.8s]
+  Iter 16: conv=88% loss=-0.3599 [2.8s]
+  Iter 17: conv=92% loss=-0.3613 [2.8s]
+  Iter 18: conv=94% loss=-0.3626 [2.8s]
+  Iter 19: conv=96% loss=-0.3637 [2.8s]
+  Iter 20: conv=97% loss=-0.3647 [2.8s]
+  Iter 21: conv=98% loss=-0.3657 [2.8s]
+  Iter 22: conv=99% loss=-0.3667 [2.8s]
+  Iter 23: conv=99% loss=-0.3676 [2.8s]
+  → Converged at iter 23
+  Done: 99% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [2.7s]
+  ER: train=81.9%, val=81.5%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 2,953,728/43,322,880 parameters
+
+[Phase 2] 62,891 train / 31,024 val tokens, 20 epochs
+  Epoch 1: train_ppl=32830.3 val_ppl=3975.4 acc=9.0% [1.9s] ★
+  Epoch 2: train_ppl=1365.6 val_ppl=1454.0 acc=14.5% [2.0s] ★
+  Epoch 3: train_ppl=451.5 val_ppl=965.5 acc=16.1% [2.0s] ★
+  Epoch 4: train_ppl=255.7 val_ppl=763.9 acc=16.7% [2.0s] ★
+  Epoch 5: train_ppl=168.2 val_ppl=663.9 acc=17.4% [2.0s] ★
+  Epoch 6: train_ppl=121.4 val_ppl=620.2 acc=17.6% [2.0s] ★
+  Epoch 7: train_ppl=92.1 val_ppl=597.2 acc=17.8% [2.0s] ★
+  Epoch 8: train_ppl=75.0 val_ppl=591.7 acc=18.3% [2.0s] ★
+  Epoch 9: train_ppl=55.6 val_ppl=604.2 acc=18.2% [2.0s]
+  → Early stop at epoch 9
+  Best: epoch 8, ppl=591.7, acc=18.3%
+  Result: PPL=591.7, Acc=18.3%
+    → PPL: 591.7, Acc: 18.3%, ER: 81.5%
+
+  --- 100 samples ---
+
+--- Experiment: 100 samples, 1L, 768d, 2tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+  Data: 122,795 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 2
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.2095 [5.4s]
+  Iter 3: conv=0% loss=-0.2563 [5.3s]
+  Iter 4: conv=0% loss=-0.2911 [5.2s]
+  Iter 5: conv=0% loss=-0.3148 [5.2s]
+  Iter 6: conv=0% loss=-0.3290 [5.2s]
+  Iter 7: conv=0% loss=-0.3364 [5.2s]
+  Iter 8: conv=1% loss=-0.3407 [5.2s]
+  Iter 9: conv=2% loss=-0.3444 [5.2s]
+  Iter 10: conv=3% loss=-0.3479 [5.2s]
+  Iter 11: conv=6% loss=-0.3507 [5.2s]
+  Iter 12: conv=13% loss=-0.3525 [5.2s]
+  Iter 13: conv=33% loss=-0.3538 [5.1s]
+  Iter 14: conv=62% loss=-0.3548 [5.3s]
+  Iter 15: conv=81% loss=-0.3560 [5.2s]
+  Iter 16: conv=89% loss=-0.3574 [5.2s]
+  Iter 17: conv=92% loss=-0.3588 [5.2s]
+  Iter 18: conv=94% loss=-0.3601 [5.2s]
+  Iter 19: conv=96% loss=-0.3612 [5.2s]
+  Iter 20: conv=98% loss=-0.3622 [5.2s]
+  Iter 21: conv=99% loss=-0.3632 [5.2s]
+  Iter 22: conv=99% loss=-0.3641 [5.2s]
+  Iter 23: conv=99% loss=-0.3651 [5.2s]
+  → Converged at iter 23
+  Done: 99% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [5.0s]
+  ER: train=82.1%, val=81.3%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 2,953,728/43,322,880 parameters
+
+[Phase 2] 122,795 train / 31,024 val tokens, 20 epochs
+  Epoch 1: train_ppl=10205.4 val_ppl=1511.1 acc=13.8% [3.4s] ★
+  Epoch 2: train_ppl=698.4 val_ppl=732.9 acc=16.9% [3.4s] ★
+  Epoch 3: train_ppl=342.3 val_ppl=533.4 acc=17.9% [3.4s] ★
+  Epoch 4: train_ppl=217.1 val_ppl=453.4 acc=18.5% [3.4s] ★
+  Epoch 5: train_ppl=156.5 val_ppl=417.1 acc=19.0% [3.4s] ★
+  Epoch 6: train_ppl=118.0 val_ppl=403.0 acc=19.5% [3.4s] ★
+  Epoch 7: train_ppl=92.0 val_ppl=400.3 acc=19.8% [3.4s] ★
+  Epoch 8: train_ppl=73.2 val_ppl=405.3 acc=19.9% [3.4s]
+  → Early stop at epoch 8
+  Best: epoch 7, ppl=400.3, acc=19.8%
+  Result: PPL=400.3, Acc=19.8%
+    → PPL: 400.3, Acc: 19.8%, ER: 81.3%
+
+  --- 200 samples ---
+
+--- Experiment: 200 samples, 1L, 768d, 2tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_200samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 240132 tokens (200 samples)
+  Val:   31024 tokens
+  Data: 240,132 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 2
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 240,132 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.2079 [10.0s]
+  Iter 3: conv=0% loss=-0.2546 [9.9s]
+  Iter 4: conv=0% loss=-0.2892 [10.0s]
+  Iter 5: conv=0% loss=-0.3126 [9.9s]
+  Iter 6: conv=0% loss=-0.3268 [10.0s]
+  Iter 7: conv=0% loss=-0.3342 [10.0s]
+  Iter 8: conv=1% loss=-0.3387 [9.9s]
+  Iter 9: conv=2% loss=-0.3425 [10.0s]
+  Iter 10: conv=3% loss=-0.3460 [10.0s]
+  Iter 11: conv=6% loss=-0.3487 [10.0s]
+  Iter 12: conv=11% loss=-0.3506 [9.9s]
+  Iter 13: conv=26% loss=-0.3518 [9.9s]
+  Iter 14: conv=50% loss=-0.3529 [10.0s]
+  Iter 15: conv=70% loss=-0.3542 [10.0s]
+  Iter 16: conv=81% loss=-0.3556 [9.9s]
+  Iter 17: conv=86% loss=-0.3570 [10.0s]
+  Iter 18: conv=90% loss=-0.3582 [9.9s]
+  Iter 19: conv=93% loss=-0.3593 [9.9s]
+  Iter 20: conv=95% loss=-0.3602 [9.9s]
+  Iter 21: conv=97% loss=-0.3611 [10.0s]
+  Iter 22: conv=98% loss=-0.3621 [10.0s]
+  Iter 23: conv=98% loss=-0.3630 [9.9s]
+  Iter 24: conv=99% loss=-0.3640 [10.0s]
+  Iter 25: conv=99% loss=-0.3649 [10.1s]
+  Iter 26: conv=99% loss=-0.3658 [9.9s]
+  Iter 27: conv=99% loss=-0.3667 [9.9s]
+  Iter 28: conv=99% loss=-0.3674 [10.0s]
+  → Converged at iter 28
+  Done: 99% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [9.7s]
+  ER: train=82.3%, val=81.3%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 2,953,728/43,322,880 parameters
+
+[Phase 2] 240,132 train / 31,024 val tokens, 20 epochs
+  Epoch 1: train_ppl=3491.9 val_ppl=735.2 acc=16.8% [6.3s] ★
+  Epoch 2: train_ppl=429.1 val_ppl=437.6 acc=18.5% [6.3s] ★
+  Epoch 3: train_ppl=247.3 val_ppl=355.4 acc=19.2% [6.3s] ★
+  Epoch 4: train_ppl=174.6 val_ppl=322.3 acc=19.7% [6.2s] ★
+  Epoch 5: train_ppl=131.9 val_ppl=305.8 acc=20.2% [6.1s] ★
+  Epoch 6: train_ppl=104.5 val_ppl=297.6 acc=20.4% [6.2s] ★
+  Epoch 7: train_ppl=85.1 val_ppl=296.8 acc=20.6% [6.1s] ★
+  Epoch 8: train_ppl=71.0 val_ppl=299.6 acc=20.7% [6.1s]
+  → Early stop at epoch 8
+  Best: epoch 7, ppl=296.8, acc=20.6%
+  Result: PPL=296.8, Acc=20.6%
+    → PPL: 296.8, Acc: 20.6%, ER: 81.3%
+
+  --- 400 samples ---
+
+--- Experiment: 400 samples, 1L, 768d, 2tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_400samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 473429 tokens (400 samples)
+  Val:   31024 tokens
+  Data: 473,429 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 2
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 473,429 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.2075 [19.8s]
+  Iter 3: conv=0% loss=-0.2543 [20.0s]
+  Iter 4: conv=0% loss=-0.2890 [19.8s]
+  Iter 5: conv=0% loss=-0.3125 [20.1s]
+  Iter 6: conv=0% loss=-0.3267 [20.0s]
+  Iter 7: conv=1% loss=-0.3340 [20.1s]
+  Iter 8: conv=2% loss=-0.3383 [20.1s]
+  Iter 9: conv=3% loss=-0.3420 [20.0s]
+  Iter 10: conv=4% loss=-0.3455 [20.0s]
+  Iter 11: conv=7% loss=-0.3482 [20.0s]
+  Iter 12: conv=13% loss=-0.3501 [20.1s]
+  Iter 13: conv=32% loss=-0.3513 [20.1s]
+  Iter 14: conv=60% loss=-0.3523 [20.1s]
+  Iter 15: conv=79% loss=-0.3535 [20.1s]
+  Iter 16: conv=87% loss=-0.3549 [20.1s]
+  Iter 17: conv=91% loss=-0.3563 [20.0s]
+  Iter 18: conv=94% loss=-0.3575 [20.0s]
+  Iter 19: conv=96% loss=-0.3586 [20.0s]
+  Iter 20: conv=97% loss=-0.3596 [20.1s]
+  Iter 21: conv=98% loss=-0.3606 [20.0s]
+  Iter 22: conv=99% loss=-0.3615 [20.0s]
+  Iter 23: conv=99% loss=-0.3625 [20.0s]
+  → Converged at iter 23
+  Done: 99% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [19.3s]
+  ER: train=82.4%, val=81.4%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 2,953,728/43,322,880 parameters
+
+[Phase 2] 473,429 train / 31,024 val tokens, 20 epochs
+  Epoch 1: train_ppl=1472.0 val_ppl=430.3 acc=18.3% [12.0s] ★
+  Epoch 2: train_ppl=301.2 val_ppl=296.2 acc=20.1% [11.9s] ★
+  Epoch 3: train_ppl=194.6 val_ppl=250.3 acc=21.0% [11.7s] ★
+  Epoch 4: train_ppl=145.0 val_ppl=228.4 acc=21.8% [11.6s] ★
+  Epoch 5: train_ppl=115.0 val_ppl=216.9 acc=22.3% [11.5s] ★
+  Epoch 6: train_ppl=94.8 val_ppl=212.0 acc=22.4% [11.5s] ★
+  Epoch 7: train_ppl=80.4 val_ppl=211.0 acc=22.6% [11.6s] ★
+  Epoch 8: train_ppl=69.5 val_ppl=213.1 acc=22.6% [11.7s]
+  → Early stop at epoch 8
+  Best: epoch 7, ppl=211.0, acc=22.6%
+  Result: PPL=211.0, Acc=22.6%
+    → PPL: 211.0, Acc: 22.6%, ER: 81.4%
+
+  --- 800 samples ---
+
+--- Experiment: 800 samples, 1L, 768d, 2tok ---
+Loading training data...
+  Loading 800 samples from UltraChat...
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_800samples_full.pt
+Loading validation data...
+  Train: 948524 tokens (800 samples)
+  Val:   31024 tokens
+  Data: 948,524 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 2
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 948,524 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.2072 [40.0s]
+  Iter 3: conv=0% loss=-0.2537 [40.1s]
+  Iter 4: conv=0% loss=-0.2884 [39.3s]
+  Iter 5: conv=0% loss=-0.3120 [39.3s]
+  Iter 6: conv=0% loss=-0.3263 [39.4s]
+  Iter 7: conv=0% loss=-0.3336 [39.2s]
+  Iter 8: conv=1% loss=-0.3380 [39.2s]
+  Iter 9: conv=2% loss=-0.3417 [39.2s]
+  Iter 10: conv=3% loss=-0.3452 [39.4s]
+  Iter 11: conv=6% loss=-0.3480 [39.2s]
+  Iter 12: conv=13% loss=-0.3498 [39.5s]
+  Iter 13: conv=32% loss=-0.3510 [39.4s]
+  Iter 14: conv=60% loss=-0.3521 [39.4s]
+  Iter 15: conv=79% loss=-0.3533 [39.2s]
+  Iter 16: conv=88% loss=-0.3547 [39.3s]
+  Iter 17: conv=92% loss=-0.3560 [39.3s]
+  Iter 18: conv=94% loss=-0.3573 [39.1s]
+  Iter 19: conv=96% loss=-0.3584 [39.2s]
+  Iter 20: conv=97% loss=-0.3594 [39.4s]
+  Iter 21: conv=98% loss=-0.3603 [39.2s]
+  Iter 22: conv=99% loss=-0.3613 [39.3s]
+  Iter 23: conv=99% loss=-0.3622 [39.3s]
+  → Converged at iter 23
+  Done: 99% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [36.7s]
+  ER: train=82.5%, val=81.3%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 2,953,728/43,322,880 parameters
+
+[Phase 2] 948,524 train / 31,024 val tokens, 20 epochs
+  Epoch 1: train_ppl=743.9 val_ppl=288.6 acc=20.1% [23.5s] ★
+  Epoch 2: train_ppl=221.3 val_ppl=216.5 acc=21.8% [23.1s] ★
+  Epoch 3: train_ppl=155.3 val_ppl=190.1 acc=22.7% [22.7s] ★
+  Epoch 4: train_ppl=122.5 val_ppl=177.1 acc=23.4% [23.0s] ★
+  Epoch 5: train_ppl=102.5 val_ppl=170.9 acc=23.8% [23.1s] ★
+  Epoch 6: train_ppl=88.9 val_ppl=168.2 acc=24.0% [23.1s] ★
+  Epoch 7: train_ppl=78.9 val_ppl=168.0 acc=24.2% [23.0s] ★
+  Epoch 8: train_ppl=71.3 val_ppl=168.8 acc=24.1% [23.0s]
+  → Early stop at epoch 8
+  Best: epoch 7, ppl=168.0, acc=24.2%
+  Result: PPL=168.0, Acc=24.2%
+    → PPL: 168.0, Acc: 24.2%, ER: 81.3%
+
+====================================================================================================
+RESULTS SUMMARY
+====================================================================================================
+Config                   α          A     R²     PPL    Acc   T.PPL    ER Iter
+----------------------------------------------------------------------------------------------------
+1L_768d_2tok       -0.4658   9.71e+04  0.992   168.0  24.2%    78.9 81.3%   23
+
+====================================================================================================
+DETAILED RESULTS (All sample sizes)
+====================================================================================================
+Config             Samples     Tokens P1 Iter Train ER  Val ER   T.PPL   V.PPL    Acc
+----------------------------------------------------------------------------------------------------
+1L_768d_2tok            50     62,891      23    81.9%   81.5%    75.0   591.7  18.3%
+1L_768d_2tok           100    122,795      23    82.1%   81.3%    92.0   400.3  19.8%
+1L_768d_2tok           200    240,132      28    82.3%   81.3%    85.1   296.8  20.6%
+1L_768d_2tok           400    473,429      23    82.4%   81.4%    80.4   211.0  22.6%
+1L_768d_2tok           800    948,524      23    82.5%   81.3%    78.9   168.0  24.2%
+
+Results saved to: results/alpha_scaling_20251130_073711
+
+====================================================================================================
+ALPHA PROGRESSION ANALYSIS (Sliding Window)
+Window size: 4 points
+====================================================================================================
+
+1L_768d_2tok:
+--------------------------------------------------------------------------------
+  Window              Samples                    Tokens          α            A       R²
+--------------------------------------------------------------------------------
+       1               50-400            62,891-473,429   -0.50435     1.53e+05   0.9972
+       2              100-800           122,795-948,524   -0.43220     6.26e+04   0.9933
+
+  α change: -0.50435 → -0.43220 (Δ = +0.07215, +14.30%)
+  Trend: ↑ DEGRADING (α becoming less negative = worse scaling)
+
+Alpha progression saved to: results/alpha_scaling_20251130_073711/alpha_progression.json
+
+Total time: 38.0 min
