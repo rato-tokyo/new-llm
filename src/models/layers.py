@@ -8,6 +8,8 @@ TokenLayer: トークン処理専用レイヤー
 import torch
 import torch.nn as nn
 
+from src.utils.initialization import init_linear_weights
+
 
 class ContextLayer(nn.Module):
     """
@@ -45,15 +47,7 @@ class ContextLayer(nn.Module):
         else:
             self.residual_proj = None
 
-        self._init_weights()
-
-    def _init_weights(self):
-        """Initialize layer weights"""
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.normal_(module.weight, mean=0.0, std=0.1)
-                if module.bias is not None:
-                    nn.init.normal_(module.bias, mean=0.0, std=0.01)
+        init_linear_weights(self)
 
     def forward(self, context, token_embeds=None):
         """
@@ -128,15 +122,7 @@ class TokenLayer(nn.Module):
         else:
             self.residual_proj = None
 
-        self._init_weights()
-
-    def _init_weights(self):
-        """Initialize layer weights"""
-        for module in self.modules():
-            if isinstance(module, nn.Linear):
-                nn.init.normal_(module.weight, mean=0.0, std=0.1)
-                if module.bias is not None:
-                    nn.init.normal_(module.bias, mean=0.0, std=0.01)
+        init_linear_weights(self)
 
     def forward(self, context, token_embeds):
         """
