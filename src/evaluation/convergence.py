@@ -5,17 +5,13 @@ Convergence Evaluation - CVFP収束判定
 Phase1トレーナー（Memory/Storage）から共通利用。
 """
 
-import sys
 from dataclasses import dataclass
 from typing import Optional, List
 import torch
 import torch.nn.functional as F
 import numpy as np
 
-
-def print_flush(msg: str):
-    print(msg, flush=True)
-    sys.stdout.flush()
+from src.utils.io import print_flush
 
 
 @dataclass

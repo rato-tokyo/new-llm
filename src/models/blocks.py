@@ -52,43 +52,33 @@ class ContextBlock(nn.Module):
                 )
             )
 
-    def forward(self, context, token_embeds):
+    def forward(self, context, token_embeds, return_intermediates: bool = False):
         """
         Execute all context layers sequentially
 
         Args:
             context: [batch, context_dim]
             token_embeds: [batch, embed_dim * num_input_tokens]
+            return_intermediates: If True, return all layer outputs (E案用)
 
         Returns:
-            context: Updated context [batch, context_dim]
+            return_intermediates=False: context [batch, context_dim]
+            return_intermediates=True: List of outputs [context_1, ..., context_N]
         """
-        # token継ぎ足し方式: 全レイヤーでtoken入力
-        for layer in self.layers:
-            context = layer(context, token_embeds)
-        return context
+        if return_intermediates:
+            outputs = []
+            for layer in self.layers:
+                context = layer(context, token_embeds)
+                outputs.append(context)
+            return outputs
+        else:
+            for layer in self.layers:
+                context = layer(context, token_embeds)
+            return context
 
     def forward_with_intermediates(self, context, token_embeds):
-        """
-        Execute all context layers and return intermediate outputs (E案用)
-
-        各レイヤーの出力を返す。TokenBlockの各レイヤーが対応する
-        ContextBlockレイヤーの出力を参照するために使用。
-
-        Args:
-            context: [batch, context_dim] (初期コンテキスト)
-            token_embeds: [batch, embed_dim * num_input_tokens]
-
-        Returns:
-            outputs: List of context outputs [context_1, context_2, ..., context_N]
-                     len(outputs) == num_layers
-        """
-        outputs = []
-        # token継ぎ足し方式: 全レイヤーでtoken入力
-        for layer in self.layers:
-            context = layer(context, token_embeds)
-            outputs.append(context)
-        return outputs
+        """後方互換性のためのエイリアス"""
+        return self.forward(context, token_embeds, return_intermediates=True)
 
     def num_params(self) -> int:
         """このブロックのパラメータ数を返す"""
@@ -321,53 +311,42 @@ class TokenBlock(nn.Module):
                 )
             )
 
-    def forward(self, context, token_embeds):
+    def forward(self, context, token_embeds, context_list=None):
         """
-        Execute all token layers sequentially (A案: 全レイヤーで同じcontext)
+        Execute all token layers sequentially
 
         Args:
-            context: [batch, context_dim] (参照のみ、更新されない)
+            context: [batch, context_dim] - 単一context（A案用、context_list=Noneの場合）
             token_embeds: [batch, embed_dim * num_input_tokens]
-
-        Returns:
-            token: Updated token [batch, embed_dim]
-        """
-        for layer in self.layers:
-            # 各レイヤーの出力は [batch, embed_dim]
-            # 次のレイヤーへの入力は最後のトークン + 履歴として再構成
-            token_embeds = layer(context, token_embeds)
-
-        return token_embeds
-
-    def forward_with_contexts(self, context_list, token_embeds):
-        """
-        Execute all token layers with layer-specific contexts (E案用)
-
-        各レイヤーが対応するContextBlockレイヤーの出力を使用する。
-        TokenBlock Layer i は context_list[i] を参照。
-
-        Args:
-            context_list: List of context outputs from ContextBlock
-                          [context_1, context_2, ..., context_N]
-                          len(context_list) == num_layers
-            token_embeds: [batch, embed_dim * num_input_tokens] (初期トークン)
+            context_list: List of context outputs（E案用）
+                          [context_1, ..., context_N] len == num_layers
+                          指定時はcontextは無視される
 
         Returns:
             token: Updated token [batch, embed_dim]
 
         Raises:
-            ValueError: if len(context_list) != num_layers
+            ValueError: if context_list provided but len != num_layers
         """
-        if len(context_list) != self.num_layers:
-            raise ValueError(
-                f"context_list length ({len(context_list)}) must equal "
-                f"num_layers ({self.num_layers})"
-            )
-
-        for i, layer in enumerate(self.layers):
-            token_embeds = layer(context_list[i], token_embeds)
+        if context_list is not None:
+            # E案: レイヤーごとに異なるcontextを使用
+            if len(context_list) != self.num_layers:
+                raise ValueError(
+                    f"context_list length ({len(context_list)}) must equal "
+                    f"num_layers ({self.num_layers})"
+                )
+            for i, layer in enumerate(self.layers):
+                token_embeds = layer(context_list[i], token_embeds)
+        else:
+            # A案: 全レイヤーで同じcontextを使用
+            for layer in self.layers:
+                token_embeds = layer(context, token_embeds)
 
         return token_embeds
+
+    def forward_with_contexts(self, context_list, token_embeds):
+        """後方互換性のためのエイリアス"""
+        return self.forward(None, token_embeds, context_list=context_list)
 
     def num_params(self) -> int:
         """このブロックのパラメータ数を返す"""

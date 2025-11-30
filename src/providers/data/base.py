@@ -6,9 +6,7 @@ from abc import ABC, abstractmethod
 from typing import Tuple
 import torch
 
-
-def print_flush(msg: str):
-    print(msg, flush=True)
+from src.utils.io import print_flush
 
 
 class DataProvider(ABC):

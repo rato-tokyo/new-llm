@@ -9,7 +9,9 @@ from typing import Optional, Any
 import torch
 import torch.nn.functional as F
 
-from .base import Phase1Trainer, print_flush, TrainResult, EvalResult, ContextCache
+from .base import Phase1Trainer, TrainResult, EvalResult, ContextCache
+from src.utils.io import print_flush
+from src.utils.device import is_cuda_device, clear_gpu_cache
 
 
 class MemoryPhase1Trainer(Phase1Trainer):
@@ -92,17 +94,13 @@ class MemoryPhase1Trainer(Phase1Trainer):
         optimizer = torch.optim.Adam(context_params, lr=self.config.phase1_learning_rate)
 
         # トークン埋め込み（1回のみ計算、CPUに保存）
-        # デバイス判定用（文字列またはtorch.device両対応）
-        is_cuda = str(self.device) == 'cuda' or (hasattr(self.device, 'type') and self.device.type == 'cuda')
-
         with torch.no_grad():
             # GPUで計算してCPUに移動（大規模データ対応）
             token_embeds_gpu = self.model.token_embedding(token_ids.unsqueeze(0).to(self.device))
             token_embeds_gpu = self.model.embed_norm(token_embeds_gpu).squeeze(0)
             token_embeds = token_embeds_gpu.cpu()  # CPUに保存
             del token_embeds_gpu
-            if is_cuda:
-                torch.cuda.empty_cache()
+            clear_gpu_cache(self.device)
 
         previous_contexts: Optional[torch.Tensor] = None  # CPUに保存
         final_convergence_rate = 0.0
@@ -135,8 +133,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             final_convergence_rate = convergence_rate
 
             del token_embeds_gpu, previous_contexts_gpu, contexts
-            if is_cuda:
-                torch.cuda.empty_cache()
+            clear_gpu_cache(self.device)
 
             elapsed = time.time() - start_time
             print_flush(
@@ -189,8 +186,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
         # バッチ分割で全レイヤー出力を計算（OOM対策）
         # GPU空きメモリに基づいてバッチサイズを決定
         cache_batch_size = 50000  # 50kトークンずつ処理（安全なサイズ）
-        if is_cuda:
-            torch.cuda.empty_cache()
+        if is_cuda_device(self.device):
+            clear_gpu_cache(self.device)
             free_mem_gb = (torch.cuda.get_device_properties(0).total_memory
                           - torch.cuda.memory_allocated()) / (1024**3)
             # 1トークンあたり約30KB（6層×768dim×4bytes×安全係数）
@@ -241,16 +238,14 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
                 # メモリ解放
                 del batch_results, batch_embeds
-                if is_cuda:
-                    torch.cuda.empty_cache()
+                clear_gpu_cache(self.device)
 
         cache_elapsed = time.time() - cache_start
         print_flush(f"  Cache collected (parallel) [{cache_elapsed:.1f}s]")
 
         self.model.train()
         del token_embeds_gpu
-        if is_cuda:
-            torch.cuda.empty_cache()
+        clear_gpu_cache(self.device)
 
         assert all_layer_contexts is not None
         assert token_embeds_combined is not None
@@ -295,9 +290,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         )
 
         del token_embeds_gpu
-        is_cuda = str(self.device) == 'cuda' or (hasattr(self.device, 'type') and self.device.type == 'cuda')
-        if is_cuda:
-            torch.cuda.empty_cache()
+        clear_gpu_cache(self.device)
 
         assert all_layer_contexts is not None
         assert token_embeds_combined is not None
@@ -410,9 +403,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         num_batches = (num_tokens + batch_size - 1) // batch_size
         context_noise = self.config.phase1_context_noise
 
-        # デバイス判定用（文字列またはtorch.device両対応）
-        is_cuda = str(self.device) == 'cuda' or (hasattr(self.device, 'type') and self.device.type == 'cuda')
-
         # 勾配をゼロに
         optimizer.zero_grad()
 
@@ -476,9 +466,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
             # メモリ解放
             del batch_combined, batch_output, batch_loss, scaled_loss, batch_contexts, batch_prev
-
-            if is_cuda:
-                torch.cuda.empty_cache()
+            clear_gpu_cache(self.device)
 
         # 勾配クリッピングとパラメータ更新
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.config.phase1_gradient_clip)
@@ -588,15 +576,12 @@ class MemoryPhase1Trainer(Phase1Trainer):
             print_flush(f"  Split ContextBlock params: {sum(p.numel() for p in split_params):,}")
 
             # トークン埋め込み（1回のみ計算）
-            is_cuda = str(self.device) == 'cuda' or (hasattr(self.device, 'type') and self.device.type == 'cuda')
-
             with torch.no_grad():
                 token_embeds_gpu = self.model.token_embedding(split_token_ids.unsqueeze(0).to(self.device))
                 token_embeds_gpu = self.model.embed_norm(token_embeds_gpu).squeeze(0)
                 token_embeds = token_embeds_gpu.cpu()
                 del token_embeds_gpu
-                if is_cuda:
-                    torch.cuda.empty_cache()
+                clear_gpu_cache(self.device)
 
             previous_contexts: Optional[torch.Tensor] = None
             final_convergence_rate = 0.0
@@ -613,8 +598,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
                     )
                     previous_contexts = contexts.detach().cpu()
                     del token_embeds_gpu, contexts
-                    if is_cuda:
-                        torch.cuda.empty_cache()
+                    clear_gpu_cache(self.device)
                     elapsed = time.time() - start_time
                     print_flush(f"  Iteration 1/{self.config.phase1_max_iterations}: シーケンシャル [{elapsed:.2f}s]")
                     continue
@@ -637,8 +621,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 final_convergence_rate = convergence_rate
 
                 del token_embeds_gpu, previous_contexts_gpu, contexts
-                if is_cuda:
-                    torch.cuda.empty_cache()
+                clear_gpu_cache(self.device)
 
                 elapsed = time.time() - start_time
                 print_flush(
@@ -716,8 +699,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         num_batches = (num_tokens + batch_size - 1) // batch_size
         context_noise = self.config.phase1_context_noise
 
-        is_cuda = str(self.device) == 'cuda' or (hasattr(self.device, 'type') and self.device.type == 'cuda')
-
         optimizer.zero_grad()
 
         all_contexts_cpu = []
@@ -766,9 +747,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             total_loss_sum += batch_loss.item() * current_batch_size
 
             del batch_combined, batch_output, batch_loss, scaled_loss, batch_contexts, batch_prev
-
-            if is_cuda:
-                torch.cuda.empty_cache()
+            clear_gpu_cache(self.device)
 
         torch.nn.utils.clip_grad_norm_(split_block.parameters(), max_norm=self.config.phase1_gradient_clip)
         optimizer.step()

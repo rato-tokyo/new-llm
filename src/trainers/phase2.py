@@ -40,8 +40,9 @@ Phase 1で学習したContextBlockを固定（freeze）し、TokenBlockのみを
 import torch
 import torch.nn as nn
 import time
-import sys
 from typing import Dict, Any
+
+from src.utils.io import print_flush
 
 # メモリユーティリティをインポート（オプショナル）
 try:
@@ -49,11 +50,6 @@ try:
     MEMORY_UTILS_AVAILABLE = True
 except ImportError:
     MEMORY_UTILS_AVAILABLE = False
-
-
-def print_flush(msg: str):
-    print(msg, flush=True)
-    sys.stdout.flush()
 
 
 class Phase2Trainer:

@@ -43,16 +43,13 @@ from scipy import stats
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from src.experiments import ExperimentRunner, ExperimentConfig
+from src.utils.io import print_flush
 
 
 # デフォルト設定
 DEFAULT_SAMPLE_SIZES = [50, 100, 200, 500]
 DEFAULT_EMBED_DIM = 768
 RANDOM_SEED = 42
-
-
-def print_flush(msg):
-    print(msg, flush=True)
 
 
 def calculate_scaling_law(results: list):

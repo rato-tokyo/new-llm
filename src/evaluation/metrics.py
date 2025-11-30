@@ -4,15 +4,10 @@ Evaluation metrics for New-LLM
 Fixed-point analysis, effective rank calculation, and other metrics.
 """
 
-import sys
 import torch
 import torch.nn.functional as F  # check_identity_mapping で使用
 
-
-def print_flush(msg):
-    """Print with immediate flush"""
-    print(msg)
-    sys.stdout.flush()
+from src.utils.io import print_flush
 
 
 def analyze_fixed_points(contexts, label="", verbose=True):

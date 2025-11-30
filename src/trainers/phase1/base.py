@@ -2,23 +2,22 @@
 Phase1Trainer - CVFP固定点学習トレーナーの抽象基底クラス
 """
 
-import sys
 from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Union, Tuple
 import torch
 
 from src.evaluation import ConvergenceResult
+from src.utils.io import print_flush
 
 # Phase 2キャッシュ用の型定義
 # token継ぎ足し方式: 全レイヤー同じcontext_dimなのでテンソル形式のみ
 ContextCache = torch.Tensor
+
+# 戻り値の型
+# return_all_layers=False: torch.Tensor (contexts)
+# return_all_layers=True: Tuple[contexts, all_layer_cache, token_embeds]
 TrainResult = Union[torch.Tensor, Tuple[torch.Tensor, ContextCache, torch.Tensor]]
-EvalResult = Union[ConvergenceResult, torch.Tensor, Tuple[torch.Tensor, ContextCache, torch.Tensor]]
-
-
-def print_flush(msg: str):
-    print(msg, flush=True)
-    sys.stdout.flush()
+EvalResult = Union[torch.Tensor, Tuple[torch.Tensor, ContextCache, torch.Tensor]]
 
 
 class Phase1Trainer(ABC):
