@@ -3,7 +3,7 @@ DataProvider - データローダーの抽象基底クラス
 """
 
 from abc import ABC, abstractmethod
-from typing import Any, Optional, Tuple, Type
+from typing import Optional, Tuple, Type
 from types import TracebackType
 import torch
 

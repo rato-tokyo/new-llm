@@ -71,6 +71,7 @@ class StandardFFN(BaseFFN):
         self.activation = activation
 
         # 活性化関数の選択
+        act_fn: type[nn.Module]
         if activation == "relu":
             act_fn = nn.ReLU
         elif activation == "gelu":

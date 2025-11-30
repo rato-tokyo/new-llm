@@ -4,7 +4,7 @@ Evaluation metrics for New-LLM
 Fixed-point analysis, effective rank calculation, and other metrics.
 """
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
 import torch
 import torch.nn.functional as F  # check_identity_mapping で使用

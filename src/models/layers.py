@@ -5,12 +5,12 @@ ContextLayer: 文脈処理専用レイヤー
 TokenLayer: トークン処理専用レイヤー
 """
 
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
 
-from src.models.ffn import create_ffn
+from src.models.ffn import create_ffn, BaseFFN
 from src.utils.initialization import init_linear_weights
 
 
@@ -45,6 +45,7 @@ class ContextLayer(nn.Module):
         input_dim = context_input_dim + token_input_dim
 
         # FFNをファクトリで生成
+        self.fnn: Union[BaseFFN, nn.Sequential]
         if config is not None:
             self.fnn = create_ffn(
                 fnn_type=config.fnn_type,
@@ -139,6 +140,7 @@ class TokenLayer(nn.Module):
         input_dim = context_dim + token_input_dim
 
         # FFNをファクトリで生成
+        self.fnn: Union[BaseFFN, nn.Sequential]
         if config is not None:
             self.fnn = create_ffn(
                 fnn_type=config.fnn_type,

@@ -85,7 +85,9 @@ print("\nStarting Phase 1 training...")
 print(f"設定: dist_reg_weight={config.dist_reg_weight}, max_iterations={config.phase1_max_iterations}")
 
 train_start = time.time()
-train_contexts = trainer.train(train_token_ids, label="Train", data_provider=data_provider)
+train_result = trainer.train(train_token_ids, label="Train", data_provider=data_provider)
+assert isinstance(train_result, torch.Tensor), "Expected Tensor from train()"
+train_contexts: torch.Tensor = train_result
 train_time = time.time() - train_start
 
 # Evaluate on validation data

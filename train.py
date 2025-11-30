@@ -16,15 +16,15 @@ import argparse
 project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_root)
 
-from config import ResidualConfig
-from src.models.llm import LLM
-from src.providers.data import MemoryDataProvider
-from src.trainers.phase1 import MemoryPhase1Trainer
-from src.trainers.phase2 import Phase2Trainer
-from src.evaluation.metrics import analyze_fixed_points
-from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
-from src.utils.io import print_flush
-from src.utils.seed import set_seed
+from config import ResidualConfig  # noqa: E402
+from src.models.llm import LLM  # noqa: E402
+from src.providers.data import MemoryDataProvider  # noqa: E402
+from src.trainers.phase1 import MemoryPhase1Trainer  # noqa: E402
+from src.trainers.phase2 import Phase2Trainer  # noqa: E402
+from src.evaluation.metrics import analyze_fixed_points  # noqa: E402
+from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning  # noqa: E402
+from src.utils.io import print_flush  # noqa: E402
+from src.utils.seed import set_seed  # noqa: E402
 
 
 def main():
