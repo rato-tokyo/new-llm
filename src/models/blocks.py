@@ -76,6 +76,10 @@ class ContextBlock(nn.Module):
                 context = layer(context, token_embeds)
             return context
 
+    def forward_with_intermediates(self, context, token_embeds):
+        """各レイヤーの中間出力を返す"""
+        return self.forward(context, token_embeds, return_intermediates=True)
+
     def num_params(self) -> int:
         """このブロックのパラメータ数を返す"""
         return sum(p.numel() for p in self.parameters())
