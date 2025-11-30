@@ -6,7 +6,7 @@ TokenBlock: トークン処理ブロック（Phase 2で学習）
 SplitContextBlock: 分割されたContextBlockのコンテナ
 """
 
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -29,9 +29,17 @@ class ContextBlock(nn.Module):
         context_dim: Final context vector dimension
         embed_dim: Token embedding dimension (単一トークンの次元)
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
+        config: 設定オブジェクト（FFN設定を含む）
     """
 
-    def __init__(self, num_layers: int, context_dim: int, embed_dim: int, num_input_tokens: int = 1) -> None:
+    def __init__(
+        self,
+        num_layers: int,
+        context_dim: int,
+        embed_dim: int,
+        num_input_tokens: int = 1,
+        config: Optional[Any] = None
+    ) -> None:
         super().__init__()
 
         self.num_layers = num_layers
@@ -50,7 +58,8 @@ class ContextBlock(nn.Module):
                 ContextLayer(
                     context_input_dim=context_dim,
                     context_output_dim=context_dim,
-                    token_input_dim=token_input_dim  # 全レイヤーでtoken入力
+                    token_input_dim=token_input_dim,  # 全レイヤーでtoken入力
+                    config=config
                 )
             )
 
@@ -143,9 +152,18 @@ class SplitContextBlock(nn.Module):
         context_dim: Total context dimension (will be split into context_dim/N per block)
         embed_dim: Token embedding dimension (not split, full size to each block)
         num_input_tokens: Number of input tokens
+        config: 設定オブジェクト（FFN設定を含む）
     """
 
-    def __init__(self, num_splits: int, num_layers: int, context_dim: int, embed_dim: int, num_input_tokens: int = 1) -> None:
+    def __init__(
+        self,
+        num_splits: int,
+        num_layers: int,
+        context_dim: int,
+        embed_dim: int,
+        num_input_tokens: int = 1,
+        config: Optional[Any] = None
+    ) -> None:
         super().__init__()
 
         self.num_splits = num_splits
@@ -168,7 +186,8 @@ class SplitContextBlock(nn.Module):
                 num_layers=num_layers,
                 context_dim=self.split_context_dim,
                 embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens
+                num_input_tokens=num_input_tokens,
+                config=config
             )
             for _ in range(num_splits)
         ])
@@ -280,6 +299,7 @@ class TokenBlock(nn.Module):
         embed_dim: Token embedding dimension (最終出力次元)
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
         context_dims_list: List of context dimensions from ContextBlock (for E案)
+        config: 設定オブジェクト（FFN設定を含む）
     """
 
     def __init__(
@@ -288,7 +308,8 @@ class TokenBlock(nn.Module):
         context_dim: int,
         embed_dim: int,
         num_input_tokens: int = 1,
-        context_dims_list: Optional[List[int]] = None
+        context_dims_list: Optional[List[int]] = None,
+        config: Optional[Any] = None
     ) -> None:
         super().__init__()
 
@@ -324,7 +345,8 @@ class TokenBlock(nn.Module):
                 TokenLayer(
                     context_dim=self.context_dims_list[i],
                     token_input_dim=self.token_dims[i],
-                    token_output_dim=self.token_dims[i + 1]
+                    token_output_dim=self.token_dims[i + 1],
+                    config=config
                 )
             )
 

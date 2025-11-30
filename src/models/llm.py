@@ -12,7 +12,7 @@ Main features:
 4. GPT-2 pretrained embeddings support
 """
 
-from typing import Dict, List, Union
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -48,6 +48,7 @@ class LLM(nn.Module):
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
         use_weight_tying: Whether to tie token_embedding and token_output weights
                           (reduces parameters by ~38M, GPT-2 style)
+        config: 設定オブジェクト（FFN設定を含む）
     """
 
     def __init__(
@@ -59,7 +60,8 @@ class LLM(nn.Module):
         num_input_tokens: int = 1,
         num_context_splits: int = 1,
         use_pretrained_embeddings: bool = True,
-        use_weight_tying: bool = False
+        use_weight_tying: bool = False,
+        config: Optional[Any] = None
     ) -> None:
         super().__init__()
 
@@ -97,7 +99,8 @@ class LLM(nn.Module):
                 num_layers=num_layers,
                 context_dim=context_dim,
                 embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens
+                num_input_tokens=num_input_tokens,
+                config=config
             )
         else:
             # 通常モード: 従来のContextBlockを使用
@@ -105,7 +108,8 @@ class LLM(nn.Module):
                 num_layers=num_layers,
                 context_dim=context_dim,
                 embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens
+                num_input_tokens=num_input_tokens,
+                config=config
             )
 
         # TokenBlock: トークン処理専用
@@ -117,7 +121,8 @@ class LLM(nn.Module):
             context_dim=context_dim,
             embed_dim=embed_dim,
             num_input_tokens=num_input_tokens,
-            context_dims_list=context_dims_for_token
+            context_dims_list=context_dims_for_token,
+            config=config
         )
 
         # ========== Output Head (Weight Tying) ==========

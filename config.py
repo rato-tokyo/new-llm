@@ -29,6 +29,16 @@ class ResidualConfig:
                                     # パラメータ約38M削減（91M → 53M）
     # LayerNorm: 常に有効（数値安定性のため必須）
 
+    # ========== FFN (Feed-Forward Network) 設定 ==========
+    fnn_type = "standard"           # FFNタイプ: "standard", "swiglu"（将来）
+    fnn_expand_factor = 1           # 中間層の拡張率
+                                    # 1: 拡張なし（現状維持、デフォルト）
+                                    # 4: Transformer標準（768 → 3072 → 768）
+    fnn_num_layers = 1              # FFN内の層数
+                                    # 1: 現状維持（Linear → ReLU）
+                                    # 2: Transformer標準（expand → contract）
+    fnn_activation = "relu"         # 活性化関数: "relu", "gelu"
+
     # ========== 複数トークン入力 ==========
     num_input_tokens = 1            # 入力するトークン数
                                     # 1: 現在のトークンのみ（現状維持）

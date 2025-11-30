@@ -69,7 +69,8 @@ model = LLM(
     num_input_tokens=config.num_input_tokens,
     num_context_splits=config.num_context_splits,
     use_pretrained_embeddings=config.use_pretrained_embeddings,
-    use_weight_tying=config.use_weight_tying
+    use_weight_tying=config.use_weight_tying,
+    config=config
 )
 model.to(device)
 
