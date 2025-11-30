@@ -76,14 +76,14 @@ class ResidualConfig:
                                              # 複数回順伝播してCVFP損失の推移を確認
 
     # コンテキストノイズ（汎化性能向上）
-    phase1_context_noise = 0.0           # コンテキストに追加するガウシアンノイズの標準偏差
+    phase1_context_noise = 0.1           # コンテキストに追加するガウシアンノイズの標準偏差
                                          # 0.0: ノイズなし
                                          # 0.1: 推奨（軽いノイズ）
                                          # 0.2: 強めのノイズ
 
     # 学習率
     phase1_learning_rate = 0.002         # Phase 1の学習率（0.001-0.004）
-    phase1_batch_size = 8000            # 並列処理のバッチサイズ（L4 GPU 24GB対応）
+    phase1_batch_size = 5000            # 並列処理のバッチサイズ（L4 GPU 24GB対応）
     phase1_gradient_clip = 1.0           # 勾配クリッピング値
 
     # ========== Phase 2: トークン予測（キャッシュ方式） ==========
