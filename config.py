@@ -94,7 +94,7 @@ class ResidualConfig:
     # 学習率
     phase1_learning_rate = 0.002         # Phase 1の学習率（0.001-0.004）
     phase1_batch_size = 5000            # 並列処理のバッチサイズ（L4 GPU 24GB対応）
-    phase1_gradient_clip = 1.0           # 勾配クリッピング値
+    phase1_gradient_clip = 2.0           # 勾配クリッピング値
 
     # ========== Phase 2: トークン予測（キャッシュ方式） ==========
     # キャッシュ方式による高速化:
