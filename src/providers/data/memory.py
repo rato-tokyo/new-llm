@@ -6,7 +6,7 @@ MemoryDataProvider - メモリ展開型データプロバイダー
 """
 
 import os
-from typing import Tuple, Optional, List
+from typing import Any, Tuple, Optional, List
 import torch
 from transformers import AutoTokenizer
 from datasets import load_dataset
@@ -18,7 +18,7 @@ from src.utils.io import print_flush
 class MemoryDataProvider(DataProvider):
     """メモリ展開型データプロバイダー（シャッフル機能付き）"""
 
-    def __init__(self, config, shuffle_samples: bool = False, shuffle_seed: int = 42):
+    def __init__(self, config: Any, shuffle_samples: bool = False, shuffle_seed: int = 42) -> None:
         """
         Args:
             config: ResidualConfig
@@ -62,7 +62,7 @@ class MemoryDataProvider(DataProvider):
         self._loaded = True
         return self._train_token_ids, self._val_token_ids
 
-    def _load_train_data(self, tokenizer) -> Tuple[torch.Tensor, List[int], List[Tuple[int, int]]]:
+    def _load_train_data(self, tokenizer: Any) -> Tuple[torch.Tensor, List[int], List[Tuple[int, int]]]:
         """訓練データをロード（UltraChat）"""
         shuffle_suffix = f"_shuffle{self.shuffle_seed}" if self.shuffle_samples else ""
         cache_file = os.path.join(

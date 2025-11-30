@@ -19,7 +19,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
     def train_epochs(
         self,
-        data_provider,
+        data_provider: Any,
         num_epochs: int = 1,
         label: str = "Train"
     ) -> torch.Tensor:
@@ -387,7 +387,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         token_embeds: torch.Tensor,
         previous_contexts: torch.Tensor,
         optimizer: torch.optim.Optimizer
-    ) -> tuple:
+    ) -> tuple[torch.Tensor, float, float, float]:
         """
         勾配累積付き並列処理（メモリ効率版）
 
@@ -538,7 +538,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
     def is_streaming(self) -> bool:
         return False
 
-    def _train_split_mode(self, data_provider, label: str = "Train") -> torch.Tensor:
+    def _train_split_mode(self, data_provider: Any, label: str = "Train") -> torch.Tensor:
         """
         分割訓練モード: 各splitを順番に訓練
 
@@ -653,7 +653,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         self,
         token_embeds: torch.Tensor,
         previous_contexts: Optional[torch.Tensor],
-        split_block,
+        split_block: torch.nn.Module,
         split_context_dim: int
     ) -> torch.Tensor:
         """分割ブロック用シーケンシャル処理"""
@@ -688,9 +688,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
         token_embeds: torch.Tensor,
         previous_contexts: torch.Tensor,
         optimizer: torch.optim.Optimizer,
-        split_block,
+        split_block: torch.nn.Module,
         split_context_dim: int
-    ) -> tuple:
+    ) -> tuple[torch.Tensor, float, float, float]:
         """分割ブロック用並列処理（勾配累積）"""
         num_tokens = len(token_embeds)
         batch_size = self.config.phase1_batch_size
@@ -760,7 +760,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         return contexts, avg_total_loss, avg_cvfp_loss, avg_diversity_loss
 
-    def _inference_all_splits(self, token_ids: torch.Tensor, data_provider) -> torch.Tensor:
+    def _inference_all_splits(self, token_ids: torch.Tensor, data_provider: Any) -> torch.Tensor:
         """
         全splitを使って全データのコンテキストを計算（結合モード）
 

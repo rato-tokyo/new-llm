@@ -3,7 +3,8 @@ DataProvider - データローダーの抽象基底クラス
 """
 
 from abc import ABC, abstractmethod
-from typing import Tuple
+from typing import Any, Optional, Tuple, Type
+from types import TracebackType
 import torch
 
 
@@ -36,12 +37,16 @@ class DataProvider(ABC):
     def get_all_val_tokens(self, device: torch.device) -> torch.Tensor:
         pass
 
-    def close(self):
+    def close(self) -> None:
         pass
 
-    def __enter__(self):
+    def __enter__(self) -> "DataProvider":
         return self
 
-    def __exit__(self, exc_type, exc_val, exc_tb):
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType]
+    ) -> None:
         self.close()
-        return False

@@ -22,7 +22,7 @@ EvalResult = Union[torch.Tensor, Tuple[torch.Tensor, ContextCache, torch.Tensor]
 class Phase1Trainer(ABC):
     """Phase 1トレーナーの抽象基底クラス"""
 
-    def __init__(self, model: torch.nn.Module, config, device: torch.device):
+    def __init__(self, model: torch.nn.Module, config: Any, device: torch.device) -> None:
         self.model = model
         self.config = config
         self.device = device
@@ -57,7 +57,7 @@ class Phase1Trainer(ABC):
     def is_streaming(self) -> bool:
         pass
 
-    def save_checkpoint(self, path: str):
+    def save_checkpoint(self, path: str) -> None:
         checkpoint = {
             'model_state_dict': self.model.state_dict(),
             'epoch': 'phase1_complete',

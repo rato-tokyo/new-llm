@@ -6,7 +6,7 @@ Phase1トレーナー（Memory/Storage）から共通利用。
 """
 
 from dataclasses import dataclass
-from typing import Optional, List
+from typing import Any, Optional, List
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -27,7 +27,13 @@ class ConvergenceResult:
     contexts: torch.Tensor  # 最終イテレーションのコンテキスト
 
 
-def forward_sequential(model, token_embeds: torch.Tensor, previous_contexts: Optional[torch.Tensor], device: torch.device, num_input_tokens: int = 1) -> torch.Tensor:
+def forward_sequential(
+    model: Any,
+    token_embeds: torch.Tensor,
+    previous_contexts: Optional[torch.Tensor],
+    device: torch.device,
+    num_input_tokens: int = 1
+) -> torch.Tensor:
     """
     順次処理で全トークンのコンテキストを計算
 
@@ -65,7 +71,7 @@ def forward_sequential(model, token_embeds: torch.Tensor, previous_contexts: Opt
 
 
 def check_convergence(
-    model,
+    model: Any,
     token_ids: torch.Tensor,
     device: torch.device,
     num_trials: int = 10,

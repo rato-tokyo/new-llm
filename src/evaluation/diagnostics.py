@@ -5,11 +5,20 @@
 - 恒等写像検出（Identity Mapping Detection）
 """
 
+from typing import Any, Dict
+
 import torch
 import torch.nn.functional as F
 
 
-def check_identity_mapping(model, context_dim, device, num_samples=100, threshold=0.95, num_input_tokens=1):
+def check_identity_mapping(
+    model: Any,
+    context_dim: int,
+    device: torch.device,
+    num_samples: int = 100,
+    threshold: float = 0.95,
+    num_input_tokens: int = 1
+) -> Dict[str, Any]:
     """
     恒等写像かどうかをチェック
 
@@ -71,7 +80,7 @@ def check_identity_mapping(model, context_dim, device, num_samples=100, threshol
     }
 
 
-def print_identity_mapping_warning(check_result):
+def print_identity_mapping_warning(check_result: Dict[str, Any]) -> bool:
     """
     恒等写像チェック結果を表示し、必要に応じて警告を出す
 

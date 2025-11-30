@@ -43,7 +43,7 @@ class ResidualConfig:
                                     # 訓練: 各ブロックは異なるサンプルで訓練（sample_id % N）
 
     @property
-    def split_context_dim(self):
+    def split_context_dim(self) -> int:
         """分割後の各ContextBlockのcontext_dim"""
         if self.context_dim % self.num_context_splits != 0:
             raise ValueError(
@@ -116,7 +116,7 @@ class ResidualConfig:
                                     # Weight Tying時はOutput Headも凍結される
 
     @property
-    def effective_phase2_batch_size(self):
+    def effective_phase2_batch_size(self) -> int:
         """Phase 2のバッチサイズを取得（GPUメモリベース自動計算）"""
         if self.phase2_batch_size is not None:
             return self.phase2_batch_size

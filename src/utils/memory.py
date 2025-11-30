@@ -308,7 +308,7 @@ def print_memory_report(
     context_dim: int,
     embed_dim: int,
     num_input_tokens: int = 1
-):
+) -> dict[str, Any]:
     """
     メモリレポートを表示
     """

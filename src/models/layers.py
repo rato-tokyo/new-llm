@@ -5,6 +5,8 @@ ContextLayer: 文脈処理専用レイヤー
 TokenLayer: トークン処理専用レイヤー
 """
 
+from typing import Optional
+
 import torch
 import torch.nn as nn
 
@@ -24,7 +26,7 @@ class ContextLayer(nn.Module):
         token_input_dim: Token input dimension
     """
 
-    def __init__(self, context_input_dim, context_output_dim, token_input_dim=0):
+    def __init__(self, context_input_dim: int, context_output_dim: int, token_input_dim: int = 0) -> None:
         super().__init__()
 
         self.context_input_dim = context_input_dim
@@ -42,14 +44,13 @@ class ContextLayer(nn.Module):
         self.context_norm = nn.LayerNorm(context_output_dim)
 
         # 残差接続用の射影レイヤー（次元が異なる場合のみ）
+        self.residual_proj: Optional[nn.Linear] = None
         if context_input_dim != context_output_dim:
             self.residual_proj = nn.Linear(context_input_dim, context_output_dim)
-        else:
-            self.residual_proj = None
 
         init_linear_weights(self)
 
-    def forward(self, context, token_embeds=None):
+    def forward(self, context: torch.Tensor, token_embeds: Optional[torch.Tensor] = None) -> torch.Tensor:
         """
         Forward pass: Update context only
 
@@ -99,7 +100,7 @@ class TokenLayer(nn.Module):
         token_output_dim: Output token dimension
     """
 
-    def __init__(self, context_dim, token_input_dim, token_output_dim):
+    def __init__(self, context_dim: int, token_input_dim: int, token_output_dim: int) -> None:
         super().__init__()
 
         self.context_dim = context_dim
@@ -117,14 +118,13 @@ class TokenLayer(nn.Module):
         self.token_norm = nn.LayerNorm(token_output_dim)
 
         # 残差接続用の射影レイヤー（次元が異なる場合のみ）
+        self.residual_proj: Optional[nn.Linear] = None
         if token_input_dim != token_output_dim:
             self.residual_proj = nn.Linear(token_input_dim, token_output_dim)
-        else:
-            self.residual_proj = None
 
         init_linear_weights(self)
 
-    def forward(self, context, token_embeds):
+    def forward(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
         """
         Forward pass: Update token only
 
