@@ -106,13 +106,16 @@ def run_single_config(runner, num_input_tokens, num_layers, context_dim,
             results.append({
                 'num_samples': num_samples,
                 'train_tokens': result['train_tokens'],
+                'phase1_iter': result.get('phase1_iterations', 0),
+                'train_er': result.get('train_effective_rank', 0),
+                'val_er': result.get('val_effective_rank', 0),
+                'train_ppl': result.get('train_ppl', 0),
                 'val_ppl': result['val_ppl'],
                 'val_acc': result['val_acc'],
-                'val_er': result.get('val_er', 0),
             })
             print_flush(f"    → PPL: {result['val_ppl']:.1f}, "
                        f"Acc: {result['val_acc']:.1%}, "
-                       f"ER: {result.get('val_er', 0):.1%}")
+                       f"ER: {result.get('val_effective_rank', 0):.1%}")
         except Exception as e:
             print_flush(f"    ✗ Error: {e}")
             continue
@@ -141,14 +144,14 @@ def run_single_config(runner, num_input_tokens, num_layers, context_dim,
 
 def print_summary(all_results, output_dir):
     """結果サマリーを表示・保存"""
-    print_flush("\n" + "=" * 70)
+    print_flush("\n" + "=" * 100)
     print_flush("RESULTS SUMMARY")
-    print_flush("=" * 70)
+    print_flush("=" * 100)
 
     # ヘッダー
-    header = f"{'Config':<25} {'α':>8} {'A':>12} {'R²':>8} {'Best PPL':>10} {'Best Acc':>10}"
+    header = f"{'Config':<18} {'α':>7} {'A':>10} {'R²':>6} {'PPL':>7} {'Acc':>6} {'T.PPL':>7} {'ER':>5} {'Iter':>4}"
     print_flush(header)
-    print_flush("-" * 70)
+    print_flush("-" * 100)
 
     summary_data = []
 
@@ -157,11 +160,19 @@ def print_summary(all_results, output_dir):
         scaling = result['scaling']
 
         if result['results']:
-            best_ppl = min(r['val_ppl'] for r in result['results'])
-            best_acc = max(r['val_acc'] for r in result['results'])
+            # 最良サンプル（500サンプル）のデータを取得
+            best_result = max(result['results'], key=lambda r: r['num_samples'])
+            best_ppl = best_result['val_ppl']
+            best_acc = best_result['val_acc']
+            best_train_ppl = best_result.get('train_ppl', 0)
+            best_val_er = best_result.get('val_er', 0)
+            best_iter = best_result.get('phase1_iter', 0)
         else:
             best_ppl = float('inf')
             best_acc = 0
+            best_train_ppl = 0
+            best_val_er = 0
+            best_iter = 0
 
         alpha = scaling.get('alpha')
         A = scaling.get('A')
@@ -169,10 +180,13 @@ def print_summary(all_results, output_dir):
 
         alpha_str = f"{alpha:.4f}" if alpha else "N/A"
         A_str = f"{A:.2e}" if A else "N/A"
-        r_sq_str = f"{r_sq:.4f}" if r_sq else "N/A"
+        r_sq_str = f"{r_sq:.3f}" if r_sq else "N/A"
+        train_ppl_str = f"{best_train_ppl:.1f}" if best_train_ppl else "N/A"
+        val_er_str = f"{best_val_er*100:.1f}%" if best_val_er else "N/A"
+        iter_str = f"{best_iter}" if best_iter else "N/A"
 
-        print_flush(f"{config_name:<25} {alpha_str:>8} {A_str:>12} {r_sq_str:>8} "
-                   f"{best_ppl:>10.1f} {best_acc:>9.1%}")
+        print_flush(f"{config_name:<18} {alpha_str:>7} {A_str:>10} {r_sq_str:>6} "
+                   f"{best_ppl:>7.1f} {best_acc*100:>5.1f}% {train_ppl_str:>7} {val_er_str:>5} {iter_str:>4}")
 
         summary_data.append({
             'config_name': config_name,
@@ -184,11 +198,46 @@ def print_summary(all_results, output_dir):
             'r_squared': r_sq,
             'best_ppl': best_ppl,
             'best_acc': best_acc,
+            'best_train_ppl': best_train_ppl,
+            'best_val_er': best_val_er,
+            'best_iter': best_iter,
         })
+
+    # 詳細テーブル（全サンプル数）
+    print_flush("\n" + "=" * 100)
+    print_flush("DETAILED RESULTS (All sample sizes)")
+    print_flush("=" * 100)
+    header2 = f"{'Config':<18} {'Samples':>7} {'Tokens':>10} {'P1 Iter':>7} {'Train ER':>8} {'Val ER':>7} {'T.PPL':>7} {'V.PPL':>7} {'Acc':>6}"
+    print_flush(header2)
+    print_flush("-" * 100)
+
+    for result in all_results:
+        config_name = result['config_name']
+        for r in result['results']:
+            train_er_str = f"{r.get('train_er', 0)*100:.1f}%" if r.get('train_er') else "N/A"
+            val_er_str = f"{r.get('val_er', 0)*100:.1f}%" if r.get('val_er') else "N/A"
+            train_ppl_str = f"{r.get('train_ppl', 0):.1f}" if r.get('train_ppl') else "N/A"
+            iter_str = f"{r.get('phase1_iter', 0)}" if r.get('phase1_iter') else "N/A"
+            print_flush(f"{config_name:<18} {r['num_samples']:>7} {r['train_tokens']:>10,} {iter_str:>7} "
+                       f"{train_er_str:>8} {val_er_str:>7} {train_ppl_str:>7} {r['val_ppl']:>7.1f} {r['val_acc']*100:>5.1f}%")
 
     # サマリーJSON保存
     with open(os.path.join(output_dir, 'summary.json'), 'w') as f:
         json.dump(summary_data, f, indent=2)
+
+    # 詳細結果もJSON保存
+    detailed_data = []
+    for result in all_results:
+        for r in result['results']:
+            detailed_data.append({
+                'config_name': result['config_name'],
+                'num_layers': result['num_layers'],
+                'context_dim': result['context_dim'],
+                'num_input_tokens': result['num_input_tokens'],
+                **r
+            })
+    with open(os.path.join(output_dir, 'detailed_results.json'), 'w') as f:
+        json.dump(detailed_data, f, indent=2)
 
     print_flush(f"\nResults saved to: {output_dir}")
 

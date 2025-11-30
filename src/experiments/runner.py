@@ -182,6 +182,10 @@ class ExperimentRunner:
         train_result = phase1_trainer.train(train_token_ids, return_all_layers=True)
         train_contexts, train_context_cache, train_token_embeds = train_result
 
+        # Phase 1 訓練統計を取得
+        phase1_stats = getattr(phase1_trainer, '_training_stats', {})
+        phase1_iterations = phase1_stats.get('iterations', 0)
+
         val_result = phase1_trainer.evaluate(val_token_ids, return_all_layers=True)
         assert isinstance(val_result, tuple), "evaluate with return_all_layers=True must return tuple"
         val_contexts, val_context_cache, val_token_embeds = val_result
@@ -212,6 +216,7 @@ class ExperimentRunner:
         best_epoch = history['best_epoch']
         best_ppl = history['val_ppl'][best_epoch - 1]
         best_acc = history['val_acc'][best_epoch - 1]
+        best_train_ppl = history['train_ppl'][best_epoch - 1]
 
         if config.verbose:
             print_flush(f"  Result: PPL={best_ppl:.1f}, Acc={best_acc*100:.1f}%")
@@ -231,13 +236,16 @@ class ExperimentRunner:
             'num_input_tokens': config.num_input_tokens,
             'train_tokens': train_tokens,
             'val_tokens': val_tokens,
+            'phase1_iterations': phase1_iterations,
             'train_effective_rank': train_er,
             'val_effective_rank': val_er,
             'best_epoch': best_epoch,
+            'train_ppl': best_train_ppl,
             'val_ppl': best_ppl,
             'val_acc': best_acc,
             'history': {
                 'train_loss': history['train_loss'],
+                'train_ppl': history['train_ppl'],
                 'val_ppl': history['val_ppl'],
                 'val_acc': history['val_acc'],
             }

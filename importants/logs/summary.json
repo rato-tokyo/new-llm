@@ -1,0 +1,101 @@
+[
+  {
+    "config_name": "1L_768d_1tok",
+    "num_input_tokens": 1,
+    "num_layers": 1,
+    "context_dim": 768,
+    "alpha": -0.5460258657472039,
+    "A": 267189.0693492774,
+    "r_squared": 0.9842269006141858,
+    "best_ppl": 198.24517822265625,
+    "best_acc": 0.22644489572252843
+  },
+  {
+    "config_name": "2L_768d_1tok",
+    "num_input_tokens": 1,
+    "num_layers": 2,
+    "context_dim": 768,
+    "alpha": -0.4734264465508102,
+    "A": 117954.15875434122,
+    "r_squared": 0.9968582948669465,
+    "best_ppl": 222.2315673828125,
+    "best_acc": 0.22457531508880507
+  },
+  {
+    "config_name": "3L_768d_1tok",
+    "num_input_tokens": 1,
+    "num_layers": 3,
+    "context_dim": 768,
+    "alpha": -0.4947793667322418,
+    "A": 164615.40088323175,
+    "r_squared": 0.9932944554070896,
+    "best_ppl": 236.6761932373047,
+    "best_acc": 0.22044934403507074
+  },
+  {
+    "config_name": "1L_768d_2tok",
+    "num_input_tokens": 2,
+    "num_layers": 1,
+    "context_dim": 768,
+    "alpha": -0.5034652964601518,
+    "A": 150770.94174220905,
+    "r_squared": 0.9977840423464146,
+    "best_ppl": 189.4351348876953,
+    "best_acc": 0.23408438900170842
+  },
+  {
+    "config_name": "2L_768d_2tok",
+    "num_input_tokens": 2,
+    "num_layers": 2,
+    "context_dim": 768,
+    "alpha": -0.5070444349988945,
+    "A": 158786.5752836295,
+    "r_squared": 0.9842977232104746,
+    "best_ppl": 196.99368286132812,
+    "best_acc": 0.22795990071882152
+  },
+  {
+    "config_name": "3L_768d_2tok",
+    "num_input_tokens": 2,
+    "num_layers": 3,
+    "context_dim": 768,
+    "alpha": -0.5299563939342347,
+    "A": 214119.20471878137,
+    "r_squared": 0.9863790869593401,
+    "best_ppl": 194.5714874267578,
+    "best_acc": 0.22660606646681494
+  },
+  {
+    "config_name": "1L_768d_3tok",
+    "num_input_tokens": 3,
+    "num_layers": 1,
+    "context_dim": 768,
+    "alpha": -0.5046365065493118,
+    "A": 157671.92634120016,
+    "r_squared": 0.9977326740557437,
+    "best_ppl": 195.86764526367188,
+    "best_acc": 0.2294104374174
+  },
+  {
+    "config_name": "2L_768d_3tok",
+    "num_input_tokens": 3,
+    "num_layers": 2,
+    "context_dim": 768,
+    "alpha": -0.49939429825734755,
+    "A": 145182.56377069425,
+    "r_squared": 0.9904426375355445,
+    "best_ppl": 198.12950134277344,
+    "best_acc": 0.22567127614995325
+  },
+  {
+    "config_name": "3L_768d_3tok",
+    "num_input_tokens": 3,
+    "num_layers": 3,
+    "context_dim": 768,
+    "alpha": -0.53462862174897,
+    "A": 228476.75199538903,
+    "r_squared": 0.9920131186698352,
+    "best_ppl": 193.65809631347656,
+    "best_acc": 0.22979724720368758
+  }
+]

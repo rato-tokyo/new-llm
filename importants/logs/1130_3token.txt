@@ -1,0 +1,597 @@
+======================================================================
+Config: 1L_768d_3tok
+  num_layers=1, context_dim=768, num_input_tokens=3
+======================================================================
+
+  --- 50 samples ---
+
+--- Experiment: 50 samples, 1L, 768d, 3tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_50samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 62891 tokens (50 samples)
+  Val:   31024 tokens
+  Data: 62,891 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 3
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 62,891 tokens, 40 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.0182 [3.7s]
+  Iter 3: conv=0% loss=-0.1346 [3.5s]
+  Iter 4: conv=0% loss=-0.1835 [3.7s]
+  Iter 5: conv=0% loss=-0.2091 [3.7s]
+  Iter 6: conv=1% loss=-0.2240 [3.8s]
+  Iter 7: conv=3% loss=-0.2331 [3.6s]
+  Iter 8: conv=10% loss=-0.2387 [3.6s]
+  Iter 9: conv=53% loss=-0.2423 [3.7s]
+  Iter 10: conv=89% loss=-0.2447 [3.7s]
+  Iter 11: conv=98% loss=-0.2463 [3.7s]
+  Iter 12: conv=100% loss=-0.2475 [3.7s]
+  → Converged at iter 12
+  Done: 100% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [2.7s]
+  ER: train=86.5%, val=86.3%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 4,133,376/45,092,352 parameters
+
+[Phase 2] 62,891 train / 31,024 val tokens, 10 epochs
+  Epoch 1: train_ppl=29904.0 val_ppl=3418.1 acc=10.2% [2.0s] ★
+  Epoch 2: train_ppl=1289.3 val_ppl=1347.6 acc=14.0% [2.0s] ★
+  Epoch 3: train_ppl=415.4 val_ppl=907.8 acc=15.5% [2.0s] ★
+  Epoch 4: train_ppl=226.5 val_ppl=728.8 acc=16.4% [2.0s] ★
+  Epoch 5: train_ppl=145.2 val_ppl=641.6 acc=17.0% [2.0s] ★
+  Epoch 6: train_ppl=104.0 val_ppl=611.3 acc=17.6% [2.0s] ★
+  Epoch 7: train_ppl=70.5 val_ppl=614.4 acc=17.4% [2.0s]
+  → Early stop at epoch 7
+  Best: epoch 6, ppl=611.3, acc=17.6%
+  Result: PPL=611.3, Acc=17.6%
+    → PPL: 611.3, Acc: 17.6%, ER: 0.0%
+
+  --- 100 samples ---
+
+--- Experiment: 100 samples, 1L, 768d, 3tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+  Data: 122,795 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 3
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 122,795 tokens, 40 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.0197 [7.4s]
+  Iter 3: conv=0% loss=-0.1357 [7.3s]
+  Iter 4: conv=0% loss=-0.1848 [7.3s]
+  Iter 5: conv=0% loss=-0.2105 [7.3s]
+  Iter 6: conv=1% loss=-0.2256 [7.3s]
+  Iter 7: conv=2% loss=-0.2349 [7.5s]
+  Iter 8: conv=8% loss=-0.2405 [7.3s]
+  Iter 9: conv=52% loss=-0.2441 [7.3s]
+  Iter 10: conv=88% loss=-0.2465 [7.3s]
+  Iter 11: conv=98% loss=-0.2482 [7.3s]
+  Iter 12: conv=100% loss=-0.2494 [7.4s]
+  → Converged at iter 12
+  Done: 100% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [5.2s]
+  ER: train=86.8%, val=86.2%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 4,133,376/45,092,352 parameters
+
+[Phase 2] 122,795 train / 31,024 val tokens, 10 epochs
+  Epoch 1: train_ppl=9367.4 val_ppl=1348.4 acc=14.0% [3.5s] ★
+  Epoch 2: train_ppl=658.7 val_ppl=685.4 acc=16.6% [3.5s] ★
+  Epoch 3: train_ppl=315.0 val_ppl=513.9 acc=17.7% [3.5s] ★
+  Epoch 4: train_ppl=193.3 val_ppl=441.1 acc=18.4% [3.5s] ★
+  Epoch 5: train_ppl=129.7 val_ppl=414.5 acc=18.8% [3.5s] ★
+  Epoch 6: train_ppl=92.4 val_ppl=414.1 acc=19.0% [3.5s] ★
+  Epoch 7: train_ppl=67.5 val_ppl=429.4 acc=19.0% [3.5s]
+  → Early stop at epoch 7
+  Best: epoch 6, ppl=414.1, acc=19.0%
+  Result: PPL=414.1, Acc=19.0%
+    → PPL: 414.1, Acc: 19.0%, ER: 0.0%
+
+  --- 200 samples ---
+
+--- Experiment: 200 samples, 1L, 768d, 3tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_200samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 240132 tokens (200 samples)
+  Val:   31024 tokens
+  Data: 240,132 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 3
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 240,132 tokens, 40 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.0170 [14.2s]
+  Iter 3: conv=0% loss=-0.1333 [14.1s]
+  Iter 4: conv=0% loss=-0.1821 [14.0s]
+  Iter 5: conv=0% loss=-0.2073 [14.0s]
+  Iter 6: conv=0% loss=-0.2223 [14.2s]
+  Iter 7: conv=1% loss=-0.2316 [14.1s]
+  Iter 8: conv=7% loss=-0.2372 [14.1s]
+  Iter 9: conv=44% loss=-0.2409 [14.1s]
+  Iter 10: conv=82% loss=-0.2433 [14.1s]
+  Iter 11: conv=96% loss=-0.2450 [14.1s]
+  Iter 12: conv=100% loss=-0.2462 [14.2s]
+  → Converged at iter 12
+  Done: 100% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [10.1s]
+  ER: train=87.1%, val=86.3%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 4,133,376/45,092,352 parameters
+
+[Phase 2] 240,132 train / 31,024 val tokens, 10 epochs
+  Epoch 1: train_ppl=3233.3 val_ppl=690.0 acc=16.4% [6.4s] ★
+  Epoch 2: train_ppl=411.6 val_ppl=424.4 acc=18.2% [6.5s] ★
+  Epoch 3: train_ppl=228.7 val_ppl=344.9 acc=19.3% [6.5s] ★
+  Epoch 4: train_ppl=153.3 val_ppl=312.8 acc=19.9% [6.4s] ★
+  Epoch 5: train_ppl=109.5 val_ppl=301.6 acc=20.2% [6.3s] ★
+  Epoch 6: train_ppl=82.6 val_ppl=302.5 acc=20.5% [6.3s]
+  → Early stop at epoch 6
+  Best: epoch 5, ppl=301.6, acc=20.2%
+  Result: PPL=301.6, Acc=20.2%
+    → PPL: 301.6, Acc: 20.2%, ER: 0.0%
+
+  --- 500 samples ---
+
+--- Experiment: 500 samples, 1L, 768d, 3tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_500samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 587970 tokens (500 samples)
+  Val:   31024 tokens
+  Data: 587,970 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 3
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 587,970 tokens, 40 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.0168 [34.8s]
+  Iter 3: conv=0% loss=-0.1329 [34.6s]
+  Iter 4: conv=0% loss=-0.1816 [34.6s]
+  Iter 5: conv=0% loss=-0.2070 [34.5s]
+  Iter 6: conv=1% loss=-0.2220 [34.5s]
+  Iter 7: conv=2% loss=-0.2313 [34.5s]
+  Iter 8: conv=8% loss=-0.2370 [34.5s]
+  Iter 9: conv=50% loss=-0.2406 [34.7s]
+  Iter 10: conv=88% loss=-0.2430 [34.6s]
+  Iter 11: conv=98% loss=-0.2447 [34.8s]
+  Iter 12: conv=100% loss=-0.2459 [34.6s]
+  → Converged at iter 12
+  Done: 100% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [24.7s]
+  ER: train=87.1%, val=86.2%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 4,133,376/45,092,352 parameters
+
+[Phase 2] 587,970 train / 31,024 val tokens, 10 epochs
+  Epoch 1: train_ppl=1100.6 val_ppl=351.7 acc=19.0% [15.3s] ★
+  Epoch 2: train_ppl=257.3 val_ppl=249.2 acc=20.8% [15.0s] ★
+  Epoch 3: train_ppl=164.0 val_ppl=216.1 acc=21.8% [14.8s] ★
+  Epoch 4: train_ppl=118.9 val_ppl=201.5 acc=22.5% [14.8s] ★
+  Epoch 5: train_ppl=92.6 val_ppl=196.0 acc=22.8% [14.8s] ★
+  Epoch 6: train_ppl=75.1 val_ppl=195.9 acc=22.9% [14.8s] ★
+  Epoch 7: train_ppl=62.7 val_ppl=199.7 acc=22.9% [15.0s]
+  → Early stop at epoch 7
+  Best: epoch 6, ppl=195.9, acc=22.9%
+  Result: PPL=195.9, Acc=22.9%
+    → PPL: 195.9, Acc: 22.9%, ER: 0.0%
+
+======================================================================
+Config: 2L_768d_3tok
+  num_layers=2, context_dim=768, num_input_tokens=3
+======================================================================
+
+  --- 50 samples ---
+
+--- Experiment: 50 samples, 2L, 768d, 3tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_50samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 62891 tokens (50 samples)
+  Val:   31024 tokens
+  Data: 62,891 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(2 layers) + TokenBlock(2 layers)
+  num_input_tokens: 3
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 62,891 tokens, 40 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.0205 [3.8s]
+  Iter 3: conv=0% loss=-0.1675 [3.8s]
+  Iter 4: conv=0% loss=-0.2121 [3.8s]
+  Iter 5: conv=2% loss=-0.2319 [3.8s]
+  Iter 6: conv=88% loss=-0.2407 [3.8s]
+  Iter 7: conv=100% loss=-0.2448 [3.9s]
+  → Converged at iter 7
+  Done: 100% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [2.9s]
+  ER: train=86.8%, val=86.9%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 11,217,408/54,537,984 parameters
+
+[Phase 2] 62,891 train / 31,024 val tokens, 10 epochs
+  Epoch 1: train_ppl=12436.2 val_ppl=1709.0 acc=13.4% [2.4s] ★
+  Epoch 2: train_ppl=684.6 val_ppl=861.2 acc=15.7% [2.4s] ★
+  Epoch 3: train_ppl=250.9 val_ppl=653.9 acc=16.7% [2.4s] ★
+  Epoch 4: train_ppl=112.2 val_ppl=608.7 acc=17.3% [2.4s] ★
+  Epoch 5: train_ppl=57.3 val_ppl=685.5 acc=17.2% [2.4s]
+  → Early stop at epoch 5
+  Best: epoch 4, ppl=608.7, acc=17.3%
+  Result: PPL=608.7, Acc=17.3%
+    → PPL: 608.7, Acc: 17.3%, ER: 0.0%
+
+  --- 100 samples ---
+
+--- Experiment: 100 samples, 2L, 768d, 3tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+  Data: 122,795 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(2 layers) + TokenBlock(2 layers)
+  num_input_tokens: 3
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 122,795 tokens, 40 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.0220 [7.7s]
+  Iter 3: conv=0% loss=-0.1697 [7.6s]
+  Iter 4: conv=0% loss=-0.2138 [7.7s]
+  Iter 5: conv=3% loss=-0.2341 [7.6s]
+  Iter 6: conv=86% loss=-0.2428 [7.5s]
+  Iter 7: conv=100% loss=-0.2469 [7.5s]
+  → Converged at iter 7
+  Done: 100% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [5.7s]
+  ER: train=87.2%, val=86.9%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 11,217,408/54,537,984 parameters
+
+[Phase 2] 122,795 train / 31,024 val tokens, 10 epochs
+  Epoch 1: train_ppl=4508.8 val_ppl=833.5 acc=15.5% [4.1s] ★
+  Epoch 2: train_ppl=426.9 val_ppl=481.0 acc=17.6% [4.2s] ★
+  Epoch 3: train_ppl=186.9 val_ppl=402.1 acc=18.6% [4.3s] ★
+  Epoch 4: train_ppl=95.0 val_ppl=408.8 acc=18.8% [4.2s]
+  → Early stop at epoch 4
+  Best: epoch 3, ppl=402.1, acc=18.6%
+  Result: PPL=402.1, Acc=18.6%
+    → PPL: 402.1, Acc: 18.6%, ER: 0.0%
+
+  --- 200 samples ---
+
+--- Experiment: 200 samples, 2L, 768d, 3tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_200samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 240132 tokens (200 samples)
+  Val:   31024 tokens
+  Data: 240,132 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(2 layers) + TokenBlock(2 layers)
+  num_input_tokens: 3
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 240,132 tokens, 40 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.0191 [14.9s]
+  Iter 3: conv=0% loss=-0.1682 [14.8s]
+  Iter 4: conv=0% loss=-0.2119 [14.7s]
+  Iter 5: conv=2% loss=-0.2316 [14.6s]
+  Iter 6: conv=87% loss=-0.2400 [14.7s]
+  Iter 7: conv=100% loss=-0.2440 [14.7s]
+  → Converged at iter 7
+  Done: 100% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [11.0s]
+  ER: train=87.3%, val=87.0%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 11,217,408/54,537,984 parameters
+
+[Phase 2] 240,132 train / 31,024 val tokens, 10 epochs
+  Epoch 1: train_ppl=1825.7 val_ppl=481.5 acc=17.3% [7.7s] ★
+  Epoch 2: train_ppl=282.3 val_ppl=322.4 acc=19.5% [7.8s] ★
+  Epoch 3: train_ppl=142.9 val_ppl=285.7 acc=20.3% [7.7s] ★
+  Epoch 4: train_ppl=81.9 val_ppl=288.7 acc=20.7% [7.7s]
+  → Early stop at epoch 4
+  Best: epoch 3, ppl=285.7, acc=20.3%
+  Result: PPL=285.7, Acc=20.3%
+    → PPL: 285.7, Acc: 20.3%, ER: 0.0%
+
+  --- 500 samples ---
+
+--- Experiment: 500 samples, 2L, 768d, 3tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_500samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 587970 tokens (500 samples)
+  Val:   31024 tokens
+  Data: 587,970 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(2 layers) + TokenBlock(2 layers)
+  num_input_tokens: 3
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 587,970 tokens, 40 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.0189 [35.9s]
+  Iter 3: conv=0% loss=-0.1665 [35.3s]
+  Iter 4: conv=0% loss=-0.2106 [35.3s]
+  Iter 5: conv=3% loss=-0.2304 [35.3s]
+  Iter 6: conv=87% loss=-0.2392 [35.3s]
+  Iter 7: conv=100% loss=-0.2433 [35.2s]
+  → Converged at iter 7
+  Done: 100% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [27.0s]
+  ER: train=87.2%, val=86.8%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 11,217,408/54,537,984 parameters
+
+[Phase 2] 587,970 train / 31,024 val tokens, 10 epochs
+  Epoch 1: train_ppl=731.5 val_ppl=280.2 acc=19.8% [18.3s] ★
+  Epoch 2: train_ppl=195.0 val_ppl=212.4 acc=21.8% [18.0s] ★
+  Epoch 3: train_ppl=113.5 val_ppl=198.1 acc=22.6% [17.8s] ★
+  Epoch 4: train_ppl=76.1 val_ppl=205.6 acc=22.7% [17.7s]
+  → Early stop at epoch 4
+  Best: epoch 3, ppl=198.1, acc=22.6%
+  Result: PPL=198.1, Acc=22.6%
+    → PPL: 198.1, Acc: 22.6%, ER: 0.0%
+
+======================================================================
+Config: 3L_768d_3tok
+  num_layers=3, context_dim=768, num_input_tokens=3
+======================================================================
+
+  --- 50 samples ---
+
+--- Experiment: 50 samples, 3L, 768d, 3tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_50samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 62891 tokens (50 samples)
+  Val:   31024 tokens
+  Data: 62,891 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(3 layers) + TokenBlock(3 layers)
+  num_input_tokens: 3
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 62,891 tokens, 40 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.0182 [3.8s]
+  Iter 3: conv=0% loss=-0.1667 [3.8s]
+  Iter 4: conv=0% loss=-0.2113 [3.8s]
+  Iter 5: conv=10% loss=-0.2325 [3.8s]
+  Iter 6: conv=99% loss=-0.2413 [3.8s]
+  → Converged at iter 6
+  Done: 99% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [3.0s]
+  ER: train=85.7%, val=86.2%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 17,777,152/63,459,328 parameters
+
+[Phase 2] 62,891 train / 31,024 val tokens, 10 epochs
+  Epoch 1: train_ppl=19525.4 val_ppl=1849.3 acc=13.1% [2.8s] ★
+  Epoch 2: train_ppl=750.2 val_ppl=891.2 acc=15.8% [2.8s] ★
+  Epoch 3: train_ppl=207.5 val_ppl=650.7 acc=17.0% [2.8s] ★
+  Epoch 4: train_ppl=80.8 val_ppl=726.0 acc=17.4% [2.8s]
+  → Early stop at epoch 4
+  Best: epoch 3, ppl=650.7, acc=17.0%
+  Result: PPL=650.7, Acc=17.0%
+    → PPL: 650.7, Acc: 17.0%, ER: 0.0%
+
+  --- 100 samples ---
+
+--- Experiment: 100 samples, 3L, 768d, 3tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+  Data: 122,795 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(3 layers) + TokenBlock(3 layers)
+  num_input_tokens: 3
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 122,795 tokens, 40 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.0195 [7.8s]
+  Iter 3: conv=0% loss=-0.1688 [7.7s]
+  Iter 4: conv=0% loss=-0.2133 [7.7s]
+  Iter 5: conv=10% loss=-0.2345 [7.6s]
+  Iter 6: conv=98% loss=-0.2433 [7.6s]
+  Iter 7: conv=100% loss=-0.2475 [7.6s]
+  → Converged at iter 7
+  Done: 100% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [6.0s]
+  ER: train=86.6%, val=86.3%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 17,777,152/63,459,328 parameters
+
+[Phase 2] 122,795 train / 31,024 val tokens, 10 epochs
+  Epoch 1: train_ppl=5729.0 val_ppl=863.0 acc=14.9% [5.0s] ★
+  Epoch 2: train_ppl=401.0 val_ppl=461.5 acc=17.7% [5.0s] ★
+  Epoch 3: train_ppl=145.5 val_ppl=412.0 acc=18.9% [5.0s] ★
+  Epoch 4: train_ppl=65.5 val_ppl=447.6 acc=19.0% [5.0s]
+  → Early stop at epoch 4
+  Best: epoch 3, ppl=412.0, acc=18.9%
+  Result: PPL=412.0, Acc=18.9%
+    → PPL: 412.0, Acc: 18.9%, ER: 0.0%
+
+  --- 200 samples ---
+
+--- Experiment: 200 samples, 3L, 768d, 3tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_200samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 240132 tokens (200 samples)
+  Val:   31024 tokens
+  Data: 240,132 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(3 layers) + TokenBlock(3 layers)
+  num_input_tokens: 3
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 240,132 tokens, 40 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.0168 [15.0s]
+  Iter 3: conv=0% loss=-0.1686 [15.3s]
+  Iter 4: conv=0% loss=-0.2114 [15.2s]
+  Iter 5: conv=10% loss=-0.2319 [15.2s]
+  Iter 6: conv=99% loss=-0.2406 [15.1s]
+  Iter 7: conv=100% loss=-0.2447 [15.2s]
+  → Converged at iter 7
+  Done: 100% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [11.9s]
+  ER: train=86.8%, val=86.5%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 17,777,152/63,459,328 parameters
+
+[Phase 2] 240,132 train / 31,024 val tokens, 10 epochs
+  Epoch 1: train_ppl=2045.6 val_ppl=477.1 acc=17.4% [9.2s] ★
+  Epoch 2: train_ppl=249.6 val_ppl=308.6 acc=19.2% [9.2s] ★
+  Epoch 3: train_ppl=113.8 val_ppl=297.0 acc=20.6% [9.1s] ★
+  Epoch 4: train_ppl=60.1 val_ppl=331.1 acc=20.8% [9.0s]
+  → Early stop at epoch 4
+  Best: epoch 3, ppl=297.0, acc=20.6%
+  Result: PPL=297.0, Acc=20.6%
+    → PPL: 297.0, Acc: 20.6%, ER: 0.0%
+
+  --- 500 samples ---
+
+--- Experiment: 500 samples, 3L, 768d, 3tok ---
+Loading training data...
+  Loading from cache: ./cache/ultrachat_500samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 587970 tokens (500 samples)
+  Val:   31024 tokens
+  Data: 587,970 train, 31,024 val tokens
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(3 layers) + TokenBlock(3 layers)
+  num_input_tokens: 3
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] Train: 587,970 tokens, 40 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.0166 [36.7s]
+  Iter 3: conv=0% loss=-0.1656 [36.4s]
+  Iter 4: conv=0% loss=-0.2098 [36.5s]
+  Iter 5: conv=10% loss=-0.2311 [36.3s]
+  Iter 6: conv=99% loss=-0.2398 [36.3s]
+  Iter 7: conv=100% loss=-0.2439 [36.3s]
+  → Converged at iter 7
+  Done: 100% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [29.0s]
+  ER: train=86.6%, val=86.3%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 17,777,152/63,459,328 parameters
+
+[Phase 2] 587,970 train / 31,024 val tokens, 10 epochs
+  Epoch 1: train_ppl=720.0 val_ppl=255.2 acc=20.4% [21.7s] ★
+  Epoch 2: train_ppl=175.0 val_ppl=199.7 acc=22.1% [21.2s] ★
+  Epoch 3: train_ppl=97.7 val_ppl=193.7 acc=23.0% [20.9s] ★
+  Epoch 4: train_ppl=62.8 val_ppl=207.2 acc=23.1% [21.1s]
+  → Early stop at epoch 4
+  Best: epoch 3, ppl=193.7, acc=23.0%
+  Result: PPL=193.7, Acc=23.0%
+    → PPL: 193.7, Acc: 23.0%, ER: 0.0%
