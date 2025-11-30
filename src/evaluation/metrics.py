@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F  # check_identity_mapping で使用
 
 from src.utils.io import print_flush
+from src.utils.device import clear_gpu_cache
 
 
 def analyze_fixed_points(contexts, label="", verbose=True):
@@ -49,8 +50,7 @@ def analyze_fixed_points(contexts, label="", verbose=True):
 
     # Free SVD memory
     del U, V, svd_contexts
-    if device.type == 'cuda':
-        torch.cuda.empty_cache()
+    clear_gpu_cache(device)
 
     if verbose:
         er_ratio = effective_rank / context_dim * 100

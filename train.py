@@ -25,12 +25,7 @@ from src.trainers.phase1 import MemoryPhase1Trainer
 from src.trainers.phase2 import Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
-
-
-def print_flush(msg):
-    """Print with immediate flush"""
-    print(msg)
-    sys.stdout.flush()
+from src.utils.io import print_flush
 
 
 def set_seed(seed=42):

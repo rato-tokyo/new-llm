@@ -17,10 +17,8 @@ from src.trainers.phase1.memory import MemoryPhase1Trainer
 from src.trainers.phase2 import Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.providers.data import MemoryDataProvider
-
-
-def print_flush(msg):
-    print(msg, flush=True)
+from src.utils.io import print_flush
+from src.utils.device import clear_gpu_cache
 
 
 def set_seed(seed: int):
@@ -236,8 +234,7 @@ class ExperimentRunner:
         del train_context_cache, val_context_cache
         del train_token_embeds, val_token_embeds
         provider.close()
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
+        clear_gpu_cache(self.device)
 
         return {
             'num_samples': config.num_samples,

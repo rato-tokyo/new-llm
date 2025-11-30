@@ -7,6 +7,9 @@ GPU/CPUメモリに基づく自動パラメータ調整
 import torch
 from typing import Dict, Any
 
+from src.utils.io import print_flush
+from src.utils.device import clear_gpu_cache, synchronize_device
+
 
 def get_gpu_memory_info() -> Dict[str, float]:
     """
@@ -181,19 +184,12 @@ def calculate_optimal_batch_size(
     Returns:
         int: 最適なバッチサイズ
     """
-    import sys
-
-    def print_flush(msg):
-        if verbose:
-            print(msg, flush=True)
-            sys.stdout.flush()
-
     if not torch.cuda.is_available():
         return min(initial_batch_size, 512)  # CPU: 固定値
 
     # GPUメモリ情報を取得
-    torch.cuda.synchronize()
-    torch.cuda.empty_cache()
+    synchronize_device('cuda')
+    clear_gpu_cache('cuda')
 
     gpu_info = get_gpu_memory_info()
     free_gb = gpu_info['free_gb']
@@ -316,12 +312,6 @@ def print_memory_report(
     """
     メモリレポートを表示
     """
-    import sys
-
-    def print_flush(msg):
-        print(msg, flush=True)
-        sys.stdout.flush()
-
     print_flush("\n" + "="*60)
     print_flush("MEMORY REPORT")
     print_flush("="*60)

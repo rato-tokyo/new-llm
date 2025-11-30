@@ -43,6 +43,7 @@ import time
 from typing import Dict, Any
 
 from src.utils.io import print_flush
+from src.utils.device import clear_gpu_cache, synchronize_device
 
 # メモリユーティリティをインポート（オプショナル）
 try:
@@ -338,8 +339,8 @@ class Phase2Trainer:
         min_batch = getattr(self.config, 'phase2_min_batch_size', 256)
         max_batch = getattr(self.config, 'phase2_max_batch_size', 16384)
 
-        torch.cuda.synchronize()
-        torch.cuda.empty_cache()
+        synchronize_device('cuda')
+        clear_gpu_cache('cuda')
 
         total_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
         allocated_gb = torch.cuda.memory_allocated() / (1024**3)
