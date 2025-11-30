@@ -78,7 +78,7 @@ class ContextLayer(nn.Module):
             residual = context
 
         # Residual connection + LayerNorm
-        new_context = self.context_norm(residual + delta_context)
+        new_context: torch.Tensor = self.context_norm(residual + delta_context)
 
         return new_context
 
@@ -148,7 +148,7 @@ class TokenLayer(nn.Module):
             residual = token_embeds
 
         # Residual connection + LayerNorm
-        new_token = self.token_norm(residual + delta_token)
+        new_token: torch.Tensor = self.token_norm(residual + delta_token)
 
         return new_token
 

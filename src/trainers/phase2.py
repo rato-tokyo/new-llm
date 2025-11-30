@@ -40,7 +40,7 @@ Phase 1で学習したContextBlockを固定（freeze）し、TokenBlockのみを
 import torch
 import torch.nn as nn
 import time
-from typing import Dict, Any
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache, synchronize_device
@@ -67,7 +67,7 @@ class Phase2Trainer:
         config: ResidualConfig（設定）
     """
 
-    def __init__(self, model, config):
+    def __init__(self, model: Any, config: Any) -> None:
         self.model = model
         self.config = config
         self.learning_rate = config.phase2_learning_rate
@@ -105,7 +105,14 @@ class Phase2Trainer:
         # Loss function
         self.criterion = nn.CrossEntropyLoss(reduction='mean')
 
-    def train_epoch(self, token_ids, device, batch_size, context_cache, token_embeds):
+    def train_epoch(
+        self,
+        token_ids: torch.Tensor,
+        device: torch.device,
+        batch_size: int,
+        context_cache: Union[torch.Tensor, List[torch.Tensor]],
+        token_embeds: torch.Tensor
+    ) -> Tuple[float, float]:
         """
         1エポックの訓練（キャッシュ方式）
 
@@ -179,7 +186,13 @@ class Phase2Trainer:
 
         return avg_loss, perplexity
 
-    def evaluate(self, token_ids, device, context_cache, token_embeds):
+    def evaluate(
+        self,
+        token_ids: torch.Tensor,
+        device: torch.device,
+        context_cache: Union[torch.Tensor, List[torch.Tensor]],
+        token_embeds: torch.Tensor
+    ) -> Tuple[float, float, float]:
         """
         評価（検証データ）- キャッシュ方式
 
@@ -242,7 +255,7 @@ class Phase2Trainer:
 
                 # 正解率
                 preds = torch.argmax(logits, dim=-1)
-                correct += (preds == batch_targets).sum().item()
+                correct += int((preds == batch_targets).sum().item())
 
         avg_loss = total_loss / num_tokens
         perplexity = torch.exp(torch.tensor(avg_loss)).item()
@@ -254,7 +267,7 @@ class Phase2Trainer:
         self,
         train_tokens: int,
         val_tokens: int,
-        device
+        device: torch.device
     ) -> Dict[str, Any]:
         """
         メモリ要件を事前見積もり
@@ -302,7 +315,7 @@ class Phase2Trainer:
 
     def _calculate_optimal_batch_size(
         self,
-        device,
+        device: torch.device,
         initial_batch_size: int = 4096,
         actual_cache_gb: float = 0.0
     ) -> int:
@@ -355,17 +368,17 @@ class Phase2Trainer:
 
     def train_full(
         self,
-        train_token_ids,
-        val_token_ids,
-        device,
-        train_context_cache,
-        train_token_embeds,
-        val_context_cache,
-        val_token_embeds,
-        epochs=None,
-        patience=None,
-        batch_size=None
-    ):
+        train_token_ids: torch.Tensor,
+        val_token_ids: torch.Tensor,
+        device: torch.device,
+        train_context_cache: Union[torch.Tensor, List[torch.Tensor]],
+        train_token_embeds: torch.Tensor,
+        val_context_cache: Union[torch.Tensor, List[torch.Tensor]],
+        val_token_embeds: torch.Tensor,
+        epochs: Optional[int] = None,
+        patience: Optional[int] = None,
+        batch_size: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
         フル訓練ループ（早期停止あり + 自動メモリ管理）
 
@@ -405,7 +418,7 @@ class Phase2Trainer:
         print_flush(f"\n[Phase 2] {train_tokens:,} train / {val_tokens:,} val tokens, {epochs} epochs")
 
         # 実際のキャッシュサイズを計算
-        def _calc_cache_size(cache):
+        def _calc_cache_size(cache: Union[torch.Tensor, List[torch.Tensor]]) -> float:
             """キャッシュサイズを計算（テンソルまたはリスト対応）"""
             if isinstance(cache, list):
                 return sum(t.numel() for t in cache) * 4 / (1024 * 1024)
@@ -423,7 +436,7 @@ class Phase2Trainer:
         # evaluateメソッドでも同じバッチサイズを使用
         self._effective_batch_size = batch_size
 
-        history = {
+        history: Dict[str, Any] = {
             'train_loss': [],
             'train_ppl': [],
             'val_loss': [],

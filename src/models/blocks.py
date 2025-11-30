@@ -201,7 +201,8 @@ class SplitContextBlock(nn.Module):
         """
         if split_id is not None:
             # 訓練: 特定の分割のみ実行
-            return self.blocks[split_id](context, token_embeds)
+            result: torch.Tensor = self.blocks[split_id](context, token_embeds)
+            return result
         else:
             # 推論: 全分割を実行して連結
             outputs = []
@@ -229,7 +230,8 @@ class SplitContextBlock(nn.Module):
         """
         if split_id is not None:
             # 訓練: 特定の分割のみ
-            return self.blocks[split_id].forward_with_intermediates(context, token_embeds)
+            intermediates: List[torch.Tensor] = self.blocks[split_id].forward_with_intermediates(context, token_embeds)
+            return intermediates
         else:
             # 推論: 全分割の出力を連結
             all_intermediates = []

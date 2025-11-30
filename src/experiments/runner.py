@@ -45,15 +45,19 @@ class ExperimentConfig:
     random_seed: int = 42
     verbose: bool = True
 
-    def get_phase1_config(self, base_config: ResidualConfig, device: Union[str, torch.device]):
+    def get_phase1_config(
+        self, base_config: ResidualConfig, device: Union[str, torch.device]
+    ) -> "_Phase1Config":
         """Phase 1用の設定オブジェクトを生成"""
         return _Phase1Config(self, base_config, device)
 
-    def get_phase2_config(self, base_config: ResidualConfig, device: Union[str, torch.device]):
+    def get_phase2_config(
+        self, base_config: ResidualConfig, device: Union[str, torch.device]
+    ) -> "_Phase2Config":
         """Phase 2用の設定オブジェクトを生成"""
         return _Phase2Config(self, base_config, device)
 
-    def get_data_config(self, base_config: ResidualConfig):
+    def get_data_config(self, base_config: ResidualConfig) -> "_DataConfig":
         """データ読み込み用の設定オブジェクトを生成"""
         return _DataConfig(self, base_config)
 

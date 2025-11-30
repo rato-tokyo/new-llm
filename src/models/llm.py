@@ -12,6 +12,9 @@ Main features:
 4. GPT-2 pretrained embeddings support
 """
 
+from typing import Dict, List, Union
+
+import torch
 import torch.nn as nn
 
 from .blocks import ContextBlock, SplitContextBlock, TokenBlock
@@ -49,15 +52,15 @@ class LLM(nn.Module):
 
     def __init__(
         self,
-        vocab_size,
-        embed_dim,
-        context_dim,
-        num_layers=6,
-        num_input_tokens=1,
-        num_context_splits=1,
-        use_pretrained_embeddings=True,
-        use_weight_tying=False
-    ):
+        vocab_size: int,
+        embed_dim: int,
+        context_dim: int,
+        num_layers: int = 6,
+        num_input_tokens: int = 1,
+        num_context_splits: int = 1,
+        use_pretrained_embeddings: bool = True,
+        use_weight_tying: bool = False
+    ) -> None:
         super().__init__()
 
         # Save configuration
@@ -84,6 +87,7 @@ class LLM(nn.Module):
         print("  token継ぎ足し方式: 全レイヤーでtoken入力")
 
         # ContextBlock: 文脈処理専用
+        self.context_block: Union[ContextBlock, SplitContextBlock]
         if num_context_splits > 1:
             # 分割モード: SplitContextBlockを使用
             print(f"  num_context_splits: {num_context_splits} (split mode)")
@@ -128,7 +132,7 @@ class LLM(nn.Module):
         if not use_pretrained_embeddings:
             self._init_weights()
 
-    def _load_pretrained_embeddings(self):
+    def _load_pretrained_embeddings(self) -> None:
         """Load GPT-2 pretrained embeddings"""
         try:
             from transformers import GPT2Model
@@ -149,11 +153,11 @@ class LLM(nn.Module):
             self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
             nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
 
-    def _init_weights(self):
+    def _init_weights(self) -> None:
         """Initialize embedding weights"""
         nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
 
-    def forward_context(self, context, token_embeds):
+    def forward_context(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
         """
         ContextBlock forward pass (Phase 1用)
 
@@ -164,9 +168,12 @@ class LLM(nn.Module):
         Returns:
             new_context: [batch, context_dim]
         """
-        return self.context_block(context, token_embeds)
+        result: torch.Tensor = self.context_block(context, token_embeds)
+        return result
 
-    def forward_context_with_intermediates(self, context, token_embeds):
+    def forward_context_with_intermediates(
+        self, context: torch.Tensor, token_embeds: torch.Tensor
+    ) -> List[torch.Tensor]:
         """
         ContextBlock forward pass with intermediate outputs (E案用)
 
@@ -179,7 +186,9 @@ class LLM(nn.Module):
         """
         return self.context_block.forward_with_intermediates(context, token_embeds)
 
-    def forward_token_e(self, context_list, token_embeds):
+    def forward_token_e(
+        self, context_list: List[torch.Tensor], token_embeds: torch.Tensor
+    ) -> torch.Tensor:
         """
         TokenBlock forward pass with layer-specific contexts (E案用)
 
@@ -195,13 +204,13 @@ class LLM(nn.Module):
         """
         return self.token_block.forward_with_contexts(context_list, token_embeds)
 
-    def freeze_context_block(self):
+    def freeze_context_block(self) -> None:
         """ContextBlockのパラメータをfreezeする（Phase 2用）"""
         for param in self.context_block.parameters():
             param.requires_grad = False
         print("✓ ContextBlock frozen")
 
-    def unfreeze_token_output(self, freeze_embedding: bool = False):
+    def unfreeze_token_output(self, freeze_embedding: bool = False) -> None:
         """
         token_output層の勾配を有効化する（Phase 2用）
 
@@ -234,7 +243,9 @@ class LLM(nn.Module):
                 self.token_output.bias.requires_grad = True
                 print("✓ token_output layer unfrozen")
 
-    def _update_context_one_step(self, token_embeds, context):
+    def _update_context_one_step(
+        self, token_embeds: torch.Tensor, context: torch.Tensor
+    ) -> torch.Tensor:
         """
         Update context for one token step (診断用)
 
@@ -245,9 +256,10 @@ class LLM(nn.Module):
         Returns:
             new_context: Updated context [batch, context_dim]
         """
-        return self.context_block(context, token_embeds)
+        result: torch.Tensor = self.context_block(context, token_embeds)
+        return result
 
-    def num_params(self) -> dict:
+    def num_params(self) -> Dict[str, int]:
         """
         モデル全体のパラメータ数を返す
 

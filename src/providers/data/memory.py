@@ -42,7 +42,7 @@ class MemoryDataProvider(DataProvider):
             assert self._val_token_ids is not None
             return self._train_token_ids, self._val_token_ids
 
-        tokenizer = AutoTokenizer.from_pretrained(
+        tokenizer = AutoTokenizer.from_pretrained(  # type: ignore[no-untyped-call]
             self.config.tokenizer_name,
             cache_dir=os.path.join(self.config.cache_dir, "tokenizer")
         )
@@ -140,7 +140,7 @@ class MemoryDataProvider(DataProvider):
 
         return token_ids, sample_order, sample_boundaries
 
-    def _load_val_data(self, tokenizer) -> torch.Tensor:
+    def _load_val_data(self, tokenizer: Any) -> torch.Tensor:
         """検証データをロード（テキストファイル、存在しない場合は自動生成）"""
         if self.config.val_data_source == "auto_split":
             raise ValueError(
@@ -156,9 +156,10 @@ class MemoryDataProvider(DataProvider):
             text = f.read()
 
         tokens = tokenizer(text, truncation=False, return_tensors="pt")
-        return tokens["input_ids"].squeeze(0)
+        result: torch.Tensor = tokens["input_ids"].squeeze(0)
+        return result
 
-    def _generate_val_file(self, file_path: str, tokenizer) -> None:
+    def _generate_val_file(self, file_path: str, tokenizer: Any) -> None:
         """検証データファイルを自動生成（UltraChatのサンプル1000-1020）"""
         print_flush(f"  Validation file not found, generating: {file_path}")
 
@@ -303,7 +304,7 @@ class MemoryDataProvider(DataProvider):
     def is_streaming(self) -> bool:
         return False
 
-    def close(self):
+    def close(self) -> None:
         self._train_token_ids = None
         self._val_token_ids = None
         self._sample_order = None

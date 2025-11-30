@@ -4,6 +4,8 @@ Evaluation metrics for New-LLM
 Fixed-point analysis, effective rank calculation, and other metrics.
 """
 
+from typing import Any, Dict, List, Optional
+
 import torch
 import torch.nn.functional as F  # check_identity_mapping で使用
 
@@ -11,7 +13,9 @@ from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
 
 
-def analyze_fixed_points(contexts, label="", verbose=True):
+def analyze_fixed_points(
+    contexts: torch.Tensor, label: str = "", verbose: bool = True
+) -> Dict[str, Any]:
     """
     Analyze fixed-point contexts for quality metrics.
 
@@ -63,7 +67,12 @@ def analyze_fixed_points(contexts, label="", verbose=True):
     }
 
 
-def check_identity_mapping(model, token_embeds, contexts, device):
+def check_identity_mapping(
+    model: Any,
+    token_embeds: torch.Tensor,
+    contexts: torch.Tensor,
+    device: torch.device
+) -> Dict[str, Any]:
     """
     恒等写像チェック: 学習が起きているかを確認
 

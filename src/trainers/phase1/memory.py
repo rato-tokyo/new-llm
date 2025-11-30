@@ -526,13 +526,14 @@ class MemoryPhase1Trainer(Phase1Trainer):
     def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
         context_mean = contexts.mean(dim=0)
         deviation = contexts - context_mean
-        return -torch.norm(deviation, p=2) / len(contexts)
+        result: torch.Tensor = -torch.norm(deviation, p=2) / len(contexts)
+        return result
 
     def _compute_convergence_rate(self, current: torch.Tensor, previous: torch.Tensor, num_tokens: int) -> float:
         with torch.no_grad():
             token_losses = ((current - previous) ** 2).mean(dim=1)
             converged = token_losses < self.config.phase1_convergence_threshold
-            return converged.sum().item() / num_tokens
+            return float(converged.sum().item()) / num_tokens
 
     @property
     def is_streaming(self) -> bool:
