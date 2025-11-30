@@ -76,10 +76,6 @@ class ContextBlock(nn.Module):
                 context = layer(context, token_embeds)
             return context
 
-    def forward_with_intermediates(self, context, token_embeds):
-        """後方互換性のためのエイリアス"""
-        return self.forward(context, token_embeds, return_intermediates=True)
-
     def num_params(self) -> int:
         """このブロックのパラメータ数を返す"""
         return sum(p.numel() for p in self.parameters())
@@ -343,10 +339,6 @@ class TokenBlock(nn.Module):
                 token_embeds = layer(context, token_embeds)
 
         return token_embeds
-
-    def forward_with_contexts(self, context_list, token_embeds):
-        """後方互換性のためのエイリアス"""
-        return self.forward(None, token_embeds, context_list=context_list)
 
     def num_params(self) -> int:
         """このブロックのパラメータ数を返す"""
