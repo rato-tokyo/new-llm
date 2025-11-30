@@ -6,8 +6,6 @@ from abc import ABC, abstractmethod
 from typing import Tuple
 import torch
 
-from src.utils.io import print_flush
-
 
 class DataProvider(ABC):
     """データプロバイダーの抽象基底クラス"""

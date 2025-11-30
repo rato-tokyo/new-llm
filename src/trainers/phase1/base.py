@@ -6,7 +6,6 @@ from abc import ABC, abstractmethod
 from typing import Dict, Any, Optional, Union, Tuple
 import torch
 
-from src.evaluation import ConvergenceResult
 from src.utils.io import print_flush
 
 # Phase 2キャッシュ用の型定義
