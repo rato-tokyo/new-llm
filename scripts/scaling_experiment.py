@@ -408,7 +408,7 @@ def main():
         """
     )
 
-    parser.add_argument('--input-tokens', type=int, nargs='+', default=[2],
+    parser.add_argument('--input-tokens', type=int, nargs='+', default=[1],
                         help='num_input_tokens の値（複数指定可）')
     parser.add_argument('--layers', type=int, nargs='+', default=[1],
                         help='num_layers の値（複数指定可）')
