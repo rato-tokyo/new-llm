@@ -87,6 +87,10 @@ class ContextLayer(nn.Module):
 
         return new_context
 
+    def num_params(self) -> int:
+        """このレイヤーのパラメータ数を返す"""
+        return sum(p.numel() for p in self.parameters())
+
 
 class TokenLayer(nn.Module):
     """
@@ -161,3 +165,7 @@ class TokenLayer(nn.Module):
         new_token = self.token_norm(residual + delta_token)
 
         return new_token
+
+    def num_params(self) -> int:
+        """このレイヤーのパラメータ数を返す"""
+        return sum(p.numel() for p in self.parameters())

@@ -246,3 +246,30 @@ class LLM(nn.Module):
             new_context: Updated context [batch, context_dim]
         """
         return self.context_block(context, token_embeds)
+
+    def num_params(self) -> dict:
+        """
+        モデル全体のパラメータ数を返す
+
+        Returns:
+            パラメータ数の詳細辞書
+        """
+        embedding_params = self.token_embedding.weight.numel()
+        embed_norm_params = sum(p.numel() for p in self.embed_norm.parameters())
+        context_block_params = self.context_block.num_params()
+        token_block_params = self.token_block.num_params()
+        # Weight Tyingにより output_head は追加パラメータなし
+        output_head_params = 0
+
+        total = embedding_params + embed_norm_params + context_block_params + token_block_params
+
+        return {
+            'embedding': embedding_params,
+            'embed_norm': embed_norm_params,
+            'context_block': context_block_params,
+            'token_block': token_block_params,
+            'output_head': output_head_params,
+            'total': total,
+            'trainable_phase1': context_block_params,
+            'trainable_phase2': token_block_params,  # Embedding凍結時
+        }

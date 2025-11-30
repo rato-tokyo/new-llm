@@ -90,6 +90,10 @@ class ContextBlock(nn.Module):
             outputs.append(context)
         return outputs
 
+    def num_params(self) -> int:
+        """このブロックのパラメータ数を返す"""
+        return sum(p.numel() for p in self.parameters())
+
     def forward_with_intermediates_batch(self, contexts, token_embeds):
         """
         バッチ並列で全レイヤーの中間出力を計算
@@ -245,6 +249,10 @@ class SplitContextBlock(nn.Module):
                 merged.append(torch.cat(layer_outputs, dim=-1))
             return merged
 
+    def num_params(self) -> int:
+        """このブロックのパラメータ数を返す"""
+        return sum(p.numel() for p in self.parameters())
+
 
 class TokenBlock(nn.Module):
     """
@@ -360,3 +368,7 @@ class TokenBlock(nn.Module):
             token_embeds = layer(context_list[i], token_embeds)
 
         return token_embeds
+
+    def num_params(self) -> int:
+        """このブロックのパラメータ数を返す"""
+        return sum(p.numel() for p in self.parameters())
