@@ -6,6 +6,8 @@ TokenBlock: トークン処理ブロック（Phase 2で学習）
 SplitContextBlock: 分割されたContextBlockのコンテナ
 """
 
+from typing import List, Optional, Union
+
 import torch
 import torch.nn as nn
 
@@ -29,7 +31,7 @@ class ContextBlock(nn.Module):
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
     """
 
-    def __init__(self, num_layers, context_dim, embed_dim, num_input_tokens=1):
+    def __init__(self, num_layers: int, context_dim: int, embed_dim: int, num_input_tokens: int = 1) -> None:
         super().__init__()
 
         self.num_layers = num_layers
@@ -52,7 +54,12 @@ class ContextBlock(nn.Module):
                 )
             )
 
-    def forward(self, context, token_embeds, return_intermediates: bool = False):
+    def forward(
+        self,
+        context: torch.Tensor,
+        token_embeds: torch.Tensor,
+        return_intermediates: bool = False
+    ) -> Union[torch.Tensor, List[torch.Tensor]]:
         """
         Execute all context layers sequentially
 
@@ -76,15 +83,17 @@ class ContextBlock(nn.Module):
                 context = layer(context, token_embeds)
             return context
 
-    def forward_with_intermediates(self, context, token_embeds):
+    def forward_with_intermediates(self, context: torch.Tensor, token_embeds: torch.Tensor) -> List[torch.Tensor]:
         """各レイヤーの中間出力を返す"""
-        return self.forward(context, token_embeds, return_intermediates=True)
+        result = self.forward(context, token_embeds, return_intermediates=True)
+        assert isinstance(result, list)
+        return result
 
     def num_params(self) -> int:
         """このブロックのパラメータ数を返す"""
         return sum(p.numel() for p in self.parameters())
 
-    def forward_with_intermediates_batch(self, contexts, token_embeds):
+    def forward_with_intermediates_batch(self, contexts: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
         """
         バッチ並列で全レイヤーの中間出力を計算
 
@@ -136,7 +145,7 @@ class SplitContextBlock(nn.Module):
         num_input_tokens: Number of input tokens
     """
 
-    def __init__(self, num_splits, num_layers, context_dim, embed_dim, num_input_tokens=1):
+    def __init__(self, num_splits: int, num_layers: int, context_dim: int, embed_dim: int, num_input_tokens: int = 1) -> None:
         super().__init__()
 
         self.num_splits = num_splits
@@ -168,7 +177,7 @@ class SplitContextBlock(nn.Module):
         # 各ブロックのcontext_dims[1:]を結合
         self.context_dims = self._compute_merged_context_dims()
 
-    def _compute_merged_context_dims(self):
+    def _compute_merged_context_dims(self) -> List[int]:
         """各レイヤーの結合後の出力次元を計算"""
         # 全ブロックの最初のブロックから次元情報を取得
         # 各ブロックは同じ構造なので、最初のブロックの次元 × num_splits
@@ -176,7 +185,7 @@ class SplitContextBlock(nn.Module):
         merged_dims = [dim * self.num_splits for dim in base_dims]
         return merged_dims
 
-    def forward(self, context, token_embeds, split_id=None):
+    def forward(self, context: torch.Tensor, token_embeds: torch.Tensor, split_id: Optional[int] = None) -> torch.Tensor:
         """
         Forward pass
 
@@ -203,7 +212,7 @@ class SplitContextBlock(nn.Module):
                 outputs.append(block(split_context, token_embeds))
             return torch.cat(outputs, dim=-1)
 
-    def forward_with_intermediates(self, context, token_embeds, split_id=None):
+    def forward_with_intermediates(self, context: torch.Tensor, token_embeds: torch.Tensor, split_id: Optional[int] = None) -> List[torch.Tensor]:
         """
         Forward pass with intermediate outputs (E案用)
 
@@ -271,8 +280,14 @@ class TokenBlock(nn.Module):
         context_dims_list: List of context dimensions from ContextBlock (for E案)
     """
 
-    def __init__(self, num_layers, context_dim, embed_dim, num_input_tokens=1,
-                 context_dims_list=None):
+    def __init__(
+        self,
+        num_layers: int,
+        context_dim: int,
+        embed_dim: int,
+        num_input_tokens: int = 1,
+        context_dims_list: Optional[List[int]] = None
+    ) -> None:
         super().__init__()
 
         self.num_layers = num_layers
@@ -311,7 +326,7 @@ class TokenBlock(nn.Module):
                 )
             )
 
-    def forward(self, context, token_embeds, context_list=None):
+    def forward(self, context: Optional[torch.Tensor], token_embeds: torch.Tensor, context_list: Optional[List[torch.Tensor]] = None) -> torch.Tensor:
         """
         Execute all token layers sequentially
 
@@ -344,7 +359,7 @@ class TokenBlock(nn.Module):
 
         return token_embeds
 
-    def forward_with_contexts(self, context_list, token_embeds):
+    def forward_with_contexts(self, context_list: List[torch.Tensor], token_embeds: torch.Tensor) -> torch.Tensor:
         """各レイヤーが対応するcontextを使用"""
         return self.forward(None, token_embeds, context_list=context_list)
 
