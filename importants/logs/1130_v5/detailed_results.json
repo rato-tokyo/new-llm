@@ -1,0 +1,72 @@
+[
+  {
+    "config_name": "1L_1085d_1tok",
+    "num_layers": 1,
+    "context_dim": 1085,
+    "num_input_tokens": 1,
+    "num_samples": 50,
+    "train_tokens": 62891,
+    "phase1_iter": 60,
+    "train_er": 0.7170564291114632,
+    "val_er": 0.7098763883388537,
+    "train_ppl": 91.12461853027344,
+    "val_ppl": 598.5732421875,
+    "val_acc": 0.17790026754343552
+  },
+  {
+    "config_name": "1L_1085d_1tok",
+    "num_layers": 1,
+    "context_dim": 1085,
+    "num_input_tokens": 1,
+    "num_samples": 100,
+    "train_tokens": 122795,
+    "phase1_iter": 60,
+    "train_er": 0.7192329371579781,
+    "val_er": 0.7075567711333526,
+    "train_ppl": 95.89198303222656,
+    "val_ppl": 406.9277038574219,
+    "val_acc": 0.1959513909035232
+  },
+  {
+    "config_name": "1L_1085d_1tok",
+    "num_layers": 1,
+    "context_dim": 1085,
+    "num_input_tokens": 1,
+    "num_samples": 200,
+    "train_tokens": 240132,
+    "phase1_iter": 60,
+    "train_er": 0.7190405498451901,
+    "val_er": 0.708404062860023,
+    "train_ppl": 105.50236511230469,
+    "val_ppl": 298.8429870605469,
+    "val_acc": 0.2075234503432937
+  },
+  {
+    "config_name": "1L_1085d_1tok",
+    "num_layers": 1,
+    "context_dim": 1085,
+    "num_input_tokens": 1,
+    "num_samples": 400,
+    "train_tokens": 473429,
+    "phase1_iter": 60,
+    "train_er": 0.722229735203053,
+    "val_er": 0.7090870940740207,
+    "train_ppl": 96.01717376708984,
+    "val_ppl": 227.0361785888672,
+    "val_acc": 0.22228669051993682
+  },
+  {
+    "config_name": "1L_1085d_1tok",
+    "num_layers": 1,
+    "context_dim": 1085,
+    "num_input_tokens": 1,
+    "num_samples": 800,
+    "train_tokens": 948524,
+    "phase1_iter": 60,
+    "train_er": 0.7224019274733583,
+    "val_er": 0.7080275575136808,
+    "train_ppl": 90.67777252197266,
+    "val_ppl": 180.0132293701172,
+    "val_acc": 0.2405634529220256
+  }
+]

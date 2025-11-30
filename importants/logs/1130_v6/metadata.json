@@ -1,0 +1,24 @@
+{
+  "timestamp": "2025-11-30T13:37:37.287044",
+  "elapsed_seconds": 2388.5446565151215,
+  "sample_sizes": [
+    50,
+    100,
+    200,
+    400,
+    800
+  ],
+  "configs": [
+    {
+      "input_tokens": 1,
+      "layers": 1,
+      "context_dim": 1085
+    }
+  ],
+  "alpha_scaling": {
+    "init_samples": 50,
+    "multiplier": 2.0,
+    "window_size": 4,
+    "num_windows": 2
+  }
+}

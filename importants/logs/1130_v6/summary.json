@@ -1,0 +1,16 @@
+[
+  {
+    "config_name": "1L_1085d_1tok",
+    "num_input_tokens": 1,
+    "num_layers": 1,
+    "context_dim": 1085,
+    "alpha": -0.42175896348109615,
+    "A": 59360.5992719744,
+    "r_squared": 0.989659174701103,
+    "best_ppl": 187.3721160888672,
+    "best_acc": 0.23879057473487414,
+    "best_train_ppl": 97.02284240722656,
+    "best_val_er": 0.6614138554867511,
+    "best_iter": 100
+  }
+]

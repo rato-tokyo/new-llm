@@ -1,0 +1,55 @@
+[
+  {
+    "config_name": "1L_1085d_1tok",
+    "num_input_tokens": 1,
+    "num_layers": 1,
+    "context_dim": 1085,
+    "window_size": 4,
+    "windows": [
+      {
+        "window_index": 1,
+        "sample_range": [
+          50,
+          400
+        ],
+        "token_range": [
+          62891,
+          473429
+        ],
+        "samples_in_window": [
+          50,
+          100,
+          200,
+          400
+        ],
+        "alpha": -0.45663907543667936,
+        "A": 89352.32532689792,
+        "r_squared": 0.9934484774483545,
+        "p_value": 0.0032811442295502817,
+        "std_err": 0.02622143891681643
+      },
+      {
+        "window_index": 2,
+        "sample_range": [
+          100,
+          800
+        ],
+        "token_range": [
+          122795,
+          948524
+        ],
+        "samples_in_window": [
+          100,
+          200,
+          400,
+          800
+        ],
+        "alpha": -0.3831046959126042,
+        "A": 35804.956643624835,
+        "r_squared": 0.9955326151154068,
+        "p_value": 0.002236192721239871,
+        "std_err": 0.018146856978245567
+      }
+    ]
+  }
+]
