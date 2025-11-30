@@ -410,7 +410,7 @@ def main():
 
     parser.add_argument('--input-tokens', type=int, nargs='+', default=[2],
                         help='num_input_tokens の値（複数指定可）')
-    parser.add_argument('--layers', type=int, nargs='+', default=[3],
+    parser.add_argument('--layers', type=int, nargs='+', default=[1],
                         help='num_layers の値（複数指定可）')
     parser.add_argument('--context-dim', type=int, nargs='+', default=[768],
                         help='context_dim の値（複数指定可、デフォルト: 768）')
