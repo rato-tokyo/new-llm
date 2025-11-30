@@ -344,6 +344,10 @@ class TokenBlock(nn.Module):
 
         return token_embeds
 
+    def forward_with_contexts(self, context_list, token_embeds):
+        """各レイヤーが対応するcontextを使用"""
+        return self.forward(None, token_embeds, context_list=context_list)
+
     def num_params(self) -> int:
         """このブロックのパラメータ数を返す"""
         return sum(p.numel() for p in self.parameters())
