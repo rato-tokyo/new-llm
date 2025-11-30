@@ -185,3 +185,35 @@ class ResidualConfig:
     # ========== ログ出力 ==========
     log_every_steps = 1
     save_every_samples = 10
+
+    # ========== スケーリング実験設定 ==========
+    # scaling_experiment.pyで使用する設定
+    # コマンドライン引数は使用せず、すべてここで一元管理
+
+    # 実験モード
+    scaling_alpha_mode = True           # α値スケーリングモード（データ量依存性測定）
+    scaling_matrix_mode = False         # マトリックスモード（input_tokens×layers）
+
+    # α値スケーリングモード設定
+    scaling_init_samples = 50           # 初期サンプル数
+    scaling_multiplier = 2.0            # サンプル数の倍率（50→100→200→...）
+    scaling_window_size = 4             # α計算に使うウィンドウサイズ
+    scaling_num_windows = 2             # ウィンドウ数
+
+    # 実験対象（単一設定の場合）
+    # これらの値がスケーリング実験で使用される
+    # 複数設定を試したい場合はscaling_matrix_mode=Trueを使用
+    scaling_input_tokens = 1            # 実験するnum_input_tokens
+    scaling_layers = 1                  # 実験するnum_layers
+    scaling_context_dim = 1085          # 実験するcontext_dim
+
+    # マトリックスモード設定（scaling_matrix_mode=True時のみ）
+    scaling_input_tokens_list = [1, 2, 3]   # 試すinput_tokensのリスト
+    scaling_layers_list = [1, 2, 3]         # 試すlayersのリスト
+    scaling_context_dim_list = [768]        # 試すcontext_dimのリスト（固定推奨）
+
+    # 通常モード設定（scaling_alpha_mode=False時のみ）
+    scaling_sample_sizes = [50, 100, 200, 500]  # サンプルサイズリスト
+
+    # 出力ディレクトリ（Noneで自動生成）
+    scaling_output_dir = None           # 例: "importants/logs/1130_v8"

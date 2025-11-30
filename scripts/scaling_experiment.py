@@ -2,36 +2,24 @@
 """
 スケーリング則実験スクリプト（統合版）
 
-任意のnum_input_tokens, num_layers, context_dimでスケーリング則を計算。
-複数設定をまとめて実行し、関係式の導出に使用可能。
+すべての設定はconfig.pyで一元管理。コマンドライン引数は不要。
 
 使用方法:
-  # 単一設定
-  python3 scripts/scaling_experiment.py --input-tokens 2 --layers 3 --context-dim 1536
+  # 基本実行（config.pyの設定を使用）
+  python3 scripts/scaling_experiment.py
 
-  # 9設定マトリックス（関係式導出用）
-  # context_dim=768固定、input_tokens=[1,2,3], layers=[1,2,3]
-  python3 scripts/scaling_experiment.py --matrix
-
-  # カスタムマトリックス（context_dim固定）
-  python3 scripts/scaling_experiment.py --input-tokens 1 2 3 --layers 1 2 3 --context-dim 768
-
-  # context_dimも変えたい場合（等倍: 768, 1536, 2304 推奨）
-  python3 scripts/scaling_experiment.py --input-tokens 1 2 --layers 1 2 --context-dim 768 1536
-
-  # サンプルサイズ指定
-  python3 scripts/scaling_experiment.py --input-tokens 2 --layers 3 --context-dim 1536 --samples 50 100 200 500
-
-  # α値のデータ量依存性測定（スライディングウィンドウ方式）
-  # 初期サンプル50, 倍率2, ウィンドウ4点, ステップ1で5サンプル生成 [50,100,200,400,800]
-  # 採取標本1: [50,100,200,400] → α₁
-  # 採取標本2: [100,200,400,800] → α₂
-  python3 scripts/scaling_experiment.py --alpha-scaling --init-samples 50 --multiplier 2 --window-size 4 --num-windows 2
+  # 出力ディレクトリのみ指定可能
+  python3 scripts/scaling_experiment.py --output-dir importants/logs/1130_v8
 
 Colab実行用:
-  !cd /content/new-llm && python3 scripts/scaling_experiment.py --matrix
+  !cd /content/new-llm && python3 scripts/scaling_experiment.py
 
-出力: results/scaling_YYYYMMDD_HHMMSS/
+設定変更:
+  config.pyの以下のセクションを編集:
+  - scaling_alpha_mode: α値スケーリングモード
+  - scaling_matrix_mode: マトリックスモード
+  - scaling_input_tokens, scaling_layers, scaling_context_dim: 実験対象
+  - fnn_num_layers, fnn_expand_factor, fnn_activation: FFN設定
 """
 
 import os
@@ -48,13 +36,12 @@ from scipy import stats
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config import ResidualConfig
 from src.experiments import ExperimentRunner, ExperimentConfig
 from src.utils.io import print_flush
 
 
-# デフォルト設定
-DEFAULT_SAMPLE_SIZES = [50, 100, 200, 500]
-DEFAULT_EMBED_DIM = 768
+# 定数
 RANDOM_SEED = 42
 
 
@@ -84,45 +71,18 @@ def calculate_scaling_law(results: list):
 
 def generate_sample_sizes(init_samples: int, multiplier: float,
                           window_size: int, num_windows: int) -> list[int]:
-    """サンプルサイズのリストを生成
-
-    Args:
-        init_samples: 初期サンプル数（例: 50）
-        multiplier: 倍率（例: 2 → 50, 100, 200, ...）
-        window_size: 1つのウィンドウに含むサンプル数（例: 4）
-        num_windows: ウィンドウ数（例: 2）
-
-    Returns:
-        サンプルサイズのリスト
-
-    Example:
-        generate_sample_sizes(50, 2, 4, 2)
-        → [50, 100, 200, 400, 800]  (5点 = 4 + 2 - 1)
-        Window 1: [50, 100, 200, 400]
-        Window 2: [100, 200, 400, 800]
-    """
-    # 必要な点数: window_size + (num_windows - 1)
+    """サンプルサイズのリストを生成"""
     total_points = window_size + (num_windows - 1)
-
     samples = []
     current: float = float(init_samples)
     for _ in range(total_points):
         samples.append(int(current))
         current *= multiplier
-
     return samples
 
 
 def calculate_sliding_window_alphas(results: list, window_size: int) -> list[dict]:
-    """スライディングウィンドウでα値を計算
-
-    Args:
-        results: 実験結果リスト（num_samplesでソート済み）
-        window_size: ウィンドウサイズ
-
-    Returns:
-        各ウィンドウのスケーリング情報リスト
-    """
+    """スライディングウィンドウでα値を計算"""
     if len(results) < window_size:
         return []
 
@@ -133,7 +93,6 @@ def calculate_sliding_window_alphas(results: list, window_size: int) -> list[dic
         window_data = results[i:i + window_size]
         scaling = calculate_scaling_law(window_data)
 
-        # ウィンドウの範囲情報
         min_samples = window_data[0]['num_samples']
         max_samples = window_data[-1]['num_samples']
         min_tokens = window_data[0]['train_tokens']
@@ -184,7 +143,6 @@ def print_alpha_progression(all_results: list, window_size: int, output_dir: str
             print_flush(f"{w['window_index']:>8} {samples_str:>20} {tokens_str:>25} "
                        f"{alpha_str:>10} {A_str:>12} {r_sq_str:>8}")
 
-        # α値の変化を計算
         if len(window_results) >= 2:
             alphas = [w['alpha'] for w in window_results if w['alpha'] is not None]
             if len(alphas) >= 2:
@@ -193,7 +151,6 @@ def print_alpha_progression(all_results: list, window_size: int, output_dir: str
                 print_flush(f"\n  α change: {alphas[0]:.5f} → {alphas[-1]:.5f} "
                            f"(Δ = {alpha_change:+.5f}, {alpha_change_pct:+.2f}%)")
 
-                # 傾向判定
                 if alpha_change < -0.01:
                     trend = "↓ IMPROVING (α becoming more negative = better scaling)"
                 elif alpha_change > 0.01:
@@ -211,7 +168,6 @@ def print_alpha_progression(all_results: list, window_size: int, output_dir: str
             'windows': window_results,
         })
 
-    # JSON保存
     with open(os.path.join(output_dir, 'alpha_progression.json'), 'w') as f:
         json.dump(all_progressions, f, indent=2)
 
@@ -221,7 +177,7 @@ def print_alpha_progression(all_results: list, window_size: int, output_dir: str
 
 
 def run_single_config(runner, num_input_tokens, num_layers, context_dim,
-                      sample_sizes, output_dir):
+                      sample_sizes, output_dir, config):
     """単一設定で複数サンプル数の実験を実行"""
     config_name = f"{num_layers}L_{context_dim}d_{num_input_tokens}tok"
 
@@ -240,7 +196,7 @@ def run_single_config(runner, num_input_tokens, num_layers, context_dim,
             num_samples=num_samples,
             num_layers=num_layers,
             context_dim=context_dim,
-            embed_dim=DEFAULT_EMBED_DIM,
+            embed_dim=config.embed_dim,
             num_input_tokens=num_input_tokens,
             random_seed=RANDOM_SEED,
         )
@@ -264,10 +220,8 @@ def run_single_config(runner, num_input_tokens, num_layers, context_dim,
             print_flush(f"    ✗ Error: {e}")
             continue
 
-    # スケーリング則計算
     scaling = calculate_scaling_law(results)
 
-    # 結果保存
     config_result = {
         'config_name': config_name,
         'num_input_tokens': num_input_tokens,
@@ -277,7 +231,6 @@ def run_single_config(runner, num_input_tokens, num_layers, context_dim,
         'scaling': scaling,
     }
 
-    # JSONファイル保存
     config_dir = os.path.join(output_dir, config_name)
     os.makedirs(config_dir, exist_ok=True)
     with open(os.path.join(config_dir, 'results.json'), 'w') as f:
@@ -292,7 +245,6 @@ def print_summary(all_results, output_dir):
     print_flush("RESULTS SUMMARY")
     print_flush("=" * 100)
 
-    # ヘッダー
     header = f"{'Config':<18} {'α':>7} {'A':>10} {'R²':>6} {'PPL':>7} {'Acc':>6} {'T.PPL':>7} {'ER':>5} {'Iter':>4}"
     print_flush(header)
     print_flush("-" * 100)
@@ -304,7 +256,6 @@ def print_summary(all_results, output_dir):
         scaling = result['scaling']
 
         if result['results']:
-            # 最良サンプル（500サンプル）のデータを取得
             best_result = max(result['results'], key=lambda r: r['num_samples'])
             best_ppl = best_result['val_ppl']
             best_acc = best_result['val_acc']
@@ -347,7 +298,6 @@ def print_summary(all_results, output_dir):
             'best_iter': best_iter,
         })
 
-    # 詳細テーブル（全サンプル数）
     print_flush("\n" + "=" * 100)
     print_flush("DETAILED RESULTS (All sample sizes)")
     print_flush("=" * 100)
@@ -365,11 +315,9 @@ def print_summary(all_results, output_dir):
             print_flush(f"{config_name:<18} {r['num_samples']:>7} {r['train_tokens']:>10,} {iter_str:>7} "
                        f"{train_er_str:>8} {val_er_str:>7} {train_ppl_str:>7} {r['val_ppl']:>7.1f} {r['val_acc']*100:>5.1f}%")
 
-    # サマリーJSON保存
     with open(os.path.join(output_dir, 'summary.json'), 'w') as f:
         json.dump(summary_data, f, indent=2)
 
-    # 詳細結果もJSON保存
     detailed_data = []
     for result in all_results:
         for r in result['results']:
@@ -389,81 +337,57 @@ def print_summary(all_results, output_dir):
 
 
 def main():
+    # config.pyから設定を読み込み
+    config = ResidualConfig()
+
+    # コマンドライン引数は出力ディレクトリのみ
     parser = argparse.ArgumentParser(
-        description='スケーリング則実験スクリプト',
-        formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog="""
-例:
-  # 単一設定
-  python3 scripts/scaling_experiment.py --input-tokens 2 --layers 3 --context-dim 1536
-
-  # 9設定マトリックス（context_dim=768固定）
-  python3 scripts/scaling_experiment.py --matrix
-
-  # カスタムマトリックス（context_dim固定）
-  python3 scripts/scaling_experiment.py --input-tokens 1 2 3 --layers 1 2 3 --context-dim 768
-
-  # α値のデータ量依存性測定
-  python3 scripts/scaling_experiment.py --alpha-scaling --init-samples 50 --multiplier 2 --window-size 4 --num-windows 2
-        """
+        description='スケーリング則実験スクリプト（設定はconfig.pyで一元管理）',
     )
-
-    parser.add_argument('--input-tokens', type=int, nargs='+', default=[1],
-                        help='num_input_tokens の値（複数指定可）')
-    parser.add_argument('--layers', type=int, nargs='+', default=[1],
-                        help='num_layers の値（複数指定可）')
-    parser.add_argument('--context-dim', type=int, nargs='+', default=[768],
-                        help='context_dim の値（複数指定可、デフォルト: 768）')
-    parser.add_argument('--samples', type=int, nargs='+', default=DEFAULT_SAMPLE_SIZES,
-                        help=f'サンプルサイズ（デフォルト: {DEFAULT_SAMPLE_SIZES}）')
-    parser.add_argument('--matrix', action='store_true',
-                        help='9設定マトリックス実行（context_dim=768固定、input_tokens=[1,2,3], layers=[1,2,3]）')
     parser.add_argument('--output-dir', type=str, default=None,
-                        help='出力ディレクトリ（デフォルト: results/scaling_YYYYMMDD_HHMMSS）')
-
-    # α値スケーリング分析オプション
-    parser.add_argument('--alpha-scaling', action='store_true',
-                        help='α値のデータ量依存性を測定（スライディングウィンドウ方式）')
-    parser.add_argument('--init-samples', type=int, default=50,
-                        help='初期サンプル数（デフォルト: 50）')
-    parser.add_argument('--multiplier', type=float, default=2.0,
-                        help='サンプル数の倍率（デフォルト: 2.0）')
-    parser.add_argument('--window-size', type=int, default=4,
-                        help='α計算に使うウィンドウサイズ（デフォルト: 4点）')
-    parser.add_argument('--num-windows', type=int, default=2,
-                        help='ウィンドウ数（デフォルト: 2）')
-
+                        help='出力ディレクトリ（デフォルト: config.pyのscaling_output_dirまたは自動生成）')
     args = parser.parse_args()
 
-    # α値スケーリングモード: サンプルサイズを自動生成
-    if args.alpha_scaling:
+    # 設定の表示
+    print_flush("=" * 70)
+    print_flush("CONFIGURATION (from config.py)")
+    print_flush("=" * 70)
+    print_flush(f"FFN: type={config.fnn_type}, layers={config.fnn_num_layers}, "
+                f"expand={config.fnn_expand_factor}, activation={config.fnn_activation}")
+    print_flush(f"Phase 1: max_iter={config.phase1_max_iterations}, "
+                f"grad_clip={config.phase1_gradient_clip}")
+
+    # サンプルサイズの決定
+    if config.scaling_alpha_mode:
         sample_sizes = generate_sample_sizes(
-            init_samples=args.init_samples,
-            multiplier=args.multiplier,
-            window_size=args.window_size,
-            num_windows=args.num_windows,
+            init_samples=config.scaling_init_samples,
+            multiplier=config.scaling_multiplier,
+            window_size=config.scaling_window_size,
+            num_windows=config.scaling_num_windows,
         )
-        window_size = args.window_size
+        window_size = config.scaling_window_size
     else:
-        sample_sizes = args.samples
+        sample_sizes = config.scaling_sample_sizes
         window_size = None
 
-    # マトリックスモード: context_dim=768固定、input_tokens×layers
-    if args.matrix:
-        input_tokens_list = [1, 2, 3]
-        layers_list = [1, 2, 3]
-        context_dim_list = [768]  # 固定
+    # 実験設定の決定
+    if config.scaling_matrix_mode:
+        input_tokens_list = config.scaling_input_tokens_list
+        layers_list = config.scaling_layers_list
+        context_dim_list = config.scaling_context_dim_list
     else:
-        input_tokens_list = args.input_tokens
-        layers_list = args.layers
-        context_dim_list = args.context_dim
+        input_tokens_list = [config.scaling_input_tokens]
+        layers_list = [config.scaling_layers]
+        context_dim_list = [config.scaling_context_dim]
 
     # 出力ディレクトリ
     if args.output_dir:
         output_dir = args.output_dir
+    elif config.scaling_output_dir:
+        output_dir = config.scaling_output_dir
     else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        if args.alpha_scaling:
+        if config.scaling_alpha_mode:
             output_dir = f"results/alpha_scaling_{timestamp}"
         else:
             output_dir = f"results/scaling_{timestamp}"
@@ -475,18 +399,18 @@ def main():
         configs.append((input_tokens, layers, context_dim))
 
     # 実験情報表示
-    print_flush("=" * 70)
-    if args.alpha_scaling:
+    print_flush("\n" + "=" * 70)
+    if config.scaling_alpha_mode:
         print_flush("ALPHA SCALING EXPERIMENT (Data Amount Dependency)")
     else:
         print_flush("SCALING LAW EXPERIMENT")
     print_flush("=" * 70)
     print_flush(f"Configurations: {len(configs)}")
     print_flush(f"Sample sizes: {sample_sizes}")
-    if args.alpha_scaling:
-        print_flush(f"Window size: {args.window_size} points")
-        print_flush(f"Number of windows: {args.num_windows}")
-        print_flush(f"Multiplier: {args.multiplier}x")
+    if config.scaling_alpha_mode:
+        print_flush(f"Window size: {config.scaling_window_size} points")
+        print_flush(f"Number of windows: {config.scaling_num_windows}")
+        print_flush(f"Multiplier: {config.scaling_multiplier}x")
     print_flush(f"Total experiments: {len(configs) * len(sample_sizes)}")
     print_flush(f"Output: {output_dir}")
 
@@ -509,7 +433,7 @@ def main():
 
     # 実験実行
     start_time = time.time()
-    runner = ExperimentRunner()
+    runner = ExperimentRunner(base_config=config)
 
     all_results = []
     for input_tokens, layers, context_dim in configs:
@@ -520,6 +444,7 @@ def main():
             context_dim=context_dim,
             sample_sizes=sample_sizes,
             output_dir=output_dir,
+            config=config,
         )
         all_results.append(result)
 
@@ -527,7 +452,7 @@ def main():
     print_summary(all_results, output_dir)
 
     # α値スケーリング分析
-    if args.alpha_scaling and window_size:
+    if config.scaling_alpha_mode and window_size:
         print_alpha_progression(all_results, window_size, output_dir)
 
     # 実行時間
@@ -543,14 +468,23 @@ def main():
             {'input_tokens': it, 'layers': layers, 'context_dim': cd}
             for it, layers, cd in configs
         ],
+        'ffn_settings': {
+            'type': config.fnn_type,
+            'num_layers': config.fnn_num_layers,
+            'expand_factor': config.fnn_expand_factor,
+            'activation': config.fnn_activation,
+        },
+        'phase1_settings': {
+            'max_iterations': config.phase1_max_iterations,
+            'gradient_clip': config.phase1_gradient_clip,
+        },
     }
-    # α値スケーリングモードの追加情報
-    if args.alpha_scaling:
+    if config.scaling_alpha_mode:
         metadata['alpha_scaling'] = {
-            'init_samples': args.init_samples,
-            'multiplier': args.multiplier,
-            'window_size': args.window_size,
-            'num_windows': args.num_windows,
+            'init_samples': config.scaling_init_samples,
+            'multiplier': config.scaling_multiplier,
+            'window_size': config.scaling_window_size,
+            'num_windows': config.scaling_num_windows,
         }
     with open(os.path.join(output_dir, 'metadata.json'), 'w') as f:
         json.dump(metadata, f, indent=2)
