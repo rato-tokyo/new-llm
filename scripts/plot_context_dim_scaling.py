@@ -6,7 +6,6 @@ context_dim変化によるスケーリング特性の可視化
 768d (1x params) vs 1200d (2x params) vs 1537d (3x params)
 """
 
-import json
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -72,7 +71,72 @@ data_1537d = {
     ]
 }
 
-all_configs = [baseline_768d, data_1200d, data_1537d]
+all_configs_v1 = [baseline_768d, data_1200d, data_1537d]
+
+# ============================================================
+# v2 Data (dist_reg_weight=0.9, noise=0.0, epochs=20)
+# ============================================================
+v2_768d = {
+    "config_name": "1L_768d_1tok",
+    "context_dim": 768,
+    "params_ratio": 1.0,
+    "alpha": -0.4761,
+    "A": 106737,
+    "r_squared": 0.993,
+    "best_ppl": 196.3,
+    "best_acc": 0.228,
+    "best_train_ppl": 93.4,
+    "best_val_er": 0.792,
+    "samples_data": [
+        {"samples": 50, "tokens": 62891, "val_ppl": 576.0, "train_ppl": 65.9, "val_er": 0.793, "train_er": 0.797, "p1_iter": 23, "val_acc": 0.183},
+        {"samples": 100, "tokens": 122795, "val_ppl": 386.5, "train_ppl": 91.3, "val_er": 0.792, "train_er": 0.799, "p1_iter": 23, "val_acc": 0.197},
+        {"samples": 200, "tokens": 240132, "val_ppl": 286.4, "train_ppl": 94.0, "val_er": 0.791, "train_er": 0.800, "p1_iter": 25, "val_acc": 0.204},
+        {"samples": 500, "tokens": 587970, "val_ppl": 196.3, "train_ppl": 93.4, "val_er": 0.792, "train_er": 0.803, "p1_iter": 23, "val_acc": 0.228},
+    ]
+}
+
+v2_1200d = {
+    "config_name": "1L_1200d_1tok",
+    "context_dim": 1200,
+    "params_ratio": 2.0,
+    "alpha": -0.4853,
+    "A": 123874,
+    "r_squared": 0.995,
+    "best_ppl": 201.1,
+    "best_acc": 0.230,
+    "best_train_ppl": 90.1,
+    "best_val_er": 0.756,
+    "samples_data": [
+        {"samples": 50, "tokens": 62891, "val_ppl": 601.4, "train_ppl": 81.4, "val_er": 0.757, "train_er": 0.762, "p1_iter": 29, "val_acc": 0.179},
+        {"samples": 100, "tokens": 122795, "val_ppl": 404.9, "train_ppl": 88.0, "val_er": 0.757, "train_er": 0.764, "p1_iter": 29, "val_acc": 0.197},
+        {"samples": 200, "tokens": 240132, "val_ppl": 297.5, "train_ppl": 100.9, "val_er": 0.754, "train_er": 0.764, "p1_iter": 31, "val_acc": 0.206},
+        {"samples": 500, "tokens": 587970, "val_ppl": 201.1, "train_ppl": 90.1, "val_er": 0.756, "train_er": 0.769, "p1_iter": 29, "val_acc": 0.230},
+    ]
+}
+
+v2_1537d = {
+    "config_name": "1L_1537d_1tok",
+    "context_dim": 1537,
+    "params_ratio": 3.0,
+    "alpha": -0.4717,
+    "A": 104896,
+    "r_squared": 0.996,
+    "best_ppl": 202.3,
+    "best_acc": 0.229,
+    "best_train_ppl": 93.5,
+    "best_val_er": 0.726,
+    "samples_data": [
+        {"samples": 50, "tokens": 62891, "val_ppl": 588.6, "train_ppl": 79.3, "val_er": 0.728, "train_er": 0.734, "p1_iter": 32, "val_acc": 0.176},
+        {"samples": 100, "tokens": 122795, "val_ppl": 401.6, "train_ppl": 97.0, "val_er": 0.729, "train_er": 0.736, "p1_iter": 32, "val_acc": 0.191},
+        {"samples": 200, "tokens": 240132, "val_ppl": 301.8, "train_ppl": 98.1, "val_er": 0.724, "train_er": 0.736, "p1_iter": 34, "val_acc": 0.204},
+        {"samples": 500, "tokens": 587970, "val_ppl": 202.3, "train_ppl": 93.5, "val_er": 0.726, "train_er": 0.741, "p1_iter": 32, "val_acc": 0.229},
+    ]
+}
+
+all_configs_v2 = [v2_768d, v2_1200d, v2_1537d]
+
+# Default to v1 for backwards compatibility
+all_configs = all_configs_v1
 
 # Create output directory
 output_dir = "importants"
@@ -290,5 +354,91 @@ for config in all_configs:
           f"{config['alpha']:>8.4f}")
 
 print("="*120)
+
+# ============================================================
+# Figure 3: v1 vs v2 Comparison
+# ============================================================
+fig3, axes3 = plt.subplots(2, 2, figsize=(12, 10))
+
+# Plot 1: Alpha comparison (v1 vs v2)
+ax = axes3[0, 0]
+x_pos = np.arange(3)
+width = 0.35
+v1_alphas = [-c["alpha"] for c in all_configs_v1]
+v2_alphas = [-c["alpha"] for c in all_configs_v2]
+ax.bar(x_pos - width/2, v1_alphas, width, label='v1', color='#3498db', alpha=0.8)
+ax.bar(x_pos + width/2, v2_alphas, width, label='v2', color='#e74c3c', alpha=0.8)
+ax.set_xticks(x_pos)
+ax.set_xticklabels(['768d', '1200d', '1537d'])
+ax.set_ylabel('|α| (higher = better scaling)')
+ax.set_title('α Values: v1 vs v2')
+ax.legend()
+ax.set_ylim(0.4, 0.6)
+
+# Plot 2: Effective Rank comparison
+ax = axes3[0, 1]
+v1_ers = [c["best_val_er"] * 100 for c in all_configs_v1]
+v2_ers = [c["best_val_er"] * 100 for c in all_configs_v2]
+ax.bar(x_pos - width/2, v1_ers, width, label='v1', color='#3498db', alpha=0.8)
+ax.bar(x_pos + width/2, v2_ers, width, label='v2', color='#e74c3c', alpha=0.8)
+ax.set_xticks(x_pos)
+ax.set_xticklabels(['768d', '1200d', '1537d'])
+ax.set_ylabel('Effective Rank (%)')
+ax.set_title('Effective Rank: v1 vs v2 (↑ = better)')
+ax.legend()
+ax.set_ylim(65, 85)
+
+# Add improvement annotations
+for i, (v1, v2) in enumerate(zip(v1_ers, v2_ers)):
+    diff = v2 - v1
+    ax.annotate(f'+{diff:.1f}%', (i + width/2, v2 + 0.5), ha='center', fontsize=9, color='green')
+
+# Plot 3: PPL comparison
+ax = axes3[1, 0]
+v1_ppls = [c["best_ppl"] for c in all_configs_v1]
+v2_ppls = [c["best_ppl"] for c in all_configs_v2]
+ax.bar(x_pos - width/2, v1_ppls, width, label='v1', color='#3498db', alpha=0.8)
+ax.bar(x_pos + width/2, v2_ppls, width, label='v2', color='#e74c3c', alpha=0.8)
+ax.set_xticks(x_pos)
+ax.set_xticklabels(['768d', '1200d', '1537d'])
+ax.set_ylabel('Val PPL (↓ = better)')
+ax.set_title('Best Val PPL: v1 vs v2')
+ax.legend()
+ax.set_ylim(190, 210)
+
+# Plot 4: P1 Iterations comparison
+ax = axes3[1, 1]
+v1_iters = [c["samples_data"][-1].get("p1_iter", 40) for c in all_configs_v1]
+v2_iters = [c["samples_data"][-1]["p1_iter"] for c in all_configs_v2]
+ax.bar(x_pos - width/2, v1_iters, width, label='v1', color='#3498db', alpha=0.8)
+ax.bar(x_pos + width/2, v2_iters, width, label='v2', color='#e74c3c', alpha=0.8)
+ax.set_xticks(x_pos)
+ax.set_xticklabels(['768d', '1200d', '1537d'])
+ax.set_ylabel('Phase 1 Iterations (↓ = faster)')
+ax.set_title('Convergence Speed: v1 vs v2')
+ax.legend()
+
+# Add improvement annotations
+for i, (v1, v2) in enumerate(zip(v1_iters, v2_iters)):
+    diff_pct = (v2 - v1) / v1 * 100
+    ax.annotate(f'{diff_pct:.0f}%', (i + width/2, v2 + 1), ha='center', fontsize=9, color='green')
+
+plt.tight_layout()
+plt.savefig(f'{output_dir}/context_dim_v1_v2_comparison.png', dpi=150, bbox_inches='tight')
+print(f"Saved: {output_dir}/context_dim_v1_v2_comparison.png")
+
+# Print v1 vs v2 comparison summary
+print("\n" + "="*80)
+print("V1 vs V2 COMPARISON SUMMARY")
+print("="*80)
+print("\nSetting changes: dist_reg_weight 0.8→0.9, noise 0.1→0.0, epochs 10→20")
+print("\n" + "-"*80)
+print(f"{'Metric':<20} {'768d v1':>10} {'768d v2':>10} {'1200d v1':>10} {'1200d v2':>10} {'1537d v1':>10} {'1537d v2':>10}")
+print("-"*80)
+print(f"{'α':.<20} {all_configs_v1[0]['alpha']:>10.4f} {all_configs_v2[0]['alpha']:>10.4f} {all_configs_v1[1]['alpha']:>10.4f} {all_configs_v2[1]['alpha']:>10.4f} {all_configs_v1[2]['alpha']:>10.4f} {all_configs_v2[2]['alpha']:>10.4f}")
+print(f"{'Val ER (%)':.<20} {all_configs_v1[0]['best_val_er']*100:>10.1f} {all_configs_v2[0]['best_val_er']*100:>10.1f} {all_configs_v1[1]['best_val_er']*100:>10.1f} {all_configs_v2[1]['best_val_er']*100:>10.1f} {all_configs_v1[2]['best_val_er']*100:>10.1f} {all_configs_v2[2]['best_val_er']*100:>10.1f}")
+print(f"{'Val PPL':.<20} {all_configs_v1[0]['best_ppl']:>10.1f} {all_configs_v2[0]['best_ppl']:>10.1f} {all_configs_v1[1]['best_ppl']:>10.1f} {all_configs_v2[1]['best_ppl']:>10.1f} {all_configs_v1[2]['best_ppl']:>10.1f} {all_configs_v2[2]['best_ppl']:>10.1f}")
+print(f"{'P1 Iter':.<20} {v1_iters[0]:>10} {v2_iters[0]:>10} {v1_iters[1]:>10} {v2_iters[1]:>10} {v1_iters[2]:>10} {v2_iters[2]:>10}")
+print("="*80)
 
 plt.show()
