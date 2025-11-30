@@ -55,14 +55,14 @@ class ResidualConfig:
     # ========== Diversity Regularization (Per-Dimension Usage Tracking) ==========
     # LayerNorm + Per-Dimension Variance Tracking (EMA-based) による多様性確保
     # 実装: 各次元の使用頻度を追跡し、使用頻度が低い次元を優先的に活性化
-    dist_reg_weight = 0.8              # 多様性正則化の重み (PARALLEL OPTIMIZED: 90% diversity)
+    dist_reg_weight = 0.9              # 多様性正則化の重み (PARALLEL OPTIMIZED: 90% diversity)
                                        # total_loss = (1-w) * cvfp_loss + w * diversity_loss
                                        # 0.9: 10% CVFP, 90% Diversity（並列版最適設定: 55.9% ER達成）
                                        # 並列版の情報遅延を多様性強化で補償
 
     # ========== Phase 1: CVFP学習（固定点学習） ==========
     phase1_min_iterations = 5            # 固定点探索の最小反復回数（早期停止の最低保証）
-    phase1_max_iterations = 40           # 固定点探索の最大反復回数
+    phase1_max_iterations = 60           # 固定点探索の最大反復回数
     phase1_convergence_threshold = 0.03   # 収束判定のMSE閾値
                                          # 意味: 前回iterationとのMSE < 0.1なら収束と判定
                                          # 実測値: 初期MSE≈1.43、学習後MSE≈0.001-0.1
@@ -76,7 +76,7 @@ class ResidualConfig:
                                              # 複数回順伝播してCVFP損失の推移を確認
 
     # コンテキストノイズ（汎化性能向上）
-    phase1_context_noise = 0.1           # コンテキストに追加するガウシアンノイズの標準偏差
+    phase1_context_noise = 0.0           # コンテキストに追加するガウシアンノイズの標準偏差
                                          # 0.0: ノイズなし
                                          # 0.1: 推奨（軽いノイズ）
                                          # 0.2: 強めのノイズ
@@ -98,7 +98,7 @@ class ResidualConfig:
     skip_phase1 = False             # Phase 1を実行（Colab実験用）
     skip_phase2 = False             # Phase 2を実行（実装完了）
     phase2_learning_rate = 0.001    # トークン予測の学習率
-    phase2_epochs = 10              # 訓練エポック数
+    phase2_epochs = 20              # 訓練エポック数
     phase2_patience = 1             # Early stopping patience
     phase2_batch_size = None        # ミニバッチサイズ（Noneで自動計算）
                                     # None: GPUメモリに基づいて自動設定
