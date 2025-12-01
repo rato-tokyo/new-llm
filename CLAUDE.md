@@ -1,5 +1,34 @@
 # New-LLM Project Guidelines
 
+## 💻 ローカル実験の注意事項 - CPU環境 (2025-12-01)
+
+**ローカル環境（Mac/CPU）では処理が遅いため、サンプル数を最小限に抑える。**
+
+### 推奨設定
+
+```bash
+# ローカル実験（CPU）: 2-5サンプルで十分
+python3 scripts/diversity_algorithm_experiment.py -a MCDL -s 2
+
+# Colab（GPU）: 100サンプル以上で本格実験
+python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM -s 100
+```
+
+### ローカル vs Colab 比較
+
+| 環境 | 推奨サンプル数 | 処理時間目安 |
+|------|--------------|-------------|
+| **ローカル（CPU）** | 2-5 | 数分〜十数分 |
+| **Colab（GPU）** | 100-500 | 数分 |
+
+### 注意
+
+- ローカルでは動作確認程度にとどめる
+- 本格的な実験はColab環境で実行
+- サンプル数が少ないとEffective Rankが不正確になる可能性あり
+
+---
+
 ## 🎯 MCDL (Mean-Centered Dispersion Loss) - 多様性損失アルゴリズム (2025-12-01)
 
 **Phase 1で使用している多様性確保アルゴリズムの正式名称。**
