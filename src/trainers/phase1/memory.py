@@ -569,10 +569,10 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
     def _quick_validate(self, val_token_ids: torch.Tensor) -> float:
         """
-        高速Validation評価（訓練と同じ並列処理方式）
+        高速Validation評価（シーケンシャル処理、サンプリング）
 
-        訓練時と同じく、token iはcontexts[i-1]を入力として使用する。
-        これにより、訓練時のERと整合性のある値が得られる。
+        最終評価と同じシーケンシャル処理を使用してERを計算。
+        これにより、最終評価のVal ERと整合性のある値が得られる。
 
         Args:
             val_token_ids: 検証用トークンID
@@ -589,33 +589,13 @@ class MemoryPhase1Trainer(Phase1Trainer):
         )
         sample_ids = val_token_ids[:sample_size]
 
-        # 収束まで複数イテレーション実行（軽量版: 最大10回）
-        num_val_iterations = 10
-
         with torch.no_grad():
             # トークン埋め込み取得
             token_embeds = self.model.token_embedding(sample_ids.unsqueeze(0).to(self.device))
             token_embeds = self.model.embed_norm(token_embeds).squeeze(0)
 
-            # 並列forward用のcombinedトークンを事前計算
-            num_input_tokens = self.config.num_input_tokens
-            combined = self._build_combined_tokens_batch(token_embeds, num_input_tokens, 0, sample_size)
-
-            # 初期コンテキスト（ランダム小値）
-            contexts = torch.randn(sample_size, self.model.context_dim, device=self.device) * 0.01
-
-            # 複数イテレーション実行（訓練と同じ方式）
-            for _ in range(num_val_iterations):
-                # 訓練と同じ方式: token iはcontexts[i-1]を入力として使用
-                # shifted_contexts[i] = contexts[i-1] (index 0はlast_context)
-                last_context = contexts[-1]
-                shifted_contexts = torch.zeros_like(contexts)
-                shifted_contexts[0] = last_context
-                shifted_contexts[1:] = contexts[:-1]
-
-                # Forward pass
-                output_contexts = self.model.context_block(shifted_contexts, combined)
-                contexts = output_contexts
+            # シーケンシャル処理（最終評価と同じ方式）
+            contexts, _, _ = self._forward_sequential(token_embeds, None, collect_all_layers=False)
 
             # Effective Rank計算
             effective_rank = self._compute_effective_rank(contexts)
