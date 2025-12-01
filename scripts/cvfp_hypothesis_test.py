@@ -64,11 +64,24 @@ def mcdl_loss(contexts: torch.Tensor) -> torch.Tensor:
 
 
 def odcm_loss(contexts: torch.Tensor) -> torch.Tensor:
-    """ODCM: Off-Diagonal Covariance Minimization（VICReg風）"""
-    contexts_centered = contexts - contexts.mean(dim=0)
-    cov = (contexts_centered.T @ contexts_centered) / (len(contexts) - 1)
+    """ODCM: Off-Diagonal Covariance Minimization（VICReg風）
+
+    VICRegの完全な実装:
+    1. Variance Loss: 各次元の分散を1以上に維持
+    2. Covariance Loss: 共分散行列の非対角成分を最小化
+    """
+    centered = contexts - contexts.mean(dim=0)
+
+    # Variance Loss: 各次元の標準偏差を1以上に
+    std = torch.sqrt(centered.var(dim=0) + 1e-4)
+    var_loss = torch.relu(1.0 - std).mean()
+
+    # Covariance Loss: 非対角成分を最小化
+    cov = (centered.T @ centered) / (len(contexts) - 1)
     off_diag = cov - torch.diag(torch.diag(cov))
-    return off_diag.pow(2).sum() / contexts.size(1)
+    cov_loss = off_diag.pow(2).sum() / contexts.size(1)
+
+    return var_loss + 0.04 * cov_loss
 
 
 def due_loss(contexts: torch.Tensor) -> torch.Tensor:

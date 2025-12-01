@@ -62,13 +62,25 @@ def compute_diversity_loss_odcm(contexts: torch.Tensor) -> torch.Tensor:
     """
     ODCM (Off-Diagonal Covariance Minimization) - VICReg風
 
-    共分散行列の非対角成分を最小化（次元間の相関を除去）
+    VICRegの完全な実装:
+    1. Variance Loss: 各次元の分散を1以上に維持
+    2. Covariance Loss: 共分散行列の非対角成分を最小化
+
     計算コスト: O(n×d + d²)
     """
     centered = contexts - contexts.mean(dim=0)
+
+    # Variance Loss: 各次元の標準偏差を1以上に
+    std = torch.sqrt(centered.var(dim=0) + 1e-4)
+    var_loss = torch.relu(1.0 - std).mean()  # std < 1の次元にペナルティ
+
+    # Covariance Loss: 非対角成分を最小化
     cov = torch.mm(centered.t(), centered) / len(contexts)
     off_diag = cov - torch.diag(torch.diag(cov))
-    return (off_diag ** 2).sum() / contexts.shape[1]
+    cov_loss = (off_diag ** 2).sum() / contexts.shape[1]
+
+    # VICRegでは variance:covariance = 25:1 だが、CVFPでは調整
+    return var_loss + 0.04 * cov_loss
 
 
 def compute_diversity_loss_due(contexts: torch.Tensor) -> torch.Tensor:
