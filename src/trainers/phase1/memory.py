@@ -569,7 +569,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
     def _quick_validate(self, val_token_ids: torch.Tensor) -> float:
         """
-        高速Validation評価（並列処理、サンプリング）
+        高速Validation評価（並列処理、サンプリング、収束まで複数イテレーション）
 
         Args:
             val_token_ids: 検証用トークンID
@@ -586,6 +586,10 @@ class MemoryPhase1Trainer(Phase1Trainer):
         )
         sample_ids = val_token_ids[:sample_size]
 
+        # 収束まで複数イテレーション実行（軽量版: 最大10回、収束判定あり）
+        num_val_iterations = 10
+        convergence_threshold = 0.01  # 収束判定用の閾値
+
         with torch.no_grad():
             # トークン埋め込み取得
             token_embeds = self.model.token_embedding(sample_ids.unsqueeze(0).to(self.device))
@@ -594,10 +598,20 @@ class MemoryPhase1Trainer(Phase1Trainer):
             # 初期コンテキスト（ランダム小値）
             contexts = torch.randn(sample_size, self.model.context_dim, device=self.device) * 0.01
 
-            # 並列forward（訓練と同じ方式）
+            # 並列forward用のcombinedトークンを事前計算
             num_input_tokens = self.config.num_input_tokens
             combined = self._build_combined_tokens_batch(token_embeds, num_input_tokens, 0, sample_size)
-            output_contexts = self.model.context_block(contexts, combined)
+
+            # 複数イテレーション実行
+            for _ in range(num_val_iterations):
+                output_contexts = self.model.context_block(contexts, combined)
+
+                # 収束判定（変化量が小さければ早期終了）
+                diff = ((output_contexts - contexts) ** 2).mean()
+                if diff < convergence_threshold:
+                    break
+
+                contexts = output_contexts
 
             # Effective Rank計算
             effective_rank = self._compute_effective_rank(output_contexts)
