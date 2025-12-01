@@ -17,8 +17,8 @@ import time
 from src.models.llm import LLM
 from src.providers.data.memory import MemoryDataProvider
 from src.trainers.phase1.memory import MemoryPhase1Trainer
-from src.evaluation.metrics import analyze_fixed_points, check_identity_mapping
-from src.evaluation.convergence import forward_sequential
+from src.evaluation.metrics import analyze_fixed_points
+from src.evaluation.diagnostics import check_identity_mapping, print_identity_mapping_warning
 from src.utils.seed import set_seed
 
 
@@ -42,7 +42,6 @@ print(f"  - num_layers: {config.num_layers}")
 print(f"  - context_dim: {config.context_dim}")
 print(f"  - embed_dim: {config.embed_dim}")
 print(f"  - num_input_tokens: {config.num_input_tokens}")
-print(f"  - dist_reg_weight: {config.dist_reg_weight}")
 
 device = torch.device(config.device if torch.cuda.is_available() else "cpu")
 print(f"  - device: {device}")
@@ -80,10 +79,10 @@ trainer = MemoryPhase1Trainer(model, config, device)
 
 # Train with parallel processing
 print("\nStarting Phase 1 training...")
-print(f"設定: dist_reg_weight={config.dist_reg_weight}, max_iterations={config.phase1_max_iterations}")
+print(f"設定: max_iterations={config.phase1_max_iterations}")
 
 train_start = time.time()
-train_result = trainer.train(train_token_ids, label="Train", data_provider=data_provider)
+train_result = trainer.train(train_token_ids, label="Train")
 assert isinstance(train_result, torch.Tensor), "Expected Tensor from train()"
 train_contexts: torch.Tensor = train_result
 train_time = time.time() - train_start
@@ -92,13 +91,9 @@ train_time = time.time() - train_start
 print(f"\nEvaluating on validation data ({len(val_token_ids)} tokens)...")
 
 val_start = time.time()
-model.eval()
-with torch.no_grad():
-    val_token_embeds = model.token_embedding(val_token_ids.unsqueeze(0).to(device))
-    val_token_embeds = model.embed_norm(val_token_embeds).squeeze(0)
-
-num_input_tokens = config.num_input_tokens
-val_contexts = forward_sequential(model, val_token_embeds, None, device, num_input_tokens)
+val_result = trainer.evaluate(val_token_ids, label="Val")
+assert isinstance(val_result, torch.Tensor), "Expected Tensor from evaluate()"
+val_contexts: torch.Tensor = val_result
 val_time = time.time() - val_start
 
 # ============================================================
@@ -121,16 +116,15 @@ print("-"*70 + "\n")
 val_metrics = analyze_fixed_points(val_contexts, label="Validation")
 
 # Check 2: Identity Mapping Check - 恒等写像になっていないか確認
-print("\n" + "="*70)
-print("CHECK 2: IDENTITY MAPPING (恒等写像チェック)")
-print("="*70)
-
-# トークン埋め込みを取得
-with torch.no_grad():
-    train_token_embeds = model.token_embedding(train_token_ids.unsqueeze(0).to(device))
-    train_token_embeds = model.embed_norm(train_token_embeds).squeeze(0)
-
-identity_check = check_identity_mapping(model, train_token_embeds, train_contexts, device)
+identity_check = check_identity_mapping(
+    model=model,
+    context_dim=config.context_dim,
+    device=device,
+    num_samples=config.identity_check_samples,
+    threshold=config.identity_mapping_threshold,
+    num_input_tokens=config.num_input_tokens
+)
+is_identity = print_identity_mapping_warning(identity_check)
 
 # Check 3: Processing Speed - 高速化確認
 print("\n" + "="*70)
@@ -173,10 +167,10 @@ else:
 
 # 2. Identity Mapping
 print("\n2. Identity Mapping (恒等写像):")
-if not identity_check['is_identity']:
-    print(f"   ✅ PASSED: Not identity mapping (diff={identity_check['context_diff_from_zero']:.4f})")
+if not is_identity:
+    print(f"   ✅ PASSED: Not identity mapping (avg_similarity={identity_check['avg_similarity']:.4f})")
 else:
-    print(f"   ❌ FAILED: Identity mapping detected (diff={identity_check['context_diff_from_zero']:.4f})")
+    print(f"   ❌ FAILED: Identity mapping detected (avg_similarity={identity_check['avg_similarity']:.4f})")
     all_passed = False
 
 # 3. Processing Speed
@@ -192,3 +186,6 @@ if all_passed:
 else:
     print("❌ SOME CHECKS FAILED - 実装に問題がある可能性があります！")
 print("="*70 + "\n")
+
+# Cleanup
+data_provider.close()

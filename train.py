@@ -55,7 +55,6 @@ def main():
     print_flush(f"   Layers: {config.num_layers}")
     print_flush(f"   Context dim: {config.context_dim}")
     print_flush(f"   Device: {config.device}")
-    print_flush(f"   Diversity weight: {config.dist_reg_weight}")
     if not test_mode:
         print_flush(f"   Data: {config.num_samples} samples from {config.train_data_source}")
 
@@ -138,8 +137,7 @@ def main():
         # Train Phase 1
         train_contexts = phase1_trainer.train(
             train_token_ids,
-            label="Train",
-            data_provider=data_provider
+            label="Train"
         )
 
         # Evaluate on validation data
@@ -208,8 +206,7 @@ def main():
                         'num_layers': config.num_layers,
                         'embed_dim': config.embed_dim,
                         'context_dim': config.context_dim,
-                        'vocab_size': config.vocab_size,
-                        'num_context_splits': config.num_context_splits
+                        'vocab_size': config.vocab_size
                     }
                 }
                 torch.save(checkpoint, config.checkpoint_path)
