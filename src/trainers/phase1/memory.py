@@ -590,12 +590,16 @@ class MemoryPhase1Trainer(Phase1Trainer):
         sample_ids = val_token_ids[:sample_size]
 
         with torch.no_grad():
-            # トークン埋め込み取得
+            # トークン埋め込み取得（evaluate()と同じ処理）
             token_embeds = self.model.token_embedding(sample_ids.unsqueeze(0).to(self.device))
             token_embeds = self.model.embed_norm(token_embeds).squeeze(0)
 
-            # シーケンシャル処理（最終評価と同じ方式）
-            contexts, _, _ = self._forward_sequential(token_embeds, None, collect_all_layers=False)
+            # Phase 2用に最後のトークンを除く（evaluate()と同じ）
+            input_token_embeds = token_embeds[:-1]
+
+            # シーケンシャル処理（evaluate()と同じ方式）
+            # collect_all_layers=Trueで処理することで、完全に同じコードパスを通る
+            contexts, _, _ = self._forward_sequential(input_token_embeds, None, collect_all_layers=True)
 
             # Effective Rank計算
             effective_rank = self._compute_effective_rank(contexts)
