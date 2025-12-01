@@ -1,0 +1,832 @@
+From https://github.com/rato-tokyo/new-llm
+ * branch            main       -> FETCH_HEAD
+Already up to date.
+======================================================================
+CVFP HYPOTHESIS TEST
+Hypothesis: Diversity-only training (no CVFP) leads to near-fixed-point
+======================================================================
+Device: cuda
+Algorithms: ['MCDL', 'ODCM', 'DUE', 'CTM', 'UDEL', 'SDL', 'UNIF', 'DECORR', 'NUC', 'HSIC', 'InfoNCE', 'WMSE']
+Samples: 100
+Post-training iterations: 5
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+
+============================================================
+Algorithm: MCDL (dist_reg_weight=1.0, NO CVFP)
+Samples: 100, Tokens: 122,795
+============================================================
+2025-12-01 08:38:53.917971: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-12-01 08:38:53.933526: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1764578333.953844   64292 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764578333.960263   64292 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764578333.976560   64292 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764578333.976589   64292 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764578333.976592   64292 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764578333.976594   64292 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-12-01 08:38:53.981485: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] MCDL: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.3072 [1.8s]
+  Iter 3: conv=0% loss=-0.3193 [1.5s]
+  Iter 4: conv=0% loss=-0.2949 [1.3s]
+  Iter 5: conv=0% loss=-0.2919 [1.4s]
+    Val ER: 67.0%
+  Iter 6: conv=0% loss=-0.3212 [1.4s]
+  Iter 7: conv=0% loss=-0.3390 [1.3s]
+  Iter 8: conv=0% loss=-0.3475 [1.3s]
+  Iter 9: conv=0% loss=-0.3582 [1.4s]
+  Iter 10: conv=0% loss=-0.3668 [1.3s]
+    Val ER: 64.3%
+  → Val early stop: ER not improving for 1 checks
+  Done: 0% converged
+
+Training completed in 22.2s
+Train ER: 67.7%
+Val ER: 64.3%
+
+Measuring convergence with 5 additional iterations...
+  Sampling 10000 tokens from 122795 for convergence measurement
+
+  Iter | MSE      | Cos Sim | L2/tok  | ER%
+  --------------------------------------------------
+     1 | 0.844752 | 0.5902  | 0.2547  | 67.8%
+     2 | 0.000000 | 1.0000  | 0.0000  | 67.8%
+     3 | 0.000000 | 1.0000  | 0.0000  | 67.8%
+     4 | 0.000000 | 1.0000  | 0.0000  | 67.8%
+     5 | 0.000000 | 1.0000  | 0.0000  | 67.8%
+
+  Verdict: CONVERGED (fixed point)
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+
+============================================================
+Algorithm: ODCM (dist_reg_weight=1.0, NO CVFP)
+Samples: 100, Tokens: 122,795
+============================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] ODCM: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=0.5733 [1.5s]
+  Iter 3: conv=0% loss=0.4139 [1.4s]
+  Iter 4: conv=0% loss=0.3887 [1.4s]
+  Iter 5: conv=0% loss=0.3719 [1.4s]
+    Val ER: 72.2%
+  Iter 6: conv=0% loss=0.3588 [1.4s]
+  Iter 7: conv=0% loss=0.3208 [1.4s]
+  Iter 8: conv=0% loss=0.3023 [1.4s]
+  Iter 9: conv=0% loss=0.2828 [1.4s]
+  Iter 10: conv=0% loss=0.2696 [1.4s]
+    Val ER: 76.7%
+  Iter 11: conv=0% loss=0.2663 [1.4s]
+  Iter 12: conv=0% loss=0.2582 [1.4s]
+  Iter 13: conv=0% loss=0.2375 [1.4s]
+  Iter 14: conv=0% loss=0.2333 [1.4s]
+  Iter 15: conv=0% loss=0.2350 [1.4s]
+    Val ER: 78.6%
+  Iter 16: conv=0% loss=0.2311 [1.4s]
+  Iter 17: conv=0% loss=0.2128 [1.4s]
+  Iter 18: conv=0% loss=0.2028 [1.4s]
+  Iter 19: conv=0% loss=0.1787 [1.4s]
+  Iter 20: conv=0% loss=0.1714 [1.4s]
+    Val ER: 81.7%
+  Iter 21: conv=0% loss=0.1667 [1.4s]
+  Iter 22: conv=0% loss=0.1602 [1.4s]
+  Iter 23: conv=0% loss=0.1517 [1.4s]
+  Iter 24: conv=0% loss=0.1478 [1.4s]
+  Iter 25: conv=0% loss=0.1503 [1.4s]
+    Val ER: 82.7%
+  Iter 26: conv=0% loss=0.1501 [1.4s]
+  Iter 27: conv=0% loss=0.1441 [1.4s]
+  Iter 28: conv=0% loss=0.1402 [1.4s]
+  Iter 29: conv=0% loss=0.1462 [1.4s]
+  Iter 30: conv=0% loss=0.1480 [1.4s]
+    Val ER: 83.6%
+  Iter 31: conv=0% loss=0.1507 [1.4s]
+  Iter 32: conv=0% loss=0.1509 [1.4s]
+  Iter 33: conv=0% loss=0.1503 [1.4s]
+  Iter 34: conv=0% loss=0.1428 [1.4s]
+  Iter 35: conv=0% loss=0.1367 [1.4s]
+    Val ER: 83.9%
+  Iter 36: conv=0% loss=0.1304 [1.4s]
+  Iter 37: conv=0% loss=0.1262 [1.4s]
+  Iter 38: conv=0% loss=0.1213 [1.4s]
+  Iter 39: conv=0% loss=0.1137 [1.4s]
+  Iter 40: conv=0% loss=0.1108 [1.4s]
+    Val ER: 84.1%
+  Iter 41: conv=0% loss=0.1116 [1.4s]
+  Iter 42: conv=0% loss=0.1133 [1.4s]
+  Iter 43: conv=0% loss=0.1073 [1.4s]
+  Iter 44: conv=0% loss=0.1033 [1.4s]
+  Iter 45: conv=0% loss=0.1012 [1.4s]
+    Val ER: 85.4%
+  Iter 46: conv=0% loss=0.0999 [1.4s]
+  Iter 47: conv=0% loss=0.0955 [1.4s]
+  Iter 48: conv=0% loss=0.0912 [1.4s]
+  Iter 49: conv=0% loss=0.0916 [1.4s]
+  Iter 50: conv=0% loss=0.0893 [1.4s]
+    Val ER: 86.2%
+  Iter 51: conv=0% loss=0.0869 [1.4s]
+  Iter 52: conv=0% loss=0.0825 [1.4s]
+  Iter 53: conv=0% loss=0.0812 [1.4s]
+  Iter 54: conv=0% loss=0.0797 [1.4s]
+  Iter 55: conv=0% loss=0.0806 [1.4s]
+    Val ER: 86.9%
+  Iter 56: conv=0% loss=0.0783 [1.4s]
+  Iter 57: conv=0% loss=0.0756 [1.4s]
+  Iter 58: conv=0% loss=0.0735 [1.4s]
+  Iter 59: conv=0% loss=0.0718 [1.4s]
+  Iter 60: conv=0% loss=0.0705 [1.4s]
+    Val ER: 87.4%
+  Done: 0% converged
+
+Training completed in 135.1s
+Train ER: 88.9%
+Val ER: 87.4%
+
+Measuring convergence with 5 additional iterations...
+  Sampling 10000 tokens from 122795 for convergence measurement
+
+  Iter | MSE      | Cos Sim | L2/tok  | ER%
+  --------------------------------------------------
+     1 | 1.505579 | 0.3388  | 0.3400  | 88.1%
+     2 | 0.000000 | 1.0000  | 0.0000  | 88.1%
+     3 | 0.000000 | 1.0000  | 0.0000  | 88.1%
+     4 | 0.000000 | 1.0000  | 0.0000  | 88.1%
+     5 | 0.000000 | 1.0000  | 0.0000  | 88.1%
+
+  Verdict: CONVERGED (fixed point)
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+
+============================================================
+Algorithm: DUE (dist_reg_weight=1.0, NO CVFP)
+Samples: 100, Tokens: 122,795
+============================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] DUE: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.9904 [1.4s]
+  Iter 3: conv=0% loss=-0.9961 [1.4s]
+  Iter 4: conv=0% loss=-0.9935 [1.3s]
+  Iter 5: conv=0% loss=-0.9922 [1.3s]
+    Val ER: 52.7%
+  Iter 6: conv=0% loss=-0.9933 [1.3s]
+  Iter 7: conv=0% loss=-0.9949 [1.3s]
+  Iter 8: conv=0% loss=-0.9963 [1.4s]
+  Iter 9: conv=0% loss=-0.9971 [1.4s]
+  Iter 10: conv=40% loss=-0.9977 [1.3s]
+    Val ER: 26.1%
+  → Val early stop: ER not improving for 1 checks
+  Done: 40% converged
+
+Training completed in 21.6s
+Train ER: 32.3%
+Val ER: 26.1%
+
+Measuring convergence with 5 additional iterations...
+  Sampling 10000 tokens from 122795 for convergence measurement
+
+  Iter | MSE      | Cos Sim | L2/tok  | ER%
+  --------------------------------------------------
+     1 | 0.053820 | 0.9734  | 0.0643  | 27.9%
+     2 | 0.000000 | 1.0000  | 0.0000  | 27.9%
+     3 | 0.000000 | 1.0000  | 0.0000  | 27.9%
+     4 | 0.000000 | 1.0000  | 0.0000  | 27.9%
+     5 | 0.000000 | 1.0000  | 0.0000  | 27.9%
+
+  Verdict: CONVERGED (fixed point)
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+
+============================================================
+Algorithm: CTM (dist_reg_weight=1.0, NO CVFP)
+Samples: 100, Tokens: 122,795
+============================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] CTM: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.6050 [1.5s]
+  Iter 3: conv=0% loss=-0.6535 [1.4s]
+  Iter 4: conv=0% loss=-0.5573 [1.4s]
+  Iter 5: conv=0% loss=-0.5421 [1.4s]
+    Val ER: 66.8%
+  Iter 6: conv=0% loss=-0.6565 [1.4s]
+  Iter 7: conv=0% loss=-0.7403 [1.4s]
+  Iter 8: conv=0% loss=-0.7810 [1.4s]
+  Iter 9: conv=0% loss=-0.8296 [1.4s]
+  Iter 10: conv=0% loss=-0.8700 [1.4s]
+    Val ER: 64.6%
+  → Val early stop: ER not improving for 1 checks
+  Done: 0% converged
+
+Training completed in 22.0s
+Train ER: 67.9%
+Val ER: 64.6%
+
+Measuring convergence with 5 additional iterations...
+  Sampling 10000 tokens from 122795 for convergence measurement
+
+  Iter | MSE      | Cos Sim | L2/tok  | ER%
+  --------------------------------------------------
+     1 | 0.862291 | 0.5818  | 0.2573  | 68.1%
+     2 | 0.000000 | 1.0000  | 0.0000  | 68.1%
+     3 | 0.000000 | 1.0000  | 0.0000  | 68.1%
+     4 | 0.000000 | 1.0000  | 0.0000  | 68.1%
+     5 | 0.000000 | 1.0000  | 0.0000  | 68.1%
+
+  Verdict: CONVERGED (fixed point)
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+
+============================================================
+Algorithm: UDEL (dist_reg_weight=1.0, NO CVFP)
+Samples: 100, Tokens: 122,795
+============================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] UDEL: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-0.6075 [1.4s]
+  Iter 3: conv=0% loss=-0.6938 [1.4s]
+  Iter 4: conv=0% loss=-0.6493 [1.3s]
+  Iter 5: conv=0% loss=-0.6574 [1.3s]
+    Val ER: 71.7%
+  Iter 6: conv=0% loss=-0.7650 [1.4s]
+  Iter 7: conv=0% loss=-0.8247 [1.3s]
+  Iter 8: conv=0% loss=-0.8080 [1.3s]
+  Iter 9: conv=0% loss=-0.8328 [1.3s]
+  Iter 10: conv=0% loss=-0.8748 [1.3s]
+    Val ER: 66.3%
+  → Val early stop: ER not improving for 1 checks
+  Done: 0% converged
+
+Training completed in 21.5s
+Train ER: 73.0%
+Val ER: 66.3%
+
+Measuring convergence with 5 additional iterations...
+  Sampling 10000 tokens from 122795 for convergence measurement
+
+  Iter | MSE      | Cos Sim | L2/tok  | ER%
+  --------------------------------------------------
+     1 | 0.924976 | 0.5523  | 0.2665  | 68.8%
+     2 | 0.000000 | 1.0000  | 0.0000  | 68.8%
+     3 | 0.000000 | 1.0000  | 0.0000  | 68.8%
+     4 | 0.000000 | 1.0000  | 0.0000  | 68.8%
+     5 | 0.000000 | 1.0000  | 0.0000  | 68.8%
+
+  Verdict: CONVERGED (fixed point)
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+
+============================================================
+Algorithm: SDL (dist_reg_weight=1.0, NO CVFP)
+Samples: 100, Tokens: 122,795
+============================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] SDL: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-6.1710 [2.8s]
+  Iter 3: conv=0% loss=-6.3216 [2.7s]
+  Iter 4: conv=0% loss=-6.3251 [2.7s]
+  Iter 5: conv=0% loss=-6.3397 [2.7s]
+    Val ER: 75.6%
+  Iter 6: conv=0% loss=-6.3922 [2.8s]
+  Iter 7: conv=0% loss=-6.4079 [2.8s]
+  Iter 8: conv=0% loss=-6.3904 [2.8s]
+  Iter 9: conv=0% loss=-6.3968 [2.8s]
+  Iter 10: conv=0% loss=-6.4058 [2.8s]
+    Val ER: 76.4%
+  Iter 11: conv=0% loss=-6.4057 [2.8s]
+  Iter 12: conv=0% loss=-6.4093 [2.8s]
+  Iter 13: conv=0% loss=-6.3836 [2.8s]
+  Iter 14: conv=0% loss=-6.3695 [2.8s]
+  Iter 15: conv=0% loss=-6.3513 [2.8s]
+    Val ER: 72.2%
+  → Val early stop: ER not improving for 1 checks
+  Done: 0% converged
+
+Training completed in 52.6s
+Train ER: 77.4%
+Val ER: 72.2%
+
+Measuring convergence with 5 additional iterations...
+  Sampling 10000 tokens from 122795 for convergence measurement
+
+  Iter | MSE      | Cos Sim | L2/tok  | ER%
+  --------------------------------------------------
+     1 | 1.532922 | 0.2385  | 0.3431  | 73.4%
+     2 | 0.000000 | 1.0000  | 0.0000  | 73.4%
+     3 | 0.000000 | 1.0000  | 0.0000  | 73.4%
+     4 | 0.000000 | 1.0000  | 0.0000  | 73.4%
+     5 | 0.000000 | 1.0000  | 0.0000  | 73.4%
+
+  Verdict: CONVERGED (fixed point)
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+
+============================================================
+Algorithm: UNIF (dist_reg_weight=1.0, NO CVFP)
+Samples: 100, Tokens: 122,795
+============================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] UNIF: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-2.2720 [3.8s]
+  Iter 3: conv=0% loss=-2.5009 [3.6s]
+  Iter 4: conv=0% loss=-2.0840 [3.6s]
+  Iter 5: conv=0% loss=-1.9987 [3.6s]
+    Val ER: 67.9%
+  Iter 6: conv=0% loss=-2.3593 [3.6s]
+  Iter 7: conv=0% loss=-2.6188 [3.6s]
+  Iter 8: conv=0% loss=-2.6828 [3.6s]
+  Iter 9: conv=0% loss=-2.8238 [3.6s]
+  Iter 10: conv=0% loss=-2.9937 [3.6s]
+    Val ER: 70.1%
+  Iter 11: conv=0% loss=-3.1079 [3.6s]
+  Iter 12: conv=0% loss=-3.1873 [3.6s]
+  Iter 13: conv=2% loss=-3.2521 [3.6s]
+  Iter 14: conv=3% loss=-3.3385 [3.6s]
+  Iter 15: conv=3% loss=-3.3947 [3.6s]
+    Val ER: 73.8%
+  Iter 16: conv=4% loss=-3.4284 [3.6s]
+  Iter 17: conv=4% loss=-3.5003 [3.6s]
+  Iter 18: conv=4% loss=-3.5196 [3.6s]
+  Iter 19: conv=4% loss=-3.5720 [3.6s]
+  Iter 20: conv=4% loss=-3.5951 [3.6s]
+    Val ER: 77.3%
+  Iter 21: conv=4% loss=-3.6187 [3.6s]
+  Iter 22: conv=4% loss=-3.6498 [3.6s]
+  Iter 23: conv=4% loss=-3.6607 [3.6s]
+  Iter 24: conv=3% loss=-3.7056 [3.6s]
+  Iter 25: conv=2% loss=-3.7251 [3.6s]
+    Val ER: 81.0%
+  Iter 26: conv=1% loss=-3.7616 [3.6s]
+  Iter 27: conv=0% loss=-3.7804 [3.6s]
+  Iter 28: conv=0% loss=-3.8002 [3.6s]
+  Iter 29: conv=0% loss=-3.8256 [3.6s]
+  Iter 30: conv=0% loss=-3.8352 [3.6s]
+    Val ER: 84.2%
+  Iter 31: conv=0% loss=-3.8554 [3.6s]
+  Iter 32: conv=0% loss=-3.8675 [3.6s]
+  Iter 33: conv=0% loss=-3.8774 [3.6s]
+  Iter 34: conv=0% loss=-3.8848 [3.5s]
+  Iter 35: conv=0% loss=-3.8885 [3.5s]
+    Val ER: 84.2%
+  Iter 36: conv=0% loss=-3.8945 [3.6s]
+  Iter 37: conv=0% loss=-3.8973 [3.5s]
+  Iter 38: conv=0% loss=-3.9006 [3.5s]
+  Iter 39: conv=0% loss=-3.9027 [3.6s]
+  Iter 40: conv=0% loss=-3.9037 [3.5s]
+    Val ER: 81.3%
+  → Val early stop: ER not improving for 1 checks
+  Done: 0% converged
+
+Training completed in 174.0s
+Train ER: 85.4%
+Val ER: 81.3%
+
+Measuring convergence with 5 additional iterations...
+  Sampling 10000 tokens from 122795 for convergence measurement
+
+  Iter | MSE      | Cos Sim | L2/tok  | ER%
+  --------------------------------------------------
+     1 | 1.740085 | 0.1592  | 0.3656  | 81.6%
+     2 | 0.000000 | 1.0000  | 0.0000  | 81.6%
+     3 | 0.000000 | 1.0000  | 0.0000  | 81.6%
+     4 | 0.000000 | 1.0000  | 0.0000  | 81.6%
+     5 | 0.000000 | 1.0000  | 0.0000  | 81.6%
+
+  Verdict: CONVERGED (fixed point)
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+
+============================================================
+Algorithm: DECORR (dist_reg_weight=1.0, NO CVFP)
+Samples: 100, Tokens: 122,795
+============================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] DECORR: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=0.0127 [1.5s]
+  Iter 3: conv=0% loss=0.0063 [1.4s]
+  Iter 4: conv=0% loss=0.0058 [1.4s]
+  Iter 5: conv=0% loss=0.0506 [1.4s]
+    Val ER: 53.9%
+  Iter 6: conv=0% loss=0.0046 [1.4s]
+  Iter 7: conv=0% loss=0.0083 [1.4s]
+  Iter 8: conv=0% loss=0.0212 [1.4s]
+  Iter 9: conv=0% loss=0.0091 [1.4s]
+  Iter 10: conv=0% loss=0.0074 [1.4s]
+    Val ER: 62.2%
+  Iter 11: conv=0% loss=0.0063 [1.4s]
+  Iter 12: conv=0% loss=0.0058 [1.4s]
+  Iter 13: conv=5% loss=0.0046 [1.4s]
+  Iter 14: conv=27% loss=0.0044 [1.4s]
+  Iter 15: conv=72% loss=0.0038 [1.4s]
+    Val ER: 53.2%
+  → Val early stop: ER not improving for 1 checks
+  Done: 72% converged
+
+Training completed in 33.4s
+Train ER: 58.1%
+Val ER: 53.2%
+
+Measuring convergence with 5 additional iterations...
+  Sampling 10000 tokens from 122795 for convergence measurement
+
+  Iter | MSE      | Cos Sim | L2/tok  | ER%
+  --------------------------------------------------
+     1 | 0.168665 | 0.9157  | 0.1138  | 54.9%
+     2 | 0.000000 | 1.0000  | 0.0000  | 54.9%
+     3 | 0.000000 | 1.0000  | 0.0000  | 54.9%
+     4 | 0.000000 | 1.0000  | 0.0000  | 54.9%
+     5 | 0.000000 | 1.0000  | 0.0000  | 54.9%
+
+  Verdict: CONVERGED (fixed point)
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+
+============================================================
+Algorithm: NUC (dist_reg_weight=1.0, NO CVFP)
+Samples: 100, Tokens: 122,795
+============================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] NUC: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=-5.7693 [2.8s]
+  Iter 3: conv=0% loss=-6.7014 [2.7s]
+  Iter 4: conv=0% loss=-6.2700 [2.7s]
+  Iter 5: conv=0% loss=-6.0696 [2.8s]
+    Val ER: 72.4%
+  Iter 6: conv=0% loss=-6.6186 [2.8s]
+  Iter 7: conv=0% loss=-7.0195 [2.8s]
+  Iter 8: conv=0% loss=-7.1228 [2.8s]
+  Iter 9: conv=0% loss=-7.3555 [2.8s]
+  Iter 10: conv=0% loss=-7.6887 [2.8s]
+    Val ER: 76.9%
+  Iter 11: conv=0% loss=-8.0039 [2.8s]
+  Iter 12: conv=0% loss=-8.0900 [2.8s]
+  Iter 13: conv=0% loss=-8.1090 [2.8s]
+  Iter 14: conv=0% loss=-8.0057 [2.7s]
+  Iter 15: conv=0% loss=-7.8742 [2.7s]
+    Val ER: 76.8%
+  → Val early stop: ER not improving for 1 checks
+  Done: 0% converged
+
+Training completed in 52.2s
+Train ER: 82.0%
+Val ER: 76.8%
+
+Measuring convergence with 5 additional iterations...
+  Sampling 10000 tokens from 122795 for convergence measurement
+
+  Iter | MSE      | Cos Sim | L2/tok  | ER%
+  --------------------------------------------------
+     1 | 1.462194 | 0.3052  | 0.3351  | 77.7%
+     2 | 0.000000 | 1.0000  | 0.0000  | 77.7%
+     3 | 0.000000 | 1.0000  | 0.0000  | 77.7%
+     4 | 0.000000 | 1.0000  | 0.0000  | 77.7%
+     5 | 0.000000 | 1.0000  | 0.0000  | 77.7%
+
+  Verdict: CONVERGED (fixed point)
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+
+============================================================
+Algorithm: HSIC (dist_reg_weight=1.0, NO CVFP)
+Samples: 100, Tokens: 122,795
+============================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] HSIC: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=0.0015 [4.7s]
+  Iter 3: conv=0% loss=0.0003 [4.7s]
+  Iter 4: conv=0% loss=0.0001 [4.7s]
+  Iter 5: conv=0% loss=0.0001 [4.7s]
+    Val ER: 14.6%
+  Iter 6: conv=91% loss=0.0001 [4.7s]
+  Iter 7: conv=100% loss=0.0001 [4.7s]
+  Iter 8: conv=100% loss=0.0001 [4.7s]
+  Iter 9: conv=100% loss=0.0000 [4.6s]
+  Iter 10: conv=100% loss=0.0001 [4.6s]
+    Val ER: 4.8%
+  → Val early stop: ER not improving for 1 checks
+  Done: 100% converged
+
+Training completed in 51.4s
+Train ER: 6.6%
+Val ER: 4.8%
+
+Measuring convergence with 5 additional iterations...
+  Sampling 10000 tokens from 122795 for convergence measurement
+
+  Iter | MSE      | Cos Sim | L2/tok  | ER%
+  --------------------------------------------------
+     1 | 0.001894 | 0.9990  | 0.0121  | 5.0%
+     2 | 0.000000 | 1.0000  | 0.0000  | 5.0%
+     3 | 0.000000 | 1.0000  | 0.0000  | 5.0%
+     4 | 0.000000 | 1.0000  | 0.0000  | 5.0%
+     5 | 0.000000 | 1.0000  | 0.0000  | 5.0%
+
+  Verdict: CONVERGED (fixed point)
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+
+============================================================
+Algorithm: InfoNCE (dist_reg_weight=1.0, NO CVFP)
+Samples: 100, Tokens: 122,795
+============================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] InfoNCE: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=3.5467 [1.9s]
+  Iter 3: conv=0% loss=2.8052 [1.8s]
+  Iter 4: conv=0% loss=3.5746 [1.8s]
+  Iter 5: conv=0% loss=3.7393 [1.8s]
+    Val ER: 70.0%
+  Iter 6: conv=0% loss=3.0128 [1.8s]
+  Iter 7: conv=0% loss=2.6174 [1.8s]
+  Iter 8: conv=0% loss=2.5533 [1.8s]
+  Iter 9: conv=0% loss=2.2992 [1.8s]
+  Iter 10: conv=0% loss=1.8808 [1.8s]
+    Val ER: 74.0%
+  Iter 11: conv=0% loss=1.6259 [1.8s]
+  Iter 12: conv=0% loss=1.5905 [1.8s]
+  Iter 13: conv=0% loss=1.4008 [1.8s]
+  Iter 14: conv=0% loss=1.2729 [1.8s]
+  Iter 15: conv=0% loss=1.1535 [1.8s]
+    Val ER: 72.8%
+  → Val early stop: ER not improving for 1 checks
+  Done: 0% converged
+
+Training completed in 38.6s
+Train ER: 79.6%
+Val ER: 72.8%
+
+Measuring convergence with 5 additional iterations...
+  Sampling 10000 tokens from 122795 for convergence measurement
+
+  Iter | MSE      | Cos Sim | L2/tok  | ER%
+  --------------------------------------------------
+     1 | 1.312058 | 0.3507  | 0.3174  | 73.9%
+     2 | 0.000000 | 1.0000  | 0.0000  | 73.9%
+     3 | 0.000000 | 1.0000  | 0.0000  | 73.9%
+     4 | 0.000000 | 1.0000  | 0.0000  | 73.9%
+     5 | 0.000000 | 1.0000  | 0.0000  | 73.9%
+
+  Verdict: CONVERGED (fixed point)
+Loading training data...
+  Loading from cache: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (31024 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 122795 tokens (100 samples)
+  Val:   31024 tokens
+
+============================================================
+Algorithm: WMSE (dist_reg_weight=1.0, NO CVFP)
+Samples: 100, Tokens: 122,795
+============================================================
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using E案 architecture: ContextBlock(1 layers) + TokenBlock(1 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+
+[Phase 1] WMSE: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=0.0000 [1.8s]
+  Iter 3: conv=0% loss=0.0000 [1.8s]
+  Iter 4: conv=0% loss=0.0000 [1.8s]
+  Iter 5: conv=0% loss=0.0000 [1.8s]
+    Val ER: 73.4%
+  Iter 6: conv=0% loss=0.0000 [1.8s]
+  Iter 7: conv=0% loss=0.0000 [1.8s]
+  Iter 8: conv=0% loss=0.0000 [1.8s]
+  Iter 9: conv=0% loss=0.0000 [1.8s]
+  Iter 10: conv=0% loss=0.0000 [1.8s]
+    Val ER: 74.3%
+  Iter 11: conv=0% loss=0.0000 [1.8s]
+  Iter 12: conv=0% loss=0.0000 [1.8s]
+  Iter 13: conv=0% loss=0.0000 [1.8s]
+  Iter 14: conv=0% loss=0.0000 [1.8s]
+  Iter 15: conv=0% loss=0.0000 [1.8s]
+    Val ER: 74.6%
+  Iter 16: conv=0% loss=0.0000 [1.8s]
+  Iter 17: conv=0% loss=0.0000 [1.8s]
+  Iter 18: conv=0% loss=0.0000 [1.8s]
+  Iter 19: conv=0% loss=0.0000 [1.8s]
+  Iter 20: conv=0% loss=0.0000 [1.8s]
+    Val ER: 74.8%
+  Iter 21: conv=0% loss=0.0000 [1.8s]
+  Iter 22: conv=0% loss=0.0000 [1.8s]
+  Iter 23: conv=0% loss=0.0000 [1.8s]
+  Iter 24: conv=0% loss=0.0000 [1.8s]
+  Iter 25: conv=0% loss=0.0000 [1.8s]
+    Val ER: 74.9%
+  Iter 26: conv=0% loss=0.0000 [1.8s]
+  Iter 27: conv=0% loss=0.0000 [1.8s]
+  Iter 28: conv=0% loss=0.0000 [1.8s]
+  Iter 29: conv=0% loss=0.0000 [1.8s]
+  Iter 30: conv=0% loss=0.0000 [1.8s]
+    Val ER: 75.0%
+  Iter 31: conv=0% loss=0.0000 [1.8s]
+  Iter 32: conv=0% loss=0.0000 [1.8s]
+  Iter 33: conv=0% loss=0.0000 [1.8s]
+  Iter 34: conv=0% loss=0.0000 [1.8s]
+  Iter 35: conv=0% loss=0.0000 [1.8s]
+    Val ER: 75.2%
+  Iter 36: conv=0% loss=0.0000 [1.8s]
+  Iter 37: conv=0% loss=0.0000 [1.8s]
+  Iter 38: conv=0% loss=0.0000 [1.8s]
+  Iter 39: conv=0% loss=0.0000 [1.8s]
+  Iter 40: conv=0% loss=0.0000 [1.8s]
+    Val ER: 75.3%
+  Iter 41: conv=0% loss=0.0000 [1.8s]
+  Iter 42: conv=0% loss=0.0000 [1.8s]
+  Iter 43: conv=0% loss=0.0000 [1.8s]
+  Iter 44: conv=0% loss=0.0000 [1.8s]
+  Iter 45: conv=0% loss=0.0000 [1.7s]
+    Val ER: 75.4%
+  Iter 46: conv=0% loss=0.0000 [1.8s]
+  Iter 47: conv=0% loss=0.0000 [1.8s]
+  Iter 48: conv=0% loss=0.0000 [1.8s]
+  Iter 49: conv=0% loss=0.0000 [1.8s]
+  Iter 50: conv=0% loss=0.0000 [1.8s]
+    Val ER: 75.5%
+  Iter 51: conv=0% loss=0.0000 [1.8s]
+  Iter 52: conv=0% loss=0.0000 [1.8s]
+  Iter 53: conv=0% loss=0.0000 [1.8s]
+  Iter 54: conv=0% loss=0.0000 [1.8s]
+  Iter 55: conv=0% loss=0.0000 [1.8s]
+    Val ER: 75.6%
+  Iter 56: conv=0% loss=0.0000 [1.8s]
+  Iter 57: conv=0% loss=0.0000 [1.8s]
+  Iter 58: conv=0% loss=0.0000 [1.8s]
+  Iter 59: conv=0% loss=0.0000 [1.8s]
+  Iter 60: conv=0% loss=0.0000 [1.8s]
+    Val ER: 75.7%
+  Done: 0% converged
+
+Training completed in 156.0s
+Train ER: 76.8%
+Val ER: 75.7%
+
+Measuring convergence with 5 additional iterations...
+  Sampling 10000 tokens from 122795 for convergence measurement
+
+  Iter | MSE      | Cos Sim | L2/tok  | ER%
+  --------------------------------------------------
+     1 | 0.612441 | 0.6942  | 0.2169  | 77.0%
+     2 | 0.000000 | 1.0000  | 0.0000  | 77.0%
+     3 | 0.000000 | 1.0000  | 0.0000  | 77.0%
+     4 | 0.000000 | 1.0000  | 0.0000  | 77.0%
+     5 | 0.000000 | 1.0000  | 0.0000  | 77.0%
+
+  Verdict: CONVERGED (fixed point)
+
+================================================================================
+SUMMARY
+================================================================================
+Algorithm  |  Train ER% |    Val ER% |  Final MSE |    Cos | Verdict
+--------------------------------------------------------------------------------
+MCDL       |       67.7 |       64.3 |   0.000000 | 1.0000 | CONVERGED (fixed point)
+ODCM       |       88.9 |       87.4 |   0.000000 | 1.0000 | CONVERGED (fixed point)
+DUE        |       32.3 |       26.1 |   0.000000 | 1.0000 | CONVERGED (fixed point)
+CTM        |       67.9 |       64.6 |   0.000000 | 1.0000 | CONVERGED (fixed point)
+UDEL       |       73.0 |       66.3 |   0.000000 | 1.0000 | CONVERGED (fixed point)
+SDL        |       77.4 |       72.2 |   0.000000 | 1.0000 | CONVERGED (fixed point)
+UNIF       |       85.4 |       81.3 |   0.000000 | 1.0000 | CONVERGED (fixed point)
+DECORR     |       58.1 |       53.2 |   0.000000 | 1.0000 | CONVERGED (fixed point)
+NUC        |       82.0 |       76.8 |   0.000000 | 1.0000 | CONVERGED (fixed point)
+HSIC       |        6.6 |        4.8 |   0.000000 | 1.0000 | CONVERGED (fixed point)
+InfoNCE    |       79.6 |       72.8 |   0.000000 | 1.0000 | CONVERGED (fixed point)
+WMSE       |       76.8 |       75.7 |   0.000000 | 1.0000 | CONVERGED (fixed point)
+
+Results saved to: ./importants/logs/cvfp_hypothesis_20251201_085613/results.json

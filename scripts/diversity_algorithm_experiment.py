@@ -1,21 +1,32 @@
 #!/usr/bin/env python3
 """
-多様性損失アルゴリズム比較実験スクリプト
+多様性損失アルゴリズム比較実験スクリプト（5アルゴリズム版）
 
-各アルゴリズムの純粋な性能を比較するため、Phase 1のみ実行し、
-Val ER、Train ER、処理時間を測定する。
+採用アルゴリズム:
+  - MCDL: 現行ベースライン（最速）
+  - ODCM: VICReg風（推奨、低コスト・高ER）
+  - SDL: ER直接最大化（最高ER、高コスト）
+  - NUC: 核ノルム最大化（高ER、高コスト）
+  - WMSE: 白色化ベース（中コスト）
 
 使用方法:
+  # デフォルト: context_dim=768,1000 で全5アルゴリズム実行
   python3 scripts/diversity_algorithm_experiment.py
 
   # 特定のアルゴリズムのみ実行
-  python3 scripts/diversity_algorithm_experiment.py --algorithms MCDL ODCM
+  python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM
 
   # サンプルサイズを指定
-  python3 scripts/diversity_algorithm_experiment.py --samples 50 100
+  python3 scripts/diversity_algorithm_experiment.py -s 100
+
+  # context_dimを指定（複数可）
+  python3 scripts/diversity_algorithm_experiment.py -c 768 1000
+
+  # 高コスト（SDL, NUC）を含める
+  python3 scripts/diversity_algorithm_experiment.py --include-high-cost
 
 Colab実行用:
-  !cd /content/new-llm && python3 scripts/diversity_algorithm_experiment.py
+  !cd /content/new-llm && python3 scripts/diversity_algorithm_experiment.py -s 100 -c 768 1000 --include-high-cost
 """
 
 import os
@@ -95,7 +106,8 @@ def run_single_experiment(
     base_config: ResidualConfig,
     device: torch.device,
     seed: int = 42,
-    max_iterations: Optional[int] = None
+    max_iterations: Optional[int] = None,
+    context_dim: Optional[int] = None
 ) -> Dict[str, Any]:
     """単一の実験を実行"""
 
@@ -109,6 +121,10 @@ def run_single_experiment(
     # イテレーション数を上書き
     if max_iterations is not None:
         base_config.phase1_max_iterations = max_iterations
+
+    # context_dimを上書き
+    if context_dim is not None:
+        base_config.context_dim = context_dim
 
     # データプロバイダー
     data_provider = MemoryDataProvider(data_config)
@@ -182,6 +198,7 @@ def run_single_experiment(
 
     return {
         'algorithm': algorithm_name,
+        'context_dim': base_config.context_dim,
         'num_samples': num_samples,
         'num_train_tokens': num_train_tokens,
         'num_val_tokens': num_val_tokens,
@@ -197,6 +214,7 @@ def run_single_experiment(
 def run_all_experiments(
     algorithms: List[str],
     sample_sizes: List[int],
+    context_dims: List[int],
     base_config: ResidualConfig,
     device: torch.device,
     output_dir: str
@@ -204,69 +222,77 @@ def run_all_experiments(
     """全実験を実行"""
 
     all_results = []
-    total_experiments = len(algorithms) * len(sample_sizes)
+    total_experiments = len(algorithms) * len(sample_sizes) * len(context_dims)
     current = 0
 
-    for algorithm_name in algorithms:
-        if algorithm_name not in DIVERSITY_ALGORITHMS:
-            print_flush(f"⚠️ Unknown algorithm: {algorithm_name}, skipping")
-            continue
+    for ctx_dim in context_dims:
+        print_flush(f"\n{'#'*70}")
+        print_flush(f"# context_dim = {ctx_dim}")
+        print_flush(f"{'#'*70}")
 
-        diversity_fn = DIVERSITY_ALGORITHMS[algorithm_name]
-        print_flush(f"\n{'='*70}")
-        print_flush(f"Algorithm: {algorithm_name} - {ALGORITHM_DESCRIPTIONS.get(algorithm_name, '')}")
-        print_flush(f"{'='*70}")
+        for algorithm_name in algorithms:
+            if algorithm_name not in DIVERSITY_ALGORITHMS:
+                print_flush(f"⚠️ Unknown algorithm: {algorithm_name}, skipping")
+                continue
 
-        for num_samples in sample_sizes:
-            current += 1
-            print_flush(f"\n[{current}/{total_experiments}] {algorithm_name} with {num_samples} samples")
+            diversity_fn = DIVERSITY_ALGORITHMS[algorithm_name]
+            print_flush(f"\n{'='*70}")
+            print_flush(f"Algorithm: {algorithm_name} - {ALGORITHM_DESCRIPTIONS.get(algorithm_name, '')}")
+            print_flush(f"{'='*70}")
 
-            try:
-                result = run_single_experiment(
-                    algorithm_name=algorithm_name,
-                    diversity_fn=diversity_fn,
-                    num_samples=num_samples,
-                    base_config=base_config,
-                    device=device
-                )
-                all_results.append(result)
+            for num_samples in sample_sizes:
+                current += 1
+                print_flush(f"\n[{current}/{total_experiments}] {algorithm_name} | ctx_dim={ctx_dim} | {num_samples} samples")
 
-                print_flush(f"  Train ER: {result['train_er_pct']:.1f}%")
-                print_flush(f"  Val ER: {result['val_er_pct']:.1f}%")
-                print_flush(f"  Time: {result['train_time_sec']:.1f}s")
-                print_flush(f"  Loss calc: {result['avg_loss_time_ms']:.2f}ms/iter")
+                try:
+                    result = run_single_experiment(
+                        algorithm_name=algorithm_name,
+                        diversity_fn=diversity_fn,
+                        num_samples=num_samples,
+                        base_config=base_config,
+                        device=device,
+                        context_dim=ctx_dim
+                    )
+                    all_results.append(result)
 
-            except Exception as e:
-                print_flush(f"  ❌ Error: {e}")
-                all_results.append({
-                    'algorithm': algorithm_name,
-                    'num_samples': num_samples,
-                    'error': str(e),
-                })
+                    print_flush(f"  Train ER: {result['train_er_pct']:.1f}%")
+                    print_flush(f"  Val ER: {result['val_er_pct']:.1f}%")
+                    print_flush(f"  Time: {result['train_time_sec']:.1f}s")
+                    print_flush(f"  Loss calc: {result['avg_loss_time_ms']:.2f}ms/iter")
+
+                except Exception as e:
+                    print_flush(f"  ❌ Error: {e}")
+                    all_results.append({
+                        'algorithm': algorithm_name,
+                        'context_dim': ctx_dim,
+                        'num_samples': num_samples,
+                        'error': str(e),
+                    })
 
     return all_results
 
 
-def print_results_table(results: List[Dict[str, Any]], context_dim: int):
+def print_results_table(results: List[Dict[str, Any]], context_dims: List[int]):
     """結果をテーブル形式で表示"""
 
-    print_flush("\n" + "=" * 100)
+    print_flush("\n" + "=" * 115)
     print_flush("DIVERSITY ALGORITHM COMPARISON RESULTS")
-    print_flush("=" * 100)
+    print_flush("=" * 115)
 
     # ヘッダー
-    header = f"{'Algorithm':<10} {'Samples':>8} {'Tokens':>10} {'Train ER%':>10} {'Val ER%':>10} {'Time(s)':>8} {'Loss(ms)':>10}"
+    header = f"{'Algorithm':<10} {'ctx_dim':>8} {'Samples':>8} {'Tokens':>10} {'Train ER%':>10} {'Val ER%':>10} {'Time(s)':>8} {'Loss(ms)':>10}"
     print_flush(header)
-    print_flush("-" * 100)
+    print_flush("-" * 115)
 
     # 結果を表示
     for r in results:
         if 'error' in r:
-            print_flush(f"{r['algorithm']:<10} {r['num_samples']:>8} {'ERROR':>10} {'-':>10} {'-':>10} {'-':>8} {'-':>10}")
+            print_flush(f"{r['algorithm']:<10} {r.get('context_dim', '-'):>8} {r['num_samples']:>8} {'ERROR':>10} {'-':>10} {'-':>10} {'-':>8} {'-':>10}")
             continue
 
         print_flush(
             f"{r['algorithm']:<10} "
+            f"{r['context_dim']:>8} "
             f"{r['num_samples']:>8} "
             f"{r['num_train_tokens']:>10,} "
             f"{r['train_er_pct']:>10.1f} "
@@ -275,58 +301,60 @@ def print_results_table(results: List[Dict[str, Any]], context_dim: int):
             f"{r['avg_loss_time_ms']:>10.2f}"
         )
 
-    print_flush("=" * 100)
+    print_flush("=" * 115)
 
-    # アルゴリズム別サマリー
-    print_flush("\n" + "=" * 100)
-    print_flush("SUMMARY BY ALGORITHM (Average across sample sizes)")
-    print_flush("=" * 100)
+    # context_dim別サマリー
+    for ctx_dim in context_dims:
+        print_flush(f"\n" + "=" * 100)
+        print_flush(f"SUMMARY BY ALGORITHM (context_dim={ctx_dim})")
+        print_flush("=" * 100)
 
-    # アルゴリズムごとに集計
-    algo_stats: Dict[str, Dict[str, List[float]]] = {}
-    for r in results:
-        if 'error' in r:
-            continue
-        algo = r['algorithm']
-        if algo not in algo_stats:
-            algo_stats[algo] = {
-                'train_er_pct': [],
-                'val_er_pct': [],
-                'time': [],
-                'loss_time': []
-            }
-        algo_stats[algo]['train_er_pct'].append(r['train_er_pct'])
-        algo_stats[algo]['val_er_pct'].append(r['val_er_pct'])
-        algo_stats[algo]['time'].append(r['train_time_sec'])
-        algo_stats[algo]['loss_time'].append(r['avg_loss_time_ms'])
+        # アルゴリズムごとに集計（該当context_dimのみ）
+        algo_stats: Dict[str, Dict[str, List[float]]] = {}
+        for r in results:
+            if 'error' in r:
+                continue
+            if r.get('context_dim') != ctx_dim:
+                continue
+            algo = r['algorithm']
+            if algo not in algo_stats:
+                algo_stats[algo] = {
+                    'train_er_pct': [],
+                    'val_er_pct': [],
+                    'time': [],
+                    'loss_time': []
+                }
+            algo_stats[algo]['train_er_pct'].append(r['train_er_pct'])
+            algo_stats[algo]['val_er_pct'].append(r['val_er_pct'])
+            algo_stats[algo]['time'].append(r['train_time_sec'])
+            algo_stats[algo]['loss_time'].append(r['avg_loss_time_ms'])
 
-    header = f"{'Algorithm':<10} {'Avg Train ER%':>14} {'Avg Val ER%':>12} {'Avg Time(s)':>12} {'Avg Loss(ms)':>14}"
-    print_flush(header)
-    print_flush("-" * 100)
+        header = f"{'Algorithm':<10} {'Avg Train ER%':>14} {'Avg Val ER%':>12} {'Avg Time(s)':>12} {'Avg Loss(ms)':>14}"
+        print_flush(header)
+        print_flush("-" * 100)
 
-    # Val ER%でソート（降順）
-    sorted_algos = sorted(
-        algo_stats.items(),
-        key=lambda x: sum(x[1]['val_er_pct']) / len(x[1]['val_er_pct']) if x[1]['val_er_pct'] else 0,
-        reverse=True
-    )
-
-    for algo, stats in sorted_algos:
-        avg_train = sum(stats['train_er_pct']) / len(stats['train_er_pct'])
-        avg_val = sum(stats['val_er_pct']) / len(stats['val_er_pct'])
-        avg_time = sum(stats['time']) / len(stats['time'])
-        avg_loss = sum(stats['loss_time']) / len(stats['loss_time'])
-
-        print_flush(
-            f"{algo:<10} "
-            f"{avg_train:>14.1f} "
-            f"{avg_val:>12.1f} "
-            f"{avg_time:>12.1f} "
-            f"{avg_loss:>14.2f}"
+        # Val ER%でソート（降順）
+        sorted_algos = sorted(
+            algo_stats.items(),
+            key=lambda x: sum(x[1]['val_er_pct']) / len(x[1]['val_er_pct']) if x[1]['val_er_pct'] else 0,
+            reverse=True
         )
 
-    print_flush("=" * 100)
-    print_flush("(Sorted by Avg Val ER% descending)")
+        for algo, stats in sorted_algos:
+            avg_train = sum(stats['train_er_pct']) / len(stats['train_er_pct'])
+            avg_val = sum(stats['val_er_pct']) / len(stats['val_er_pct'])
+            avg_time = sum(stats['time']) / len(stats['time'])
+            avg_loss = sum(stats['loss_time']) / len(stats['loss_time'])
+
+            print_flush(
+                f"{algo:<10} "
+                f"{avg_train:>14.1f} "
+                f"{avg_val:>12.1f} "
+                f"{avg_time:>12.1f} "
+                f"{avg_loss:>14.2f}"
+            )
+
+    print_flush("(Sorted by Val ER% descending)")
 
 
 def save_results(results: List[Dict[str, Any]], output_dir: str, config: ResidualConfig):
@@ -369,7 +397,14 @@ def main():
         nargs='+',
         type=int,
         default=[100],
-        help='Sample sizes to test (default: 50 100 200 400)'
+        help='Sample sizes to test (default: 100)'
+    )
+    parser.add_argument(
+        '--context-dims', '-c',
+        nargs='+',
+        type=int,
+        default=[768, 1000],
+        help='Context dimensions to test (default: 768 1000)'
     )
     parser.add_argument(
         '--output-dir', '-o',
@@ -379,7 +414,7 @@ def main():
     parser.add_argument(
         '--include-high-cost',
         action='store_true',
-        help='Include high-cost algorithms (SDL, UNIF, HSIC, InfoNCE)'
+        help='Include high-cost algorithms (SDL, NUC)'
     )
 
     args = parser.parse_args()
@@ -413,9 +448,9 @@ def main():
         print_flush(f"Memory: {torch.cuda.get_device_properties(0).total_memory / (1024**3):.1f}GB")
     print_flush(f"\nAlgorithms: {algorithms}")
     print_flush(f"Sample sizes: {args.samples}")
+    print_flush(f"Context dims: {args.context_dims}")
     print_flush(f"Output: {output_dir}")
     print_flush("\nConfig:")
-    print_flush(f"  context_dim: {config.context_dim}")
     print_flush(f"  num_layers: {config.num_layers}")
     print_flush(f"  dist_reg_weight: {config.dist_reg_weight}")
     print_flush(f"  phase1_max_iterations: {config.phase1_max_iterations}")
@@ -424,13 +459,14 @@ def main():
     results = run_all_experiments(
         algorithms=algorithms,
         sample_sizes=args.samples,
+        context_dims=args.context_dims,
         base_config=config,
         device=device,
         output_dir=output_dir
     )
 
     # 結果表示
-    print_results_table(results, config.context_dim)
+    print_results_table(results, args.context_dims)
 
     # 結果保存
     save_results(results, output_dir, config)
