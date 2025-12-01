@@ -241,7 +241,8 @@ def measure_convergence_after_training(
     initial_contexts: torch.Tensor,
     device: torch.device,
     num_input_tokens: int,
-    num_iterations: int = 5
+    num_iterations: int = 5,
+    max_tokens: int = 10000
 ) -> List[Dict[str, float]]:
     """
     訓練後の追加伝播で固定点収束度を測定
@@ -253,6 +254,7 @@ def measure_convergence_after_training(
         device: デバイス
         num_input_tokens: 入力トークン数
         num_iterations: 追加伝播回数
+        max_tokens: 最大トークン数（サンプリング用、デフォルト10000）
 
     Returns:
         各イテレーションの測定結果リスト
@@ -260,30 +262,22 @@ def measure_convergence_after_training(
     model.eval()
     results = []
 
-    previous_contexts = initial_contexts.clone()
+    # トークン数が多い場合はサンプリング
     num_tokens = len(token_embeds)
+    if num_tokens > max_tokens:
+        print_flush(f"  Sampling {max_tokens} tokens from {num_tokens} for convergence measurement")
+        sample_indices = torch.linspace(0, num_tokens - 1, max_tokens).long()
+        token_embeds = token_embeds[sample_indices]
+        initial_contexts = initial_contexts[sample_indices]
+        num_tokens = max_tokens
+
+    previous_contexts = initial_contexts.clone()
 
     for iteration in range(num_iterations):
-        # シーケンシャル処理で1回伝播
-        current_contexts = torch.zeros(num_tokens, model.context_dim, device=device)
-
-        # 最終contextから開始（前回の最終状態を引き継ぐ）
-        context = previous_contexts[-1].unsqueeze(0)
-
-        # トークン履歴を初期化
-        token_history = [torch.zeros(model.embed_dim, device=device)
-                         for _ in range(num_input_tokens - 1)]
-
-        with torch.no_grad():
-            for i, token_embed in enumerate(token_embeds):
-                token_history.append(token_embed)
-                combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
-
-                context = model.context_block(context, combined_tokens.unsqueeze(0))
-                current_contexts[i] = context.squeeze(0)
-
-                if len(token_history) > num_input_tokens:
-                    token_history = token_history[-num_input_tokens:]
+        # forward_sequentialを使用して高速化
+        current_contexts = forward_sequential(
+            model, token_embeds, None, device, num_input_tokens
+        )
 
         # 変化量を測定
         mse = F.mse_loss(current_contexts, previous_contexts).item()
