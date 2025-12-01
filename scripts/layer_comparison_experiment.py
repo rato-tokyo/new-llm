@@ -149,10 +149,14 @@ def run_single_experiment(
         )
         phase1_time = time.time() - phase1_start
 
-        # Phase1Result dataclass から値を取得
-        train_contexts = train_result.contexts
-        train_context_cache = train_result.cache
-        train_token_embeds = train_result.token_embeds
+        # Phase1Result dataclass から値を取得（CPUに保持）
+        train_contexts = train_result.contexts.cpu() if train_result.contexts.is_cuda else train_result.contexts
+        train_context_cache = train_result.cache.cpu() if train_result.cache.is_cuda else train_result.cache
+        train_token_embeds = train_result.token_embeds.cpu() if train_result.token_embeds.is_cuda else train_result.token_embeds
+
+        # GPUメモリ解放
+        del train_result
+        clear_gpu_cache(device)
 
         # Phase 1 統計を取得
         phase1_stats = phase1_trainer._training_stats
@@ -162,11 +166,15 @@ def run_single_experiment(
 
         # 検証データのキャッシュ収集
         val_result = phase1_trainer.evaluate(val_token_ids, return_all_layers=True)
-        val_contexts = val_result.contexts
-        val_context_cache = val_result.cache
-        val_token_embeds = val_result.token_embeds
+        val_contexts = val_result.contexts.cpu() if val_result.contexts.is_cuda else val_result.contexts
+        val_context_cache = val_result.cache.cpu() if val_result.cache.is_cuda else val_result.cache
+        val_token_embeds = val_result.token_embeds.cpu() if val_result.token_embeds.is_cuda else val_result.token_embeds
 
-        # Effective Rank計算
+        # GPUメモリ解放
+        del val_result
+        clear_gpu_cache(device)
+
+        # Effective Rank計算（CPUテンソルで計算）
         train_metrics = analyze_fixed_points(train_contexts, label="Train", verbose=False)
         val_metrics = analyze_fixed_points(val_contexts, label="Val", verbose=False)
         train_er = train_metrics['effective_rank']
