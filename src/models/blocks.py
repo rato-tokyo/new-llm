@@ -146,8 +146,9 @@ class TokenBlock(nn.Module):
     - 出力: embed_dim
     - 各レイヤーで次元を減少
 
-    E案対応:
-        各レイヤーはContextBlockの対応するレイヤーの出力を参照
+    context_mode:
+        - 'layerwise' (E案): 各レイヤーはContextBlockの対応するレイヤーの出力を参照
+        - 'final_only' (A案): 全レイヤーがContextBlockの最終出力のみを参照
 
     Args:
         num_layers: Number of token layers
@@ -155,6 +156,7 @@ class TokenBlock(nn.Module):
         embed_dim: Token embedding dimension (最終出力次元)
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
         context_dims_list: List of context dimensions from ContextBlock (for E案)
+        use_final_context_only: If True, all layers use final context (A案)
     """
 
     def __init__(
@@ -163,13 +165,16 @@ class TokenBlock(nn.Module):
         context_dim: int,
         embed_dim: int,
         num_input_tokens: int = 1,
-        context_dims_list: Optional[List[int]] = None
+        context_dims_list: Optional[List[int]] = None,
+        use_final_context_only: bool = False
     ) -> None:
         super().__init__()
 
         self.num_layers = num_layers
         self.num_input_tokens = num_input_tokens
         self.embed_dim = embed_dim
+        self.context_dim = context_dim
+        self.use_final_context_only = use_final_context_only
 
         # 次元計算
         # 入力次元: embed_dim * num_input_tokens
@@ -185,11 +190,15 @@ class TokenBlock(nn.Module):
             dim = input_token_dim - (total_reduction * i) // num_layers
             self.token_dims.append(dim)
 
-        # ContextBlockからの次元リスト（E案用）
-        # context_dims_listはContextBlockのcontext_dims[1:]に相当
-        if context_dims_list is None:
+        # ContextBlockからの次元リスト
+        if use_final_context_only:
+            # A案: 全レイヤーで最終context次元（context_dim）を使用
+            self.context_dims_list = [context_dim] * num_layers
+        elif context_dims_list is None:
+            # デフォルト: 全レイヤーで同じ次元
             self.context_dims_list = [context_dim] * num_layers
         else:
+            # E案: ContextBlockの各レイヤー出力次元を使用
             self.context_dims_list = context_dims_list
 
         # Stack of Token layers

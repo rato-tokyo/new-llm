@@ -22,13 +22,15 @@ from .blocks import ContextBlock, TokenBlock
 
 class LLM(nn.Module):
     """
-    New-LLM with Separated Context/Token Architecture (E案)
+    New-LLM with Separated Context/Token Architecture
 
     分離アーキテクチャ:
     - ContextBlock: 文脈処理専用（Phase 1で学習、Phase 2でfreeze）
     - TokenBlock: トークン処理専用（Phase 2で学習）
 
-    E案: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+    context_mode:
+    - E案 (default): TokenBlock Layer i は ContextBlock Layer i の出力を参照
+    - A案 (use_final_context_only=True): 全TokenBlockレイヤーがContextBlockの最終出力のみを参照
 
     token継ぎ足し方式（2025-11-29に一本化）:
     - 全レイヤーでtoken入力
@@ -42,6 +44,7 @@ class LLM(nn.Module):
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
         use_weight_tying: Whether to tie token_embedding and token_output weights
                           (reduces parameters by ~38M, GPT-2 style)
+        use_final_context_only: If True, use A案 (all TokenBlock layers use final context)
     """
 
     def __init__(
@@ -52,7 +55,8 @@ class LLM(nn.Module):
         num_layers: int = 6,
         num_input_tokens: int = 1,
         use_pretrained_embeddings: bool = True,
-        use_weight_tying: bool = False
+        use_weight_tying: bool = False,
+        use_final_context_only: bool = False
     ) -> None:
         super().__init__()
 
@@ -64,6 +68,7 @@ class LLM(nn.Module):
         self.num_input_tokens = num_input_tokens
         self.use_separated_architecture = True  # Always true now
         self.use_weight_tying = use_weight_tying
+        self.use_final_context_only = use_final_context_only
 
         # ========== Token Embeddings ==========
         if use_pretrained_embeddings:
@@ -74,7 +79,8 @@ class LLM(nn.Module):
         self.embed_norm = nn.LayerNorm(embed_dim)
 
         # ========== Separated Architecture ==========
-        print(f"Using E案 architecture: ContextBlock({num_layers} layers) + TokenBlock({num_layers} layers)")
+        context_mode = "A案 (final context only)" if use_final_context_only else "E案 (layerwise)"
+        print(f"Using {context_mode} architecture: ContextBlock({num_layers} layers) + TokenBlock({num_layers} layers)")
         print(f"  num_input_tokens: {num_input_tokens}")
         print("  token継ぎ足し方式: 全レイヤーでtoken入力")
 
@@ -87,16 +93,25 @@ class LLM(nn.Module):
         )
 
         # TokenBlock: トークン処理専用
-        # E案: ContextBlockの各レイヤー出力次元をTokenBlockに渡す
-        # context_dims[1:]は各レイヤーの出力次元
-        context_dims_for_token = self.context_block.context_dims[1:]
-        self.token_block = TokenBlock(
-            num_layers=num_layers,
-            context_dim=context_dim,
-            embed_dim=embed_dim,
-            num_input_tokens=num_input_tokens,
-            context_dims_list=context_dims_for_token,
-        )
+        if use_final_context_only:
+            # A案: 全レイヤーで最終context出力のみ使用
+            self.token_block = TokenBlock(
+                num_layers=num_layers,
+                context_dim=context_dim,
+                embed_dim=embed_dim,
+                num_input_tokens=num_input_tokens,
+                use_final_context_only=True,
+            )
+        else:
+            # E案: ContextBlockの各レイヤー出力次元をTokenBlockに渡す
+            context_dims_for_token = self.context_block.context_dims[1:]
+            self.token_block = TokenBlock(
+                num_layers=num_layers,
+                context_dim=context_dim,
+                embed_dim=embed_dim,
+                num_input_tokens=num_input_tokens,
+                context_dims_list=context_dims_for_token,
+            )
 
         # ========== Output Head (Weight Tying) ==========
         # Token EmbeddingとOutput Headで重みを共有（GPT-2と同じ手法）
@@ -181,6 +196,23 @@ class LLM(nn.Module):
             token_out: [batch, embed_dim]
         """
         return self.token_block.forward_with_contexts(context_list, token_embeds)
+
+    def forward_token_a(
+        self, final_context: torch.Tensor, token_embeds: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        TokenBlock forward pass with final context only (A案用)
+
+        全TokenBlockレイヤーが同じfinal_contextを使用する。
+
+        Args:
+            final_context: Final context from ContextBlock [batch, context_dim]
+            token_embeds: [batch, embed_dim * num_input_tokens]
+
+        Returns:
+            token_out: [batch, embed_dim]
+        """
+        return self.token_block(final_context, token_embeds, context_list=None)
 
     def freeze_context_block(self) -> None:
         """ContextBlockのパラメータをfreezeする（Phase 2用）"""

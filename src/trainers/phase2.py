@@ -1,5 +1,5 @@
 """
-Phase 2 Trainer: Next-Token Prediction with Separated Architecture (E案)
+Phase 2 Trainer: Next-Token Prediction with Separated Architecture
 
 Phase 1で学習したContextBlockを固定（freeze）し、TokenBlockのみを学習する。
 
@@ -17,7 +17,7 @@ Phase 1で学習したContextBlockを固定（freeze）し、TokenBlockのみを
 - ContextBlock計算: エポックごとに1回のみ（従来: トークン数×エポック回）
 - TokenBlock: 真のバッチ並列処理（GPU効率大幅向上）
 
-## 分離アーキテクチャ（E案）- レイヤー対応版
+## 分離アーキテクチャ - E案 / A案
 
 ### ContextBlock（Phase 1で学習済み、Phase 2でfreeze）
 - 入力: [context_in, token_embed]
@@ -25,7 +25,8 @@ Phase 1で学習したContextBlockを固定（freeze）し、TokenBlockのみを
 - Phase 2では重みが固定されているため、同じ入力 → 同じ出力が保証される
 
 ### TokenBlock（Phase 2で学習）
-- **E案**: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+- **E案 (default)**: TokenBlock Layer i は ContextBlock Layer i の出力を参照
+- **A案 (use_final_context_only=True)**: 全レイヤーがContextBlockの最終出力のみを参照
 - 入力: [context_i, token_{i-1}]
 - 出力: token_i
 - 最終token_Nから次トークンを予測
@@ -117,6 +118,8 @@ class Phase2Trainer:
             device: デバイス
             batch_size: ミニバッチサイズ（必須）
             context_cache: Phase 1から渡されたキャッシュ（必須）
+                - E案: [num_layers, num_tokens, context_dim]
+                - A案: [num_tokens, context_dim]（最終context出力のみ）
             token_embeds: Phase 1から渡されたトークン埋め込み（必須）
 
         Returns:
@@ -131,6 +134,7 @@ class Phase2Trainer:
         # TokenBlockバッチ並列処理
         total_loss = 0.0
         num_layers = self.model.num_layers
+        use_final_context_only = getattr(self.model, 'use_final_context_only', False)
 
         for batch_start in range(0, num_tokens, batch_size):
             batch_end = min(batch_start + batch_size, num_tokens)
@@ -140,18 +144,22 @@ class Phase2Trainer:
             batch_targets = target_ids[batch_start:batch_end].to(device)
             batch_token_embeds = token_embeds[batch_start:batch_end].to(device)  # [batch, embed_dim * num_input_tokens]
 
-            # バッチ内のcontext_outputsを構築（GPUに転送）
-            # context_cache: テンソル [num_layers, num_tokens, context_dim] またはリスト
-            batch_context_list = []
-            for layer_idx in range(num_layers):
-                if isinstance(context_cache, list):
-                    layer_contexts = context_cache[layer_idx][batch_start:batch_end].to(device)
-                else:
-                    layer_contexts = context_cache[layer_idx, batch_start:batch_end].to(device)
-                batch_context_list.append(layer_contexts)
-
-            # TokenBlock forward（バッチ並列）
-            batch_token_out = self.model.forward_token_e(batch_context_list, batch_token_embeds)
+            if use_final_context_only:
+                # A案: 最終context出力のみ使用
+                # context_cache: [num_tokens, context_dim]
+                batch_final_context = context_cache[batch_start:batch_end].to(device)
+                batch_token_out = self.model.forward_token_a(batch_final_context, batch_token_embeds)
+            else:
+                # E案: 各レイヤーのcontext出力を使用
+                # context_cache: テンソル [num_layers, num_tokens, context_dim] またはリスト
+                batch_context_list = []
+                for layer_idx in range(num_layers):
+                    if isinstance(context_cache, list):
+                        layer_contexts = context_cache[layer_idx][batch_start:batch_end].to(device)
+                    else:
+                        layer_contexts = context_cache[layer_idx, batch_start:batch_end].to(device)
+                    batch_context_list.append(layer_contexts)
+                batch_token_out = self.model.forward_token_e(batch_context_list, batch_token_embeds)
 
             # 予測
             batch_logits = self.model.token_output(batch_token_out)
@@ -193,6 +201,8 @@ class Phase2Trainer:
             token_ids: トークンID [seq_len]
             device: デバイス
             context_cache: Phase 1から渡されたキャッシュ（必須）
+                - E案: [num_layers, num_tokens, context_dim]
+                - A案: [num_tokens, context_dim]（最終context出力のみ）
             token_embeds: Phase 1から渡されたトークン埋め込み（必須）
 
         Returns:
@@ -208,6 +218,7 @@ class Phase2Trainer:
         total_loss = 0.0
         correct = 0
         num_layers = self.model.num_layers
+        use_final_context_only = getattr(self.model, 'use_final_context_only', False)
 
         # バッチサイズを取得（train_fullで設定された値を使用）
         # 評価時はbackwardがないので訓練より少しだけ大きくできるが、安全のため同じ値を使用
@@ -221,20 +232,23 @@ class Phase2Trainer:
             for batch_start in range(0, num_tokens, eval_batch_size):
                 batch_end = min(batch_start + eval_batch_size, num_tokens)
 
-                # context_cache: テンソル [num_layers, num_tokens, context_dim] またはリスト（GPUに転送）
-                context_list = []
-                for layer_idx in range(num_layers):
-                    if isinstance(context_cache, list):
-                        layer_contexts = context_cache[layer_idx][batch_start:batch_end].to(device)
-                    else:
-                        layer_contexts = context_cache[layer_idx, batch_start:batch_end].to(device)
-                    context_list.append(layer_contexts)
-
                 # バッチのトークン埋め込み（GPUに転送）
                 batch_token_embeds = token_embeds[batch_start:batch_end].to(device)
 
-                # TokenBlock forward（バッチ並列）
-                token_out = self.model.forward_token_e(context_list, batch_token_embeds)
+                if use_final_context_only:
+                    # A案: 最終context出力のみ使用
+                    batch_final_context = context_cache[batch_start:batch_end].to(device)
+                    token_out = self.model.forward_token_a(batch_final_context, batch_token_embeds)
+                else:
+                    # E案: 各レイヤーのcontext出力を使用
+                    context_list = []
+                    for layer_idx in range(num_layers):
+                        if isinstance(context_cache, list):
+                            layer_contexts = context_cache[layer_idx][batch_start:batch_end].to(device)
+                        else:
+                            layer_contexts = context_cache[layer_idx, batch_start:batch_end].to(device)
+                        context_list.append(layer_contexts)
+                    token_out = self.model.forward_token_e(context_list, batch_token_embeds)
 
                 # 予測
                 logits = self.model.token_output(token_out)  # [batch_size, vocab_size]
