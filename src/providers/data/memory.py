@@ -21,7 +21,7 @@ class MemoryDataProvider(DataProvider):
     def __init__(self, config: Any, shuffle_samples: bool = False, shuffle_seed: int = 42) -> None:
         """
         Args:
-            config: ResidualConfig
+            config: Config
             shuffle_samples: サンプルをシャッフルするか
             shuffle_seed: シャッフル用乱数シード
         """

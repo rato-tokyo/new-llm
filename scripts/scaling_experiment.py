@@ -33,7 +33,7 @@ from itertools import product
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import ResidualConfig
+from config import Config
 from src.experiments import ExperimentRunner, ExperimentConfig
 from src.evaluation.metrics import calculate_scaling_law
 from src.utils.io import print_flush
@@ -311,8 +311,8 @@ def print_summary(all_results, output_dir):
 
 
 def main():
-    # config.pyから設定を読み込み
-    config = ResidualConfig()
+    # configから設定を読み込み
+    config = Config()
 
     # コマンドライン引数は出力ディレクトリのみ
     parser = argparse.ArgumentParser(

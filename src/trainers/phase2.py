@@ -57,7 +57,7 @@ class Phase2Trainer:
 
     Args:
         model: LLMモデル（分離アーキテクチャ）
-        config: ResidualConfig（設定）
+        config: Config（設定）
     """
 
     def __init__(self, model: Any, config: Any) -> None:

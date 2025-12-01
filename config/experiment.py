@@ -2,13 +2,13 @@
 実験用設定クラス (Experiment Configuration Classes)
 
 各トレーナー・データプロバイダー用の設定ラッパー。
-ResidualConfigから必要な属性のみを抽出し、オプションで上書き可能。
+Configから必要な属性のみを抽出し、オプションで上書き可能。
 
 Usage:
-    from config import ResidualConfig
+    from config import Config
     from config.experiment import DataConfig, Phase1TrainerConfig, Phase2TrainerConfig
 
-    base = ResidualConfig()
+    base = Config()
     device = torch.device("cuda")
 
     # データ設定
@@ -45,7 +45,7 @@ class DataConfig:
         num_samples: Optional[int] = None,
         val_text_file: str = "./cache/example_val.txt"
     ) -> "DataConfig":
-        """ResidualConfigから生成"""
+        """Configから生成"""
         return cls(
             tokenizer_name=base.tokenizer_name,
             dataset_name=base.dataset_name,
@@ -94,7 +94,7 @@ class Phase1TrainerConfig:
         phase1_learning_rate: Optional[float] = None,
         phase1_max_iterations: Optional[int] = None,
     ) -> "Phase1TrainerConfig":
-        """ResidualConfigから生成（オプションで上書き可能）"""
+        """Configから生成（オプションで上書き可能）"""
         return cls(
             context_dim=context_dim if context_dim is not None else base.context_dim,
             embed_dim=base.embed_dim,
@@ -150,7 +150,7 @@ class Phase2TrainerConfig:
         phase2_learning_rate: Optional[float] = None,
         phase2_epochs: Optional[int] = None,
     ) -> "Phase2TrainerConfig":
-        """ResidualConfigから生成（オプションで上書き可能）"""
+        """Configから生成（オプションで上書き可能）"""
         return cls(
             context_dim=context_dim if context_dim is not None else base.context_dim,
             embed_dim=base.embed_dim,

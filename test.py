@@ -11,7 +11,7 @@ CRITICAL CHECKS (3つの必須チェック):
 3. Processing Speed: 高速化の確認
 """
 
-from config import ResidualConfig
+from config import Config
 import torch
 import time
 from src.models.llm import LLM
@@ -29,7 +29,7 @@ set_seed(42)
 print("\n✅ Random seed fixed: 42 (完全な再現性保証)")
 
 # Configuration
-config = ResidualConfig()
+config = Config()
 config.num_samples = 10  # 小サンプルで動作確認
 
 print("\n" + "="*70)

@@ -3,7 +3,8 @@ Phase1Trainer - 多様性学習トレーナーの抽象基底クラス
 """
 
 from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Union, Tuple
+from dataclasses import dataclass
+from typing import Dict, Any, Optional
 import torch
 
 from src.utils.io import print_flush
@@ -12,11 +13,27 @@ from src.utils.io import print_flush
 # token継ぎ足し方式: 全レイヤー同じcontext_dimなのでテンソル形式のみ
 ContextCache = torch.Tensor
 
-# 戻り値の型
-# return_all_layers=False: torch.Tensor (contexts)
-# return_all_layers=True: Tuple[contexts, all_layer_cache, token_embeds]
-TrainResult = Union[torch.Tensor, Tuple[torch.Tensor, ContextCache, torch.Tensor]]
-EvalResult = Union[torch.Tensor, Tuple[torch.Tensor, ContextCache, torch.Tensor]]
+
+@dataclass
+class Phase1Result:
+    """
+    Phase 1 訓練/評価の結果を格納するデータクラス
+
+    型安全なデータ受け渡しを保証し、条件付き戻り値の脆弱性を解消。
+
+    Attributes:
+        contexts: コンテキストベクトル [num_tokens, context_dim]
+        cache: 全レイヤー出力キャッシュ（Phase 2用）[num_layers, num_tokens, context_dim]
+        token_embeds: トークン埋め込み（Phase 2用）[num_tokens, embed_dim * num_input_tokens]
+    """
+    contexts: torch.Tensor
+    cache: Optional[ContextCache] = None
+    token_embeds: Optional[torch.Tensor] = None
+
+    @property
+    def has_cache(self) -> bool:
+        """Phase 2用キャッシュを持っているか"""
+        return self.cache is not None and self.token_embeds is not None
 
 
 class Phase1Trainer(ABC):
@@ -35,7 +52,19 @@ class Phase1Trainer(ABC):
         label: str = "Train",
         return_all_layers: bool = False,
         val_token_ids: Optional[torch.Tensor] = None
-    ) -> TrainResult:
+    ) -> Phase1Result:
+        """
+        Phase 1訓練を実行
+
+        Args:
+            token_ids: トークンID [num_tokens]
+            label: ログ用ラベル
+            return_all_layers: Trueの場合、Phase 2用キャッシュも返す
+            val_token_ids: 検証用トークンID（早期停止用）
+
+        Returns:
+            Phase1Result: contexts必須、cache/token_embedsはreturn_all_layers=True時のみ
+        """
         pass
 
     @abstractmethod
@@ -44,7 +73,18 @@ class Phase1Trainer(ABC):
         token_ids: torch.Tensor,
         label: str = "Val",
         return_all_layers: bool = True
-    ) -> EvalResult:
+    ) -> Phase1Result:
+        """
+        検証データを評価しPhase 2用キャッシュを収集
+
+        Args:
+            token_ids: トークンID [num_tokens]
+            label: ログ用ラベル
+            return_all_layers: 通常True（Phase 2キャッシュ用）
+
+        Returns:
+            Phase1Result: contexts, cache, token_embedsすべて含む
+        """
         pass
 
     def get_training_stats(self) -> Dict[str, Any]:

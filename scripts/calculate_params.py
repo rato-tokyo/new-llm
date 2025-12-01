@@ -9,7 +9,7 @@ New-LLMモデルのパラメータ数計算スクリプト
 import sys
 sys.path.insert(0, '.')
 
-from config import ResidualConfig
+from config import Config
 from src.models.llm import LLM
 
 
@@ -26,7 +26,7 @@ def format_number(n: int) -> str:
 
 
 def main():
-    config = ResidualConfig()
+    config = Config()
 
     # モデルを作成してパラメータ数を取得
     print("Creating model...")

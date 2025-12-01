@@ -9,7 +9,7 @@ from typing import Optional, Dict, Any, Union
 
 import torch
 
-from config import ResidualConfig
+from config import Config
 from src.models import LLM
 from src.trainers.phase1.memory import MemoryPhase1Trainer
 from src.trainers.phase2 import Phase2Trainer
@@ -34,7 +34,7 @@ class ExperimentConfig:
     num_samples: int = 500
     val_ratio: float = 0.1
 
-    # 訓練（Noneの場合はResidualConfigのデフォルト値を使用）
+    # 訓練（Noneの場合はConfigのデフォルト値を使用）
     phase1_learning_rate: Optional[float] = None
     phase1_max_iterations: Optional[int] = None
     phase2_learning_rate: Optional[float] = None
@@ -45,7 +45,7 @@ class ExperimentConfig:
     verbose: bool = True
 
     def get_phase1_config(
-        self, base_config: ResidualConfig, device: Union[str, torch.device]
+        self, base_config: Config, device: Union[str, torch.device]
     ) -> Phase1TrainerConfig:
         """Phase 1用の設定オブジェクトを生成"""
         return Phase1TrainerConfig.from_base(
@@ -58,7 +58,7 @@ class ExperimentConfig:
         )
 
     def get_phase2_config(
-        self, base_config: ResidualConfig, device: Union[str, torch.device]
+        self, base_config: Config, device: Union[str, torch.device]
     ) -> Phase2TrainerConfig:
         """Phase 2用の設定オブジェクトを生成"""
         return Phase2TrainerConfig.from_base(
@@ -70,7 +70,7 @@ class ExperimentConfig:
             phase2_epochs=self.phase2_epochs,
         )
 
-    def get_data_config(self, base_config: ResidualConfig) -> DataConfig:
+    def get_data_config(self, base_config: Config) -> DataConfig:
         """データ読み込み用の設定オブジェクトを生成"""
         return DataConfig.from_base(base_config, num_samples=self.num_samples)
 
@@ -78,7 +78,7 @@ class ExperimentConfig:
 class ExperimentRunner:
     """実験実行クラス"""
 
-    def __init__(self, device: Optional[str] = None, base_config: Optional[ResidualConfig] = None):
+    def __init__(self, device: Optional[str] = None, base_config: Optional[Config] = None):
         """
         Args:
             device: 'cuda' or 'cpu' (Noneで自動検出)
@@ -86,7 +86,7 @@ class ExperimentRunner:
         """
         device_str = device or ("cuda" if torch.cuda.is_available() else "cpu")
         self.device = torch.device(device_str)
-        self.base_config = base_config or ResidualConfig()
+        self.base_config = base_config or Config()
 
         if self.device.type == "cuda" and torch.cuda.is_available():
             gpu_name = torch.cuda.get_device_name(0)
@@ -146,15 +146,20 @@ class ExperimentRunner:
             return_all_layers=True,
             val_token_ids=val_token_ids
         )
-        train_contexts, train_context_cache, train_token_embeds = train_result
+        # Phase1Result dataclass から値を取得
+        train_contexts = train_result.contexts
+        train_context_cache = train_result.cache
+        train_token_embeds = train_result.token_embeds
 
         # Phase 1 訓練統計を取得
         phase1_stats = getattr(phase1_trainer, '_training_stats', {})
         phase1_iterations = phase1_stats.get('iterations', 0)
 
         val_result = phase1_trainer.evaluate(val_token_ids, return_all_layers=True)
-        assert isinstance(val_result, tuple), "evaluate with return_all_layers=True must return tuple"
-        val_contexts, val_context_cache, val_token_embeds = val_result
+        # Phase1Result dataclass から値を取得
+        val_contexts = val_result.contexts
+        val_context_cache = val_result.cache
+        val_token_embeds = val_result.token_embeds
 
         # Effective Rank計算
         train_metrics = analyze_fixed_points(train_contexts, label="Train", verbose=False)
@@ -166,6 +171,12 @@ class ExperimentRunner:
             print_flush(f"  ER: train={train_er*100:.1f}%, val={val_er*100:.1f}%")
 
         # Phase 2 実行
+        # キャッシュは return_all_layers=True で取得したので必ず存在
+        assert train_context_cache is not None, "train_context_cache must not be None"
+        assert train_token_embeds is not None, "train_token_embeds must not be None"
+        assert val_context_cache is not None, "val_context_cache must not be None"
+        assert val_token_embeds is not None, "val_token_embeds must not be None"
+
         phase2_config = config.get_phase2_config(self.base_config, self.device)
         phase2_trainer = Phase2Trainer(model, phase2_config)
 

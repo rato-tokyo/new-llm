@@ -8,11 +8,12 @@ import time
 from typing import Optional, Any
 import torch
 
-from .base import Phase1Trainer, TrainResult, EvalResult, ContextCache
+from .base import Phase1Trainer, Phase1Result, ContextCache
 from src.losses.diversity import oacd_loss
 from src.evaluation.metrics import compute_effective_rank
 from src.utils.io import print_flush
 from src.utils.device import is_cuda_device, clear_gpu_cache
+from src.utils.token_combiner import TokenCombiner
 
 
 class MemoryPhase1Trainer(Phase1Trainer):
@@ -35,6 +36,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         Returns:
             最終エポックのコンテキスト
         """
+        result: Optional[Phase1Result] = None
         for epoch in range(num_epochs):
             if epoch > 0:
                 # 2エポック目以降はreshuffle
@@ -44,10 +46,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
             epoch_label = f"{label} (epoch {epoch+1}/{num_epochs})"
             result = self.train(token_ids, label=epoch_label)
-            # train_epochsは常にreturn_all_layers=Falseなので、結果はTensor
-            contexts = result if isinstance(result, torch.Tensor) else result[0]
 
-        return contexts
+        assert result is not None
+        return result.contexts
 
     def train(
         self,
@@ -55,7 +56,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         label: str = "Train",
         return_all_layers: bool = False,
         val_token_ids: Optional[torch.Tensor] = None
-    ) -> TrainResult:
+    ) -> Phase1Result:
         """
         Phase 1訓練
 
@@ -66,8 +67,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             val_token_ids: 検証用トークンID（早期停止用、オプション）
 
         Returns:
-            return_all_layers=False: コンテキスト [num_tokens, context_dim]
-            return_all_layers=True: (コンテキスト, 全レイヤー出力, トークン埋め込み)
+            Phase1Result: contexts必須、cache/token_embedsはreturn_all_layers=True時のみ
         """
         return self._train_single(
             token_ids, label,
@@ -81,7 +81,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         label: str = "Train",
         return_all_layers: bool = False,
         val_token_ids: Optional[torch.Tensor] = None
-    ) -> TrainResult:
+    ) -> Phase1Result:
         """
         通常の単一訓練
 
@@ -121,14 +121,18 @@ class MemoryPhase1Trainer(Phase1Trainer):
         final_contexts = previous_contexts.to(self.device)
 
         if not return_all_layers:
-            return final_contexts
+            return Phase1Result(contexts=final_contexts)
 
         # 全レイヤーキャッシュ収集
         all_layer_contexts, token_embeds_combined = self._collect_layer_cache(
             token_embeds, previous_contexts
         )
 
-        return final_contexts, all_layer_contexts, token_embeds_combined
+        return Phase1Result(
+            contexts=final_contexts,
+            cache=all_layer_contexts,
+            token_embeds=token_embeds_combined
+        )
 
     def _compute_token_embeddings(self, token_ids: torch.Tensor) -> torch.Tensor:
         """トークン埋め込みを計算（CPUに保存）"""
@@ -346,35 +350,15 @@ class MemoryPhase1Trainer(Phase1Trainer):
         num_input_tokens_total: int
     ) -> torch.Tensor:
         """num_input_tokens対応のtoken_embeds_combinedを準備"""
-        num_input_tokens_config = self.config.num_input_tokens
-        if num_input_tokens_config == 1:
-            return input_token_embeds.cpu()
-
-        # 複数トークン入力の場合（履歴を結合）
-        token_embeds_combined = torch.zeros(
-            num_input_tokens_total, self.model.embed_dim * num_input_tokens_config,
-            device='cpu', dtype=input_token_embeds.dtype
-        )
-        for i in range(num_input_tokens_total):
-            start_idx = max(0, i - num_input_tokens_config + 1)
-            token_window = input_token_embeds[start_idx:i+1]
-            if len(token_window) < num_input_tokens_config:
-                padding = torch.zeros(
-                    num_input_tokens_config - len(token_window),
-                    self.model.embed_dim,
-                    device=self.device
-                )
-                token_window = torch.cat([padding, token_window], dim=0)
-            token_embeds_combined[i] = token_window.flatten().cpu()
-
-        return token_embeds_combined
+        combiner = TokenCombiner(self.config.num_input_tokens, self.model.embed_dim)
+        return combiner.combine_all(input_token_embeds, device=torch.device('cpu'))
 
     def evaluate(
         self,
         token_ids: torch.Tensor,
         label: str = "Val",
         return_all_layers: bool = True
-    ) -> EvalResult:
+    ) -> Phase1Result:
         """
         検証データのPhase 2キャッシュを収集
 
@@ -384,7 +368,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             return_all_layers: 必ずTrue（Phase 2キャッシュ用）
 
         Returns:
-            (contexts, all_layer_contexts, token_embeds)
+            Phase1Result: contexts, cache, token_embedsすべて含む
         """
 
         self.model.eval()
@@ -407,7 +391,11 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         assert all_layer_contexts is not None
         assert token_embeds_combined is not None
-        return contexts, all_layer_contexts, token_embeds_combined
+        return Phase1Result(
+            contexts=contexts,
+            cache=all_layer_contexts,
+            token_embeds=token_embeds_combined
+        )
 
     def _forward_sequential(
         self,
@@ -429,6 +417,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         """
         num_tokens = len(token_embeds)
         num_input_tokens = self.config.num_input_tokens
+        combiner = TokenCombiner(num_input_tokens, self.model.embed_dim)
 
         # 結果を格納するテンソルを事前確保（メモリ効率）
         contexts = torch.zeros(num_tokens, self.model.context_dim, device=self.device)
@@ -438,9 +427,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
         else:
             context = previous_contexts[-1].unsqueeze(0).detach()
 
-        # トークン履歴を初期化（ゼロベクトルで埋める）
-        token_history = [torch.zeros(self.model.embed_dim, device=self.device)
-                         for _ in range(num_input_tokens - 1)]
+        # トークン履歴を初期化（空リスト）
+        token_history: list[torch.Tensor] = []
 
         # 全レイヤー収集用の変数を初期化
         context_cache: Optional[ContextCache] = None
@@ -458,16 +446,20 @@ class MemoryPhase1Trainer(Phase1Trainer):
             )
 
             token_embeds_combined = torch.zeros(
-                num_tokens, self.model.embed_dim * num_input_tokens,
+                num_tokens, combiner.combined_dim,
                 device=self.device, dtype=torch.float32
             )
 
         # 勾配なしで処理
         with torch.no_grad():
             for i, token_embed in enumerate(token_embeds):
-                # 履歴 + 現在のトークンを結合
+                # TokenCombinerを使用してトークンを結合
+                combined_tokens = combiner.combine_single(token_history, token_embed)
+
+                # 履歴を更新（現在のトークンを追加し、古いものを削除）
                 token_history.append(token_embed)
-                combined_tokens = torch.cat(token_history[-num_input_tokens:], dim=-1)
+                if len(token_history) >= num_input_tokens:
+                    token_history = token_history[-(num_input_tokens - 1):]
 
                 if collect_all_layers:
                     # 全レイヤー出力を取得
@@ -488,10 +480,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
                     # 通常処理（最終レイヤーのみ）
                     context = self.model.context_block(context, combined_tokens.unsqueeze(0))
                     contexts[i] = context.squeeze(0)
-
-                # メモリ効率: 古い履歴を削除
-                if len(token_history) > num_input_tokens:
-                    token_history = token_history[-num_input_tokens:]
 
         return contexts, context_cache, token_embeds_combined
 
@@ -607,29 +595,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
         Returns:
             combined_tokens: [batch_size, embed_dim * num_input_tokens]
         """
-        if num_input_tokens == 1:
-            return token_embeds[start_idx:end_idx]
-
-        batch_size = end_idx - start_idx
-        embed_dim = self.model.embed_dim
-
-        combined_tokens = torch.zeros(
-            batch_size,
-            embed_dim * num_input_tokens,
-            device=self.device
-        )
-
-        for batch_i, global_i in enumerate(range(start_idx, end_idx)):
-            for j in range(num_input_tokens):
-                # j=0 が最も古いトークン、j=num_input_tokens-1 が現在のトークン
-                src_idx = global_i - (num_input_tokens - 1 - j)
-                if src_idx >= 0:
-                    start = j * embed_dim
-                    end = (j + 1) * embed_dim
-                    combined_tokens[batch_i, start:end] = token_embeds[src_idx]
-                # src_idx < 0 の場合はゼロベクトル（初期化済み）
-
-        return combined_tokens
+        combiner = TokenCombiner(num_input_tokens, self.model.embed_dim)
+        return combiner.combine_batch(token_embeds, start_idx, end_idx, self.device)
 
     def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
         """多様性損失計算（デフォルト: OACD）"""

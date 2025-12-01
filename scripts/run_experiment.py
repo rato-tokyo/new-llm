@@ -28,7 +28,7 @@ import torch
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from config import ResidualConfig
+from config import Config
 from config.experiment import DataConfig, Phase1TrainerConfig, Phase2TrainerConfig
 from src.models import LLM
 from src.trainers.phase1 import MemoryPhase1Trainer
@@ -46,7 +46,7 @@ from src.utils.seed import set_seed
 
 def run_single_experiment(
     num_samples: int,
-    base_config: ResidualConfig,
+    base_config: Config,
     device: torch.device,
     seed: int = 42,
     context_dim: int = 500,
@@ -102,11 +102,10 @@ def run_single_experiment(
     )
     phase1_time = time.time() - phase1_start
 
-    # train_resultの型チェック
-    if isinstance(train_result, tuple):
-        train_contexts, train_context_cache, train_token_embeds = train_result
-    else:
-        raise ValueError("Expected tuple from train() with return_all_layers=True")
+    # Phase1Result dataclass から値を取得
+    train_contexts = train_result.contexts
+    train_context_cache = train_result.cache
+    train_token_embeds = train_result.token_embeds
 
     # Phase 1 統計を取得
     phase1_stats = phase1_trainer._training_stats
@@ -116,8 +115,10 @@ def run_single_experiment(
 
     # 検証データのキャッシュ収集
     val_result = phase1_trainer.evaluate(val_token_ids, return_all_layers=True)
-    assert isinstance(val_result, tuple), "evaluate with return_all_layers=True must return tuple"
-    val_contexts, val_context_cache, val_token_embeds = val_result
+    # Phase1Result dataclass から値を取得
+    val_contexts = val_result.contexts
+    val_context_cache = val_result.cache
+    val_token_embeds = val_result.token_embeds
 
     # Effective Rank計算
     train_metrics = analyze_fixed_points(train_contexts, label="Train", verbose=False)
@@ -223,7 +224,7 @@ def main():
     args = parser.parse_args()
 
     # 設定
-    config = ResidualConfig()
+    config = Config()
     device = torch.device(config.device if torch.cuda.is_available() else "cpu")
 
     # 出力ディレクトリ

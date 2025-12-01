@@ -16,7 +16,7 @@ import argparse
 project_root = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, project_root)
 
-from config import ResidualConfig  # noqa: E402
+from config import Config  # noqa: E402
 from src.models.llm import LLM  # noqa: E402
 from src.providers.data import MemoryDataProvider  # noqa: E402
 from src.trainers.phase1 import MemoryPhase1Trainer  # noqa: E402
@@ -39,7 +39,7 @@ def main():
     args = parser.parse_args()
 
     # Configuration
-    config = ResidualConfig()
+    config = Config()
     device = torch.device(config.device)
     test_mode = args.test
 
