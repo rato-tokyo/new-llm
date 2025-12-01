@@ -69,6 +69,23 @@ python3 scripts/scaling_experiment.py --alpha-scaling \
 
 **Alpha Scaling Mode**: Measures how scaling efficiency (α) changes as data amount increases. Uses sliding window analysis to track α progression.
 
+### Diversity Algorithm Experiments
+
+```bash
+# Phase 1 only: Compare diversity algorithms on Effective Rank
+python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM SDL NUC -s 50 100
+
+# Phase 1 + Phase 2: Full experiment with α analysis (CVFP disabled)
+# Uses 4 algorithms, samples=[50,100,200], context_dim=1000
+python3 scripts/diversity_full_experiment.py
+```
+
+**Available Algorithms**:
+- **MCDL**: Mean-Centered Dispersion Loss (fastest baseline)
+- **ODCM**: Off-Diagonal Covariance Minimization (VICReg-style, recommended)
+- **SDL**: Spectral Diversity Loss (direct ER maximization, highest ER)
+- **NUC**: Nuclear Norm Maximization (high ER, high cost)
+
 ## Project Structure
 
 ```
@@ -80,14 +97,20 @@ new-llm/
 ├── README.md                      # This file
 ├── src/
 │   ├── models/
-│   │   └── new_llm_residual.py    # Main model architecture
+│   │   └── llm.py                 # Main model architecture (LLM)
 │   ├── trainers/
 │   │   ├── phase1/
 │   │   │   ├── base.py            # Phase 1 abstract base class
 │   │   │   └── memory.py          # Memory-based Phase 1 trainer
 │   │   └── phase2.py              # Phase 2: Token prediction
-│   ├── data/
-│   │   └── loader.py              # Data loading utilities
+│   ├── experiments/
+│   │   ├── config.py              # Shared config classes (DataConfig, Phase1Config, Phase2Config)
+│   │   └── runner.py              # ExperimentRunner
+│   ├── losses/
+│   │   └── diversity.py           # Diversity loss algorithms (MCDL, ODCM, SDL, NUC)
+│   ├── providers/
+│   │   └── data/
+│   │       └── memory.py          # Memory-based data provider
 │   ├── utils/
 │   │   └── memory.py              # GPU memory management
 │   └── evaluation/
@@ -95,9 +118,11 @@ new-llm/
 │       └── diagnostics.py         # Identity mapping check
 ├── scripts/
 │   ├── scaling_experiment.py      # Scaling law experiments (with alpha progression)
+│   ├── diversity_algorithm_experiment.py  # Phase 1 diversity algorithm comparison
+│   ├── diversity_full_experiment.py       # Phase 1+2 with α analysis
 │   └── create_val_from_train.py   # Generate validation data
 ├── data/
-│   └── ultrachat_*samples_val.txt # Validation data files
+│   └── example_val.txt            # Validation data file (auto-generated)
 └── importants/
     └── *.md                       # Experimental reports
 ```
@@ -206,6 +231,11 @@ embed_dim = 768
 - ✅ GPT-2 pre-trained embeddings (768-dim, frozen in Phase 2)
 - ✅ Weight tying (embedding = output head)
 - ✅ Deterministic training (seed=42)
+
+**Current Research Focus (2025-12-01):**
+- 🔬 Diversity algorithm comparison (MCDL, ODCM, SDL, NUC)
+- 🔬 Phase 1 diversity-only training (CVFP disabled)
+- 🔬 α value comparison across algorithms
 
 **Next Steps:**
 - 🎯 Scale to 1000+ samples with shallow_wide config

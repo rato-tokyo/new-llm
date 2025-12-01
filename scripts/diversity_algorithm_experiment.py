@@ -46,6 +46,7 @@ from config import ResidualConfig
 from src.models import LLM
 from src.trainers.phase1 import TimedDiversityTrainer
 from src.evaluation.metrics import analyze_fixed_points
+from src.experiments.config import DataConfig, Phase1Config
 from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
@@ -75,18 +76,11 @@ def run_single_experiment(
 
     set_seed(seed)
 
-    # データ読み込み用設定
-    data_config = ResidualConfig()
-    data_config.num_samples = num_samples
-    data_config.val_text_file = "./data/example_val.txt"
+    # context_dimを確定
+    actual_context_dim = context_dim if context_dim is not None else base_config.context_dim
 
-    # イテレーション数を上書き
-    if max_iterations is not None:
-        base_config.phase1_max_iterations = max_iterations
-
-    # context_dimを上書き
-    if context_dim is not None:
-        base_config.context_dim = context_dim
+    # データ読み込み用設定（共有設定クラスを使用）
+    data_config = DataConfig.from_base(base_config, num_samples=num_samples)
 
     # データプロバイダー
     data_provider = MemoryDataProvider(data_config)
@@ -103,7 +97,7 @@ def run_single_experiment(
     model = LLM(
         vocab_size=base_config.vocab_size,
         embed_dim=base_config.embed_dim,
-        context_dim=base_config.context_dim,
+        context_dim=actual_context_dim,
         num_layers=base_config.num_layers,
         num_input_tokens=base_config.num_input_tokens,
         use_pretrained_embeddings=base_config.use_pretrained_embeddings,
@@ -112,9 +106,16 @@ def run_single_experiment(
     )
     model.to(device)
 
+    # Phase 1用設定（共有設定クラスを使用）
+    phase1_config = Phase1Config.from_base(
+        base_config, device,
+        context_dim=actual_context_dim,
+        phase1_max_iterations=max_iterations,
+    )
+
     # トレーナー作成
     trainer = TimedDiversityTrainer(
-        model, base_config, device,
+        model, phase1_config, device,
         diversity_fn=diversity_fn,
         algorithm_name=algorithm_name
     )
@@ -138,11 +139,11 @@ def run_single_experiment(
         # 訓練データER
         train_metrics = analyze_fixed_points(train_contexts, label="Train", verbose=False)
         train_er = train_metrics['effective_rank']
-        train_er_pct = train_er / base_config.context_dim * 100
+        train_er_pct = train_er / actual_context_dim * 100
 
         # 検証データER: 訓練中の最高値を使用
         best_val_er = training_stats.get('best_val_er', 0.0)
-        val_er_pct = best_val_er / base_config.context_dim * 100
+        val_er_pct = best_val_er / actual_context_dim * 100
 
     avg_loss_time_ms = trainer.get_avg_diversity_loss_time_ms()
 
@@ -153,7 +154,7 @@ def run_single_experiment(
 
     return {
         'algorithm': algorithm_name,
-        'context_dim': base_config.context_dim,
+        'context_dim': actual_context_dim,
         'num_samples': num_samples,
         'num_train_tokens': num_train_tokens,
         'num_val_tokens': num_val_tokens,

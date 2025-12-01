@@ -1,5 +1,40 @@
 # New-LLM Project Guidelines
 
+## 🏗️ 共有設定クラスの使用 - リファクタリング完了 (2025-12-01)
+
+**実験スクリプト間で設定クラスを共有化し、コード重複を解消。**
+
+### 共有設定クラス
+
+```python
+# src/experiments/config.py から使用
+from src.experiments.config import DataConfig, Phase1Config, Phase2Config
+
+# データ設定
+data_config = DataConfig.from_base(base_config, num_samples=100)
+
+# Phase 1設定（オプションで上書き可能）
+phase1_config = Phase1Config.from_base(
+    base_config, device,
+    context_dim=1000,
+    dist_reg_weight=0.9,  # 多様性90%, CVFP 10%（標準設定）
+)
+
+# Phase 2設定
+phase2_config = Phase2Config.from_base(
+    base_config, device,
+    context_dim=1000,
+)
+```
+
+### 対応スクリプト
+
+- `src/experiments/runner.py` - ExperimentRunner
+- `scripts/diversity_algorithm_experiment.py` - Phase 1のみ
+- `scripts/diversity_full_experiment.py` - Phase 1 + Phase 2 + α分析
+
+---
+
 ## 🚨 num_layers = 1 固定ルール - 絶対遵守 (2025-12-01)
 
 **`config.py`の`num_layers`は1に固定。変更禁止。**
@@ -44,48 +79,55 @@ python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM -s 100
 
 ---
 
-## 🎯 MCDL (Mean-Centered Dispersion Loss) - 多様性損失アルゴリズム (2025-12-01)
+## 🎯 多様性損失アルゴリズム（4種類採用）(2025-12-01)
 
-**Phase 1で使用している多様性確保アルゴリズムの正式名称。**
+**Phase 1で使用している多様性確保アルゴリズム（WMSEは除外）。**
 
-### 現行アルゴリズム: MCDL
-
-```python
-def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
-    """MCDL: Mean-Centered Dispersion Loss"""
-    context_mean = contexts.mean(dim=0)  # バッチ全体の平均
-    deviation = contexts - context_mean   # 各サンプルの平均からの偏差
-    return -torch.norm(deviation, p=2) / len(contexts)  # L2ノルムを最大化
-```
-
-**特徴**:
-- 計算コスト: O(n×d) - 非常に高速
-- 動作: バッチ全体の平均（centroid）からの分散を最大化
-- 損失が負: 分散が大きいほど損失が小さい（最大化）
-
-### 代替アルゴリズム（比較実験用）
+### 採用アルゴリズム一覧
 
 | 名称 | 説明 | 計算コスト |
 |------|------|-----------|
-| **MCDL** | Mean-Centered Dispersion Loss（現行） | O(n×d) |
-| **ODCM** | Off-Diagonal Covariance Minimization（VICReg風） | O(n×d + d²) |
-| **DUE** | Dimension Usage Entropy（次元活性度均一化） | O(n×d) |
-| **CTM** | Covariance Trace Maximization（統計的分散） | O(n×d + d²) |
-| **UDEL** | Uniform Distribution Entropy Loss（Barlow Twins風） | O(n×d) |
-| **SDL** | Spectral Diversity Loss（ER直接最大化）| O(n×d²) 高コスト |
+| **MCDL** | Mean-Centered Dispersion Loss（現行ベースライン） | O(n×d) 最速 |
+| **ODCM** | Off-Diagonal Covariance Minimization（VICReg風、推奨） | O(n×d + d²) |
+| **SDL** | Spectral Diversity Loss（ER直接最大化、最高ER）| O(n×d²) 高コスト |
+| **NUC** | Nuclear Norm Maximization（核ノルム最大化）| O(n×d²) 高コスト |
+
+### 実装場所
+
+`src/losses/diversity.py`:
+```python
+from src.losses.diversity import (
+    DIVERSITY_ALGORITHMS,      # アルゴリズム辞書
+    ALGORITHM_DESCRIPTIONS,    # 説明辞書
+    HIGH_COST_ALGORITHMS,      # {'SDL', 'NUC'}
+)
+```
 
 ### 比較実験の実行
 
 ```bash
-# 全アルゴリズム比較（SDLは高コストなので除外）
-python3 scripts/diversity_algorithm_experiment.py --skip-sdl
+# Phase 1のみ（ER比較）
+python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM SDL NUC -s 50 100
 
-# 特定のアルゴリズムのみ
-python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM DUE
+# Phase 1 + Phase 2（α値比較）- CVFP無効
+python3 scripts/diversity_full_experiment.py
 
-# サンプルサイズ指定
-python3 scripts/diversity_algorithm_experiment.py -s 50 100 200
+# context_dim指定
+python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM -s 50 --context-dim 1000
 ```
+
+### dist_reg_weightの設定
+
+```python
+# dist_reg_weight = 0.9 で多様性90%、CVFP 10%（推奨・標準設定）
+# 損失計算: (1-dist_reg_weight)*cvfp + dist_reg_weight*diversity
+phase1_config = Phase1Config.from_base(
+    base_config, device,
+    dist_reg_weight=0.9,  # 多様性90%, CVFP 10%（安定した訓練）
+)
+```
+
+**注意**: `dist_reg_weight=1.0`（CVFP完全無効）は訓練が不安定になり早期停止しやすい。0.9推奨。
 
 ---
 
@@ -1418,4 +1460,4 @@ current_contexts[t] = context.squeeze(0).detach()  # Detach for convergence trac
 
 ---
 
-Last Updated: 2025-11-29 (Refactoring: 後方互換性コード削除、ドキュメント整理)
+Last Updated: 2025-12-01 (共有設定クラス追加、多様性アルゴリズム4種採用、WMSE除外)

@@ -43,6 +43,7 @@ from src.models import LLM
 from src.trainers.phase1 import FlexibleDiversityTrainer
 from src.trainers.phase2 import Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
+from src.experiments.config import DataConfig, Phase1Config, Phase2Config
 from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
@@ -106,18 +107,8 @@ def run_single_experiment(
 
     set_seed(seed)
 
-    # データ読み込み用設定（config属性をコピー）
-    class DataConfig:
-        pass
-
-    data_config = DataConfig()
-    data_config.tokenizer_name = base_config.tokenizer_name
-    data_config.dataset_name = base_config.dataset_name
-    data_config.dataset_split = base_config.dataset_split
-    data_config.cache_dir = base_config.cache_dir
-    data_config.num_samples = num_samples
-    data_config.val_data_source = base_config.val_data_source
-    data_config.val_text_file = "./data/example_val.txt"
+    # データ読み込み用設定（共有設定クラスを使用）
+    data_config = DataConfig.from_base(base_config, num_samples=num_samples)
 
     # データプロバイダー
     data_provider = MemoryDataProvider(data_config)
@@ -144,29 +135,13 @@ def run_single_experiment(
     )
     model.to(device)
 
-    # Phase 1用設定（config属性をコピー）
-    class Phase1Config:
-        pass
-
-    phase1_config = Phase1Config()
-    phase1_config.context_dim = context_dim
-    phase1_config.embed_dim = base_config.embed_dim
-    phase1_config.num_layers = base_config.num_layers
-    phase1_config.num_input_tokens = base_config.num_input_tokens
-    phase1_config.phase1_learning_rate = base_config.phase1_learning_rate
-    phase1_config.phase1_max_iterations = base_config.phase1_max_iterations
-    phase1_config.phase1_convergence_threshold = base_config.phase1_convergence_threshold
-    phase1_config.phase1_context_noise = base_config.phase1_context_noise
-    phase1_config.phase1_batch_size = base_config.phase1_batch_size
-    phase1_config.phase1_gradient_clip = base_config.phase1_gradient_clip
-    # CVFP損失を無効化（多様性損失100%）
-    # dist_reg_weight = 1.0 で (1-1.0)*cvfp + 1.0*diversity = diversity のみ
-    phase1_config.dist_reg_weight = 1.0
-    phase1_config.phase1_val_early_stopping = getattr(base_config, 'phase1_val_early_stopping', True)
-    phase1_config.phase1_val_frequency = getattr(base_config, 'phase1_val_frequency', 5)
-    phase1_config.phase1_val_sample_size = getattr(base_config, 'phase1_val_sample_size', 10000)
-    phase1_config.phase1_val_patience = getattr(base_config, 'phase1_val_patience', 2)
-    phase1_config.device = device
+    # Phase 1用設定（共有設定クラスを使用）
+    # dist_reg_weight = 0.9 で多様性90%, CVFP 10%（前回実験と同じ設定）
+    phase1_config = Phase1Config.from_base(
+        base_config, device,
+        context_dim=context_dim,
+        dist_reg_weight=0.9,  # 多様性90%, CVFP 10%
+    )
 
     # Phase 1 トレーナー作成（FlexibleDiversityTrainer使用）
     phase1_trainer = FlexibleDiversityTrainer(
@@ -213,25 +188,11 @@ def run_single_experiment(
     print_flush(f"    Phase 1: {phase1_time:.1f}s, {phase1_iterations} iter, "
                 f"ER={train_er_pct:.1f}%/{best_val_er_pct:.1f}%")
 
-    # Phase 2用設定
-    class Phase2Config:
-        pass
-
-    phase2_config = Phase2Config()
-    phase2_config.context_dim = context_dim
-    phase2_config.embed_dim = base_config.embed_dim
-    phase2_config.num_layers = base_config.num_layers
-    phase2_config.num_input_tokens = base_config.num_input_tokens
-    phase2_config.phase2_learning_rate = base_config.phase2_learning_rate
-    phase2_config.phase2_epochs = base_config.phase2_epochs
-    phase2_config.phase2_patience = base_config.phase2_patience
-    phase2_config.phase2_batch_size = base_config.phase2_batch_size
-    phase2_config.phase2_gradient_clip = base_config.phase2_gradient_clip
-    phase2_config.phase2_freeze_embedding = base_config.phase2_freeze_embedding
-    phase2_config.phase2_memory_safety_factor = base_config.phase2_memory_safety_factor
-    phase2_config.phase2_min_batch_size = base_config.phase2_min_batch_size
-    phase2_config.phase2_max_batch_size = base_config.phase2_max_batch_size
-    phase2_config.device = device
+    # Phase 2用設定（共有設定クラスを使用）
+    phase2_config = Phase2Config.from_base(
+        base_config, device,
+        context_dim=context_dim,
+    )
 
     # Phase 2 トレーナー作成
     phase2_trainer = Phase2Trainer(model, phase2_config)

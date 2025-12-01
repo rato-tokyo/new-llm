@@ -18,6 +18,7 @@ from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
+from src.experiments.config import DataConfig, Phase1Config, Phase2Config
 
 
 @dataclass
@@ -46,77 +47,34 @@ class ExperimentConfig:
 
     def get_phase1_config(
         self, base_config: ResidualConfig, device: Union[str, torch.device]
-    ) -> "_Phase1Config":
+    ) -> Phase1Config:
         """Phase 1用の設定オブジェクトを生成"""
-        return _Phase1Config(self, base_config, device)
+        return Phase1Config.from_base(
+            base_config, device,
+            context_dim=self.context_dim,
+            num_layers=self.num_layers,
+            num_input_tokens=self.num_input_tokens,
+            phase1_learning_rate=self.phase1_learning_rate,
+            phase1_max_iterations=self.phase1_max_iterations,
+            dist_reg_weight=self.dist_reg_weight,
+        )
 
     def get_phase2_config(
         self, base_config: ResidualConfig, device: Union[str, torch.device]
-    ) -> "_Phase2Config":
+    ) -> Phase2Config:
         """Phase 2用の設定オブジェクトを生成"""
-        return _Phase2Config(self, base_config, device)
+        return Phase2Config.from_base(
+            base_config, device,
+            context_dim=self.context_dim,
+            num_layers=self.num_layers,
+            num_input_tokens=self.num_input_tokens,
+            phase2_learning_rate=self.phase2_learning_rate,
+            phase2_epochs=self.phase2_epochs,
+        )
 
-    def get_data_config(self, base_config: ResidualConfig) -> "_DataConfig":
+    def get_data_config(self, base_config: ResidualConfig) -> DataConfig:
         """データ読み込み用の設定オブジェクトを生成"""
-        return _DataConfig(self, base_config)
-
-
-class _Phase1Config:
-    """Phase 1 Trainer用の設定ラッパー"""
-
-    def __init__(self, exp: ExperimentConfig, base: ResidualConfig, device: Union[str, torch.device]):
-        self.context_dim = exp.context_dim
-        self.embed_dim = exp.embed_dim
-        self.num_layers = exp.num_layers
-        self.num_input_tokens = exp.num_input_tokens
-        self.phase1_learning_rate = exp.phase1_learning_rate or base.phase1_learning_rate
-        self.phase1_max_iterations = exp.phase1_max_iterations or base.phase1_max_iterations
-        self.phase1_convergence_threshold = base.phase1_convergence_threshold
-        self.phase1_context_noise = base.phase1_context_noise
-        self.phase1_batch_size = base.phase1_batch_size
-        self.phase1_gradient_clip = base.phase1_gradient_clip
-        self.dist_reg_weight = exp.dist_reg_weight or base.dist_reg_weight
-        # Phase 1 Validation Early Stopping
-        self.phase1_val_early_stopping = getattr(base, 'phase1_val_early_stopping', False)
-        self.phase1_val_frequency = getattr(base, 'phase1_val_frequency', 5)
-        self.phase1_val_sample_size = getattr(base, 'phase1_val_sample_size', 10000)
-        self.phase1_val_patience = getattr(base, 'phase1_val_patience', 2)
-        self.device = device
-
-
-class _Phase2Config:
-    """Phase 2 Trainer用の設定ラッパー"""
-
-    def __init__(self, exp: ExperimentConfig, base: ResidualConfig, device: Union[str, torch.device]):
-        self.context_dim = exp.context_dim
-        self.embed_dim = exp.embed_dim
-        self.num_layers = exp.num_layers
-        self.num_input_tokens = exp.num_input_tokens
-        self.phase2_learning_rate = exp.phase2_learning_rate or base.phase2_learning_rate
-        self.phase2_epochs = exp.phase2_epochs or base.phase2_epochs
-        self.phase2_patience = base.phase2_patience
-        self.phase2_batch_size = base.phase2_batch_size
-        self.phase2_gradient_clip = base.phase2_gradient_clip
-        self.phase2_freeze_embedding = base.phase2_freeze_embedding
-        self.phase2_memory_safety_factor = base.phase2_memory_safety_factor
-        self.phase2_min_batch_size = base.phase2_min_batch_size
-        self.phase2_max_batch_size = base.phase2_max_batch_size
-        self.device = device
-
-
-class _DataConfig:
-    """MemoryDataProvider用の設定ラッパー"""
-
-    def __init__(self, exp: ExperimentConfig, base: ResidualConfig):
-        self.tokenizer_name = base.tokenizer_name
-        self.dataset_name = base.dataset_name
-        self.dataset_split = base.dataset_split
-        self.cache_dir = base.cache_dir
-        self.num_samples = exp.num_samples
-        self.val_data_source = base.val_data_source
-        # 汎用の検証ファイルを使用（example_val.txt）
-        # サンプル数に依存しない固定の検証データ
-        self.val_text_file = "./data/example_val.txt"
+        return DataConfig.from_base(base_config, num_samples=self.num_samples)
 
 
 class ExperimentRunner:
