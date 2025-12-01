@@ -156,12 +156,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 f"loss={total_loss:.4f} [{elapsed:.1f}s]"
             )
 
-            # 早期停止: 最小イテレーション数を超え、かつ収束率が閾値以上
-            min_iterations = getattr(self.config, 'phase1_min_iterations', 3)
-            if iteration + 1 >= min_iterations and convergence_rate >= self.config.phase1_min_converged_ratio:
-                print_flush(f"  → Converged at iter {iteration+1}")
-                break
-
             # Validation早期停止チェック（N イテレーションごと）
             if (val_early_stopping and
                 val_token_ids is not None and
@@ -734,12 +728,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
                     f"収束={convergence_rate*100:.1f}% | "
                     f"Loss={total_loss:.6f} [{elapsed:.2f}s]"
                 )
-
-                # 早期停止
-                min_iterations = getattr(self.config, 'phase1_min_iterations', 3)
-                if iteration + 1 >= min_iterations and convergence_rate >= self.config.phase1_min_converged_ratio:
-                    print_flush("  → Early stopping")
-                    break
 
             print_flush(f"  Split {split_id} 完了: {int(final_convergence_rate * num_tokens)}/{num_tokens} トークン収束")
 
