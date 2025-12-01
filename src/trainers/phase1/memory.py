@@ -83,7 +83,14 @@ class MemoryPhase1Trainer(Phase1Trainer):
         return_all_layers: bool = False,
         val_token_ids: Optional[torch.Tensor] = None
     ) -> TrainResult:
-        """通常の単一訓練"""
+        """
+        通常の単一訓練
+
+        分割された処理:
+        - _train_iteration(): 単一イテレーションの処理
+        - _check_validation_early_stop(): 早期停止判定
+        - _collect_layer_cache(): 全レイヤーキャッシュ収集
+        """
         self.model.train()
         num_tokens = len(token_ids)
 
@@ -93,84 +100,15 @@ class MemoryPhase1Trainer(Phase1Trainer):
         optimizer = torch.optim.Adam(context_params, lr=self.config.phase1_learning_rate)
 
         # トークン埋め込み（1回のみ計算、CPUに保存）
-        with torch.no_grad():
-            # GPUで計算してCPUに移動（大規模データ対応）
-            token_embeds_gpu = self.model.token_embedding(token_ids.unsqueeze(0).to(self.device))
-            token_embeds_gpu = self.model.embed_norm(token_embeds_gpu).squeeze(0)
-            token_embeds = token_embeds_gpu.cpu()  # CPUに保存
-            del token_embeds_gpu
-            clear_gpu_cache(self.device)
+        token_embeds = self._compute_token_embeddings(token_ids)
 
-        previous_contexts: Optional[torch.Tensor] = None  # CPUに保存
-        final_convergence_rate = 0.0
-
-        # Validation早期停止の設定
-        val_early_stopping = getattr(self.config, 'phase1_val_early_stopping', False)
-        val_frequency = getattr(self.config, 'phase1_val_frequency', 5)
-        val_patience = getattr(self.config, 'phase1_val_patience', 2)
-        best_val_er = 0.0
-        val_patience_counter = 0
-        val_early_stopped = False
-
-        for iteration in range(self.config.phase1_max_iterations):
-            start_time = time.time()
-
-            if iteration == 0:
-                # Iteration 0: 小さなランダム値で初期化（シーケンシャル処理を省略）
-                # context ≈ 0 なので、Iteration 1で各トークンがほぼ独立に処理される
-                previous_contexts = torch.randn(num_tokens, self.model.context_dim) * 0.01
-                print_flush("  Iter 1: random init")
-                continue
-
-            # Iteration 1+: 勾配累積付き並列処理
-            # token_embedsとprevious_contextsをGPUに移動
-            assert previous_contexts is not None  # iteration 0で必ず設定される
-            token_embeds_gpu = token_embeds.to(self.device)
-            previous_contexts_gpu = previous_contexts.to(self.device)
-
-            contexts, total_loss, cvfp_loss, diversity_loss = self._forward_parallel_with_grad_accum(
-                token_embeds_gpu, previous_contexts_gpu, optimizer
-            )
-
-            # 収束率（GPUで計算）
-            convergence_rate = self._compute_convergence_rate(contexts, previous_contexts_gpu, num_tokens)
-
-            # CPUに保存してGPUメモリ解放
-            previous_contexts = contexts.detach().cpu()
-            final_convergence_rate = convergence_rate
-
-            del token_embeds_gpu, previous_contexts_gpu, contexts
-            clear_gpu_cache(self.device)
-
-            elapsed = time.time() - start_time
-            print_flush(
-                f"  Iter {iteration+1}: conv={convergence_rate*100:.0f}% "
-                f"loss={total_loss:.4f} [{elapsed:.1f}s]"
-            )
-
-            # Validation早期停止チェック（N イテレーションごと）
-            if (val_early_stopping and
-                val_token_ids is not None and
-                (iteration + 1) % val_frequency == 0):
-
-                val_er = self._quick_validate(val_token_ids)
-                val_er_percent = val_er / self.model.context_dim * 100
-                print_flush(f"    Val ER: {val_er_percent:.1f}%")
-
-                # Patience check（Phase 2と同じ方式）
-                if val_er > best_val_er:
-                    best_val_er = val_er
-                    val_patience_counter = 0
-                else:
-                    val_patience_counter += 1
-
-                if val_patience_counter >= val_patience:
-                    print_flush(f"  → Val early stop: ER not improving for {val_patience} checks")
-                    val_early_stopped = True
-                    break
+        # 訓練ループ
+        previous_contexts, final_convergence_rate, val_early_stopped, best_val_er, final_iter = (
+            self._run_training_loop(token_embeds, num_tokens, optimizer, val_token_ids)
+        )
 
         self._training_stats = {
-            'iterations': iteration + 1,
+            'iterations': final_iter + 1,
             'convergence_rate': final_convergence_rate,
             'num_tokens': num_tokens,
             'val_early_stopped': val_early_stopped,
@@ -180,14 +118,163 @@ class MemoryPhase1Trainer(Phase1Trainer):
         print_flush(f"  Done: {final_convergence_rate*100:.0f}% converged")
 
         # 最終結果をGPUに戻す
-        assert previous_contexts is not None  # 必ず1回以上iterationが実行される
+        assert previous_contexts is not None
         final_contexts = previous_contexts.to(self.device)
 
         if not return_all_layers:
             return final_contexts
 
-        # return_all_layers=True: Phase 2キャッシュ用に全レイヤー出力を収集
-        # 並列処理版: 確定済みcontextを使ってバッチ処理（OOM対策でバッチ分割）
+        # 全レイヤーキャッシュ収集
+        all_layer_contexts, token_embeds_combined = self._collect_layer_cache(
+            token_embeds, previous_contexts
+        )
+
+        return final_contexts, all_layer_contexts, token_embeds_combined
+
+    def _compute_token_embeddings(self, token_ids: torch.Tensor) -> torch.Tensor:
+        """トークン埋め込みを計算（CPUに保存）"""
+        with torch.no_grad():
+            token_embeds_gpu = self.model.token_embedding(token_ids.unsqueeze(0).to(self.device))
+            token_embeds_gpu = self.model.embed_norm(token_embeds_gpu).squeeze(0)
+            token_embeds = token_embeds_gpu.cpu()
+            del token_embeds_gpu
+            clear_gpu_cache(self.device)
+        return token_embeds
+
+    def _run_training_loop(
+        self,
+        token_embeds: torch.Tensor,
+        num_tokens: int,
+        optimizer: torch.optim.Optimizer,
+        val_token_ids: Optional[torch.Tensor]
+    ) -> tuple[torch.Tensor, float, bool, float, int]:
+        """
+        訓練ループを実行
+
+        Returns:
+            (previous_contexts, final_convergence_rate, val_early_stopped, best_val_er, final_iter)
+        """
+        # Validation早期停止の設定
+        val_early_stopping = getattr(self.config, 'phase1_val_early_stopping', False)
+        val_frequency = getattr(self.config, 'phase1_val_frequency', 5)
+        val_patience = getattr(self.config, 'phase1_val_patience', 2)
+        best_val_er = 0.0
+        val_patience_counter = 0
+        val_early_stopped = False
+
+        previous_contexts: Optional[torch.Tensor] = None
+        final_convergence_rate = 0.0
+        final_iter = 0
+
+        for iteration in range(self.config.phase1_max_iterations):
+            final_iter = iteration
+
+            if iteration == 0:
+                # Iteration 0: 小さなランダム値で初期化
+                previous_contexts = torch.randn(num_tokens, self.model.context_dim) * 0.01
+                print_flush("  Iter 1: random init")
+                continue
+
+            # Iteration 1+: 勾配累積付き並列処理
+            assert previous_contexts is not None
+            contexts, total_loss, convergence_rate, elapsed = self._train_iteration(
+                token_embeds, previous_contexts, num_tokens, optimizer
+            )
+
+            previous_contexts = contexts.detach().cpu()
+            final_convergence_rate = convergence_rate
+
+            print_flush(
+                f"  Iter {iteration+1}: conv={convergence_rate*100:.0f}% "
+                f"loss={total_loss:.4f} [{elapsed:.1f}s]"
+            )
+
+            # Validation早期停止チェック
+            if (val_early_stopping and
+                val_token_ids is not None and
+                (iteration + 1) % val_frequency == 0):
+
+                should_stop, best_val_er, val_patience_counter = self._check_validation_early_stop(
+                    val_token_ids, best_val_er, val_patience_counter, val_patience
+                )
+                if should_stop:
+                    val_early_stopped = True
+                    break
+
+        assert previous_contexts is not None
+        return previous_contexts, final_convergence_rate, val_early_stopped, best_val_er, final_iter
+
+    def _train_iteration(
+        self,
+        token_embeds: torch.Tensor,
+        previous_contexts: torch.Tensor,
+        num_tokens: int,
+        optimizer: torch.optim.Optimizer
+    ) -> tuple[torch.Tensor, float, float, float]:
+        """
+        単一イテレーションの処理
+
+        Returns:
+            (contexts, total_loss, convergence_rate, elapsed_time)
+        """
+        start_time = time.time()
+
+        token_embeds_gpu = token_embeds.to(self.device)
+        previous_contexts_gpu = previous_contexts.to(self.device)
+
+        contexts, total_loss, _, _ = self._forward_parallel_with_grad_accum(
+            token_embeds_gpu, previous_contexts_gpu, optimizer
+        )
+
+        convergence_rate = self._compute_convergence_rate(contexts, previous_contexts_gpu, num_tokens)
+
+        del token_embeds_gpu, previous_contexts_gpu
+        clear_gpu_cache(self.device)
+
+        elapsed = time.time() - start_time
+
+        return contexts, total_loss, convergence_rate, elapsed
+
+    def _check_validation_early_stop(
+        self,
+        val_token_ids: torch.Tensor,
+        best_val_er: float,
+        patience_counter: int,
+        patience: int
+    ) -> tuple[bool, float, int]:
+        """
+        Validation早期停止チェック
+
+        Returns:
+            (should_stop, best_val_er, patience_counter)
+        """
+        val_er = self._quick_validate(val_token_ids)
+        val_er_percent = val_er / self.model.context_dim * 100
+        print_flush(f"    Val ER: {val_er_percent:.1f}%")
+
+        if val_er > best_val_er:
+            best_val_er = val_er
+            patience_counter = 0
+        else:
+            patience_counter += 1
+
+        should_stop = patience_counter >= patience
+        if should_stop:
+            print_flush(f"  → Val early stop: ER not improving for {patience} checks")
+
+        return should_stop, best_val_er, patience_counter
+
+    def _collect_layer_cache(
+        self,
+        token_embeds: torch.Tensor,
+        previous_contexts: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Phase 2用の全レイヤーキャッシュを収集
+
+        Returns:
+            (all_layer_contexts, token_embeds_combined)
+        """
         cache_start = time.time()
         print_flush("  Collecting cache (parallel)...")
         self.model.eval()
@@ -198,69 +285,39 @@ class MemoryPhase1Trainer(Phase1Trainer):
         num_input_tokens_total = len(input_token_embeds)
 
         # Phase 2では token i の処理に previous_contexts[i-1] を使用
-        # → 1つずらしたcontextを準備
-        # token 0 は初期context（ゼロベクトル）を使用
-        # input_token_embedsと同じサイズになるように調整
         initial_context = torch.zeros(1, self.model.context_dim, device=self.device)
         shifted_contexts = torch.cat([
             initial_context,
-            previous_contexts[:-2].to(self.device)  # -2: 最後の2つを除く（-1でtokenに合わせ、さらに-1でずらし）
-        ], dim=0)  # [num_input_tokens_total, context_dim]
+            previous_contexts[:-2].to(self.device)
+        ], dim=0)
 
-        # バッチ分割で全レイヤー出力を計算（OOM対策）
-        # GPU空きメモリに基づいてバッチサイズを決定
-        cache_batch_size = 50000  # 50kトークンずつ処理（安全なサイズ）
-        if is_cuda_device(self.device):
-            clear_gpu_cache(self.device)
-            free_mem_gb = (torch.cuda.get_device_properties(0).total_memory
-                          - torch.cuda.memory_allocated()) / (1024**3)
-            # 1トークンあたり約30KB（6層×768dim×4bytes×安全係数）
-            cache_batch_size = min(cache_batch_size, int(free_mem_gb * 1024 * 1024 / 30))
-            cache_batch_size = max(cache_batch_size, 10000)  # 最低10k
+        # バッチサイズ決定
+        cache_batch_size = self._compute_cache_batch_size()
 
         num_layers = self.model.num_layers
         all_layer_contexts = torch.zeros(
             num_layers, num_input_tokens_total, self.model.context_dim,
-            device='cpu', dtype=torch.float32  # CPUに保存してGPUメモリ節約
+            device='cpu', dtype=torch.float32
         )
 
-        # token_embeds_combined を先に準備（num_input_tokens対応）
-        # forward_with_intermediates_batch でも使用するため
-        num_input_tokens_config = self.config.num_input_tokens
-        if num_input_tokens_config == 1:
-            token_embeds_combined = input_token_embeds.cpu()  # CPUに保存
-        else:
-            # 複数トークン入力の場合（履歴を結合）
-            token_embeds_combined = torch.zeros(
-                num_input_tokens_total, self.model.embed_dim * num_input_tokens_config,
-                device='cpu', dtype=input_token_embeds.dtype
-            )
-            for i in range(num_input_tokens_total):
-                start_idx = max(0, i - num_input_tokens_config + 1)
-                token_window = input_token_embeds[start_idx:i+1]
-                if len(token_window) < num_input_tokens_config:
-                    padding = torch.zeros(
-                        num_input_tokens_config - len(token_window),
-                        self.model.embed_dim,
-                        device=self.device
-                    )
-                    token_window = torch.cat([padding, token_window], dim=0)
-                token_embeds_combined[i] = token_window.flatten().cpu()
+        # token_embeds_combined を準備
+        token_embeds_combined = self._prepare_combined_token_embeds(
+            input_token_embeds, num_input_tokens_total
+        )
 
+        # バッチ処理
         with torch.no_grad():
             for batch_start in range(0, num_input_tokens_total, cache_batch_size):
                 batch_end = min(batch_start + cache_batch_size, num_input_tokens_total)
                 batch_contexts = shifted_contexts[batch_start:batch_end]
-                # num_input_tokens対応: token_embeds_combinedを使用
                 batch_embeds = token_embeds_combined[batch_start:batch_end].to(self.device)
 
                 batch_results = self.model.context_block.forward_with_intermediates_batch(
                     batch_contexts, batch_embeds
-                )  # [num_layers, batch_size, context_dim]
+                )
 
                 all_layer_contexts[:, batch_start:batch_end, :] = batch_results.cpu()
 
-                # メモリ解放
                 del batch_results, batch_embeds
                 clear_gpu_cache(self.device)
 
@@ -271,10 +328,47 @@ class MemoryPhase1Trainer(Phase1Trainer):
         del token_embeds_gpu
         clear_gpu_cache(self.device)
 
-        assert all_layer_contexts is not None
-        assert token_embeds_combined is not None
+        return all_layer_contexts, token_embeds_combined
 
-        return final_contexts, all_layer_contexts, token_embeds_combined
+    def _compute_cache_batch_size(self) -> int:
+        """キャッシュ収集用のバッチサイズを計算"""
+        cache_batch_size = 50000
+        if is_cuda_device(self.device):
+            clear_gpu_cache(self.device)
+            free_mem_gb = (torch.cuda.get_device_properties(0).total_memory
+                          - torch.cuda.memory_allocated()) / (1024**3)
+            cache_batch_size = min(cache_batch_size, int(free_mem_gb * 1024 * 1024 / 30))
+            cache_batch_size = max(cache_batch_size, 10000)
+        return cache_batch_size
+
+    def _prepare_combined_token_embeds(
+        self,
+        input_token_embeds: torch.Tensor,
+        num_input_tokens_total: int
+    ) -> torch.Tensor:
+        """num_input_tokens対応のtoken_embeds_combinedを準備"""
+        num_input_tokens_config = self.config.num_input_tokens
+        if num_input_tokens_config == 1:
+            return input_token_embeds.cpu()
+
+        # 複数トークン入力の場合（履歴を結合）
+        token_embeds_combined = torch.zeros(
+            num_input_tokens_total, self.model.embed_dim * num_input_tokens_config,
+            device='cpu', dtype=input_token_embeds.dtype
+        )
+        for i in range(num_input_tokens_total):
+            start_idx = max(0, i - num_input_tokens_config + 1)
+            token_window = input_token_embeds[start_idx:i+1]
+            if len(token_window) < num_input_tokens_config:
+                padding = torch.zeros(
+                    num_input_tokens_config - len(token_window),
+                    self.model.embed_dim,
+                    device=self.device
+                )
+                token_window = torch.cat([padding, token_window], dim=0)
+            token_embeds_combined[i] = token_window.flatten().cpu()
+
+        return token_embeds_combined
 
     def evaluate(
         self,
