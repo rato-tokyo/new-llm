@@ -1,16 +1,13 @@
 #!/usr/bin/env python3
 """
-多様性損失アルゴリズム比較実験スクリプト（5アルゴリズム版）
+多様性損失アルゴリズム比較実験スクリプト（2アルゴリズム版）
 
 採用アルゴリズム:
-  - MCDL: 現行ベースライン（最速）
+  - MCDL: 現行ベースライン（最速、唯一CVFPなしでも収束）
   - ODCM: VICReg風（推奨、低コスト・高ER）
-  - SDL: ER直接最大化（最高ER、高コスト）
-  - NUC: 核ノルム最大化（高ER、高コスト）
-  - WMSE: 白色化ベース（中コスト）
 
 使用方法:
-  # デフォルト: context_dim=768,1000 で全5アルゴリズム実行
+  # デフォルト: context_dim=768,1000 で全アルゴリズム実行
   python3 scripts/diversity_algorithm_experiment.py
 
   # 特定のアルゴリズムのみ実行
@@ -22,11 +19,8 @@
   # context_dimを指定（複数可）
   python3 scripts/diversity_algorithm_experiment.py -c 768 1000
 
-  # 高コスト（SDL, NUC）を含める
-  python3 scripts/diversity_algorithm_experiment.py --include-high-cost
-
 Colab実行用:
-  !cd /content/new-llm && python3 scripts/diversity_algorithm_experiment.py -s 100 -c 768 1000 --include-high-cost
+  !cd /content/new-llm && python3 scripts/diversity_algorithm_experiment.py -s 100 -c 768 1000
 """
 
 import os
@@ -54,7 +48,6 @@ from src.utils.seed import set_seed
 from src.losses.diversity import (
     DIVERSITY_ALGORITHMS,
     ALGORITHM_DESCRIPTIONS,
-    HIGH_COST_ALGORITHMS,
 )
 
 
@@ -367,21 +360,10 @@ def main():
         default=None,
         help='Output directory (default: auto-generated)'
     )
-    parser.add_argument(
-        '--include-high-cost',
-        action='store_true',
-        help='Include high-cost algorithms (SDL, NUC)'
-    )
-
     args = parser.parse_args()
 
-    # 高コストアルゴリズムをフィルタリング
+    # アルゴリズムリスト
     algorithms = args.algorithms
-    if not args.include_high_cost:
-        skipped = [a for a in algorithms if a in HIGH_COST_ALGORITHMS]
-        algorithms = [a for a in algorithms if a not in HIGH_COST_ALGORITHMS]
-        if skipped:
-            print_flush(f"Note: Skipping high-cost algorithms: {skipped} (use --include-high-cost to include)")
 
     # 出力ディレクトリ
     if args.output_dir:

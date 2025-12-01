@@ -79,9 +79,9 @@ python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM -s 100
 
 ---
 
-## 🎯 多様性損失アルゴリズム（4種類採用）(2025-12-01)
+## 🎯 多様性損失アルゴリズム（2種類採用）(2025-12-01)
 
-**Phase 1で使用している多様性確保アルゴリズム（WMSEは除外）。**
+**Phase 1で使用している多様性確保アルゴリズム。**
 
 ### 採用アルゴリズム一覧
 
@@ -89,8 +89,49 @@ python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM -s 100
 |------|------|-----------|
 | **MCDL** | Mean-Centered Dispersion Loss（現行ベースライン） | O(n×d) 最速 |
 | **ODCM** | Off-Diagonal Covariance Minimization（VICReg風、推奨） | O(n×d + d²) |
-| **SDL** | Spectral Diversity Loss（ER直接最大化、最高ER）| O(n×d²) 高コスト |
-| **NUC** | Nuclear Norm Maximization（核ノルム最大化）| O(n×d²) 高コスト |
+
+### 🔬 MCDLが最良である理由 - 重要分析 (2025-12-01)
+
+**実験結果**: 通常Layer版 + context_dim=500 + dwr=0.9
+
+| アルゴリズム | Val PPL | Acc | α値 | Val ER |
+|------------|---------|-----|-----|--------|
+| **MCDL** | **289.1** | **20.3%** | -0.423 | 82.7% |
+| ODCM | 308.5 | 19.6% | -0.568 | 86.7% |
+
+**MCDLが最良PPLを達成した理由**:
+
+1. **適度な多様性**: ER=82.7%（過剰な95%より適切）
+2. **早期停止**: 10 iterで完了（他は45-60 iter）→ 過学習回避
+3. **言語構造保持**: 球状分布を強制しないため自然な表現を維持
+4. **単純な目的関数**: 安定した最適化、滑らかな勾配
+
+### 🔬 MCDLの特異な収束特性 - CVFPなしでも収束
+
+**MCDLだけがCVFP無効(dwr=1.0)でも僅かに収束する**:
+
+| 設定 | MCDL | ODCM |
+|------|------|------|
+| dwr=1.0 (200s) | **2%** | 0% |
+| dwr=0.9 (200s) | **7%** | 0% |
+
+**理由**: MCDLの「自己平衡」効果
+
+```python
+# MCDL: 平均からの偏差を最大化
+L = -||X - mean(X)||
+
+# 勾配の方向: 平均から離れろ
+# しかし全点が離れると平均自体も移動
+# → 「追いかけっこ」が平衡点に収束
+```
+
+**他アルゴリズムが収束しない理由**:
+- ODCM: 「無相関にしろ」→ 限界なく発散
+
+**教訓**:
+- **相対的目標（平均からの偏差）は収束しやすい**
+- **絶対的目標（無相関、均等分布）は収束しにくい**
 
 ### 実装場所
 
@@ -99,7 +140,6 @@ python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM -s 100
 from src.losses.diversity import (
     DIVERSITY_ALGORITHMS,      # アルゴリズム辞書
     ALGORITHM_DESCRIPTIONS,    # 説明辞書
-    HIGH_COST_ALGORITHMS,      # {'SDL', 'NUC'}
 )
 ```
 
@@ -107,7 +147,7 @@ from src.losses.diversity import (
 
 ```bash
 # Phase 1のみ（ER比較）
-python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM SDL NUC -s 50 100
+python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM -s 50 100
 
 # Phase 1 + Phase 2（α値比較）- CVFP無効
 python3 scripts/diversity_full_experiment.py

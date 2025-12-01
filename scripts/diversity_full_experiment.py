@@ -2,7 +2,7 @@
 """
 多様性損失アルゴリズム比較実験（Phase 1 + Phase 2 + α値分析）
 
-4つのアルゴリズム（MCDL, ODCM, SDL, NUC）で Phase 1 + Phase 2 を実行し、
+2つのアルゴリズム（MCDL, ODCM）で Phase 1 + Phase 2 を実行し、
 α値（スケーリング指数）を比較する。
 
 使用方法:
@@ -478,8 +478,8 @@ def main():
     parser.add_argument(
         '--algorithms', '-a',
         nargs='+',
-        default=['MCDL', 'ODCM', 'SDL', 'NUC'],
-        help='Algorithms to test (default: MCDL ODCM SDL NUC)'
+        default=['MCDL', 'ODCM'],
+        help='Algorithms to test (default: MCDL ODCM)'
     )
     parser.add_argument(
         '--samples', '-s',

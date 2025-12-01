@@ -3,12 +3,10 @@ Diversity Loss Algorithms for CVFP Training
 
 多様性損失アルゴリズム集。Phase 1訓練で使用。
 
-採用アルゴリズム（5種類）:
-- MCDL: 現行ベースライン（最速）
+採用アルゴリズム（3種類）:
+- MCDL: 現行ベースライン（最速、唯一CVFPなしでも収束）
 - ODCM: VICReg風（推奨、低コスト・高ER）
-- SDL: ER直接最大化（最高ER、高コスト）
-- NUC: 核ノルム最大化（高ER、高コスト）
-- WMSE: 白色化ベース（中コスト）
+- OACD: 原点固定重心分散（MCDLの拡張、より安定した平衡点）
 """
 
 from typing import Callable, Dict
@@ -17,7 +15,7 @@ import torch
 
 
 # =============================================================================
-# 採用アルゴリズム（5種類）
+# 採用アルゴリズム（3種類）
 # =============================================================================
 
 def mcdl_loss(contexts: torch.Tensor) -> torch.Tensor:
@@ -56,33 +54,30 @@ def odcm_loss(contexts: torch.Tensor) -> torch.Tensor:
     return var_loss + 0.04 * cov_loss
 
 
-def sdl_loss(contexts: torch.Tensor) -> torch.Tensor:
+def oacd_loss(contexts: torch.Tensor, centroid_weight: float = 0.1) -> torch.Tensor:
     """
-    SDL (Spectral Diversity Loss) - Effective Rank直接最大化
+    OACD (Origin-Anchored Centroid Dispersion) - 原点固定重心分散
 
-    SVD特異値のエントロピーを直接最大化。
-    最高のER達成が可能だが、計算コストが高い。
+    MCDLの拡張版:
+    1. 各点を重心から離散させる（MCDL同様）
+    2. 重心を原点に引き寄せる（新規）
 
-    計算コスト: O(n×d²) - 高コスト
+    これにより:
+    - MCDLの「自己平衡」効果を維持
+    - 重心が原点に固定されることで、より安定した平衡点が期待できる
+
+    計算コスト: O(n×d) - MCDLと同等
     """
-    _, S, _ = torch.svd(contexts)
-    S_normalized = S / (S.sum() + 1e-10)
-    entropy = -(S_normalized * torch.log(S_normalized + 1e-10)).sum()
-    return -entropy
+    context_mean = contexts.mean(dim=0)
+    deviation = contexts - context_mean
 
+    # Term 1: 重心からの分散を最大化（MCDL）
+    dispersion_loss = -torch.norm(deviation, p=2) / len(contexts)
 
-def nuc_loss(contexts: torch.Tensor) -> torch.Tensor:
-    """
-    NUC (Nuclear Norm Maximization) - 核ノルム最大化
+    # Term 2: 重心を原点に引き寄せる
+    centroid_loss = torch.norm(context_mean, p=2) ** 2
 
-    特異値の和（核ノルム）を最大化。
-    SDLに次ぐ高ER達成が可能。
-
-    計算コスト: O(n×d²) - 高コスト
-    """
-    centered = contexts - contexts.mean(dim=0)
-    nuclear_norm = torch.linalg.matrix_norm(centered, ord='nuc')
-    return -nuclear_norm / len(contexts)
+    return dispersion_loss + centroid_weight * centroid_loss
 
 
 def wmse_loss(contexts: torch.Tensor) -> torch.Tensor:
@@ -127,18 +122,13 @@ def wmse_loss(contexts: torch.Tensor) -> torch.Tensor:
 DIVERSITY_ALGORITHMS: Dict[str, Callable[[torch.Tensor], torch.Tensor]] = {
     'MCDL': mcdl_loss,
     'ODCM': odcm_loss,
-    'SDL': sdl_loss,
-    'NUC': nuc_loss,
+    'OACD': oacd_loss,
     'WMSE': wmse_loss,
 }
 
 ALGORITHM_DESCRIPTIONS: Dict[str, str] = {
     'MCDL': 'Mean-Centered Dispersion Loss (現行ベースライン)',
     'ODCM': 'Off-Diagonal Covariance Minimization (VICReg風, 推奨)',
-    'SDL': 'Spectral Diversity Loss (ER直接最大化, 高コスト)',
-    'NUC': 'Nuclear Norm Maximization (核ノルム最大化, 高コスト)',
+    'OACD': 'Origin-Anchored Centroid Dispersion (原点固定重心分散)',
     'WMSE': 'Whitening MSE (白色化ベース)',
 }
-
-# 高コストアルゴリズム
-HIGH_COST_ALGORITHMS = {'SDL', 'NUC'}
