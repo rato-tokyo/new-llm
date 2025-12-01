@@ -26,6 +26,3 @@ class Phase1Config:
     val_frequency = 5                # N イテレーションごとに評価
     val_sample_size = 10000          # サンプル数（10000以上推奨）
     val_patience = 1                 # N回連続で改善なし→停止
-
-    # ========== 実行制御 ==========
-    skip = False                     # Phase 1をスキップ

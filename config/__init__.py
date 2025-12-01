@@ -38,7 +38,6 @@ class Config(BaseConfig):
     phase1_val_frequency = Phase1Config.val_frequency
     phase1_val_sample_size = Phase1Config.val_sample_size
     phase1_val_patience = Phase1Config.val_patience
-    skip_phase1 = Phase1Config.skip
 
     # ========== Phase 2 設定 ==========
     phase2_learning_rate = Phase2Config.learning_rate
@@ -50,7 +49,6 @@ class Config(BaseConfig):
     phase2_max_batch_size = Phase2Config.max_batch_size
     phase2_memory_safety_factor = Phase2Config.memory_safety_factor
     phase2_freeze_embedding = Phase2Config.freeze_embedding
-    skip_phase2 = Phase2Config.skip
 
     @property
     def effective_phase2_batch_size(self) -> int:

@@ -33,9 +33,6 @@ class Phase2Config:
                                      # PPL 66-72%改善、Accuracy 53-63%改善
                                      # Weight Tying時はOutput Headも凍結される
 
-    # ========== 実行制御 ==========
-    skip = False                     # Phase 2をスキップ
-
     @classmethod
     def get_effective_batch_size(cls, config_batch_size=None):
         """Phase 2のバッチサイズを取得（GPUメモリベース自動計算）"""

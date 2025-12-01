@@ -29,10 +29,8 @@ class BaseConfig:
 
     # ========== データ ==========
     tokenizer_name = "gpt2"
-    train_data_source = "ultrachat"
-    train_val_split_ratio = 0.9
     val_data_source = "text_file"
-    val_text_file = "./cache/example_val.txt"  # data/ → cache/ に変更
+    val_text_file = "./cache/example_val.txt"
     num_samples = 500
     dataset_name = "HuggingFaceH4/ultrachat_200k"
     dataset_split = "train_sft"
@@ -41,17 +39,3 @@ class BaseConfig:
     # ========== デバイス ==========
     device = "cuda" if torch.cuda.is_available() else "cpu"
     random_seed = 42
-
-    # ========== 診断設定 ==========
-    identity_mapping_threshold = 0.95
-    identity_check_samples = 100
-
-    # ========== チェックポイント ==========
-    checkpoint_dir = "./checkpoints"
-    checkpoint_path = "./checkpoints/model_latest.pt"
-    load_checkpoint = False
-    save_checkpoint = True
-
-    # ========== ログ出力 ==========
-    log_every_steps = 1
-    save_every_samples = 10

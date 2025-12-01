@@ -285,9 +285,9 @@ class Phase2Trainer:
 
     def _calculate_optimal_batch_size(
         self,
-        device: torch.device,
+        device: torch.device,  # noqa: ARG002
         initial_batch_size: int = 4096,
-        actual_cache_gb: float = 0.0
+        _actual_cache_gb: float = 0.0
     ) -> int:
         """
         現在のGPUメモリ状態から最適なバッチサイズを計算
@@ -295,9 +295,9 @@ class Phase2Trainer:
         memory.pyのcalculate_optimal_batch_size関数に委譲。
 
         Args:
-            device: デバイス
+            device: デバイス（将来の拡張用に保持）
             initial_batch_size: 初期バッチサイズ
-            actual_cache_gb: 実際に使用しているキャッシュサイズ (GB) - 未使用
+            _actual_cache_gb: 実際に使用しているキャッシュサイズ (GB) - 未使用
 
         Returns:
             int: 最適なバッチサイズ
