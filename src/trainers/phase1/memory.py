@@ -514,8 +514,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
         total_diversity_loss = 0.0
         total_loss_sum = 0.0
 
-        # 最終コンテキスト（ラップアラウンド用）
-        last_context = previous_contexts[-1].detach()
+        # 最終コンテキスト（ラップアラウンド用）- GPUに転送
+        last_context = previous_contexts[-1].detach().to(self.device)
 
         # バッチ処理（勾配累積）
         for start_idx in range(0, num_tokens, batch_size):
@@ -539,10 +539,10 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 noise = torch.randn_like(batch_contexts) * context_noise
                 batch_contexts = batch_contexts + noise
 
-            # バッチ分のcombined_tokensを作成
+            # バッチ分のcombined_tokensを作成（GPUに転送）
             batch_combined = self._build_combined_tokens_batch(
                 token_embeds, num_input_tokens, start_idx, end_idx
-            )
+            ).to(self.device)
 
             # Forward pass
             batch_output = self.model.context_block(batch_contexts, batch_combined)
