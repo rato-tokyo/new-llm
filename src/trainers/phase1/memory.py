@@ -217,22 +217,24 @@ class MemoryPhase1Trainer(Phase1Trainer):
         """
         単一イテレーションの処理
 
+        大規模データでのOOMを防ぐため、token_embedsとprevious_contextsは
+        CPUに保持し、バッチ処理内で必要な分だけGPUに転送する。
+
         Returns:
             (contexts, total_loss, convergence_rate, elapsed_time)
         """
         start_time = time.time()
 
-        token_embeds_gpu = token_embeds.to(self.device)
-        previous_contexts_gpu = previous_contexts.to(self.device)
-
+        # CPUのまま渡す（_forward_parallel_with_grad_accum内でバッチごとにGPU転送）
         contexts, total_loss, _ = self._forward_parallel_with_grad_accum(
-            token_embeds_gpu, previous_contexts_gpu, optimizer
+            token_embeds, previous_contexts, optimizer
         )
 
-        convergence_rate = self._compute_convergence_rate(contexts, previous_contexts_gpu, num_tokens)
-
-        del token_embeds_gpu, previous_contexts_gpu
-        clear_gpu_cache(self.device)
+        # 収束率計算（バッチ処理で省メモリ）
+        # contextsはGPU上、previous_contextsはCPU上なのでGPUに転送してバッチ計算
+        convergence_rate = self._compute_convergence_rate_batched(
+            contexts, previous_contexts, num_tokens
+        )
 
         elapsed = time.time() - start_time
 
@@ -569,15 +571,15 @@ class MemoryPhase1Trainer(Phase1Trainer):
         torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=self.config.phase1_gradient_clip)
         optimizer.step()
 
-        # コンテキストを結合してGPUに戻す
-        contexts = torch.cat(all_contexts_cpu, dim=0).to(self.device)
+        # コンテキストを結合（CPUに保持してメモリ節約）
+        contexts_cpu = torch.cat(all_contexts_cpu, dim=0)
         del all_contexts_cpu
 
         # 平均損失を計算
         avg_diversity_loss = total_diversity_loss / num_tokens
         avg_total_loss = total_loss_sum / num_tokens
 
-        return contexts, avg_total_loss, avg_diversity_loss
+        return contexts_cpu, avg_total_loss, avg_diversity_loss
 
     def _build_combined_tokens_batch(
         self, token_embeds: torch.Tensor, num_input_tokens: int,
@@ -602,11 +604,44 @@ class MemoryPhase1Trainer(Phase1Trainer):
         """多様性損失計算（デフォルト: OACD）"""
         return oacd_loss(contexts)
 
-    def _compute_convergence_rate(self, current: torch.Tensor, previous: torch.Tensor, num_tokens: int) -> float:
+    def _compute_convergence_rate_batched(
+        self, current: torch.Tensor, previous: torch.Tensor, num_tokens: int
+    ) -> float:
+        """
+        収束率を計算（CPUテンソル対応、バッチ処理でメモリ効率化）
+
+        大規模データでのOOMを防ぐため、バッチごとにGPU転送して処理。
+        currentとpreviousはどちらもCPUテンソルを想定。
+
+        Args:
+            current: 現在のコンテキスト（CPUテンソル）
+            previous: 前回のコンテキスト（CPUテンソル）
+            num_tokens: トークン数
+
+        Returns:
+            収束率（0.0-1.0）
+        """
         with torch.no_grad():
-            token_losses = ((current - previous) ** 2).mean(dim=1)
-            converged = token_losses < self.config.phase1_convergence_threshold
-            return float(converged.sum().item()) / num_tokens
+            # バッチサイズ（メモリ効率のため分割処理）
+            batch_size = 100000  # 10万トークンずつ処理
+
+            converged_count = 0
+            threshold = self.config.phase1_convergence_threshold
+
+            for start_idx in range(0, num_tokens, batch_size):
+                end_idx = min(start_idx + batch_size, num_tokens)
+
+                # バッチ分だけGPUに転送して計算
+                current_batch = current[start_idx:end_idx].to(self.device)
+                previous_batch = previous[start_idx:end_idx].to(self.device)
+
+                token_losses = ((current_batch - previous_batch) ** 2).mean(dim=1)
+                converged_count += (token_losses < threshold).sum().item()
+
+                del current_batch, previous_batch, token_losses
+                clear_gpu_cache(self.device)
+
+            return converged_count / num_tokens
 
     def _quick_validate(self, val_token_ids: torch.Tensor) -> float:
         """

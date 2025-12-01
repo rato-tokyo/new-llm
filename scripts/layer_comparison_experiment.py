@@ -257,8 +257,8 @@ def main():
     parser.add_argument(
         '--samples', '-s',
         type=int,
-        default=2000,
-        help='Number of samples (default: 2000)'
+        default=500,
+        help='Number of samples (default: 500)'
     )
     parser.add_argument(
         '--context-dim', '-c',
