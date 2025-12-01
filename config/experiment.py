@@ -79,6 +79,7 @@ class Phase1TrainerConfig:
     phase1_val_frequency: int
     phase1_val_sample_size: int
     phase1_val_patience: int
+    phase1_extra_iterations_after_stop: int
 
     # デバイス
     device: Union[str, torch.device]
@@ -93,6 +94,7 @@ class Phase1TrainerConfig:
         num_input_tokens: Optional[int] = None,
         phase1_learning_rate: Optional[float] = None,
         phase1_max_iterations: Optional[int] = None,
+        phase1_extra_iterations_after_stop: Optional[int] = None,
     ) -> "Phase1TrainerConfig":
         """Configから生成（オプションで上書き可能）"""
         return cls(
@@ -110,6 +112,10 @@ class Phase1TrainerConfig:
             phase1_val_frequency=getattr(base, 'phase1_val_frequency', 5),
             phase1_val_sample_size=getattr(base, 'phase1_val_sample_size', 10000),
             phase1_val_patience=getattr(base, 'phase1_val_patience', 1),
+            phase1_extra_iterations_after_stop=(
+                phase1_extra_iterations_after_stop if phase1_extra_iterations_after_stop is not None
+                else getattr(base, 'phase1_extra_iterations_after_stop', 0)
+            ),
             device=device,
         )
 

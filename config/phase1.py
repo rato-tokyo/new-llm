@@ -26,3 +26,4 @@ class Phase1Config:
     val_frequency = 5                # N イテレーションごとに評価
     val_sample_size = 10000          # サンプル数（10000以上推奨）
     val_patience = 1                 # N回連続で改善なし→停止
+    extra_iterations_after_stop = 0  # Early Stop後の追加イテレーション数（検証用）

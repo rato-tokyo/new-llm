@@ -161,9 +161,11 @@ class MemoryPhase1Trainer(Phase1Trainer):
         val_early_stopping = self.config.phase1_val_early_stopping
         val_frequency = self.config.phase1_val_frequency
         val_patience = self.config.phase1_val_patience
+        extra_iterations = getattr(self.config, 'phase1_extra_iterations_after_stop', 0)
         best_val_er = 0.0
         val_patience_counter = 0
         val_early_stopped = False
+        early_stop_iteration: Optional[int] = None  # Early Stop発動イテレーション
 
         previous_contexts: Optional[torch.Tensor] = None
         final_convergence_rate = 0.0
@@ -187,10 +189,23 @@ class MemoryPhase1Trainer(Phase1Trainer):
             previous_contexts = contexts.detach().cpu()
             final_convergence_rate = convergence_rate
 
+            # 追加イテレーション中かどうかを表示
+            extra_marker = ""
+            if early_stop_iteration is not None:
+                extra_iter_num = iteration - early_stop_iteration
+                extra_marker = f" [+{extra_iter_num}]"
+
             print_flush(
-                f"  Iter {iteration+1}: conv={convergence_rate*100:.0f}% "
+                f"  Iter {iteration+1}{extra_marker}: conv={convergence_rate*100:.0f}% "
                 f"loss={total_loss:.4f} [{elapsed:.1f}s]"
             )
+
+            # Early Stop発動後の追加イテレーション完了チェック
+            if early_stop_iteration is not None:
+                if iteration >= early_stop_iteration + extra_iterations:
+                    print_flush(f"  ✓ Extra iterations completed (+{extra_iterations})")
+                    break
+                continue  # 追加イテレーション中はValidationチェックをスキップ
 
             # Validation早期停止チェック
             if (val_early_stopping and
@@ -202,7 +217,11 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 )
                 if should_stop:
                     val_early_stopped = True
-                    break
+                    if extra_iterations > 0:
+                        early_stop_iteration = iteration
+                        print_flush(f"  → Early stop triggered, running +{extra_iterations} extra iterations...")
+                    else:
+                        break
 
         assert previous_contexts is not None
         return previous_contexts, final_convergence_rate, val_early_stopped, best_val_er, final_iter

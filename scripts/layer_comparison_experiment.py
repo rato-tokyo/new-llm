@@ -128,11 +128,12 @@ def run_single_experiment(
 
         print_flush(f"    Model: {total_params:,} params (layers={exp_config.num_layers}, fnn={exp_config.fnn_num_layers})")
 
-        # Phase 1用設定
+        # Phase 1用設定（Early Stop後+10イテレーション）
         phase1_config = Phase1TrainerConfig.from_base(
             base_config, device,
             context_dim=context_dim,
             num_layers=exp_config.num_layers,
+            phase1_extra_iterations_after_stop=10,
         )
 
         # Phase 1 トレーナー作成
