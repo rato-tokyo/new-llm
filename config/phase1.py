@@ -23,4 +23,4 @@ class Phase1Config:
 
     # ========== 収束率Early Stopping ==========
     early_stopping = True            # 収束率による早期停止を有効化
-    early_stopping_threshold = 0.30  # 収束率がこの値以上で停止（30%）
+    early_stopping_threshold = 0.90  # 収束率がこの値以上で停止（30%）
