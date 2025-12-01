@@ -605,7 +605,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
     def _compute_effective_rank(self, contexts: torch.Tensor) -> float:
         """
-        Effective Rank計算（GPU最適化）
+        Effective Rank計算（SVDベース - analyze_fixed_pointsと同じ方法）
 
         Args:
             contexts: コンテキストテンソル [num_tokens, context_dim]
@@ -613,23 +613,13 @@ class MemoryPhase1Trainer(Phase1Trainer):
         Returns:
             effective_rank: Effective Rank値（0 〜 context_dim）
         """
-        # 中心化
-        centered = contexts - contexts.mean(dim=0, keepdim=True)
+        # SVDで特異値を計算（analyze_fixed_pointsと同じ方法）
+        _, S, _ = torch.svd(contexts)
 
-        # 共分散行列
-        cov = torch.mm(centered.T, centered) / (len(contexts) - 1)
+        # Effective rank (entropy-based)
+        S_normalized = S / S.sum()
+        entropy = -(S_normalized * torch.log(S_normalized + 1e-10)).sum()
 
-        # 固有値（SVDより高速）
-        eigenvalues = torch.linalg.eigvalsh(cov)
-        eigenvalues = torch.clamp(eigenvalues, min=1e-10)
-
-        # 確率に変換
-        probs = eigenvalues / eigenvalues.sum()
-
-        # エントロピー
-        entropy = -(probs * torch.log(probs)).sum()
-
-        # Effective Rank = exp(entropy)
         return float(torch.exp(entropy).item())
 
     @property
