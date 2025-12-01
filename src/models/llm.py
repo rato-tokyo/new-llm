@@ -12,12 +12,12 @@ Main features:
 4. GPT-2 pretrained embeddings support
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 
 import torch
 import torch.nn as nn
 
-from .blocks import ContextBlock, SplitContextBlock, TokenBlock
+from .blocks import ContextBlock, TokenBlock
 
 
 class LLM(nn.Module):
@@ -33,18 +33,12 @@ class LLM(nn.Module):
     token継ぎ足し方式（2025-11-29に一本化）:
     - 全レイヤーでtoken入力
 
-    ContextBlock分割機能:
-    - num_context_splits > 1 の場合、ContextBlockを分割
-    - 各ブロックは異なるサンプルで訓練
-    - 推論時は出力を連結
-
     Args:
         vocab_size: Vocabulary size
         embed_dim: Token embedding dimension (単一トークンの次元)
         context_dim: Context vector dimension
         num_layers: Number of layers in both ContextBlock and TokenBlock
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
-        num_context_splits: Number of ContextBlock splits (1 = no split)
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
         use_weight_tying: Whether to tie token_embedding and token_output weights
                           (reduces parameters by ~38M, GPT-2 style)
@@ -58,7 +52,6 @@ class LLM(nn.Module):
         context_dim: int,
         num_layers: int = 6,
         num_input_tokens: int = 1,
-        num_context_splits: int = 1,
         use_pretrained_embeddings: bool = True,
         use_weight_tying: bool = False,
         config: Optional[Any] = None
@@ -71,7 +64,6 @@ class LLM(nn.Module):
         self.context_dim = context_dim
         self.num_layers = num_layers
         self.num_input_tokens = num_input_tokens
-        self.num_context_splits = num_context_splits
         self.use_separated_architecture = True  # Always true now
         self.use_weight_tying = use_weight_tying
 
@@ -89,28 +81,13 @@ class LLM(nn.Module):
         print("  token継ぎ足し方式: 全レイヤーでtoken入力")
 
         # ContextBlock: 文脈処理専用
-        self.context_block: Union[ContextBlock, SplitContextBlock]
-        if num_context_splits > 1:
-            # 分割モード: SplitContextBlockを使用
-            print(f"  num_context_splits: {num_context_splits} (split mode)")
-            print(f"    → Each split: context_dim={context_dim // num_context_splits}")
-            self.context_block = SplitContextBlock(
-                num_splits=num_context_splits,
-                num_layers=num_layers,
-                context_dim=context_dim,
-                embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens,
-                config=config
-            )
-        else:
-            # 通常モード: 従来のContextBlockを使用
-            self.context_block = ContextBlock(
-                num_layers=num_layers,
-                context_dim=context_dim,
-                embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens,
-                config=config
-            )
+        self.context_block = ContextBlock(
+            num_layers=num_layers,
+            context_dim=context_dim,
+            embed_dim=embed_dim,
+            num_input_tokens=num_input_tokens,
+            config=config
+        )
 
         # TokenBlock: トークン処理専用
         # E案: ContextBlockの各レイヤー出力次元をTokenBlockに渡す

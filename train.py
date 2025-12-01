@@ -54,7 +54,6 @@ def main():
     print_flush("📋 Configuration:")
     print_flush(f"   Layers: {config.num_layers}")
     print_flush(f"   Context dim: {config.context_dim}")
-    print_flush(f"   num_context_splits: {config.num_context_splits}")
     print_flush(f"   Device: {config.device}")
     print_flush(f"   Diversity weight: {config.dist_reg_weight}")
     if not test_mode:
@@ -78,7 +77,6 @@ def main():
         context_dim=config.context_dim,
         num_layers=config.num_layers,
         num_input_tokens=config.num_input_tokens,
-        num_context_splits=config.num_context_splits,
         use_pretrained_embeddings=config.use_pretrained_embeddings,
         use_weight_tying=config.use_weight_tying,
         config=config

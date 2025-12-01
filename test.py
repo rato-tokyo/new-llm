@@ -42,7 +42,6 @@ print(f"  - num_layers: {config.num_layers}")
 print(f"  - context_dim: {config.context_dim}")
 print(f"  - embed_dim: {config.embed_dim}")
 print(f"  - num_input_tokens: {config.num_input_tokens}")
-print(f"  - num_context_splits: {config.num_context_splits}")
 print(f"  - dist_reg_weight: {config.dist_reg_weight}")
 
 device = torch.device(config.device if torch.cuda.is_available() else "cpu")
@@ -67,7 +66,6 @@ model = LLM(
     context_dim=config.context_dim,
     num_layers=config.num_layers,
     num_input_tokens=config.num_input_tokens,
-    num_context_splits=config.num_context_splits,
     use_pretrained_embeddings=config.use_pretrained_embeddings,
     use_weight_tying=config.use_weight_tying,
     config=config

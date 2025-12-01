@@ -28,7 +28,6 @@ class ExperimentConfig:
     context_dim: int = 768
     embed_dim: int = 768
     num_input_tokens: int = 1
-    num_context_splits: int = 1
 
     # データ
     num_samples: int = 500
@@ -177,7 +176,6 @@ class ExperimentRunner:
             context_dim=config.context_dim,
             num_layers=config.num_layers,
             num_input_tokens=config.num_input_tokens,
-            num_context_splits=config.num_context_splits,
             use_pretrained_embeddings=self.base_config.use_pretrained_embeddings,
             use_weight_tying=self.base_config.use_weight_tying,
             config=self.base_config

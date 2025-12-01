@@ -228,7 +228,6 @@ def run_single_experiment(
         context_dim=base_config.context_dim,
         num_layers=base_config.num_layers,
         num_input_tokens=base_config.num_input_tokens,
-        num_context_splits=base_config.num_context_splits,
         use_pretrained_embeddings=base_config.use_pretrained_embeddings,
         use_weight_tying=base_config.use_weight_tying,
         config=base_config

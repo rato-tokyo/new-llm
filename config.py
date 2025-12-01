@@ -45,27 +45,10 @@ class ResidualConfig:
                                     # 2: 直前2トークン [token_{t-1}, token_t]
                                     # N: 直前Nトークン [token_{t-N+1}, ..., token_t]
 
-    # ========== ContextBlock分割 ==========
-    num_context_splits = 1          # ContextBlockの分割数
-                                    # 1: 分割なし（従来動作）
-                                    # N: N分割（各ブロックがcontext_dim/Nを出力、連結して結合）
-                                    # 効果: 計算量・パラメータが約1/Nに削減
-                                    # 訓練: 各ブロックは異なるサンプルで訓練（sample_id % N）
-
-    @property
-    def split_context_dim(self) -> int:
-        """分割後の各ContextBlockのcontext_dim"""
-        if self.context_dim % self.num_context_splits != 0:
-            raise ValueError(
-                f"context_dim ({self.context_dim}) must be divisible by "
-                f"num_context_splits ({self.num_context_splits})"
-            )
-        return self.context_dim // self.num_context_splits
-
     # ========== Diversity Regularization (Per-Dimension Usage Tracking) ==========
     # LayerNorm + Per-Dimension Variance Tracking (EMA-based) による多様性確保
     # 実装: 各次元の使用頻度を追跡し、使用頻度が低い次元を優先的に活性化
-    dist_reg_weight = 0.9              # 多様性正則化の重み (PARALLEL OPTIMIZED: 90% diversity)
+    dist_reg_weight = 0.5              # 多様性正則化の重み (PARALLEL OPTIMIZED: 90% diversity)
                                        # total_loss = (1-w) * cvfp_loss + w * diversity_loss
                                        # 0.9: 10% CVFP, 90% Diversity（並列版最適設定: 55.9% ER達成）
                                        # 並列版の情報遅延を多様性強化で補償
@@ -94,7 +77,7 @@ class ResidualConfig:
     phase1_val_early_stopping = True     # Validation早期停止を有効化
     phase1_val_frequency = 5             # N イテレーションごとに評価
     phase1_val_sample_size = 10000       # サンプル数（500では不正確、10000以上推奨）
-    phase1_val_patience = 2              # N回連続で改善なし→停止
+    phase1_val_patience = 1              # N回連続で改善なし→停止
 
     # ========== Phase 2: トークン予測（キャッシュ方式） ==========
     # キャッシュ方式による高速化:

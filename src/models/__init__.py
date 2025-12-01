@@ -5,7 +5,7 @@ CVFP (Context Vector Fixed-Point) architecture with token継ぎ足し方式.
 
 from .llm import LLM
 from .layers import ContextLayer, TokenLayer
-from .blocks import ContextBlock, TokenBlock, SplitContextBlock
+from .blocks import ContextBlock, TokenBlock
 
 __all__ = [
     'LLM',
@@ -13,5 +13,4 @@ __all__ = [
     'TokenLayer',
     'ContextBlock',
     'TokenBlock',
-    'SplitContextBlock',
 ]
