@@ -72,13 +72,16 @@ class _Phase1Config:
         self.num_input_tokens = exp.num_input_tokens
         self.phase1_learning_rate = exp.phase1_learning_rate or base.phase1_learning_rate
         self.phase1_max_iterations = exp.phase1_max_iterations or base.phase1_max_iterations
-        self.phase1_min_iterations = base.phase1_min_iterations
         self.phase1_convergence_threshold = base.phase1_convergence_threshold
-        self.phase1_min_converged_ratio = base.phase1_min_converged_ratio
         self.phase1_context_noise = base.phase1_context_noise
         self.phase1_batch_size = base.phase1_batch_size
         self.phase1_gradient_clip = base.phase1_gradient_clip
         self.dist_reg_weight = exp.dist_reg_weight or base.dist_reg_weight
+        # Phase 1 Validation Early Stopping
+        self.phase1_val_early_stopping = getattr(base, 'phase1_val_early_stopping', False)
+        self.phase1_val_frequency = getattr(base, 'phase1_val_frequency', 5)
+        self.phase1_val_sample_size = getattr(base, 'phase1_val_sample_size', 500)
+        self.phase1_val_patience = getattr(base, 'phase1_val_patience', 2)
         self.device = device
 
 
