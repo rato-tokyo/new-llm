@@ -44,55 +44,17 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import ResidualConfig
 from src.models import LLM
-from src.trainers.phase1 import FlexibleDiversityTrainer
+from src.trainers.phase1 import TimedDiversityTrainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
-from src.evaluation.convergence import forward_sequential
 from src.losses.diversity import (
     DIVERSITY_ALGORITHMS,
     ALGORITHM_DESCRIPTIONS,
     HIGH_COST_ALGORITHMS,
 )
-
-
-# =============================================================================
-# タイミング計測付きトレーナー（実験用拡張）
-# =============================================================================
-
-class TimedDiversityTrainer(FlexibleDiversityTrainer):
-    """タイミング計測機能付きの多様性トレーナー（実験用）"""
-
-    def __init__(
-        self,
-        model: torch.nn.Module,
-        config: Any,
-        device: torch.device,
-        diversity_fn: Callable[[torch.Tensor], torch.Tensor],
-        algorithm_name: str = "Custom"
-    ):
-        super().__init__(model, config, device, diversity_fn, algorithm_name)
-        self._diversity_loss_times: List[float] = []
-
-    def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
-        """オーバーライド: タイミング計測付きの多様性損失計算"""
-        start = time.perf_counter()
-        result = super()._compute_diversity_loss(contexts)
-        elapsed = time.perf_counter() - start
-        self._diversity_loss_times.append(elapsed * 1000)  # ms
-        return result
-
-    def get_avg_diversity_loss_time_ms(self) -> float:
-        """多様性損失計算の平均時間(ms)を取得"""
-        if not self._diversity_loss_times:
-            return 0.0
-        return sum(self._diversity_loss_times) / len(self._diversity_loss_times)
-
-    def reset_timing_stats(self):
-        """タイミング統計をリセット"""
-        self._diversity_loss_times = []
 
 
 # =============================================================================
@@ -167,6 +129,9 @@ def run_single_experiment(
         train_contexts = train_result
     train_time = time.time() - train_start
 
+    # トレーナーから訓練統計を取得（best_val_erを含む）
+    training_stats = trainer._training_stats
+
     # 評価
     model.eval()
     with torch.no_grad():
@@ -175,24 +140,14 @@ def run_single_experiment(
         train_er = train_metrics['effective_rank']
         train_er_pct = train_er / base_config.context_dim * 100
 
-        # 検証データER（シーケンシャル処理で評価、サンプリング）
-        # GPUでは10000トークンで十分高速
-        val_sample_size = min(len(val_token_ids), 10000)
-        val_sample_ids = val_token_ids[:val_sample_size]
-        val_token_embeds = model.token_embedding(val_sample_ids.unsqueeze(0).to(device))
-        val_token_embeds = model.embed_norm(val_token_embeds).squeeze(0)
-        val_contexts = forward_sequential(
-            model, val_token_embeds, None, device,
-            base_config.num_input_tokens
-        )
-        val_metrics = analyze_fixed_points(val_contexts, label="Val", verbose=False)
-        val_er = val_metrics['effective_rank']
-        val_er_pct = val_er / base_config.context_dim * 100
+        # 検証データER: 訓練中の最高値を使用
+        best_val_er = training_stats.get('best_val_er', 0.0)
+        val_er_pct = best_val_er / base_config.context_dim * 100
 
     avg_loss_time_ms = trainer.get_avg_diversity_loss_time_ms()
 
     # メモリ解放
-    del model, trainer, train_contexts, val_contexts
+    del model, trainer, train_contexts
     del train_token_ids, val_token_ids
     clear_gpu_cache(device)
 
@@ -204,7 +159,7 @@ def run_single_experiment(
         'num_val_tokens': num_val_tokens,
         'train_er': train_er,
         'train_er_pct': train_er_pct,
-        'val_er': val_er,
+        'val_er': best_val_er,  # 訓練中の最高値
         'val_er_pct': val_er_pct,
         'train_time_sec': train_time,
         'avg_loss_time_ms': avg_loss_time_ms,
@@ -305,7 +260,7 @@ def print_results_table(results: List[Dict[str, Any]], context_dims: List[int]):
 
     # context_dim別サマリー
     for ctx_dim in context_dims:
-        print_flush(f"\n" + "=" * 100)
+        print_flush("\n" + "=" * 100)
         print_flush(f"SUMMARY BY ALGORITHM (context_dim={ctx_dim})")
         print_flush("=" * 100)
 
