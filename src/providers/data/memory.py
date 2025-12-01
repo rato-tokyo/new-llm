@@ -160,7 +160,7 @@ class MemoryDataProvider(DataProvider):
         return result
 
     def _generate_val_file(self, file_path: str, tokenizer: Any) -> None:
-        """検証データファイルを自動生成（UltraChatのサンプル1000-1020）"""
+        """検証データファイルを自動生成（UltraChatの訓練データと重複しないサンプル）"""
         print_flush(f"  Validation file not found, generating: {file_path}")
 
         # ディレクトリ作成
@@ -173,9 +173,12 @@ class MemoryDataProvider(DataProvider):
             cache_dir=os.path.join(self.config.cache_dir, "datasets")
         )
 
-        # サンプル1000-1020を使用（訓練データ0-999と重複しない）
-        val_start_idx = 1000
-        val_end_idx = min(1020, len(dataset))
+        # 訓練データと重複しないインデックスを使用
+        # 訓練データは0からnum_samples-1を使用するので、
+        # 検証データはnum_samples以降から取得
+        # 安全マージンとして10000以降を使用（大規模実験でも安全）
+        val_start_idx = max(10000, self.config.num_samples + 1000)
+        val_end_idx = min(val_start_idx + 20, len(dataset))
 
         val_texts = []
         for idx in range(val_start_idx, val_end_idx):
