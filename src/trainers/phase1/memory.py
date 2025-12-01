@@ -5,7 +5,7 @@ MemoryPhase1Trainer - メモリ展開型Phase 1トレーナー
 """
 
 import time
-from typing import Optional, Any, Callable, List
+from typing import Optional, Any
 import torch
 
 from .base import Phase1Trainer, TrainResult, EvalResult, ContextCache
@@ -682,93 +682,3 @@ class MemoryPhase1Trainer(Phase1Trainer):
     @property
     def is_streaming(self) -> bool:
         return False
-
-
-class FlexibleDiversityTrainer(MemoryPhase1Trainer):
-    """
-    多様性損失関数をカスタマイズ可能なPhase 1トレーナー
-
-    スクリプトでの多様性アルゴリズム比較実験用。
-    コンストラクタで任意の多様性損失関数を注入できる。
-
-    Usage:
-        from src.losses.diversity import odcm_loss
-
-        trainer = FlexibleDiversityTrainer(
-            model, config, device,
-            diversity_fn=odcm_loss,
-            algorithm_name="ODCM"
-        )
-    """
-
-    def __init__(
-        self,
-        model: torch.nn.Module,
-        config: Any,
-        device: torch.device,
-        diversity_fn: Callable[[torch.Tensor], torch.Tensor],
-        algorithm_name: str = "Custom"
-    ):
-        """
-        Args:
-            model: LLMモデル
-            config: ResidualConfig
-            device: torch.device
-            diversity_fn: 多様性損失関数 (contexts: Tensor) -> Tensor
-            algorithm_name: アルゴリズム名（ログ表示用）
-        """
-        super().__init__(model, config, device)
-        self._diversity_fn = diversity_fn
-        self.algorithm_name = algorithm_name
-
-    def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
-        """カスタム多様性損失関数を使用"""
-        return self._diversity_fn(contexts)
-
-
-class TimedDiversityTrainer(FlexibleDiversityTrainer):
-    """
-    タイミング計測機能付きの多様性トレーナー
-
-    実験スクリプトで多様性損失計算のコスト比較に使用。
-    FlexibleDiversityTrainerを継承し、損失計算時間を記録。
-
-    Usage:
-        trainer = TimedDiversityTrainer(
-            model, config, device,
-            diversity_fn=odcm_loss,
-            algorithm_name="ODCM"
-        )
-        # ... training ...
-        avg_time = trainer.get_avg_diversity_loss_time_ms()
-    """
-
-    def __init__(
-        self,
-        model: torch.nn.Module,
-        config: Any,
-        device: torch.device,
-        diversity_fn: Callable[[torch.Tensor], torch.Tensor],
-        algorithm_name: str = "Custom"
-    ):
-        super().__init__(model, config, device, diversity_fn, algorithm_name)
-        self._diversity_loss_times: List[float] = []
-
-    def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
-        """タイミング計測付きの多様性損失計算"""
-        import time
-        start = time.perf_counter()
-        result = super()._compute_diversity_loss(contexts)
-        elapsed = time.perf_counter() - start
-        self._diversity_loss_times.append(elapsed * 1000)  # ms
-        return result
-
-    def get_avg_diversity_loss_time_ms(self) -> float:
-        """多様性損失計算の平均時間(ms)を取得"""
-        if not self._diversity_loss_times:
-            return 0.0
-        return sum(self._diversity_loss_times) / len(self._diversity_loss_times)
-
-    def reset_timing_stats(self) -> None:
-        """タイミング統計をリセット"""
-        self._diversity_loss_times = []

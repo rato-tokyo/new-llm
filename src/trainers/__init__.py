@@ -1,7 +1,7 @@
 """
 Trainers - Phase 1/Phase 2 トレーナー
 
-Phase 1: CVFP固定点学習（ContextBlock）
+Phase 1: 多様性学習（ContextBlock）
 Phase 2: トークン予測学習（TokenBlock）
 """
 

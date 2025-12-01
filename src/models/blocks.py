@@ -1,5 +1,5 @@
 """
-Block components for CVFP architecture.
+Block components for New-LLM architecture.
 
 ContextBlock: 文脈処理ブロック（Phase 1で学習、Phase 2でfreeze）
 TokenBlock: トークン処理ブロック（Phase 2で学習）

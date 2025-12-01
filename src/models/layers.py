@@ -1,5 +1,5 @@
 """
-Layer components for CVFP architecture.
+Layer components for New-LLM architecture.
 
 ContextLayer: 文脈処理専用レイヤー
 TokenLayer: トークン処理専用レイヤー

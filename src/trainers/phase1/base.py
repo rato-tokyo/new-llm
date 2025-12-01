@@ -1,5 +1,5 @@
 """
-Phase1Trainer - CVFP固定点学習トレーナーの抽象基底クラス
+Phase1Trainer - 多様性学習トレーナーの抽象基底クラス
 """
 
 from abc import ABC, abstractmethod

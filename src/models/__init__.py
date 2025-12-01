@@ -1,6 +1,6 @@
-"""New-LLM Models - CVFP Architecture
+"""New-LLM Models
 
-CVFP (Context Vector Fixed-Point) architecture with token継ぎ足し方式.
+Model architecture with token継ぎ足し方式.
 """
 
 from .llm import LLM
