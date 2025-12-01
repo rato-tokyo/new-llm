@@ -296,23 +296,26 @@ class MemoryPhase1Trainer(Phase1Trainer):
         """
         Phase 2用の全レイヤーキャッシュを収集
 
+        大規模データでのOOMを防ぐため、token_embedsとprevious_contextsは
+        CPUに保持し、バッチ処理内で必要な分だけGPUに転送する。
+
         Returns:
             (all_layer_contexts, token_embeds_combined)
         """
         cache_start = time.time()
         print_flush("  Collecting cache (parallel)...")
         self.model.eval()
-        token_embeds_gpu = token_embeds.to(self.device)
 
-        # Phase 2用に最後のトークンを除く
-        input_token_embeds = token_embeds_gpu[:-1]
+        # Phase 2用に最後のトークンを除く（CPUのまま）
+        input_token_embeds = token_embeds[:-1]
         num_input_tokens_total = len(input_token_embeds)
 
         # Phase 2では token i の処理に previous_contexts[i-1] を使用
-        initial_context = torch.zeros(1, self.model.context_dim, device=self.device)
+        # shifted_contextsはCPUに保持（バッチごとにGPU転送）
+        initial_context = torch.zeros(1, self.model.context_dim, device='cpu')
         shifted_contexts = torch.cat([
             initial_context,
-            previous_contexts[:-2].to(self.device)
+            previous_contexts[:-2]
         ], dim=0)
 
         # バッチサイズ決定
@@ -324,16 +327,18 @@ class MemoryPhase1Trainer(Phase1Trainer):
             device='cpu', dtype=torch.float32
         )
 
-        # token_embeds_combined を準備
+        # token_embeds_combined を準備（CPUで）
         token_embeds_combined = self._prepare_combined_token_embeds(
             input_token_embeds, num_input_tokens_total
         )
 
-        # バッチ処理
+        # バッチ処理（バッチごとにGPU転送）
         with torch.no_grad():
             for batch_start in range(0, num_input_tokens_total, cache_batch_size):
                 batch_end = min(batch_start + cache_batch_size, num_input_tokens_total)
-                batch_contexts = shifted_contexts[batch_start:batch_end]
+
+                # バッチ分だけGPUに転送
+                batch_contexts = shifted_contexts[batch_start:batch_end].to(self.device)
                 batch_embeds = token_embeds_combined[batch_start:batch_end].to(self.device)
 
                 batch_results = self.model.context_block.forward_with_intermediates_batch(
@@ -342,14 +347,13 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
                 all_layer_contexts[:, batch_start:batch_end, :] = batch_results.cpu()
 
-                del batch_results, batch_embeds
+                del batch_results, batch_embeds, batch_contexts
                 clear_gpu_cache(self.device)
 
         cache_elapsed = time.time() - cache_start
         print_flush(f"  Cache collected (parallel) [{cache_elapsed:.1f}s]")
 
         self.model.train()
-        del token_embeds_gpu
         clear_gpu_cache(self.device)
 
         return all_layer_contexts, token_embeds_combined
