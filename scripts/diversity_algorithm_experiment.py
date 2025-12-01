@@ -664,18 +664,20 @@ def main():
         help='Output directory (default: auto-generated)'
     )
     parser.add_argument(
-        '--skip-sdl',
+        '--include-high-cost',
         action='store_true',
-        help='Skip SDL algorithm (high computational cost)'
+        help='Include high-cost algorithms (SDL, UNIF, HSIC, InfoNCE)'
     )
 
     args = parser.parse_args()
 
-    # SDLをスキップ
+    # 高コストアルゴリズムをフィルタリング
     algorithms = args.algorithms
-    if args.skip_sdl and 'SDL' in algorithms:
-        algorithms = [a for a in algorithms if a != 'SDL']
-        print_flush("Note: Skipping SDL algorithm (use --no-skip-sdl to include)")
+    if not args.include_high_cost:
+        skipped = [a for a in algorithms if a in HIGH_COST_ALGORITHMS]
+        algorithms = [a for a in algorithms if a not in HIGH_COST_ALGORITHMS]
+        if skipped:
+            print_flush(f"Note: Skipping high-cost algorithms: {skipped} (use --include-high-cost to include)")
 
     # 出力ディレクトリ
     if args.output_dir:
