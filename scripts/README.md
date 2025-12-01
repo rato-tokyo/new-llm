@@ -19,7 +19,7 @@ python3 scripts/diversity_algorithm_experiment.py -a MCDL -s 50 --context-dim 10
 ```
 
 ### diversity_full_experiment.py
-Phase 1 + Phase 2を実行し、α値（スケーリング指数）を比較。CVFPは無効（多様性100%）。
+Phase 1 + Phase 2を実行し、α値（スケーリング指数）を比較。
 
 ```bash
 # デフォルト設定（4アルゴリズム, samples=[50,100,200], context_dim=1000）

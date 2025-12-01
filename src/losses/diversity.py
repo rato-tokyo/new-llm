@@ -32,7 +32,6 @@ def oacd_loss(contexts: torch.Tensor, centroid_weight: float = 0.1) -> torch.Ten
     これにより:
     - 「自己平衡」効果を維持（相対的目標）
     - 重心が原点に固定されることで、より安定した平衡点
-    - CVFPなし（dwr=1.0）でも収束する
 
     計算コスト: O(n×d) - 最速クラス
 

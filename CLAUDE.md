@@ -17,10 +17,10 @@ def oacd_loss(contexts, centroid_weight=0.1):
     return dispersion_loss + centroid_weight * centroid_loss
 ```
 
-**MCDLからの改良点**:
-- 重心を原点に固定することで、より安定した平衡点
+**特徴**:
+- 重心を原点に固定することで、安定した平衡点を実現
 - 「自己平衡」効果を維持（相対的目標）
-- CVFPロジックなしで収束可能
+- シンプルな損失関数で高いEffective Rank（80%+）を達成
 
 ### 実験結果 (context_dim=500)
 
@@ -308,4 +308,4 @@ use_weight_tying = True         # 推奨（デフォルト）
 
 ---
 
-Last Updated: 2025-12-01 (OACDアルゴリズム採用、CVFPロジック削除、コード簡素化)
+Last Updated: 2025-12-01 (OACDアルゴリズム採用、コード簡素化)

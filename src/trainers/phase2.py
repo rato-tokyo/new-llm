@@ -43,14 +43,7 @@ import time
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 from src.utils.io import print_flush
-from src.utils.device import clear_gpu_cache, synchronize_device
-
-# メモリユーティリティをインポート（オプショナル）
-try:
-    from src.utils.memory import can_fit_in_memory, calculate_optimal_batch_size
-    MEMORY_UTILS_AVAILABLE = True
-except ImportError:
-    MEMORY_UTILS_AVAILABLE = False
+from src.utils.memory import can_fit_in_memory, calculate_optimal_batch_size
 
 
 class Phase2Trainer:
@@ -285,33 +278,10 @@ class Phase2Trainer:
         embed_dim = self.model.embed_dim
         num_input_tokens = self.config.num_input_tokens
 
-        if MEMORY_UTILS_AVAILABLE:
-            return can_fit_in_memory(
-                train_tokens, val_tokens,
-                num_layers, context_dim, embed_dim, num_input_tokens
-            )
-
-        # フォールバック: 簡易計算
-        # context_cache: [num_layers, num_tokens, context_dim] (float32)
-        train_cache_gb = (num_layers * train_tokens * context_dim * 4) / (1024**3)
-        val_cache_gb = (num_layers * val_tokens * context_dim * 4) / (1024**3)
-
-        if torch.cuda.is_available():
-            total_gpu = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-            available = total_gpu * 0.8
-        else:
-            available = float('inf')
-
-        total_required = train_cache_gb + val_cache_gb + 1.0  # +1GB for model/batch
-
-        return {
-            'fits': total_required <= available,
-            'total_required_gb': total_required,
-            'available_gb': available,
-            'train_cache_gb': train_cache_gb,
-            'val_cache_gb': val_cache_gb,
-            'recommendation': f"Required: {total_required:.1f}GB, Available: {available:.1f}GB"
-        }
+        return can_fit_in_memory(
+            train_tokens, val_tokens,
+            num_layers, context_dim, embed_dim, num_input_tokens
+        )
 
     def _calculate_optimal_batch_size(
         self,
@@ -332,39 +302,14 @@ class Phase2Trainer:
         Returns:
             int: 最適なバッチサイズ
         """
-        if MEMORY_UTILS_AVAILABLE:
-            # memory.pyの関数を使用（一元化）
-            return calculate_optimal_batch_size(
-                vocab_size=getattr(self.config, 'vocab_size', 50257),
-                safety_factor=getattr(self.config, 'phase2_memory_safety_factor', 0.5),
-                min_batch_size=getattr(self.config, 'phase2_min_batch_size', 256),
-                max_batch_size=getattr(self.config, 'phase2_max_batch_size', 16384),
-                initial_batch_size=initial_batch_size,
-                verbose=True
-            )
-
-        # フォールバック: memory.pyがない場合の簡易実装
-        if not torch.cuda.is_available():
-            return min(initial_batch_size, 512)
-
-        # 簡易計算
-        safety_factor = getattr(self.config, 'phase2_memory_safety_factor', 0.5)
-        min_batch = getattr(self.config, 'phase2_min_batch_size', 256)
-        max_batch = getattr(self.config, 'phase2_max_batch_size', 16384)
-
-        synchronize_device('cuda')
-        clear_gpu_cache('cuda')
-
-        total_gb = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-        allocated_gb = torch.cuda.memory_allocated() / (1024**3)
-        free_gb = total_gb - allocated_gb
-
-        vocab_size = getattr(self.config, 'vocab_size', 50257)
-        per_token_mb = vocab_size * 4 / (1024**2) * 3.5
-        available_mb = free_gb * 1024 * safety_factor * 0.5
-        safe_batch_size = int(available_mb / per_token_mb)
-
-        return max(min_batch, min(safe_batch_size, min(initial_batch_size, max_batch)))
+        return calculate_optimal_batch_size(
+            vocab_size=getattr(self.config, 'vocab_size', 50257),
+            safety_factor=getattr(self.config, 'phase2_memory_safety_factor', 0.5),
+            min_batch_size=getattr(self.config, 'phase2_min_batch_size', 256),
+            max_batch_size=getattr(self.config, 'phase2_max_batch_size', 16384),
+            initial_batch_size=initial_batch_size,
+            verbose=True
+        )
 
     def train_full(
         self,

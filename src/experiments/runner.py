@@ -18,7 +18,7 @@ from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
-from src.experiments.config import DataConfig, Phase1Config, Phase2Config
+from config.experiment import DataConfig, Phase1TrainerConfig, Phase2TrainerConfig
 
 
 @dataclass
@@ -46,9 +46,9 @@ class ExperimentConfig:
 
     def get_phase1_config(
         self, base_config: ResidualConfig, device: Union[str, torch.device]
-    ) -> Phase1Config:
+    ) -> Phase1TrainerConfig:
         """Phase 1用の設定オブジェクトを生成"""
-        return Phase1Config.from_base(
+        return Phase1TrainerConfig.from_base(
             base_config, device,
             context_dim=self.context_dim,
             num_layers=self.num_layers,
@@ -59,9 +59,9 @@ class ExperimentConfig:
 
     def get_phase2_config(
         self, base_config: ResidualConfig, device: Union[str, torch.device]
-    ) -> Phase2Config:
+    ) -> Phase2TrainerConfig:
         """Phase 2用の設定オブジェクトを生成"""
-        return Phase2Config.from_base(
+        return Phase2TrainerConfig.from_base(
             base_config, device,
             context_dim=self.context_dim,
             num_layers=self.num_layers,

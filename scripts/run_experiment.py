@@ -29,11 +29,11 @@ import torch
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import ResidualConfig
+from config.experiment import DataConfig, Phase1TrainerConfig, Phase2TrainerConfig
 from src.models import LLM
 from src.trainers.phase1 import MemoryPhase1Trainer
 from src.trainers.phase2 import Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points, calculate_scaling_law
-from src.experiments.config import DataConfig, Phase1Config, Phase2Config
 from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
@@ -84,7 +84,7 @@ def run_single_experiment(
     model.to(device)
 
     # Phase 1用設定
-    phase1_config = Phase1Config.from_base(
+    phase1_config = Phase1TrainerConfig.from_base(
         base_config, device,
         context_dim=context_dim,
     )
@@ -132,7 +132,7 @@ def run_single_experiment(
                 f"ER={train_er_pct:.1f}%/{best_val_er_pct:.1f}%, Conv={convergence_rate*100:.1f}%")
 
     # Phase 2用設定
-    phase2_config = Phase2Config.from_base(
+    phase2_config = Phase2TrainerConfig.from_base(
         base_config, device,
         context_dim=context_dim,
     )

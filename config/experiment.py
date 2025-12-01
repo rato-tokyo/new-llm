@@ -6,7 +6,7 @@ ResidualConfigから必要な属性のみを抽出し、オプションで上書
 
 Usage:
     from config import ResidualConfig
-    from src.experiments.config import DataConfig, Phase1Config, Phase2Config
+    from config.experiment import DataConfig, Phase1TrainerConfig, Phase2TrainerConfig
 
     base = ResidualConfig()
     device = torch.device("cuda")
@@ -15,18 +15,16 @@ Usage:
     data_cfg = DataConfig.from_base(base, num_samples=100)
 
     # Phase 1設定（context_dimを上書き）
-    p1_cfg = Phase1Config.from_base(base, device, context_dim=1000)
+    p1_cfg = Phase1TrainerConfig.from_base(base, device, context_dim=1000)
 
     # Phase 2設定
-    p2_cfg = Phase2Config.from_base(base, device, context_dim=1000)
+    p2_cfg = Phase2TrainerConfig.from_base(base, device, context_dim=1000)
 """
 
 from dataclasses import dataclass
 from typing import Union, Optional
 
 import torch
-
-from config import ResidualConfig
 
 
 @dataclass
@@ -38,14 +36,14 @@ class DataConfig:
     cache_dir: str
     num_samples: int
     val_data_source: str
-    val_text_file: str = "./data/example_val.txt"
+    val_text_file: str = "./cache/example_val.txt"
 
     @classmethod
     def from_base(
         cls,
-        base: ResidualConfig,
+        base,
         num_samples: Optional[int] = None,
-        val_text_file: str = "./data/example_val.txt"
+        val_text_file: str = "./cache/example_val.txt"
     ) -> "DataConfig":
         """ResidualConfigから生成"""
         return cls(
@@ -60,7 +58,7 @@ class DataConfig:
 
 
 @dataclass
-class Phase1Config:
+class Phase1TrainerConfig:
     """Phase 1 Trainer用の設定（OACDアルゴリズム）"""
     # アーキテクチャ
     context_dim: int
@@ -88,14 +86,14 @@ class Phase1Config:
     @classmethod
     def from_base(
         cls,
-        base: ResidualConfig,
+        base,
         device: Union[str, torch.device],
         context_dim: Optional[int] = None,
         num_layers: Optional[int] = None,
         num_input_tokens: Optional[int] = None,
         phase1_learning_rate: Optional[float] = None,
         phase1_max_iterations: Optional[int] = None,
-    ) -> "Phase1Config":
+    ) -> "Phase1TrainerConfig":
         """ResidualConfigから生成（オプションで上書き可能）"""
         return cls(
             context_dim=context_dim if context_dim is not None else base.context_dim,
@@ -111,13 +109,13 @@ class Phase1Config:
             phase1_val_early_stopping=getattr(base, 'phase1_val_early_stopping', True),
             phase1_val_frequency=getattr(base, 'phase1_val_frequency', 5),
             phase1_val_sample_size=getattr(base, 'phase1_val_sample_size', 10000),
-            phase1_val_patience=getattr(base, 'phase1_val_patience', 2),
+            phase1_val_patience=getattr(base, 'phase1_val_patience', 1),
             device=device,
         )
 
 
 @dataclass
-class Phase2Config:
+class Phase2TrainerConfig:
     """Phase 2 Trainer用の設定"""
     # アーキテクチャ
     context_dim: int
@@ -144,14 +142,14 @@ class Phase2Config:
     @classmethod
     def from_base(
         cls,
-        base: ResidualConfig,
+        base,
         device: Union[str, torch.device],
         context_dim: Optional[int] = None,
         num_layers: Optional[int] = None,
         num_input_tokens: Optional[int] = None,
         phase2_learning_rate: Optional[float] = None,
         phase2_epochs: Optional[int] = None,
-    ) -> "Phase2Config":
+    ) -> "Phase2TrainerConfig":
         """ResidualConfigから生成（オプションで上書き可能）"""
         return cls(
             context_dim=context_dim if context_dim is not None else base.context_dim,

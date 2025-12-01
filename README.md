@@ -1,14 +1,14 @@
-# New-LLM: Context Vector Fixed-Point Property
+# New-LLM: Origin-Anchored Centroid Dispersion
 
-A novel language model architecture based on the hypothesis that context vectors converge to fixed points with high dimensional diversity.
+A novel language model architecture using OACD (Origin-Anchored Centroid Dispersion) algorithm for learning diverse context representations.
 
-## Core Concept: CVFP (Context Vector Fixed-Point Property)
+## Core Concept: OACD Algorithm
 
-New-LLM explores the idea that meaningful context representations emerge through iterative refinement to fixed points, rather than traditional recurrent or transformer-based approaches.
+New-LLM uses diversity-based learning where context vectors are trained to maximize dispersion while anchoring their centroid to the origin. This creates meaningful context representations through diversity optimization rather than traditional recurrent or transformer-based approaches.
 
 ## Features
 
-- **Two-Phase Training**: Separate fixed-point learning and token prediction
+- **Two-Phase Training**: Separate diversity learning (OACD) and token prediction
 - **Shallow & Wide Architecture**: 3 layers, 1536 context_dim, 2 input tokens (best performance)
 - **Best Scaling Law**: α = **-0.5402** (R² = 0.977), PPL 197.0, Acc 22.9%
 - **Token Input All Layers**: `token_input_all_layers=True` is essential for performance
@@ -75,7 +75,7 @@ python3 scripts/scaling_experiment.py --alpha-scaling \
 # Phase 1 only: Compare diversity algorithms on Effective Rank
 python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM SDL NUC -s 50 100
 
-# Phase 1 + Phase 2: Full experiment with α analysis (CVFP disabled)
+# Phase 1 + Phase 2: Full experiment with α analysis
 # Uses 4 algorithms, samples=[50,100,200], context_dim=1000
 python3 scripts/diversity_full_experiment.py
 ```
@@ -129,61 +129,47 @@ new-llm/
 
 ## Architecture Highlights
 
-### Parallel Processing with Diversity Optimization
+### OACD Algorithm
 
-Our implementation achieves **23x speedup** through parallel batch processing while maintaining high diversity:
+Our implementation uses the Origin-Anchored Centroid Dispersion (OACD) algorithm:
 
-**Implementation in phase1_train() (src/trainers/phase1.py):**
+**Implementation in src/losses/diversity.py:**
 ```python
-def compute_diversity_loss(contexts):
+def oacd_loss(contexts, centroid_weight=0.1):
     """
-    多様性損失: 全トークンの平均からの偏差（負の損失で最大化）
+    OACD: Origin-Anchored Centroid Dispersion
 
-    Args:
-        contexts: 現在のコンテキスト [num_tokens, context_dim]
-
-    Returns:
-        diversity_loss: 多様性損失（スカラー）
+    Term 1: 重心からの分散を最大化
+    Term 2: 重心を原点に引き寄せる
     """
-    context_mean = contexts.mean(dim=0)  # [context_dim]
-    deviation = contexts - context_mean  # [num_tokens, context_dim]
-    diversity_loss = -torch.norm(deviation, p=2) / len(contexts)
-    return diversity_loss
-
-# Combined loss with parallel optimization
-total_loss = (1 - dist_reg_weight) * cvfp_loss + dist_reg_weight * diversity_loss
+    centroid = contexts.mean(dim=0)
+    deviations = contexts - centroid
+    dispersion_loss = -torch.norm(deviations, p=2) / len(contexts)
+    centroid_loss = torch.norm(centroid) ** 2
+    return dispersion_loss + centroid_weight * centroid_loss
 ```
 
-**Parallel Processing Design:**
-- **Iteration 0**: Sequential processing (establishes fixed-point target)
-- **Iteration 1+**: Parallel batch processing (uses previous iteration's contexts)
-- **1-token shift**: Token i uses previous_contexts[i-1] from prior iteration
-- **Information delay**: Compensated by `dist_reg_weight = 0.9` (90% diversity)
-
 **Key Benefits:**
-- **23x speedup**: 265s → 11s (vs sequential version)
-- **High Effective Rank**: 55.9% (val) / ~60% (train) with parallel optimization
-- **Diversity-first optimization**: `dist_reg_weight = 0.9` compensates information delay
-- **Stable training**: Gradient clipping, deterministic results
+- **Stable convergence**: Origin anchoring provides consistent equilibrium
+- **High Effective Rank**: 80%+ dimensional utilization
+- **No complex logic**: Simple loss function without convergence checking
+- **Parallel processing**: 23x speedup with batch processing
 
 ### Two-Phase Training
 
-**Phase 1: Parallel Fixed-Point Learning**
+**Phase 1: Diversity Learning (OACD)**
 - **Parallel batch processing**: 23x speedup (265s → 11s)
-- **Iteration 0**: Sequential processing to establish fixed-point target
-- **Iteration 1+**: Parallel processing with context propagation
-- **Global mean-based diversity**: Enforces high dimensional spread (55.9% Effective Rank)
-- **Diversity-first optimization**: `dist_reg_weight = 0.9` (90% diversity, 10% CVFP)
+- **OACD algorithm**: Origin-anchored centroid dispersion
+- **High diversity**: 80%+ Effective Rank through dispersion maximization
 - Gradient clipping ensures training stability
-- Early stopping based on convergence rate (95% of tokens)
+- Early stopping based on validation Effective Rank
 
 **Phase 2: Token Prediction**
 - Context propagation across tokens (matches Phase 1 behavior)
 - Prediction from concatenated context + token embeddings (both utilized)
-- Context provides文脈information, token_embed provides local representation
+- Context provides 文脈 information, token_embed provides local representation
 - Next-token prediction with CrossEntropyLoss
-- Full model fine-tuning with small learning rate (0.002)
-- CVFP layers remain trainable for end-to-end optimization
+- ContextBlock frozen, TokenBlock trained
 
 ## Development Guidelines
 
@@ -205,7 +191,7 @@ See `CLAUDE.md` for:
 | layers_9 | 9 | 768 | 1 | -0.4818 | 256.8 | 21.1% |
 | **shallow_wide** | **3** | **1536** | **2** | **-0.5402** | **197.0** | **22.9%** |
 
-**Key Discovery: CVFP benefits from input richness over depth**
+**Key Discovery: Model benefits from width over depth**
 - shallow_wide achieves best α (-0.5402) with only 3 layers
 - Doubling context_dim (768→1536) + 2 input tokens is optimal
 - 9 layers provides no benefit over 6 layers (unlike Transformers)
@@ -233,8 +219,8 @@ embed_dim = 768
 - ✅ Deterministic training (seed=42)
 
 **Current Research Focus (2025-12-01):**
+- 🔬 OACD algorithm optimization
 - 🔬 Diversity algorithm comparison (MCDL, ODCM, SDL, NUC)
-- 🔬 Phase 1 diversity-only training (CVFP disabled)
 - 🔬 α value comparison across algorithms
 
 **Next Steps:**
