@@ -34,10 +34,8 @@ class Config(BaseConfig):
     phase1_batch_size = Phase1Config.batch_size
     phase1_gradient_clip = Phase1Config.gradient_clip
     phase1_context_noise = Phase1Config.context_noise
-    phase1_val_early_stopping = Phase1Config.val_early_stopping
-    phase1_val_frequency = Phase1Config.val_frequency
-    phase1_val_sample_size = Phase1Config.val_sample_size
-    phase1_val_patience = Phase1Config.val_patience
+    phase1_early_stopping = Phase1Config.early_stopping
+    phase1_early_stopping_threshold = Phase1Config.early_stopping_threshold
 
     # ========== Phase 2 設定 ==========
     phase2_learning_rate = Phase2Config.learning_rate
