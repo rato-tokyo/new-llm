@@ -522,15 +522,17 @@ class MemoryPhase1Trainer(Phase1Trainer):
             end_idx = min(start_idx + batch_size, num_tokens)
             current_batch_size = end_idx - start_idx
 
-            # バッチ分のコンテキストをその場で作成（メモリ効率化）
+            # バッチ分のコンテキストをその場で作成（GPUに転送）
             if start_idx == 0:
                 # 最初のバッチ: index 0 は last_context を使用
                 batch_contexts = torch.zeros(current_batch_size, self.model.context_dim, device=self.device)
                 batch_contexts[0] = last_context
                 if current_batch_size > 1:
-                    batch_contexts[1:] = previous_contexts[:end_idx-1].detach()
+                    # CPUからGPUに転送
+                    batch_contexts[1:] = previous_contexts[:end_idx-1].detach().to(self.device)
             else:
-                batch_contexts = previous_contexts[start_idx-1:end_idx-1].detach().clone()
+                # CPUからGPUに転送
+                batch_contexts = previous_contexts[start_idx-1:end_idx-1].detach().to(self.device)
 
             # ノイズ追加
             if context_noise > 0 and self.model.training:
