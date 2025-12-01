@@ -25,7 +25,7 @@ import sys
 import json
 import time
 from datetime import datetime
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Callable
 
 import torch
 import torch.nn.functional as F
