@@ -1,5 +1,50 @@
 # New-LLM Project Guidelines
 
+## 🎯 MCDL (Mean-Centered Dispersion Loss) - 多様性損失アルゴリズム (2025-12-01)
+
+**Phase 1で使用している多様性確保アルゴリズムの正式名称。**
+
+### 現行アルゴリズム: MCDL
+
+```python
+def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
+    """MCDL: Mean-Centered Dispersion Loss"""
+    context_mean = contexts.mean(dim=0)  # バッチ全体の平均
+    deviation = contexts - context_mean   # 各サンプルの平均からの偏差
+    return -torch.norm(deviation, p=2) / len(contexts)  # L2ノルムを最大化
+```
+
+**特徴**:
+- 計算コスト: O(n×d) - 非常に高速
+- 動作: バッチ全体の平均（centroid）からの分散を最大化
+- 損失が負: 分散が大きいほど損失が小さい（最大化）
+
+### 代替アルゴリズム（比較実験用）
+
+| 名称 | 説明 | 計算コスト |
+|------|------|-----------|
+| **MCDL** | Mean-Centered Dispersion Loss（現行） | O(n×d) |
+| **ODCM** | Off-Diagonal Covariance Minimization（VICReg風） | O(n×d + d²) |
+| **DUE** | Dimension Usage Entropy（次元活性度均一化） | O(n×d) |
+| **CTM** | Covariance Trace Maximization（統計的分散） | O(n×d + d²) |
+| **UDEL** | Uniform Distribution Entropy Loss（Barlow Twins風） | O(n×d) |
+| **SDL** | Spectral Diversity Loss（ER直接最大化）| O(n×d²) 高コスト |
+
+### 比較実験の実行
+
+```bash
+# 全アルゴリズム比較（SDLは高コストなので除外）
+python3 scripts/diversity_algorithm_experiment.py --skip-sdl
+
+# 特定のアルゴリズムのみ
+python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM DUE
+
+# サンプルサイズ指定
+python3 scripts/diversity_algorithm_experiment.py -s 50 100 200
+```
+
+---
+
 ## 🚨 Effective Rank計算の整合性 - 重要教訓 (2025-12-01)
 
 **Phase 1 Validation Early StoppingのVal ERと最終評価のERが大幅に乖離する問題を修正。**
