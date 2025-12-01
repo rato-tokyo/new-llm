@@ -103,6 +103,9 @@ def run_single_experiment(
     phase1_time = time.time() - phase1_start
 
     # Phase1Result dataclass から値を取得
+    # return_all_layers=Trueなのでcache, token_embedsは必ず存在
+    assert train_result.cache is not None
+    assert train_result.token_embeds is not None
     train_contexts = train_result.contexts
     train_context_cache = train_result.cache
     train_token_embeds = train_result.token_embeds
@@ -116,6 +119,8 @@ def run_single_experiment(
     # 検証データのキャッシュ収集
     val_result = phase1_trainer.evaluate(val_token_ids, return_all_layers=True)
     # Phase1Result dataclass から値を取得
+    assert val_result.cache is not None
+    assert val_result.token_embeds is not None
     val_contexts = val_result.contexts
     val_context_cache = val_result.cache
     val_token_embeds = val_result.token_embeds
