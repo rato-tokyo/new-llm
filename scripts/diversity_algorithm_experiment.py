@@ -89,12 +89,15 @@ def compute_diversity_loss_due(contexts: torch.Tensor) -> torch.Tensor:
 
     各次元の使用頻度のエントロピーを最大化（死んだ次元を防ぐ）
     計算コスト: O(n×d)
+
+    損失が負: エントロピーが高いほど損失が小さい（最大化）
     """
     dim_usage = contexts.abs().mean(dim=0)
     dim_usage_normalized = dim_usage / (dim_usage.sum() + 1e-10)
     entropy = -(dim_usage_normalized * torch.log(dim_usage_normalized + 1e-10)).sum()
     max_entropy = torch.log(torch.tensor(contexts.shape[1], dtype=torch.float, device=contexts.device))
-    return (max_entropy - entropy) / max_entropy
+    # エントロピーを最大化するため、負の値を返す
+    return -(entropy / max_entropy)
 
 
 def compute_diversity_loss_ctm(contexts: torch.Tensor) -> torch.Tensor:
@@ -113,15 +116,19 @@ def compute_diversity_loss_udel(contexts: torch.Tensor) -> torch.Tensor:
     """
     UDEL (Uniform Distribution Entropy Loss) - Barlow Twins風
 
-    各次元の値分布を均一化（分散が1に近づくように）
+    各次元の標準偏差を均一化しつつ、全体の分散を維持
     計算コスト: O(n×d)
+
+    2つの目標:
+    1. 各次元の標準偏差を均一に（分散項）
+    2. 平均標準偏差を大きく保つ（崩壊防止）
     """
     std = contexts.std(dim=0)
-    # 分散が0の次元を避けるためのクランプ
-    std = torch.clamp(std, min=1e-10)
-    normalized = (contexts - contexts.mean(dim=0)) / std
-    var_per_dim = normalized.var(dim=0)
-    return ((var_per_dim - 1) ** 2).mean()
+    std_mean = std.mean()
+    # 分散項: 各次元のstdが平均から離れないように
+    std_var = ((std - std_mean) ** 2).mean()
+    # 崩壊防止: 平均stdを大きく保つ（負の値で最大化）
+    return std_var - std_mean
 
 
 def compute_diversity_loss_sdl(contexts: torch.Tensor) -> torch.Tensor:
