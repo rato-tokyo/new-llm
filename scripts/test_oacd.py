@@ -367,7 +367,7 @@ def main():
                 print_flush(f"    A = {scaling['A']:.2e}")
                 print_flush(f"    R² = {scaling['r_squared']:.4f}")
             else:
-                print_flush(f"    Could not calculate (insufficient data)")
+                print_flush("    Could not calculate (insufficient data)")
 
     # サマリー表示
     print_flush("\n" + "=" * 70)
