@@ -174,10 +174,11 @@ class MemoryDataProvider(DataProvider):
         )
 
         # 訓練データと重複しないインデックスを使用
-        # 訓練データは0からnum_samples-1を使用するので、
-        # 検証データはnum_samples以降から取得
-        # 安全マージンとして10000以降を使用（大規模実験でも安全）
-        val_start_idx = max(10000, self.config.num_samples + 1000)
+        # 検証データは常に固定インデックス50000-50019を使用
+        # - 訓練データは最大でも数千サンプル（インデックス0〜数千）
+        # - 50000以降なら十分な安全マージンがある
+        # - 固定することで、サンプル数によらず同じ検証データで比較可能
+        val_start_idx = 50000
         val_end_idx = min(val_start_idx + 20, len(dataset))
 
         val_texts = []
