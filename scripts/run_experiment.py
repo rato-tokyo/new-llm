@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-OACD (Origin-Anchored Centroid Dispersion) アルゴリズムのテストスクリプト
+Phase 1 + Phase 2 実験スクリプト
 
-dwr=1.0（CVFP完全無効）でOACDの収束特性をテストする。
-MCDLとの比較も実施。
+OACDアルゴリズムでPhase 1を実行し、その後Phase 2でトークン予測を学習。
+α値（スケーリング指数）を計算して報告。
 
 使用方法:
   # ローカル（CPU）: 2サンプルで動作確認
-  python3 scripts/test_oacd.py
+  python3 scripts/run_experiment.py -s 2
 
-  # Colab（GPU）: 100-200サンプルで本格実験
-  python3 scripts/test_oacd.py -s 100 200
+  # Colab（GPU）: 50-200サンプルで本格実験
+  python3 scripts/run_experiment.py -s 50 100 200
 
-  # MCDLとの比較
-  python3 scripts/test_oacd.py -a MCDL OACD -s 100 200
+  # context_dimを指定
+  python3 scripts/run_experiment.py -s 50 100 200 -c 500
 """
 
 import os
@@ -21,7 +21,7 @@ import sys
 import time
 import argparse
 from datetime import datetime
-from typing import Callable, Dict, Any, List
+from typing import Dict, Any, List
 
 import numpy as np
 from scipy import stats
@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import ResidualConfig
 from src.models import LLM
-from src.trainers.phase1 import FlexibleDiversityTrainer
+from src.trainers.phase1 import MemoryPhase1Trainer
 from src.trainers.phase2 import Phase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.experiments.config import DataConfig, Phase1Config, Phase2Config
@@ -41,10 +41,6 @@ from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
-from src.losses.diversity import (
-    DIVERSITY_ALGORITHMS,
-    ALGORITHM_DESCRIPTIONS,
-)
 
 
 # =============================================================================
@@ -88,14 +84,11 @@ def calculate_scaling_law(results: List[Dict[str, Any]]) -> Dict[str, Any]:
 # =============================================================================
 
 def run_single_experiment(
-    algorithm_name: str,
-    diversity_fn: Callable[[torch.Tensor], torch.Tensor],
     num_samples: int,
     base_config: ResidualConfig,
     device: torch.device,
     seed: int = 42,
     context_dim: int = 500,
-    dist_reg_weight: float = 1.0,  # デフォルトでCVFP無効
 ) -> Dict[str, Any]:
     """単一の実験を実行（Phase 1 + Phase 2）"""
 
@@ -133,21 +126,16 @@ def run_single_experiment(
     phase1_config = Phase1Config.from_base(
         base_config, device,
         context_dim=context_dim,
-        dist_reg_weight=dist_reg_weight,
     )
 
     # Phase 1 トレーナー作成
-    phase1_trainer = FlexibleDiversityTrainer(
-        model, phase1_config, device,
-        diversity_fn=diversity_fn,
-        algorithm_name=algorithm_name
-    )
+    phase1_trainer = MemoryPhase1Trainer(model, phase1_config, device)
 
     # Phase 1 実行
     phase1_start = time.time()
     train_result = phase1_trainer.train(
         train_token_ids,
-        label=algorithm_name,
+        label="OACD",
         return_all_layers=True,
         val_token_ids=val_token_ids
     )
@@ -222,9 +210,7 @@ def run_single_experiment(
     clear_gpu_cache(device)
 
     return {
-        'algorithm': algorithm_name,
         'context_dim': context_dim,
-        'dist_reg_weight': dist_reg_weight,
         'num_samples': num_samples,
         'train_tokens': num_train_tokens,
         'val_tokens': num_val_tokens,
@@ -252,13 +238,7 @@ def run_single_experiment(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Test OACD algorithm with dwr=1.0 (CVFP disabled)'
-    )
-    parser.add_argument(
-        '--algorithms', '-a',
-        nargs='+',
-        default=['OACD'],
-        help='Algorithms to test (default: OACD)'
+        description='Run Phase 1 + Phase 2 experiment with OACD algorithm'
     )
     parser.add_argument(
         '--samples', '-s',
@@ -272,12 +252,6 @@ def main():
         type=int,
         default=500,
         help='Context dimension (default: 500)'
-    )
-    parser.add_argument(
-        '--dist-reg-weight', '-d',
-        type=float,
-        default=1.0,
-        help='Diversity regularization weight (default: 1.0 = CVFP disabled)'
     )
     parser.add_argument(
         '--output-dir', '-o',
@@ -296,105 +270,74 @@ def main():
     if args.output_dir:
         output_dir = args.output_dir
     else:
-        output_dir = f"importants/logs/{timestamp}_oacd_test"
+        output_dir = f"importants/logs/{timestamp}_experiment"
 
     os.makedirs(output_dir, exist_ok=True)
 
     # 情報表示
     print_flush("=" * 70)
-    print_flush("OACD ALGORITHM TEST")
+    print_flush("OACD EXPERIMENT")
     print_flush("=" * 70)
     print_flush(f"Device: {device}")
     if device.type == "cuda":
         print_flush(f"GPU: {torch.cuda.get_device_name(0)}")
         print_flush(f"Memory: {torch.cuda.get_device_properties(0).total_memory / (1024**3):.1f}GB")
-    print_flush(f"\nAlgorithms: {args.algorithms}")
-    print_flush(f"Sample sizes: {args.samples}")
+    print_flush(f"\nSample sizes: {args.samples}")
     print_flush(f"Context dim: {args.context_dim}")
-    print_flush(f"dist_reg_weight: {args.dist_reg_weight}")
     print_flush(f"Output: {output_dir}")
     print_flush("=" * 70)
 
     # 実験実行
-    all_results = {}
+    results = []
 
-    for algo_name in args.algorithms:
-        if algo_name not in DIVERSITY_ALGORITHMS:
-            print_flush(f"Warning: Unknown algorithm '{algo_name}', skipping")
+    for num_samples in args.samples:
+        print_flush(f"\n  Samples: {num_samples}")
+
+        try:
+            result = run_single_experiment(
+                num_samples=num_samples,
+                base_config=config,
+                device=device,
+                seed=42,
+                context_dim=args.context_dim,
+            )
+            results.append(result)
+        except Exception as e:
+            print_flush(f"    ERROR: {e}")
+            import traceback
+            traceback.print_exc()
             continue
 
-        diversity_fn = DIVERSITY_ALGORITHMS[algo_name]
-        algo_desc = ALGORITHM_DESCRIPTIONS.get(algo_name, algo_name)
+    if results:
+        # スケーリング則計算
+        scaling = calculate_scaling_law(results)
 
-        print_flush(f"\n{'='*70}")
-        print_flush(f"Algorithm: {algo_name} - {algo_desc}")
-        print_flush(f"{'='*70}")
-
-        algo_results = []
-
-        for num_samples in args.samples:
-            print_flush(f"\n  [{algo_name}] Samples: {num_samples}")
-
-            try:
-                result = run_single_experiment(
-                    algorithm_name=algo_name,
-                    diversity_fn=diversity_fn,
-                    num_samples=num_samples,
-                    base_config=config,
-                    device=device,
-                    seed=42,
-                    context_dim=args.context_dim,
-                    dist_reg_weight=args.dist_reg_weight,
-                )
-                algo_results.append(result)
-            except Exception as e:
-                print_flush(f"    ERROR: {e}")
-                import traceback
-                traceback.print_exc()
-                continue
-
-        if algo_results:
-            # スケーリング則計算
-            scaling = calculate_scaling_law(algo_results)
-            all_results[algo_name] = {
-                'experiments': algo_results,
-                'scaling': scaling,
-            }
-
-            print_flush(f"\n  [{algo_name}] Scaling Law:")
-            if scaling['alpha'] is not None:
-                print_flush(f"    α = {scaling['alpha']:.4f}")
-                print_flush(f"    A = {scaling['A']:.2e}")
-                print_flush(f"    R² = {scaling['r_squared']:.4f}")
-            else:
-                print_flush("    Could not calculate (insufficient data)")
+        print_flush("\nScaling Law:")
+        if scaling['alpha'] is not None:
+            print_flush(f"  α = {scaling['alpha']:.4f}")
+            print_flush(f"  A = {scaling['A']:.2e}")
+            print_flush(f"  R² = {scaling['r_squared']:.4f}")
+        else:
+            print_flush("  Could not calculate (insufficient data)")
 
     # サマリー表示
     print_flush("\n" + "=" * 70)
     print_flush("SUMMARY")
     print_flush("=" * 70)
 
-    print_flush(f"\n{'Algorithm':<10} {'Samples':<10} {'Tokens':<12} {'Val PPL':<10} "
+    print_flush(f"\n{'Samples':<10} {'Tokens':<12} {'Val PPL':<10} "
                 f"{'Acc':<8} {'ER%':<8} {'Conv%':<8} {'Iter':<6}")
-    print_flush("-" * 80)
+    print_flush("-" * 70)
 
-    for algo_name, data in all_results.items():
-        for r in data['experiments']:
-            print_flush(f"{r['algorithm']:<10} {r['num_samples']:<10} {r['train_tokens']:<12,} "
-                       f"{r['val_ppl']:<10.1f} {r['val_acc']*100:<8.1f} "
-                       f"{r['val_er_pct']:<8.1f} {r['convergence_rate']*100:<8.1f} "
-                       f"{r['phase1_iterations']:<6}")
+    for r in results:
+        print_flush(f"{r['num_samples']:<10} {r['train_tokens']:<12,} "
+                   f"{r['val_ppl']:<10.1f} {r['val_acc']*100:<8.1f} "
+                   f"{r['val_er_pct']:<8.1f} {r['convergence_rate']*100:<8.1f} "
+                   f"{r['phase1_iterations']:<6}")
 
-    print_flush("\n" + "-" * 80)
-    print_flush(f"\n{'Algorithm':<10} {'α':<10} {'A':<12} {'R²':<10}")
-    print_flush("-" * 50)
-
-    for algo_name, data in all_results.items():
-        s = data['scaling']
-        if s['alpha'] is not None:
-            print_flush(f"{algo_name:<10} {s['alpha']:<10.4f} {s['A']:<12.2e} {s['r_squared']:<10.4f}")
-        else:
-            print_flush(f"{algo_name:<10} {'N/A':<10} {'N/A':<12} {'N/A':<10}")
+    if results and scaling['alpha'] is not None:
+        print_flush("\n" + "-" * 70)
+        print_flush(f"\nα = {scaling['alpha']:.4f}, A = {scaling['A']:.2e}, R² = {scaling['r_squared']:.4f}")
 
     print_flush("\n" + "=" * 70)
     print_flush("DONE")

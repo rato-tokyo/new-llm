@@ -13,7 +13,7 @@ import torch
 
 class ResidualConfig:
     """
-    CVFP (Context Vector Fixed-Point) アーキテクチャの設定
+    New-LLM アーキテクチャの設定
 
     設定を変更する場合は、このファイルを直接編集してください。
     """
@@ -45,21 +45,11 @@ class ResidualConfig:
                                     # 2: 直前2トークン [token_{t-1}, token_t]
                                     # N: 直前Nトークン [token_{t-N+1}, ..., token_t]
 
-    # ========== Diversity Regularization (Per-Dimension Usage Tracking) ==========
-    # LayerNorm + Per-Dimension Variance Tracking (EMA-based) による多様性確保
-    # 実装: 各次元の使用頻度を追跡し、使用頻度が低い次元を優先的に活性化
-    dist_reg_weight = 0.5              # 多様性正則化の重み (PARALLEL OPTIMIZED: 90% diversity)
-                                       # total_loss = (1-w) * cvfp_loss + w * diversity_loss
-                                       # 0.9: 10% CVFP, 90% Diversity（並列版最適設定: 55.9% ER達成）
-                                       # 並列版の情報遅延を多様性強化で補償
-
-    # ========== Phase 1: CVFP学習（固定点学習） ==========
-    phase1_max_iterations = 60           # 固定点探索の最大反復回数
+    # ========== Phase 1: 多様性学習（OACD） ==========
+    # OACDアルゴリズム: 重心からの分散最大化 + 重心→原点引力
+    # CVFPロジックは削除済み（多様性損失のみで訓練）
+    phase1_max_iterations = 60           # 多様性学習の最大反復回数
     phase1_convergence_threshold = 0.03   # 収束判定のMSE閾値（ログ表示用）
-
-    # 検証データ収束判定
-    val_convergence_trials = 4              # 検証データの収束判定イテレーション回数
-                                             # 複数回順伝播してCVFP損失の推移を確認
 
     # コンテキストノイズ（汎化性能向上）
     phase1_context_noise = 0.1           # コンテキストに追加するガウシアンノイズの標準偏差

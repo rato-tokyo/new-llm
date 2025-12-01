@@ -3,17 +3,13 @@
 from .diversity import (
     DIVERSITY_ALGORITHMS,
     ALGORITHM_DESCRIPTIONS,
-    mcdl_loss,
-    odcm_loss,
+    DEFAULT_ALGORITHM,
     oacd_loss,
-    wmse_loss,
 )
 
 __all__ = [
     'DIVERSITY_ALGORITHMS',
     'ALGORITHM_DESCRIPTIONS',
-    'mcdl_loss',
-    'odcm_loss',
+    'DEFAULT_ALGORITHM',
     'oacd_loss',
-    'wmse_loss',
 ]

@@ -39,7 +39,6 @@ class ExperimentConfig:
     phase1_max_iterations: Optional[int] = None
     phase2_learning_rate: Optional[float] = None
     phase2_epochs: Optional[int] = None
-    dist_reg_weight: Optional[float] = None
 
     # その他
     random_seed: int = 42
@@ -56,7 +55,6 @@ class ExperimentConfig:
             num_input_tokens=self.num_input_tokens,
             phase1_learning_rate=self.phase1_learning_rate,
             phase1_max_iterations=self.phase1_max_iterations,
-            dist_reg_weight=self.dist_reg_weight,
         )
 
     def get_phase2_config(

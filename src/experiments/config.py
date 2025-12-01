@@ -61,7 +61,7 @@ class DataConfig:
 
 @dataclass
 class Phase1Config:
-    """Phase 1 Trainer用の設定"""
+    """Phase 1 Trainer用の設定（OACDアルゴリズム）"""
     # アーキテクチャ
     context_dim: int
     embed_dim: int
@@ -75,7 +75,6 @@ class Phase1Config:
     phase1_context_noise: float
     phase1_batch_size: int
     phase1_gradient_clip: float
-    dist_reg_weight: float
 
     # Validation Early Stopping
     phase1_val_early_stopping: bool
@@ -96,7 +95,6 @@ class Phase1Config:
         num_input_tokens: Optional[int] = None,
         phase1_learning_rate: Optional[float] = None,
         phase1_max_iterations: Optional[int] = None,
-        dist_reg_weight: Optional[float] = None,
     ) -> "Phase1Config":
         """ResidualConfigから生成（オプションで上書き可能）"""
         return cls(
@@ -110,7 +108,6 @@ class Phase1Config:
             phase1_context_noise=base.phase1_context_noise,
             phase1_batch_size=base.phase1_batch_size,
             phase1_gradient_clip=base.phase1_gradient_clip,
-            dist_reg_weight=dist_reg_weight if dist_reg_weight is not None else base.dist_reg_weight,
             phase1_val_early_stopping=getattr(base, 'phase1_val_early_stopping', True),
             phase1_val_frequency=getattr(base, 'phase1_val_frequency', 5),
             phase1_val_sample_size=getattr(base, 'phase1_val_sample_size', 10000),

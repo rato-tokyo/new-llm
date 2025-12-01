@@ -7,10 +7,9 @@ MemoryPhase1Trainer - メモリ展開型Phase 1トレーナー
 import time
 from typing import Optional, Any, Callable, List
 import torch
-import torch.nn.functional as F
 
 from .base import Phase1Trainer, TrainResult, EvalResult, ContextCache
-from src.losses.diversity import mcdl_loss
+from src.losses.diversity import oacd_loss
 from src.evaluation.metrics import compute_effective_rank
 from src.utils.io import print_flush
 from src.utils.device import is_cuda_device, clear_gpu_cache
@@ -222,7 +221,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         token_embeds_gpu = token_embeds.to(self.device)
         previous_contexts_gpu = previous_contexts.to(self.device)
 
-        contexts, total_loss, _, _ = self._forward_parallel_with_grad_accum(
+        contexts, total_loss, _ = self._forward_parallel_with_grad_accum(
             token_embeds_gpu, previous_contexts_gpu, optimizer
         )
 
@@ -501,7 +500,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         token_embeds: torch.Tensor,
         previous_contexts: torch.Tensor,
         optimizer: torch.optim.Optimizer
-    ) -> tuple[torch.Tensor, float, float, float]:
+    ) -> tuple[torch.Tensor, float, float]:
         """
         勾配累積付き並列処理（メモリ効率版）
 
@@ -509,7 +508,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         これにより、大規模データでもOOMを回避できる。
 
         Returns:
-            (contexts, total_loss, cvfp_loss, diversity_loss)
+            (contexts, total_loss, diversity_loss)
         """
         num_tokens = len(token_embeds)
         batch_size = self.config.phase1_batch_size
@@ -522,7 +521,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         # 結果を格納（CPUに保存してGPUメモリ節約）
         all_contexts_cpu = []
-        total_cvfp_loss = 0.0
         total_diversity_loss = 0.0
         total_loss_sum = 0.0
 
@@ -557,11 +555,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
             # Forward pass
             batch_output = self.model.context_block(batch_contexts, batch_combined)
 
-            # バッチごとの損失計算
-            batch_prev = previous_contexts[start_idx:end_idx].detach()
-            cvfp_loss = F.mse_loss(batch_output, batch_prev)
+            # バッチごとの損失計算（多様性損失のみ）
             diversity_loss = self._compute_diversity_loss(batch_output)
-            batch_loss = (1 - self.config.dist_reg_weight) * cvfp_loss + self.config.dist_reg_weight * diversity_loss
+            batch_loss = diversity_loss
 
             # 勾配累積のためにバッチ数で割る
             scaled_loss = batch_loss / num_batches
@@ -574,12 +570,11 @@ class MemoryPhase1Trainer(Phase1Trainer):
             all_contexts_cpu.append(batch_output.detach().cpu())
 
             # 損失の記録
-            total_cvfp_loss += cvfp_loss.item() * current_batch_size
             total_diversity_loss += diversity_loss.item() * current_batch_size
             total_loss_sum += batch_loss.item() * current_batch_size
 
             # メモリ解放
-            del batch_combined, batch_output, batch_loss, scaled_loss, batch_contexts, batch_prev
+            del batch_combined, batch_output, batch_loss, scaled_loss, batch_contexts
             clear_gpu_cache(self.device)
 
         # 勾配クリッピングとパラメータ更新
@@ -591,11 +586,10 @@ class MemoryPhase1Trainer(Phase1Trainer):
         del all_contexts_cpu
 
         # 平均損失を計算
-        avg_cvfp_loss = total_cvfp_loss / num_tokens
         avg_diversity_loss = total_diversity_loss / num_tokens
         avg_total_loss = total_loss_sum / num_tokens
 
-        return contexts, avg_total_loss, avg_cvfp_loss, avg_diversity_loss
+        return contexts, avg_total_loss, avg_diversity_loss
 
     def _build_combined_tokens_batch(
         self, token_embeds: torch.Tensor, num_input_tokens: int,
@@ -638,8 +632,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
         return combined_tokens
 
     def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
-        """多様性損失計算（デフォルト: MCDL）"""
-        return mcdl_loss(contexts)
+        """多様性損失計算（デフォルト: OACD）"""
+        return oacd_loss(contexts)
 
     def _compute_convergence_rate(self, current: torch.Tensor, previous: torch.Tensor, num_tokens: int) -> float:
         with torch.no_grad():
