@@ -33,7 +33,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import ResidualConfig
 from src.models import LLM
-from src.trainers.phase1.memory import MemoryPhase1Trainer
+from src.trainers.phase1 import FlexibleDiversityTrainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
@@ -48,11 +48,11 @@ from src.losses.diversity import (
 
 
 # =============================================================================
-# カスタムPhase1Trainer（多様性損失関数を注入可能）
+# タイミング計測付きトレーナー（実験用拡張）
 # =============================================================================
 
-class CustomDiversityPhase1Trainer(MemoryPhase1Trainer):
-    """多様性損失関数をカスタマイズ可能なPhase1Trainer"""
+class TimedDiversityTrainer(FlexibleDiversityTrainer):
+    """タイミング計測機能付きの多様性トレーナー（実験用）"""
 
     def __init__(
         self,
@@ -62,15 +62,13 @@ class CustomDiversityPhase1Trainer(MemoryPhase1Trainer):
         diversity_fn: Callable[[torch.Tensor], torch.Tensor],
         algorithm_name: str = "Custom"
     ):
-        super().__init__(model, config, device)
-        self._diversity_fn = diversity_fn
-        self._algorithm_name = algorithm_name
+        super().__init__(model, config, device, diversity_fn, algorithm_name)
         self._diversity_loss_times: List[float] = []
 
     def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
-        """オーバーライド: カスタム多様性損失関数を使用"""
+        """オーバーライド: タイミング計測付きの多様性損失計算"""
         start = time.perf_counter()
-        result = self._diversity_fn(contexts)
+        result = super()._compute_diversity_loss(contexts)
         elapsed = time.perf_counter() - start
         self._diversity_loss_times.append(elapsed * 1000)  # ms
         return result
@@ -137,7 +135,7 @@ def run_single_experiment(
     model.to(device)
 
     # トレーナー作成
-    trainer = CustomDiversityPhase1Trainer(
+    trainer = TimedDiversityTrainer(
         model, base_config, device,
         diversity_fn=diversity_fn,
         algorithm_name=algorithm_name

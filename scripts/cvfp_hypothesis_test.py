@@ -35,37 +35,13 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import ResidualConfig
 from src.models import LLM
-from src.trainers.phase1.memory import MemoryPhase1Trainer
+from src.trainers.phase1 import FlexibleDiversityTrainer
 from src.providers.data.memory import MemoryDataProvider
 from src.evaluation.metrics import analyze_fixed_points
 from src.evaluation.convergence import forward_sequential
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
 from src.losses.diversity import DIVERSITY_ALGORITHMS, HIGH_COST_ALGORITHMS
-
-
-# =============================================================================
-# カスタムトレーナー（dist_reg_weight=1.0専用）
-# =============================================================================
-
-class DiversityOnlyTrainer(MemoryPhase1Trainer):
-    """多様性損失のみで訓練するトレーナー（CVFP損失なし）"""
-
-    def __init__(
-        self,
-        model: LLM,
-        config: ResidualConfig,
-        device: torch.device,
-        diversity_fn: Callable[[torch.Tensor], torch.Tensor],
-        algorithm_name: str
-    ):
-        super().__init__(model, config, device)
-        self.diversity_fn = diversity_fn
-        self.algorithm_name = algorithm_name
-
-    def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
-        """カスタム多様性損失関数を使用"""
-        return self.diversity_fn(contexts)
 
 
 # =============================================================================
@@ -194,8 +170,8 @@ def run_single_experiment(
     )
     model.to(device)
 
-    # トレーナー作成
-    trainer = DiversityOnlyTrainer(
+    # トレーナー作成（FlexibleDiversityTrainerを使用）
+    trainer = FlexibleDiversityTrainer(
         model, config, device,
         diversity_fn=diversity_fn,
         algorithm_name=algorithm_name

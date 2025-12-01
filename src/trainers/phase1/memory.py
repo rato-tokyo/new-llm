@@ -5,11 +5,13 @@ MemoryPhase1Trainer - メモリ展開型Phase 1トレーナー
 """
 
 import time
-from typing import Optional, Any
+from typing import Optional, Any, Callable
 import torch
 import torch.nn.functional as F
 
 from .base import Phase1Trainer, TrainResult, EvalResult, ContextCache
+from src.losses.diversity import mcdl_loss
+from src.evaluation.metrics import compute_effective_rank
 from src.utils.io import print_flush
 from src.utils.device import is_cuda_device, clear_gpu_cache
 
@@ -52,7 +54,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         self,
         token_ids: torch.Tensor,
         label: str = "Train",
-        data_provider: Any = None,
         return_all_layers: bool = False,
         val_token_ids: Optional[torch.Tensor] = None
     ) -> TrainResult:
@@ -62,7 +63,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         Args:
             token_ids: トークンID
             label: ラベル
-            data_provider: データプロバイダー（未使用、互換性のため残す）
             return_all_layers: Trueの場合、全レイヤー出力も返す（Phase 2キャッシュ用）
             val_token_ids: 検証用トークンID（早期停止用、オプション）
 
@@ -154,10 +154,10 @@ class MemoryPhase1Trainer(Phase1Trainer):
         Returns:
             (previous_contexts, final_convergence_rate, val_early_stopped, best_val_er, final_iter)
         """
-        # Validation早期停止の設定
-        val_early_stopping = getattr(self.config, 'phase1_val_early_stopping', False)
-        val_frequency = getattr(self.config, 'phase1_val_frequency', 5)
-        val_patience = getattr(self.config, 'phase1_val_patience', 2)
+        # Validation早期停止の設定（config.pyで必ず定義されている）
+        val_early_stopping = self.config.phase1_val_early_stopping
+        val_frequency = self.config.phase1_val_frequency
+        val_patience = self.config.phase1_val_patience
         best_val_er = 0.0
         val_patience_counter = 0
         val_early_stopped = False
@@ -374,8 +374,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         self,
         token_ids: torch.Tensor,
         label: str = "Val",
-        num_trials: Optional[int] = None,
-        return_contexts_only: bool = False,
         return_all_layers: bool = True
     ) -> EvalResult:
         """
@@ -384,8 +382,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         Args:
             token_ids: トークンID
             label: ラベル
-            num_trials: 未使用
-            return_contexts_only: 未使用
             return_all_layers: 必ずTrue（Phase 2キャッシュ用）
 
         Returns:
@@ -642,10 +638,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
         return combined_tokens
 
     def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
-        context_mean = contexts.mean(dim=0)
-        deviation = contexts - context_mean
-        result: torch.Tensor = -torch.norm(deviation, p=2) / len(contexts)
-        return result
+        """多様性損失計算（デフォルト: MCDL）"""
+        return mcdl_loss(contexts)
 
     def _compute_convergence_rate(self, current: torch.Tensor, previous: torch.Tensor, num_tokens: int) -> float:
         with torch.no_grad():
@@ -670,10 +664,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         # サンプリング（固定数、ただし検証データが少なければ全量）
         # 注意: 500トークンではERが不正確になるため、10000以上を推奨
-        sample_size = min(
-            len(val_token_ids),
-            getattr(self.config, 'phase1_val_sample_size', 10000)
-        )
+        sample_size = min(len(val_token_ids), self.config.phase1_val_sample_size)
         sample_ids = val_token_ids[:sample_size]
 
         with torch.no_grad():
@@ -688,31 +679,54 @@ class MemoryPhase1Trainer(Phase1Trainer):
             # collect_all_layers=Trueで処理することで、完全に同じコードパスを通る
             contexts, _, _ = self._forward_sequential(input_token_embeds, None, collect_all_layers=True)
 
-            # Effective Rank計算
-            effective_rank = self._compute_effective_rank(contexts)
+            # Effective Rank計算（共通関数を使用）
+            er = compute_effective_rank(contexts)
 
         self.model.train()
-        return effective_rank
-
-    def _compute_effective_rank(self, contexts: torch.Tensor) -> float:
-        """
-        Effective Rank計算（SVDベース - analyze_fixed_pointsと同じ方法）
-
-        Args:
-            contexts: コンテキストテンソル [num_tokens, context_dim]
-
-        Returns:
-            effective_rank: Effective Rank値（0 〜 context_dim）
-        """
-        # SVDで特異値を計算（analyze_fixed_pointsと同じ方法）
-        _, S, _ = torch.svd(contexts)
-
-        # Effective rank (entropy-based)
-        S_normalized = S / S.sum()
-        entropy = -(S_normalized * torch.log(S_normalized + 1e-10)).sum()
-
-        return float(torch.exp(entropy).item())
+        return er
 
     @property
     def is_streaming(self) -> bool:
         return False
+
+
+class FlexibleDiversityTrainer(MemoryPhase1Trainer):
+    """
+    多様性損失関数をカスタマイズ可能なPhase 1トレーナー
+
+    スクリプトでの多様性アルゴリズム比較実験用。
+    コンストラクタで任意の多様性損失関数を注入できる。
+
+    Usage:
+        from src.losses.diversity import odcm_loss
+
+        trainer = FlexibleDiversityTrainer(
+            model, config, device,
+            diversity_fn=odcm_loss,
+            algorithm_name="ODCM"
+        )
+    """
+
+    def __init__(
+        self,
+        model: torch.nn.Module,
+        config: Any,
+        device: torch.device,
+        diversity_fn: Callable[[torch.Tensor], torch.Tensor],
+        algorithm_name: str = "Custom"
+    ):
+        """
+        Args:
+            model: LLMモデル
+            config: ResidualConfig
+            device: torch.device
+            diversity_fn: 多様性損失関数 (contexts: Tensor) -> Tensor
+            algorithm_name: アルゴリズム名（ログ表示用）
+        """
+        super().__init__(model, config, device)
+        self._diversity_fn = diversity_fn
+        self.algorithm_name = algorithm_name
+
+    def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
+        """カスタム多様性損失関数を使用"""
+        return self._diversity_fn(contexts)

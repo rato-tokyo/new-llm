@@ -13,6 +13,40 @@ from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
 
 
+def compute_effective_rank(contexts: torch.Tensor, max_samples: int = 10000) -> float:
+    """
+    Effective Rank計算（SVDベース）
+
+    コンテキストテンソルからEffective Rankを計算する共通関数。
+    analyze_fixed_points() と MemoryPhase1Trainer._compute_effective_rank() で使用。
+
+    Args:
+        contexts: コンテキストテンソル [num_tokens, context_dim]
+        max_samples: SVD計算用の最大サンプル数（メモリ効率化）
+
+    Returns:
+        effective_rank: Effective Rank値（0 〜 context_dim）
+    """
+    device = contexts.device
+    num_tokens = contexts.shape[0]
+
+    # サンプリング（大規模データの場合）
+    if num_tokens > max_samples:
+        svd_indices = torch.randperm(num_tokens, device=device)[:max_samples]
+        svd_contexts = contexts[svd_indices]
+    else:
+        svd_contexts = contexts
+
+    # SVDで特異値を計算
+    _, S, _ = torch.svd(svd_contexts)
+
+    # Effective rank (entropy-based)
+    S_normalized = S / S.sum()
+    entropy = -(S_normalized * torch.log(S_normalized + 1e-10)).sum()
+
+    return float(torch.exp(entropy).item())
+
+
 def analyze_fixed_points(
     contexts: torch.Tensor, label: str = "", verbose: bool = True
 ) -> Dict[str, Any]:
@@ -33,7 +67,10 @@ def analyze_fixed_points(
     num_tokens = contexts.shape[0]
     context_dim = contexts.shape[1]
 
-    # Effective Rank計算（SVD）
+    # Effective Rank計算（共通関数を使用）
+    effective_rank = compute_effective_rank(contexts)
+
+    # SVDの特異値を取得（返り値に含めるため）
     max_svd_samples = 10000
     if num_tokens > max_svd_samples:
         svd_indices = torch.randperm(num_tokens, device=device)[:max_svd_samples]
@@ -41,19 +78,11 @@ def analyze_fixed_points(
     else:
         svd_contexts = contexts
 
-    # Compute SVD
-    U, S, V = torch.svd(svd_contexts)
-
-    # Actual rank
+    _, S, _ = torch.svd(svd_contexts)
     actual_rank = (S > 1e-6).sum().item()
 
-    # Effective rank (entropy-based)
-    S_normalized = S / S.sum()
-    entropy = -(S_normalized * torch.log(S_normalized + 1e-10)).sum()
-    effective_rank = torch.exp(entropy).item()
-
     # Free SVD memory
-    del U, V, svd_contexts
+    del svd_contexts
     clear_gpu_cache(device)
 
     if verbose:

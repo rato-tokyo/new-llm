@@ -33,7 +33,6 @@ class Phase1Trainer(ABC):
         self,
         token_ids: torch.Tensor,
         label: str = "Train",
-        data_provider: Any = None,
         return_all_layers: bool = False,
         val_token_ids: Optional[torch.Tensor] = None
     ) -> TrainResult:
@@ -44,9 +43,7 @@ class Phase1Trainer(ABC):
         self,
         token_ids: torch.Tensor,
         label: str = "Val",
-        num_trials: Optional[int] = None,
-        return_contexts_only: bool = False,
-        return_all_layers: bool = False
+        return_all_layers: bool = True
     ) -> EvalResult:
         pass
 
