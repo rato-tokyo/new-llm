@@ -569,7 +569,10 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
     def _quick_validate(self, val_token_ids: torch.Tensor) -> float:
         """
-        高速Validation評価（並列処理、サンプリング、収束まで複数イテレーション）
+        高速Validation評価（訓練と同じ並列処理方式）
+
+        訓練時と同じく、token iはcontexts[i-1]を入力として使用する。
+        これにより、訓練時のERと整合性のある値が得られる。
 
         Args:
             val_token_ids: 検証用トークンID
@@ -586,35 +589,36 @@ class MemoryPhase1Trainer(Phase1Trainer):
         )
         sample_ids = val_token_ids[:sample_size]
 
-        # 収束まで複数イテレーション実行（軽量版: 最大10回、収束判定あり）
+        # 収束まで複数イテレーション実行（軽量版: 最大10回）
         num_val_iterations = 10
-        convergence_threshold = 0.01  # 収束判定用の閾値
 
         with torch.no_grad():
             # トークン埋め込み取得
             token_embeds = self.model.token_embedding(sample_ids.unsqueeze(0).to(self.device))
             token_embeds = self.model.embed_norm(token_embeds).squeeze(0)
 
-            # 初期コンテキスト（ランダム小値）
-            contexts = torch.randn(sample_size, self.model.context_dim, device=self.device) * 0.01
-
             # 並列forward用のcombinedトークンを事前計算
             num_input_tokens = self.config.num_input_tokens
             combined = self._build_combined_tokens_batch(token_embeds, num_input_tokens, 0, sample_size)
 
-            # 複数イテレーション実行
+            # 初期コンテキスト（ランダム小値）
+            contexts = torch.randn(sample_size, self.model.context_dim, device=self.device) * 0.01
+
+            # 複数イテレーション実行（訓練と同じ方式）
             for _ in range(num_val_iterations):
-                output_contexts = self.model.context_block(contexts, combined)
+                # 訓練と同じ方式: token iはcontexts[i-1]を入力として使用
+                # shifted_contexts[i] = contexts[i-1] (index 0はlast_context)
+                last_context = contexts[-1]
+                shifted_contexts = torch.zeros_like(contexts)
+                shifted_contexts[0] = last_context
+                shifted_contexts[1:] = contexts[:-1]
 
-                # 収束判定（変化量が小さければ早期終了）
-                diff = ((output_contexts - contexts) ** 2).mean()
-                if diff < convergence_threshold:
-                    break
-
+                # Forward pass
+                output_contexts = self.model.context_block(shifted_contexts, combined)
                 contexts = output_contexts
 
             # Effective Rank計算
-            effective_rank = self._compute_effective_rank(output_contexts)
+            effective_rank = self._compute_effective_rank(contexts)
 
         self.model.train()
         return effective_rank
