@@ -1,11 +1,13 @@
 """
 Evaluation metrics for New-LLM
 
-Fixed-point analysis, effective rank calculation, and other metrics.
+Fixed-point analysis, effective rank calculation, scaling law analysis.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
+import numpy as np
+from scipy import stats
 import torch
 
 from src.utils.io import print_flush
@@ -92,4 +94,52 @@ def analyze_fixed_points(
         "actual_rank": actual_rank,
         "effective_rank": effective_rank,
         "singular_values": S.tolist()
+    }
+
+
+def calculate_scaling_law(results: List[Dict[str, Any]]) -> Dict[str, Optional[float]]:
+    """
+    スケーリング則を計算: PPL = A × tokens^α
+
+    Args:
+        results: 実験結果のリスト。各要素は以下を含む:
+            - train_tokens: 訓練トークン数
+            - val_ppl: 検証PPL
+
+    Returns:
+        dict: {
+            'alpha': スケーリング指数（負の値が良い）,
+            'A': 定数項,
+            'r_squared': 決定係数,
+            'p_value': p値,
+            'std_err': 標準誤差,
+        }
+    """
+    if len(results) < 2:
+        return {'alpha': None, 'A': None, 'r_squared': None, 'p_value': None, 'std_err': None}
+
+    tokens = np.array([r['train_tokens'] for r in results])
+    ppl = np.array([r['val_ppl'] for r in results])
+
+    # NaNやInfを除外
+    valid_mask = np.isfinite(tokens) & np.isfinite(ppl) & (ppl > 0)
+    if valid_mask.sum() < 2:
+        return {'alpha': None, 'A': None, 'r_squared': None, 'p_value': None, 'std_err': None}
+
+    tokens = tokens[valid_mask]
+    ppl = ppl[valid_mask]
+
+    # 対数変換
+    log_tokens = np.log(tokens)
+    log_ppl = np.log(ppl)
+
+    # 線形回帰
+    slope, intercept, r_value, p_value, std_err = stats.linregress(log_tokens, log_ppl)
+
+    return {
+        'alpha': slope,
+        'A': float(np.exp(intercept)),
+        'r_squared': r_value ** 2,
+        'p_value': p_value,
+        'std_err': std_err,
     }

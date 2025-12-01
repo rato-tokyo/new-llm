@@ -21,10 +21,7 @@ import sys
 import time
 import argparse
 from datetime import datetime
-from typing import Dict, Any, List
-
-import numpy as np
-from scipy import stats
+from typing import Dict, Any
 
 import torch
 
@@ -35,48 +32,12 @@ from config import ResidualConfig
 from src.models import LLM
 from src.trainers.phase1 import MemoryPhase1Trainer
 from src.trainers.phase2 import Phase2Trainer
-from src.evaluation.metrics import analyze_fixed_points
+from src.evaluation.metrics import analyze_fixed_points, calculate_scaling_law
 from src.experiments.config import DataConfig, Phase1Config, Phase2Config
 from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
-
-
-# =============================================================================
-# スケーリング則計算
-# =============================================================================
-
-def calculate_scaling_law(results: List[Dict[str, Any]]) -> Dict[str, Any]:
-    """スケーリング則を計算: PPL = A × tokens^α"""
-    if len(results) < 2:
-        return {'alpha': None, 'A': None, 'r_squared': None}
-
-    tokens = np.array([r['train_tokens'] for r in results])
-    ppl = np.array([r['val_ppl'] for r in results])
-
-    # NaNやInfを除外
-    valid_mask = np.isfinite(tokens) & np.isfinite(ppl) & (ppl > 0)
-    if valid_mask.sum() < 2:
-        return {'alpha': None, 'A': None, 'r_squared': None}
-
-    tokens = tokens[valid_mask]
-    ppl = ppl[valid_mask]
-
-    # 対数変換
-    log_tokens = np.log(tokens)
-    log_ppl = np.log(ppl)
-
-    # 線形回帰
-    slope, intercept, r_value, p_value, std_err = stats.linregress(log_tokens, log_ppl)
-
-    return {
-        'alpha': slope,
-        'A': np.exp(intercept),
-        'r_squared': r_value ** 2,
-        'p_value': p_value,
-        'std_err': std_err,
-    }
 
 
 # =============================================================================

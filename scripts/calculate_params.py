@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CVFPモデルのパラメータ数計算スクリプト
+New-LLMモデルのパラメータ数計算スクリプト
 
 使用方法:
     python calculate_params.py
@@ -44,7 +44,7 @@ def main():
     params = model.num_params()
 
     print("\n" + "=" * 70)
-    print("CVFPモデル パラメータ数計算（token継ぎ足し方式 + Weight Tying）")
+    print("New-LLMモデル パラメータ数計算（token継ぎ足し方式 + Weight Tying）")
     print("=" * 70)
     print("\n【設定】")
     print(f"  num_layers:       {config.num_layers}")

@@ -30,43 +30,17 @@ import argparse
 from datetime import datetime
 from itertools import product
 
-import numpy as np
-from scipy import stats
-
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import ResidualConfig
 from src.experiments import ExperimentRunner, ExperimentConfig
+from src.evaluation.metrics import calculate_scaling_law
 from src.utils.io import print_flush
 
 
 # 定数
 RANDOM_SEED = 42
-
-
-def calculate_scaling_law(results: list):
-    """スケーリング則を計算: PPL = A × tokens^α"""
-    if len(results) < 2:
-        return {'alpha': None, 'A': None, 'r_squared': None}
-
-    tokens = np.array([r['train_tokens'] for r in results])
-    ppl = np.array([r['val_ppl'] for r in results])
-
-    # 対数変換
-    log_tokens = np.log(tokens)
-    log_ppl = np.log(ppl)
-
-    # 線形回帰
-    slope, intercept, r_value, p_value, std_err = stats.linregress(log_tokens, log_ppl)
-
-    return {
-        'alpha': slope,
-        'A': np.exp(intercept),
-        'r_squared': r_value ** 2,
-        'p_value': p_value,
-        'std_err': std_err,
-    }
 
 
 def generate_sample_sizes(init_samples: int, multiplier: float,
