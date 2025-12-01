@@ -19,7 +19,6 @@ Colab実行用:
   - scaling_alpha_mode: α値スケーリングモード
   - scaling_matrix_mode: マトリックスモード
   - scaling_input_tokens, scaling_layers, scaling_context_dim: 実験対象
-  - fnn_num_layers, fnn_expand_factor, fnn_activation: FFN設定
 """
 
 import os
@@ -326,20 +325,13 @@ def main():
     print_flush("=" * 70)
     print_flush("CONFIGURATION (from config.py)")
     print_flush("=" * 70)
-    print_flush(f"FFN: type={config.fnn_type}, layers={config.fnn_num_layers}, "
-                f"expand={config.fnn_expand_factor}, activation={config.fnn_activation}")
     print_flush(f"Phase 1: max_iter={config.phase1_max_iterations}, "
                 f"grad_clip={config.phase1_gradient_clip}")
 
-    # Phase 1 Validation Early Stopping設定
-    val_es_enabled = getattr(config, 'phase1_val_early_stopping', False)
-    if val_es_enabled:
-        val_freq = getattr(config, 'phase1_val_frequency', 5)
-        val_patience = getattr(config, 'phase1_val_patience', 2)
-        val_sample = getattr(config, 'phase1_val_sample_size', 10000)
-        print_flush(f"Phase 1 Val ES: enabled, freq={val_freq}, patience={val_patience}, sample={val_sample}")
-    else:
-        print_flush("Phase 1 Val ES: disabled")
+    # Phase 1 Early Stopping設定
+    es_enabled = getattr(config, 'phase1_early_stopping', True)
+    es_threshold = getattr(config, 'phase1_early_stopping_threshold', 0.90)
+    print_flush(f"Phase 1 Early Stop: conv>={es_threshold*100:.0f}%" if es_enabled else "Phase 1 Early Stop: disabled")
 
     # サンプルサイズの決定
     if config.scaling_alpha_mode:
@@ -452,19 +444,11 @@ def main():
             {'input_tokens': it, 'layers': layers, 'context_dim': cd}
             for it, layers, cd in configs
         ],
-        'ffn_settings': {
-            'type': config.fnn_type,
-            'num_layers': config.fnn_num_layers,
-            'expand_factor': config.fnn_expand_factor,
-            'activation': config.fnn_activation,
-        },
         'phase1_settings': {
             'max_iterations': config.phase1_max_iterations,
             'gradient_clip': config.phase1_gradient_clip,
-            'val_early_stopping': getattr(config, 'phase1_val_early_stopping', False),
-            'val_frequency': getattr(config, 'phase1_val_frequency', 5),
-            'val_patience': getattr(config, 'phase1_val_patience', 2),
-            'val_sample_size': getattr(config, 'phase1_val_sample_size', 10000),
+            'early_stopping': getattr(config, 'phase1_early_stopping', True),
+            'early_stopping_threshold': getattr(config, 'phase1_early_stopping_threshold', 0.90),
         },
     }
     if config.scaling_alpha_mode:

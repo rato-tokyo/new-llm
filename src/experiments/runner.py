@@ -134,7 +134,6 @@ class ExperimentRunner:
             num_input_tokens=config.num_input_tokens,
             use_pretrained_embeddings=self.base_config.use_pretrained_embeddings,
             use_weight_tying=self.base_config.use_weight_tying,
-            config=self.base_config
         ).to(self.device)
 
         # Phase 1 実行

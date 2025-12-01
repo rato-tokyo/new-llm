@@ -18,12 +18,6 @@ class BaseConfig:
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
     use_weight_tying = True         # Weight Tying（パラメータ約38M削減）
 
-    # ========== FFN (Feed-Forward Network) 設定 ==========
-    fnn_type = "standard"           # FFNタイプ: "standard", "swiglu"
-    fnn_expand_factor = 1           # 中間層の拡張率
-    fnn_num_layers = 1              # FFN内の層数
-    fnn_activation = "gelu"         # 活性化関数: "relu", "gelu"
-
     # ========== 複数トークン入力 ==========
     num_input_tokens = 1            # 入力するトークン数
 

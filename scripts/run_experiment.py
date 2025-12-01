@@ -79,7 +79,6 @@ def run_single_experiment(
         num_input_tokens=base_config.num_input_tokens,
         use_pretrained_embeddings=base_config.use_pretrained_embeddings,
         use_weight_tying=base_config.use_weight_tying,
-        config=base_config
     )
     model.to(device)
 

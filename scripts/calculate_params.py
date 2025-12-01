@@ -38,7 +38,6 @@ def main():
         num_input_tokens=config.num_input_tokens,
         use_pretrained_embeddings=False,  # 計算用なのでGPT-2ロード不要
         use_weight_tying=config.use_weight_tying,
-        config=config
     )
 
     params = model.num_params()

@@ -5,12 +5,12 @@ ContextLayer: 文脈処理専用レイヤー
 TokenLayer: トークン処理専用レイヤー
 """
 
-from typing import Any, Optional, Union
+from typing import Optional
 
 import torch
 import torch.nn as nn
 
-from src.models.ffn import create_ffn, BaseFFN
+from src.models.ffn import FFN
 from src.utils.initialization import init_linear_weights
 
 
@@ -25,15 +25,13 @@ class ContextLayer(nn.Module):
         context_input_dim: Input context dimension
         context_output_dim: Output context dimension
         token_input_dim: Token input dimension
-        config: 設定オブジェクト（FFN設定を含む）
     """
 
     def __init__(
         self,
         context_input_dim: int,
         context_output_dim: int,
-        token_input_dim: int = 0,
-        config: Optional[Any] = None
+        token_input_dim: int = 0
     ) -> None:
         super().__init__()
 
@@ -43,24 +41,7 @@ class ContextLayer(nn.Module):
 
         # FNN: [context (+ token_embeds)] -> context_output_dim
         input_dim = context_input_dim + token_input_dim
-
-        # FFNをファクトリで生成
-        self.fnn: Union[BaseFFN, nn.Sequential]
-        if config is not None:
-            self.fnn = create_ffn(
-                fnn_type=config.fnn_type,
-                input_dim=input_dim,
-                output_dim=context_output_dim,
-                expand_factor=config.fnn_expand_factor,
-                num_layers=config.fnn_num_layers,
-                activation=config.fnn_activation
-            )
-        else:
-            # config未指定時は現状維持（1層、拡張なし）
-            self.fnn = nn.Sequential(
-                nn.Linear(input_dim, context_output_dim),
-                nn.ReLU()
-            )
+        self.fnn = FFN(input_dim, context_output_dim)
 
         # LayerNorm（必須：数値安定性のため）
         self.context_norm = nn.LayerNorm(context_output_dim)
@@ -120,15 +101,13 @@ class TokenLayer(nn.Module):
         context_dim: Context vector dimension
         token_input_dim: Input token dimension
         token_output_dim: Output token dimension
-        config: 設定オブジェクト（FFN設定を含む）
     """
 
     def __init__(
         self,
         context_dim: int,
         token_input_dim: int,
-        token_output_dim: int,
-        config: Optional[Any] = None
+        token_output_dim: int
     ) -> None:
         super().__init__()
 
@@ -138,24 +117,7 @@ class TokenLayer(nn.Module):
 
         # FNN: [context + token_embeds] -> token_output_dim
         input_dim = context_dim + token_input_dim
-
-        # FFNをファクトリで生成
-        self.fnn: Union[BaseFFN, nn.Sequential]
-        if config is not None:
-            self.fnn = create_ffn(
-                fnn_type=config.fnn_type,
-                input_dim=input_dim,
-                output_dim=token_output_dim,
-                expand_factor=config.fnn_expand_factor,
-                num_layers=config.fnn_num_layers,
-                activation=config.fnn_activation
-            )
-        else:
-            # config未指定時は現状維持（1層、拡張なし）
-            self.fnn = nn.Sequential(
-                nn.Linear(input_dim, token_output_dim),
-                nn.ReLU()
-            )
+        self.fnn = FFN(input_dim, token_output_dim)
 
         # LayerNorm（必須：数値安定性のため）
         self.token_norm = nn.LayerNorm(token_output_dim)

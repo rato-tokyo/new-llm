@@ -5,7 +5,7 @@ ContextBlock: 文脈処理ブロック（Phase 1で学習、Phase 2でfreeze）
 TokenBlock: トークン処理ブロック（Phase 2で学習）
 """
 
-from typing import Any, List, Optional, Union
+from typing import List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -28,7 +28,6 @@ class ContextBlock(nn.Module):
         context_dim: Final context vector dimension
         embed_dim: Token embedding dimension (単一トークンの次元)
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
-        config: 設定オブジェクト（FFN設定を含む）
     """
 
     def __init__(
@@ -36,8 +35,7 @@ class ContextBlock(nn.Module):
         num_layers: int,
         context_dim: int,
         embed_dim: int,
-        num_input_tokens: int = 1,
-        config: Optional[Any] = None
+        num_input_tokens: int = 1
     ) -> None:
         super().__init__()
 
@@ -58,7 +56,6 @@ class ContextBlock(nn.Module):
                     context_input_dim=context_dim,
                     context_output_dim=context_dim,
                     token_input_dim=token_input_dim,  # 全レイヤーでtoken入力
-                    config=config
                 )
             )
 
@@ -158,7 +155,6 @@ class TokenBlock(nn.Module):
         embed_dim: Token embedding dimension (最終出力次元)
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
         context_dims_list: List of context dimensions from ContextBlock (for E案)
-        config: 設定オブジェクト（FFN設定を含む）
     """
 
     def __init__(
@@ -167,8 +163,7 @@ class TokenBlock(nn.Module):
         context_dim: int,
         embed_dim: int,
         num_input_tokens: int = 1,
-        context_dims_list: Optional[List[int]] = None,
-        config: Optional[Any] = None
+        context_dims_list: Optional[List[int]] = None
     ) -> None:
         super().__init__()
 
@@ -205,7 +200,6 @@ class TokenBlock(nn.Module):
                     context_dim=self.context_dims_list[i],
                     token_input_dim=self.token_dims[i],
                     token_output_dim=self.token_dims[i + 1],
-                    config=config
                 )
             )
 

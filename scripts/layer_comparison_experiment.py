@@ -2,10 +2,9 @@
 """
 Layer構成比較実験スクリプト
 
-3つの設定を比較:
-1. layer=1, fnn_num_layers=1 (ベースライン)
-2. layer=1, fnn_num_layers=2 (FFN深化)
-3. layer=2, fnn_num_layers=1 (レイヤー追加)
+2つの設定を比較:
+1. layer=1 (ベースライン)
+2. layer=2 (レイヤー追加)
 
 使用方法:
   # Colab（GPU）: 2000サンプルで比較
@@ -48,29 +47,20 @@ class ExperimentConfig:
     """実験設定"""
     name: str
     num_layers: int
-    fnn_num_layers: int
     description: str
 
 
-# 比較する3つの設定
+# 比較する2つの設定
 EXPERIMENT_CONFIGS = [
     ExperimentConfig(
-        name="L1_F1",
+        name="L1",
         num_layers=1,
-        fnn_num_layers=1,
-        description="layer=1, fnn=1 (baseline)"
+        description="layer=1 (baseline)"
     ),
     ExperimentConfig(
-        name="L1_F2",
-        num_layers=1,
-        fnn_num_layers=2,
-        description="layer=1, fnn=2 (FFN deepened)"
-    ),
-    ExperimentConfig(
-        name="L2_F1",
+        name="L2",
         num_layers=2,
-        fnn_num_layers=1,
-        description="layer=2, fnn=1 (layer added)"
+        description="layer=2 (deeper)"
     ),
 ]
 
@@ -89,10 +79,7 @@ def run_single_experiment(
 
     # base_configを一時的に変更
     original_num_layers = base_config.num_layers
-    original_fnn_num_layers = base_config.fnn_num_layers
-
     base_config.num_layers = exp_config.num_layers
-    base_config.fnn_num_layers = exp_config.fnn_num_layers
 
     try:
         # データ読み込み用設定
@@ -119,16 +106,15 @@ def run_single_experiment(
             num_input_tokens=base_config.num_input_tokens,
             use_pretrained_embeddings=base_config.use_pretrained_embeddings,
             use_weight_tying=base_config.use_weight_tying,
-            config=base_config
         )
         model.to(device)
 
         # パラメータ数を取得
         total_params = sum(p.numel() for p in model.parameters())
 
-        print_flush(f"    Model: {total_params:,} params (layers={exp_config.num_layers}, fnn={exp_config.fnn_num_layers})")
+        print_flush(f"    Model: {total_params:,} params (layers={exp_config.num_layers})")
 
-        # Phase 1用設定（収束率30%でEarly Stop）
+        # Phase 1用設定
         phase1_config = Phase1TrainerConfig.from_base(
             base_config, device,
             context_dim=context_dim,
@@ -149,7 +135,6 @@ def run_single_experiment(
         phase1_time = time.time() - phase1_start
 
         # Phase1Result dataclass から値を取得（CPUに保持）
-        # return_all_layers=Trueなのでcache, token_embedsは必ず存在
         assert train_result.cache is not None
         assert train_result.token_embeds is not None
         train_contexts = train_result.contexts.cpu() if train_result.contexts.is_cuda else train_result.contexts
@@ -232,7 +217,6 @@ def run_single_experiment(
             'name': exp_config.name,
             'description': exp_config.description,
             'num_layers': exp_config.num_layers,
-            'fnn_num_layers': exp_config.fnn_num_layers,
             'context_dim': context_dim,
             'num_samples': num_samples,
             'train_tokens': num_train_tokens,
@@ -256,7 +240,6 @@ def run_single_experiment(
     finally:
         # 設定を元に戻す
         base_config.num_layers = original_num_layers
-        base_config.fnn_num_layers = original_fnn_num_layers
 
 
 def main():
@@ -342,12 +325,12 @@ def main():
     print_flush("SUMMARY")
     print_flush("=" * 80)
 
-    print_flush(f"\n{'Config':<10} {'Layers':<8} {'FFN':<6} {'Params':<12} "
+    print_flush(f"\n{'Config':<10} {'Layers':<8} {'Params':<12} "
                 f"{'Val PPL':<10} {'Acc':<8} {'ER%':<8} {'Time':<10}")
     print_flush("-" * 80)
 
     for r in results:
-        print_flush(f"{r['name']:<10} {r['num_layers']:<8} {r['fnn_num_layers']:<6} "
+        print_flush(f"{r['name']:<10} {r['num_layers']:<8} "
                     f"{r['total_params']:>10,}  "
                     f"{r['val_ppl']:<10.1f} {r['val_acc']*100:<8.1f}% "
                     f"{r['val_er_pct']:<8.1f} {r['total_time']:<10.1f}s")
