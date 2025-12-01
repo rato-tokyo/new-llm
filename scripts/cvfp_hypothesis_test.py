@@ -38,6 +38,7 @@ from src.models import LLM
 from src.trainers.phase1.memory import MemoryPhase1Trainer
 from src.providers.data.memory import MemoryDataProvider
 from src.evaluation.metrics import analyze_fixed_points
+from src.evaluation.convergence import forward_sequential
 from src.utils.io import print_flush
 
 
@@ -294,8 +295,23 @@ def run_single_experiment(
     train_er = train_metrics['effective_rank']
     train_er_pct = train_er / config.context_dim * 100
 
+    # Val ERを計算（シーケンシャル処理）
+    model.eval()
+    val_sample_size = min(len(val_token_ids), 10000)
+    val_sample_ids = val_token_ids[:val_sample_size]
+    with torch.no_grad():
+        val_token_embeds = model.token_embedding(val_sample_ids.unsqueeze(0).to(device))
+        val_token_embeds = model.embed_norm(val_token_embeds).squeeze(0)
+        val_contexts = forward_sequential(
+            model, val_token_embeds, None, device, config.num_input_tokens
+        )
+    val_metrics = analyze_fixed_points(val_contexts, label="Val", verbose=False)
+    val_er = val_metrics['effective_rank']
+    val_er_pct = val_er / config.context_dim * 100
+
     print_flush(f"\nTraining completed in {train_time:.1f}s")
     print_flush(f"Train ER: {train_er_pct:.1f}%")
+    print_flush(f"Val ER: {val_er_pct:.1f}%")
 
     # トークン埋め込み取得（追加伝播用）
     with torch.no_grad():
@@ -340,6 +356,7 @@ def run_single_experiment(
         'num_tokens': num_train_tokens,
         'train_time': train_time,
         'train_er_pct': train_er_pct,
+        'val_er_pct': val_er_pct,
         'convergence_iterations': convergence_results,
         'final_mse': final_mse,
         'final_cosine_similarity': final_cos_sim,
@@ -409,15 +426,15 @@ def main():
         all_results.append(result)
 
     # サマリー
-    print_flush("\n" + "="*70)
+    print_flush("\n" + "="*80)
     print_flush("SUMMARY")
-    print_flush("="*70)
-    print_flush(f"{'Algorithm':<10} | {'Train ER%':>10} | {'Final MSE':>10} | {'Final Cos':>10} | Verdict")
-    print_flush("-"*70)
+    print_flush("="*80)
+    print_flush(f"{'Algorithm':<10} | {'Train ER%':>10} | {'Val ER%':>10} | {'Final MSE':>10} | {'Cos':>6} | Verdict")
+    print_flush("-"*80)
     for r in all_results:
         print_flush(
-            f"{r['algorithm']:<10} | {r['train_er_pct']:>10.1f} | {r['final_mse']:>10.6f} | "
-            f"{r['final_cosine_similarity']:>10.4f} | {r['verdict']}"
+            f"{r['algorithm']:<10} | {r['train_er_pct']:>10.1f} | {r['val_er_pct']:>10.1f} | "
+            f"{r['final_mse']:>10.6f} | {r['final_cosine_similarity']:>6.4f} | {r['verdict']}"
         )
 
     # 結果保存
