@@ -357,6 +357,16 @@ def main():
     print_flush(f"Phase 1: max_iter={config.phase1_max_iterations}, "
                 f"grad_clip={config.phase1_gradient_clip}")
 
+    # Phase 1 Validation Early Stopping設定
+    val_es_enabled = getattr(config, 'phase1_val_early_stopping', False)
+    if val_es_enabled:
+        val_freq = getattr(config, 'phase1_val_frequency', 5)
+        val_patience = getattr(config, 'phase1_val_patience', 2)
+        val_sample = getattr(config, 'phase1_val_sample_size', 500)
+        print_flush(f"Phase 1 Val ES: enabled, freq={val_freq}, patience={val_patience}, sample={val_sample}")
+    else:
+        print_flush("Phase 1 Val ES: disabled")
+
     # サンプルサイズの決定
     if config.scaling_alpha_mode:
         sample_sizes = generate_sample_sizes(
@@ -477,6 +487,10 @@ def main():
         'phase1_settings': {
             'max_iterations': config.phase1_max_iterations,
             'gradient_clip': config.phase1_gradient_clip,
+            'val_early_stopping': getattr(config, 'phase1_val_early_stopping', False),
+            'val_frequency': getattr(config, 'phase1_val_frequency', 5),
+            'val_patience': getattr(config, 'phase1_val_patience', 2),
+            'val_sample_size': getattr(config, 'phase1_val_sample_size', 500),
         },
     }
     if config.scaling_alpha_mode:

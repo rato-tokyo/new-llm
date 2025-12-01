@@ -34,7 +34,8 @@ class Phase1Trainer(ABC):
         token_ids: torch.Tensor,
         label: str = "Train",
         data_provider: Any = None,
-        return_all_layers: bool = False
+        return_all_layers: bool = False,
+        val_token_ids: Optional[torch.Tensor] = None
     ) -> TrainResult:
         pass
 

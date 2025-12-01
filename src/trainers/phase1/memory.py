@@ -53,7 +53,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
         token_ids: torch.Tensor,
         label: str = "Train",
         data_provider: Any = None,
-        return_all_layers: bool = False
+        return_all_layers: bool = False,
+        val_token_ids: Optional[torch.Tensor] = None
     ) -> TrainResult:
         """
         Phase 1訓練
@@ -63,6 +64,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             label: ラベル
             data_provider: データプロバイダー（分割訓練用）
             return_all_layers: Trueの場合、全レイヤー出力も返す（Phase 2キャッシュ用）
+            val_token_ids: 検証用トークンID（早期停止用、オプション）
 
         Returns:
             return_all_layers=False: コンテキスト [num_tokens, context_dim]
@@ -76,13 +78,18 @@ class MemoryPhase1Trainer(Phase1Trainer):
             return self._train_split_mode(data_provider, label)
         else:
             # 通常モード
-            return self._train_single(token_ids, label, return_all_layers=return_all_layers)
+            return self._train_single(
+                token_ids, label,
+                return_all_layers=return_all_layers,
+                val_token_ids=val_token_ids
+            )
 
     def _train_single(
         self,
         token_ids: torch.Tensor,
         label: str = "Train",
-        return_all_layers: bool = False
+        return_all_layers: bool = False,
+        val_token_ids: Optional[torch.Tensor] = None
     ) -> TrainResult:
         """通常の単一訓練"""
         self.model.train()
@@ -104,6 +111,14 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         previous_contexts: Optional[torch.Tensor] = None  # CPUに保存
         final_convergence_rate = 0.0
+
+        # Validation早期停止の設定
+        val_early_stopping = getattr(self.config, 'phase1_val_early_stopping', False)
+        val_frequency = getattr(self.config, 'phase1_val_frequency', 5)
+        val_patience = getattr(self.config, 'phase1_val_patience', 2)
+        best_val_er = 0.0
+        val_patience_counter = 0
+        val_early_stopped = False
 
         for iteration in range(self.config.phase1_max_iterations):
             start_time = time.time()
@@ -147,10 +162,33 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 print_flush(f"  → Converged at iter {iteration+1}")
                 break
 
+            # Validation早期停止チェック（N イテレーションごと）
+            if (val_early_stopping and
+                val_token_ids is not None and
+                (iteration + 1) % val_frequency == 0):
+
+                val_er = self._quick_validate(val_token_ids)
+                val_er_percent = val_er / self.model.context_dim * 100
+                print_flush(f"    Val ER: {val_er_percent:.1f}%")
+
+                # Patience check（Phase 2と同じ方式）
+                if val_er > best_val_er:
+                    best_val_er = val_er
+                    val_patience_counter = 0
+                else:
+                    val_patience_counter += 1
+
+                if val_patience_counter >= val_patience:
+                    print_flush(f"  → Val early stop: ER not improving for {val_patience} checks")
+                    val_early_stopped = True
+                    break
+
         self._training_stats = {
             'iterations': iteration + 1,
             'convergence_rate': final_convergence_rate,
             'num_tokens': num_tokens,
+            'val_early_stopped': val_early_stopped,
+            'best_val_er': best_val_er,
         }
 
         print_flush(f"  Done: {final_convergence_rate*100:.0f}% converged")
@@ -534,6 +572,73 @@ class MemoryPhase1Trainer(Phase1Trainer):
             token_losses = ((current - previous) ** 2).mean(dim=1)
             converged = token_losses < self.config.phase1_convergence_threshold
             return float(converged.sum().item()) / num_tokens
+
+    def _quick_validate(self, val_token_ids: torch.Tensor) -> float:
+        """
+        高速Validation評価（並列処理、サンプリング）
+
+        Args:
+            val_token_ids: 検証用トークンID
+
+        Returns:
+            effective_rank: Effective Rank値
+        """
+        self.model.eval()
+
+        # サンプリング（固定数、ただし検証データが少なければ全量）
+        sample_size = min(
+            len(val_token_ids),
+            getattr(self.config, 'phase1_val_sample_size', 500)
+        )
+        sample_ids = val_token_ids[:sample_size]
+
+        with torch.no_grad():
+            # トークン埋め込み取得
+            token_embeds = self.model.token_embedding(sample_ids.unsqueeze(0).to(self.device))
+            token_embeds = self.model.embed_norm(token_embeds).squeeze(0)
+
+            # 初期コンテキスト（ランダム小値）
+            contexts = torch.randn(sample_size, self.model.context_dim, device=self.device) * 0.01
+
+            # 並列forward（訓練と同じ方式）
+            num_input_tokens = self.config.num_input_tokens
+            combined = self._build_combined_tokens_batch(token_embeds, num_input_tokens, 0, sample_size)
+            output_contexts = self.model.context_block(contexts, combined)
+
+            # Effective Rank計算
+            effective_rank = self._compute_effective_rank(output_contexts)
+
+        self.model.train()
+        return effective_rank
+
+    def _compute_effective_rank(self, contexts: torch.Tensor) -> float:
+        """
+        Effective Rank計算（GPU最適化）
+
+        Args:
+            contexts: コンテキストテンソル [num_tokens, context_dim]
+
+        Returns:
+            effective_rank: Effective Rank値（0 〜 context_dim）
+        """
+        # 中心化
+        centered = contexts - contexts.mean(dim=0, keepdim=True)
+
+        # 共分散行列
+        cov = torch.mm(centered.T, centered) / (len(contexts) - 1)
+
+        # 固有値（SVDより高速）
+        eigenvalues = torch.linalg.eigvalsh(cov)
+        eigenvalues = torch.clamp(eigenvalues, min=1e-10)
+
+        # 確率に変換
+        probs = eigenvalues / eigenvalues.sum()
+
+        # エントロピー
+        entropy = -(probs * torch.log(probs)).sum()
+
+        # Effective Rank = exp(entropy)
+        return float(torch.exp(entropy).item())
 
     @property
     def is_streaming(self) -> bool:

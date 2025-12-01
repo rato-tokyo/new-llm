@@ -184,7 +184,11 @@ class ExperimentRunner:
         phase1_config = config.get_phase1_config(self.base_config, self.device)
         phase1_trainer = MemoryPhase1Trainer(model, phase1_config, self.device)
 
-        train_result = phase1_trainer.train(train_token_ids, return_all_layers=True)
+        train_result = phase1_trainer.train(
+            train_token_ids,
+            return_all_layers=True,
+            val_token_ids=val_token_ids
+        )
         train_contexts, train_context_cache, train_token_embeds = train_result
 
         # Phase 1 訓練統計を取得
