@@ -362,7 +362,7 @@ def main():
     if val_es_enabled:
         val_freq = getattr(config, 'phase1_val_frequency', 5)
         val_patience = getattr(config, 'phase1_val_patience', 2)
-        val_sample = getattr(config, 'phase1_val_sample_size', 500)
+        val_sample = getattr(config, 'phase1_val_sample_size', 10000)
         print_flush(f"Phase 1 Val ES: enabled, freq={val_freq}, patience={val_patience}, sample={val_sample}")
     else:
         print_flush("Phase 1 Val ES: disabled")
@@ -490,7 +490,7 @@ def main():
             'val_early_stopping': getattr(config, 'phase1_val_early_stopping', False),
             'val_frequency': getattr(config, 'phase1_val_frequency', 5),
             'val_patience': getattr(config, 'phase1_val_patience', 2),
-            'val_sample_size': getattr(config, 'phase1_val_sample_size', 500),
+            'val_sample_size': getattr(config, 'phase1_val_sample_size', 10000),
         },
     }
     if config.scaling_alpha_mode:

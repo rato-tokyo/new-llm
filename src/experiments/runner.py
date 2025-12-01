@@ -80,7 +80,7 @@ class _Phase1Config:
         # Phase 1 Validation Early Stopping
         self.phase1_val_early_stopping = getattr(base, 'phase1_val_early_stopping', False)
         self.phase1_val_frequency = getattr(base, 'phase1_val_frequency', 5)
-        self.phase1_val_sample_size = getattr(base, 'phase1_val_sample_size', 500)
+        self.phase1_val_sample_size = getattr(base, 'phase1_val_sample_size', 10000)
         self.phase1_val_patience = getattr(base, 'phase1_val_patience', 2)
         self.device = device
 

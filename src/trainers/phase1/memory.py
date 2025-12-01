@@ -583,9 +583,10 @@ class MemoryPhase1Trainer(Phase1Trainer):
         self.model.eval()
 
         # サンプリング（固定数、ただし検証データが少なければ全量）
+        # 注意: 500トークンではERが不正確になるため、10000以上を推奨
         sample_size = min(
             len(val_token_ids),
-            getattr(self.config, 'phase1_val_sample_size', 500)
+            getattr(self.config, 'phase1_val_sample_size', 10000)
         )
         sample_ids = val_token_ids[:sample_size]
 
