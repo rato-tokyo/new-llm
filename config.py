@@ -21,7 +21,7 @@ class ResidualConfig:
     # ========== モデルアーキテクチャ ==========
     num_layers = 1                  # ContextBlock と TokenBlock の両方のレイヤー数
     embed_dim = 768                 # トークン埋め込み次元数（GPT-2事前学習済み: 768次元、固定）
-    context_dim = 768               # コンテキストベクトル次元数（直接指定）
+    context_dim = 500               # コンテキストベクトル次元数（直接指定）
                                     # 推奨: 768, 1536, 2304（768の倍数）
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
@@ -31,10 +31,10 @@ class ResidualConfig:
 
     # ========== FFN (Feed-Forward Network) 設定 ==========
     fnn_type = "standard"           # FFNタイプ: "standard", "swiglu"（将来）
-    fnn_expand_factor = 4           # 中間層の拡張率
+    fnn_expand_factor = 1           # 中間層の拡張率
                                     # 1: 拡張なし（現状維持、デフォルト）
                                     # 4: Transformer標準（768 → 3072 → 768）
-    fnn_num_layers = 2              # FFN内の層数
+    fnn_num_layers = 1              # FFN内の層数
                                     # 1: 現状維持（Linear → ReLU）
                                     # 2: Transformer標準（expand → contract）
     fnn_activation = "gelu"         # 活性化関数: "relu", "gelu"
