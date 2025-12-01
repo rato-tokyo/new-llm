@@ -137,24 +137,199 @@ def compute_diversity_loss_sdl(contexts: torch.Tensor) -> torch.Tensor:
     return -entropy
 
 
+# =============================================================================
+# 追加アルゴリズム（自己教師あり学習文献より）
+# =============================================================================
+
+def compute_diversity_loss_uniformity(contexts: torch.Tensor) -> torch.Tensor:
+    """
+    UNIF (Uniformity Loss) - 球面上の一様分布への誘導
+
+    L2正規化後のペア間距離の指数和を最小化
+    計算コスト: O(n²×d) - ペア計算
+    参考: Understanding Contrastive Learning
+    """
+    import torch.nn.functional as F
+    normalized = F.normalize(contexts, dim=1)
+    # ペア間の二乗距離を計算
+    dists_sq = torch.cdist(normalized, normalized, p=2).pow(2)
+    # 対角成分（自己距離）を除外
+    n = contexts.size(0)
+    mask = ~torch.eye(n, dtype=torch.bool, device=contexts.device)
+    dists_sq = dists_sq[mask]
+    # 一様性損失（小さいほど一様）
+    return torch.log(torch.exp(-2 * dists_sq).mean() + 1e-10)
+
+
+def compute_diversity_loss_decorr(contexts: torch.Tensor) -> torch.Tensor:
+    """
+    DECORR (Decorrelation Loss) - 相関行列の対角化
+
+    相関行列を単位行列に近づける
+    計算コスト: O(n×d + d²)
+    参考: Decorrelated Batch Normalization
+    """
+    # 標準化
+    std = contexts.std(dim=0)
+    std = torch.clamp(std, min=1e-4)
+    normalized = (contexts - contexts.mean(dim=0)) / std
+    # 相関行列
+    corr = torch.mm(normalized.t(), normalized) / len(contexts)
+    # 単位行列との差
+    identity = torch.eye(contexts.size(1), device=contexts.device)
+    return ((corr - identity) ** 2).mean()
+
+
+def compute_diversity_loss_nuclear(contexts: torch.Tensor) -> torch.Tensor:
+    """
+    NUC (Nuclear Norm Maximization) - 核ノルム最大化
+
+    特異値の和（核ノルム）を最大化
+    計算コスト: O(n×d²) - SVD計算
+    """
+    # 中心化
+    centered = contexts - contexts.mean(dim=0)
+    # 核ノルム = 特異値の和
+    nuclear_norm = torch.linalg.matrix_norm(centered, ord='nuc')
+    return -nuclear_norm / len(contexts)
+
+
+def compute_diversity_loss_hsic(contexts: torch.Tensor) -> torch.Tensor:
+    """
+    HSIC (Hilbert-Schmidt Independence Criterion) - 次元間独立性
+
+    各次元ペア間のHSICを最小化（独立性促進）
+    計算コスト: O(n²×d) - カーネル計算
+    参考: HSIC Bottleneck
+    """
+    n = contexts.size(0)
+    d = contexts.size(1)
+
+    # サンプル数が多すぎる場合はサブサンプリング
+    if n > 1000:
+        indices = torch.randperm(n)[:1000]
+        contexts = contexts[indices]
+        n = 1000
+
+    # 中心化行列
+    H = torch.eye(n, device=contexts.device) - torch.ones(n, n, device=contexts.device) / n
+
+    # 各次元のRBFカーネル
+    total_hsic = torch.tensor(0.0, device=contexts.device)
+    # 計算量削減のため、ランダムに次元ペアをサンプリング
+    num_pairs = min(50, d * (d - 1) // 2)
+    for _ in range(num_pairs):
+        i, j = torch.randint(0, d, (2,))
+        if i == j:
+            continue
+        xi = contexts[:, i:i+1]
+        xj = contexts[:, j:j+1]
+
+        # RBFカーネル（簡易版）
+        Ki = torch.exp(-torch.cdist(xi, xi, p=2).pow(2))
+        Kj = torch.exp(-torch.cdist(xj, xj, p=2).pow(2))
+
+        # HSIC = trace(KHLH) / (n-1)^2
+        hsic = torch.trace(Ki @ H @ Kj @ H) / ((n - 1) ** 2)
+        total_hsic = total_hsic + hsic
+
+    return total_hsic / num_pairs
+
+
+def compute_diversity_loss_infonce(contexts: torch.Tensor) -> torch.Tensor:
+    """
+    InfoNCE - 情報量最大化コントラスティブ損失
+
+    自己とのみ正例、他は負例として扱うInfoNCE
+    計算コスト: O(n²×d)
+    参考: CPC, MoCo
+    """
+    import torch.nn.functional as F
+    normalized = F.normalize(contexts, dim=1)
+    # 類似度行列
+    sim = torch.mm(normalized, normalized.t())
+    # 温度パラメータ
+    temperature = 0.1
+    sim = sim / temperature
+    # 対角成分が正例（自己）、他は負例
+    # ただしバッチ内自己教師なので、シフトした形で計算
+    n = contexts.size(0)
+    # ラベルは対角（自分自身）
+    labels = torch.arange(n, device=contexts.device)
+    # InfoNCE損失（CrossEntropy形式）
+    loss = F.cross_entropy(sim, labels)
+    return loss
+
+
+def compute_diversity_loss_wmse(contexts: torch.Tensor) -> torch.Tensor:
+    """
+    W-MSE (Whitening MSE) - 白色化変換後のMSE
+
+    ZCA白色化後の表現のMSEを最小化
+    計算コスト: O(n×d + d³) - 固有値分解
+    参考: W-MSE, Shuffled-DBN
+    """
+    # 中心化
+    centered = contexts - contexts.mean(dim=0)
+    # 共分散行列
+    cov = torch.mm(centered.t(), centered) / (len(contexts) - 1)
+    # 正則化
+    cov = cov + 1e-4 * torch.eye(contexts.size(1), device=contexts.device)
+
+    # 固有値分解
+    eigenvalues, eigenvectors = torch.linalg.eigh(cov)
+    eigenvalues = torch.clamp(eigenvalues, min=1e-4)
+
+    # ZCA白色化行列: W = V @ diag(1/sqrt(λ)) @ V^T
+    whitening = eigenvectors @ torch.diag(1.0 / torch.sqrt(eigenvalues)) @ eigenvectors.t()
+
+    # 白色化後の表現
+    whitened = centered @ whitening
+
+    # 目標: 白色化後の共分散が単位行列になること
+    whitened_cov = torch.mm(whitened.t(), whitened) / (len(contexts) - 1)
+    identity = torch.eye(contexts.size(1), device=contexts.device)
+
+    return ((whitened_cov - identity) ** 2).mean()
+
+
 # アルゴリズム辞書
 DIVERSITY_ALGORITHMS: Dict[str, Callable[[torch.Tensor], torch.Tensor]] = {
+    # 既存アルゴリズム
     'MCDL': compute_diversity_loss_mcdl,
     'ODCM': compute_diversity_loss_odcm,
     'DUE': compute_diversity_loss_due,
     'CTM': compute_diversity_loss_ctm,
     'UDEL': compute_diversity_loss_udel,
     'SDL': compute_diversity_loss_sdl,
+    # 追加アルゴリズム
+    'UNIF': compute_diversity_loss_uniformity,
+    'DECORR': compute_diversity_loss_decorr,
+    'NUC': compute_diversity_loss_nuclear,
+    'HSIC': compute_diversity_loss_hsic,
+    'InfoNCE': compute_diversity_loss_infonce,
+    'WMSE': compute_diversity_loss_wmse,
 }
 
 ALGORITHM_DESCRIPTIONS = {
+    # 既存アルゴリズム
     'MCDL': 'Mean-Centered Dispersion Loss (現行)',
     'ODCM': 'Off-Diagonal Covariance Minimization (VICReg風)',
     'DUE': 'Dimension Usage Entropy (次元活性度均一化)',
     'CTM': 'Covariance Trace Maximization (統計的分散)',
     'UDEL': 'Uniform Distribution Entropy Loss (Barlow Twins風)',
     'SDL': 'Spectral Diversity Loss (ER直接最大化, 高コスト)',
+    # 追加アルゴリズム
+    'UNIF': 'Uniformity Loss (球面一様分布)',
+    'DECORR': 'Decorrelation Loss (相関行列対角化)',
+    'NUC': 'Nuclear Norm Maximization (核ノルム最大化)',
+    'HSIC': 'HSIC (次元間独立性)',
+    'InfoNCE': 'InfoNCE (コントラスティブ)',
+    'WMSE': 'Whitening MSE (白色化)',
 }
+
+# 高コストアルゴリズム（デフォルトでスキップ）
+HIGH_COST_ALGORITHMS = {'SDL', 'UNIF', 'HSIC', 'InfoNCE'}
 
 
 # =============================================================================
