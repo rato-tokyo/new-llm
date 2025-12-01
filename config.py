@@ -19,7 +19,7 @@ class ResidualConfig:
     """
 
     # ========== モデルアーキテクチャ ==========
-    num_layers = 6                  # ContextBlock と TokenBlock の両方のレイヤー数
+    num_layers = 1                  # ContextBlock と TokenBlock の両方のレイヤー数
     embed_dim = 768                 # トークン埋め込み次元数（GPT-2事前学習済み: 768次元、固定）
     context_dim = 768               # コンテキストベクトル次元数（直接指定）
                                     # 推奨: 768, 1536, 2304（768の倍数）

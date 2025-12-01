@@ -1,5 +1,20 @@
 # New-LLM Project Guidelines
 
+## 🚨 num_layers = 1 固定ルール - 絶対遵守 (2025-12-01)
+
+**`config.py`の`num_layers`は1に固定。変更禁止。**
+
+```python
+# config.py - 絶対に変更しない
+num_layers = 1  # 固定
+```
+
+**理由**:
+- 現在の実験フェーズでは1レイヤーで検証中
+- レイヤー数変更は明示的なユーザー指示がある場合のみ
+
+---
+
 ## 💻 ローカル実験の注意事項 - CPU環境 (2025-12-01)
 
 **ローカル環境（Mac/CPU）では処理が遅いため、サンプル数を最小限に抑える。**
@@ -178,40 +193,6 @@ Window size: 4 points
 ### 出力ファイル
 
 - `alpha_progression.json`: 各ウィンドウのα値、A値、R²、トークン範囲
-
----
-
-## 🏆 推奨アーキテクチャ: shallow_wide (2025-11-29)
-
-**5つのアーキテクチャ比較実験の結果、shallow_wide (3L/1536d/2tok) が最高性能を達成。**
-
-### 推奨設定
-
-```python
-# config.py
-num_layers = 3           # 6層→3層に半減（CVFPは深さ不要）
-context_dim = 1536       # 768の2倍（幅を重視）
-num_input_tokens = 2     # 直近2トークンの情報を使用
-embed_dim = 768          # GPT-2互換
-```
-
-### 比較結果サマリー
-
-| Config | Layers | context_dim | input_tokens | α | Best PPL | Best Acc |
-|--------|--------|-------------|--------------|------|----------|----------|
-| baseline | 6 | 768 | 1 | -0.4860 | 249.3 | 21.3% |
-| input_tokens_2 | 6 | 768 | 2 | -0.4702 | 198.1 | 22.5% |
-| context_dim_1152 | 6 | 1152 | 1 | -0.4988 | 246.9 | 21.4% |
-| layers_9 | 9 | 768 | 1 | -0.4818 | 256.8 | 21.1% |
-| **shallow_wide** | **3** | **1536** | **2** | **-0.5402** | **197.0** | **22.9%** |
-
-### 主要な発見
-
-1. **CVFPは深さより入力の豊かさが重要**: 3層で最高性能、9層は効果なし
-2. **α = -0.5402 は全設定中最も急峻**: データ効率が最も良い
-3. **TransformerとCVFPの違い**: CVFPでは深さ≠表現力
-
-詳細: [importants/experiment-results-20251129-architecture-comparison.md](importants/experiment-results-20251129-architecture-comparison.md)
 
 ---
 
@@ -928,15 +909,12 @@ def forward_with_contexts(self, context_list, token):
 
 ```python
 # config.py
-use_separated_architecture = True  # 分離アーキテクチャを使用
-context_layers = 3                 # ContextBlockのレイヤー数
-token_layers = 3                   # TokenBlockのレイヤー数（context_layersと同じ必須）
+num_layers = 1  # 現在は1レイヤーで固定
 ```
 
 ### 制約条件
 
-- `context_layers == token_layers` が**必須**（レイヤー数が一致していないと対応できない）
-- 現在の設定: `context_layers = 3`, `token_layers = 3` → OK
+- ContextBlockとTokenBlockのレイヤー数は`num_layers`で統一される
 
 ---
 
@@ -1089,19 +1067,16 @@ Verdict:
 
 ```python
 # Model Architecture
-num_layers = 6                  # 6-layer CVFP blocks
+num_layers = 1                  # 固定（変更禁止）
 context_dim = 768               # GPT-2 aligned
 embed_dim = 768                 # GPT-2 pretrained
-hidden_dim = 1536               # 2 × embed_dim
-layernorm_mix = 1.0             # Full LayerNorm (CRITICAL)
 
 # Diversity Regularization (並列版最適化)
 dist_reg_weight = 0.9           # 90% diversity, 10% CVFP (parallel optimized)
-                                # 並列版の情報遅延を多様性強化で補償
 
 # Training
 phase1_learning_rate = 0.002    # Fast convergence
-phase1_max_iterations = 10      # 並列処理による高速化
+phase1_max_iterations = 60      # config.pyの値を使用
 ```
 
 ---
