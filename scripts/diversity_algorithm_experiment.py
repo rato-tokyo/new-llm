@@ -27,7 +27,6 @@ from datetime import datetime
 from typing import Callable, Dict, Any, List, Optional
 
 import torch
-import torch.nn.functional as F
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -243,9 +242,14 @@ def run_single_experiment(
         algorithm_name=algorithm_name
     )
 
-    # Phase 1実行
+    # Phase 1実行（val_token_idsを渡してearly stoppingを有効化）
     train_start = time.time()
-    train_contexts = trainer.train(train_token_ids, label=f"{algorithm_name}")
+    train_result = trainer.train(train_token_ids, label=f"{algorithm_name}", val_token_ids=val_token_ids)
+    # train()はTensor or Tuple[Tensor, Tensor, Tensor]を返す
+    if isinstance(train_result, tuple):
+        train_contexts = train_result[0]
+    else:
+        train_contexts = train_result
     train_time = time.time() - train_start
 
     # 評価
@@ -465,7 +469,7 @@ def main():
         '--samples', '-s',
         nargs='+',
         type=int,
-        default=[50, 100, 200, 400],
+        default=[100],
         help='Sample sizes to test (default: 50 100 200 400)'
     )
     parser.add_argument(
@@ -509,7 +513,7 @@ def main():
     print_flush(f"\nAlgorithms: {algorithms}")
     print_flush(f"Sample sizes: {args.samples}")
     print_flush(f"Output: {output_dir}")
-    print_flush(f"\nConfig:")
+    print_flush("\nConfig:")
     print_flush(f"  context_dim: {config.context_dim}")
     print_flush(f"  num_layers: {config.num_layers}")
     print_flush(f"  dist_reg_weight: {config.dist_reg_weight}")
