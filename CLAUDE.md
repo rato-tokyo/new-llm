@@ -1,5 +1,60 @@
 # New-LLM Project Guidelines
 
+## 🚨 Effective Rank計算の整合性 - 重要教訓 (2025-12-01)
+
+**Phase 1 Validation Early StoppingのVal ERと最終評価のERが大幅に乖離する問題を修正。**
+
+### 問題の症状
+
+- `_quick_validate()` が返すVal ER: 3-30%
+- 最終評価のVal ER: 64%
+- **約2-20倍の乖離**
+
+### 根本原因（3つ）
+
+**1. サンプルサイズの違い（最大の原因）**
+- `_quick_validate()`: 500トークン → **ERが低く出る**
+- 最終評価: 31,024トークン → ERが正確に出る
+- **修正**: `phase1_val_sample_size = 10000` に増加
+
+**2. ER計算方法の違い**
+- `_quick_validate()`: 共分散行列の固有値分解を使用
+- `analyze_fixed_points()`: SVDの特異値を使用
+- **修正**: 両方ともSVDベースに統一
+
+**3. コードパスの違い**
+- `_quick_validate()`: `collect_all_layers=False`
+- `evaluate()`: `collect_all_layers=True`、`token_embeds[:-1]`で最後のトークンを除く
+- **修正**: `_quick_validate()`を`evaluate()`と完全に同じ処理に変更
+
+### 修正後のコード
+
+```python
+def _quick_validate(self, val_token_ids: torch.Tensor) -> float:
+    self.model.eval()
+    sample_size = min(len(val_token_ids), self.config.phase1_val_sample_size)
+    sample_ids = val_token_ids[:sample_size]
+
+    with torch.no_grad():
+        token_embeds = self.model.token_embedding(sample_ids.unsqueeze(0).to(self.device))
+        token_embeds = self.model.embed_norm(token_embeds).squeeze(0)
+        input_token_embeds = token_embeds[:-1]  # evaluate()と同じ
+        contexts, _, _ = self._forward_sequential(input_token_embeds, None, collect_all_layers=True)
+        effective_rank = self._compute_effective_rank(contexts)  # SVDベース
+
+    self.model.train()
+    return effective_rank
+```
+
+### 教訓
+
+1. **サンプルサイズはER計算に大きく影響**: 500トークンでは不十分、10000以上推奨
+2. **計算方法は完全に統一すべき**: SVD vs 固有値分解で結果が異なる
+3. **コードパスも完全に統一すべき**: `collect_all_layers`や`[:-1]`の違いでも結果が変わる
+4. **同じシードでモデル初期化すると、異なる訓練データでも似た結果になりやすい**
+
+---
+
 ## 📈 α値スケーリング分析機能 (2025-11-30)
 
 **データ量増加に伴うα値（スケーリング効率）の変化を測定可能に。**
