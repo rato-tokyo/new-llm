@@ -92,7 +92,7 @@ class ResidualConfig:
     # Phase 1 Validation Early Stopping
     phase1_val_early_stopping = True     # Validation早期停止を有効化
     phase1_val_frequency = 5             # N イテレーションごとに評価
-    phase1_val_sample_size = 500         # 固定サンプル数（検証データが少なければ全量使用）
+    phase1_val_sample_size = 10000       # 固定サンプル数（検証データが少なければ全量使用）
     phase1_val_patience = 2              # N回連続で改善なし→停止
 
     # ========== Phase 2: トークン予測（キャッシュ方式） ==========
