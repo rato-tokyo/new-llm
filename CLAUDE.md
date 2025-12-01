@@ -83,6 +83,45 @@ python3 scripts/run_experiment.py -s 50 100 200
 
 ---
 
+## 🚨 CPU/GPUテンソル管理 - 重要教訓 (2025-12-01)
+
+**大規模データ（2000サンプル以上）でOOMを防ぐため、テンソルのデバイス管理を徹底。**
+
+### 問題の症状
+
+```
+RuntimeError: Expected all tensors to be on the same device, but got tensors is on cpu,
+different from other tensors on cuda:0
+```
+
+### 根本原因
+
+OOM対策でテンソルをCPUに保持する設計に変更した際、GPU転送漏れが発生：
+1. `previous_contexts`: CPUに保持 → バッチ処理時にGPU転送必要
+2. `token_embeds`: CPUに保持 → `combine_batch`後にGPU転送必要
+3. `last_context`: CPU上で取得 → GPU転送必要
+
+### 修正パターン
+
+```python
+# ❌ 修正前: CPUテンソルをそのまま使用
+batch_contexts = previous_contexts[start_idx:end_idx].detach()
+batch_combined = self._build_combined_tokens_batch(token_embeds, ...)
+
+# ✅ 修正後: 明示的にGPU転送
+batch_contexts = previous_contexts[start_idx:end_idx].detach().to(self.device)
+batch_combined = self._build_combined_tokens_batch(token_embeds, ...).to(self.device)
+```
+
+### チェックリスト（OOM対策コード変更時）
+
+- [ ] CPUに保持するテンソルを特定
+- [ ] GPU演算に渡す前に`.to(self.device)`を追加
+- [ ] ループ内のすべてのテンソル転送を確認
+- [ ] `torch.cat`や演算の入力デバイスを統一
+
+---
+
 ## 🚨 Effective Rank計算の整合性 - 重要教訓 (2025-12-01)
 
 **Phase 1 Validation Early StoppingのVal ERと最終評価のERが大幅に乖離する問題を修正。**
@@ -308,4 +347,4 @@ use_weight_tying = True         # 推奨（デフォルト）
 
 ---
 
-Last Updated: 2025-12-01 (OACDアルゴリズム採用、コード簡素化)
+Last Updated: 2025-12-01 (CPU/GPUテンソル管理教訓追加)
