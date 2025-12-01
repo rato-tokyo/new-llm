@@ -128,12 +128,11 @@ def run_single_experiment(
 
         print_flush(f"    Model: {total_params:,} params (layers={exp_config.num_layers}, fnn={exp_config.fnn_num_layers})")
 
-        # Phase 1用設定（Early Stop後+10イテレーション）
+        # Phase 1用設定（収束率30%でEarly Stop）
         phase1_config = Phase1TrainerConfig.from_base(
             base_config, device,
             context_dim=context_dim,
             num_layers=exp_config.num_layers,
-            phase1_extra_iterations_after_stop=10,
         )
 
         # Phase 1 トレーナー作成
@@ -164,7 +163,6 @@ def run_single_experiment(
         # Phase 1 統計を取得
         phase1_stats = phase1_trainer._training_stats
         phase1_iterations = phase1_stats.get('iterations', 0)
-        best_val_er = phase1_stats.get('best_val_er', 0.0)
         convergence_rate = phase1_stats.get('convergence_rate', 0.0)
 
         # 検証データのキャッシュ収集
@@ -186,10 +184,9 @@ def run_single_experiment(
         val_er = val_metrics['effective_rank']
         train_er_pct = train_er / context_dim * 100
         val_er_pct = val_er / context_dim * 100
-        best_val_er_pct = best_val_er / context_dim * 100
 
         print_flush(f"    Phase 1: {phase1_time:.1f}s, {phase1_iterations} iter, "
-                    f"ER={train_er_pct:.1f}%/{best_val_er_pct:.1f}%")
+                    f"conv={convergence_rate*100:.0f}%, ER={train_er_pct:.1f}%/{val_er_pct:.1f}%")
 
         # Phase 2用設定
         phase2_config = Phase2TrainerConfig.from_base(
@@ -247,8 +244,6 @@ def run_single_experiment(
             'train_er_pct': train_er_pct,
             'val_er': val_er,
             'val_er_pct': val_er_pct,
-            'best_val_er': best_val_er,
-            'best_val_er_pct': best_val_er_pct,
             'convergence_rate': convergence_rate,
             'phase2_time': phase2_time,
             'best_epoch': best_epoch,

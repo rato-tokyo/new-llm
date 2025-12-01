@@ -10,7 +10,6 @@ import torch
 
 from .base import Phase1Trainer, Phase1Result, ContextCache
 from src.losses.diversity import oacd_loss
-from src.evaluation.metrics import compute_effective_rank
 from src.utils.io import print_flush
 from src.utils.device import is_cuda_device, clear_gpu_cache
 from src.utils.token_combiner import TokenCombiner
@@ -155,20 +154,16 @@ class MemoryPhase1Trainer(Phase1Trainer):
         訓練ループを実行
 
         Returns:
-            (previous_contexts, final_convergence_rate, val_early_stopped, best_val_er, final_iter)
+            (previous_contexts, final_convergence_rate, early_stopped, best_convergence_rate, final_iter)
         """
-        # Validation早期停止の設定（config.pyで必ず定義されている）
-        val_early_stopping = self.config.phase1_val_early_stopping
-        val_frequency = self.config.phase1_val_frequency
-        val_patience = self.config.phase1_val_patience
-        extra_iterations = getattr(self.config, 'phase1_extra_iterations_after_stop', 0)
-        best_val_er = 0.0
-        val_patience_counter = 0
-        val_early_stopped = False
-        early_stop_iteration: Optional[int] = None  # Early Stop発動イテレーション
+        # 収束率Early Stoppingの設定
+        early_stopping = getattr(self.config, 'phase1_early_stopping', True)
+        early_stopping_threshold = getattr(self.config, 'phase1_early_stopping_threshold', 0.30)
 
         previous_contexts: Optional[torch.Tensor] = None
         final_convergence_rate = 0.0
+        best_convergence_rate = 0.0
+        early_stopped = False
         final_iter = 0
 
         for iteration in range(self.config.phase1_max_iterations):
@@ -188,43 +183,21 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
             previous_contexts = contexts.detach().cpu()
             final_convergence_rate = convergence_rate
-
-            # 追加イテレーション中かどうかを表示
-            extra_marker = ""
-            if early_stop_iteration is not None:
-                extra_iter_num = iteration - early_stop_iteration
-                extra_marker = f" [+{extra_iter_num}]"
+            best_convergence_rate = max(best_convergence_rate, convergence_rate)
 
             print_flush(
-                f"  Iter {iteration+1}{extra_marker}: conv={convergence_rate*100:.0f}% "
+                f"  Iter {iteration+1}: conv={convergence_rate*100:.0f}% "
                 f"loss={total_loss:.4f} [{elapsed:.1f}s]"
             )
 
-            # Early Stop発動後の追加イテレーション完了チェック
-            if early_stop_iteration is not None:
-                if iteration >= early_stop_iteration + extra_iterations:
-                    print_flush(f"  ✓ Extra iterations completed (+{extra_iterations})")
-                    break
-                continue  # 追加イテレーション中はValidationチェックをスキップ
-
-            # Validation早期停止チェック
-            if (val_early_stopping and
-                val_token_ids is not None and
-                (iteration + 1) % val_frequency == 0):
-
-                should_stop, best_val_er, val_patience_counter = self._check_validation_early_stop(
-                    val_token_ids, best_val_er, val_patience_counter, val_patience
-                )
-                if should_stop:
-                    val_early_stopped = True
-                    if extra_iterations > 0:
-                        early_stop_iteration = iteration
-                        print_flush(f"  → Early stop triggered, running +{extra_iterations} extra iterations...")
-                    else:
-                        break
+            # 収束率Early Stopping
+            if early_stopping and convergence_rate >= early_stopping_threshold:
+                early_stopped = True
+                print_flush(f"  → Early stop: conv {convergence_rate*100:.0f}% >= {early_stopping_threshold*100:.0f}%")
+                break
 
         assert previous_contexts is not None
-        return previous_contexts, final_convergence_rate, val_early_stopped, best_val_er, final_iter
+        return previous_contexts, final_convergence_rate, early_stopped, best_convergence_rate, final_iter
 
     def _train_iteration(
         self,
@@ -258,35 +231,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         elapsed = time.time() - start_time
 
         return contexts, total_loss, convergence_rate, elapsed
-
-    def _check_validation_early_stop(
-        self,
-        val_token_ids: torch.Tensor,
-        best_val_er: float,
-        patience_counter: int,
-        patience: int
-    ) -> tuple[bool, float, int]:
-        """
-        Validation早期停止チェック
-
-        Returns:
-            (should_stop, best_val_er, patience_counter)
-        """
-        val_er = self._quick_validate(val_token_ids)
-        val_er_percent = val_er / self.model.context_dim * 100
-        print_flush(f"    Val ER: {val_er_percent:.1f}%")
-
-        if val_er > best_val_er:
-            best_val_er = val_er
-            patience_counter = 0
-        else:
-            patience_counter += 1
-
-        should_stop = patience_counter >= patience
-        if should_stop:
-            print_flush(f"  → Val early stop: ER not improving for {patience} checks")
-
-        return should_stop, best_val_er, patience_counter
 
     def _collect_layer_cache(
         self,
@@ -667,44 +611,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 clear_gpu_cache(self.device)
 
             return converged_count / num_tokens
-
-    def _quick_validate(self, val_token_ids: torch.Tensor) -> float:
-        """
-        高速Validation評価（シーケンシャル処理、サンプリング）
-
-        最終評価と同じシーケンシャル処理を使用してERを計算。
-        これにより、最終評価のVal ERと整合性のある値が得られる。
-
-        Args:
-            val_token_ids: 検証用トークンID
-
-        Returns:
-            effective_rank: Effective Rank値
-        """
-        self.model.eval()
-
-        # サンプリング（固定数、ただし検証データが少なければ全量）
-        # 注意: 500トークンではERが不正確になるため、10000以上を推奨
-        sample_size = min(len(val_token_ids), self.config.phase1_val_sample_size)
-        sample_ids = val_token_ids[:sample_size]
-
-        with torch.no_grad():
-            # トークン埋め込み取得（evaluate()と同じ処理）
-            token_embeds = self.model.token_embedding(sample_ids.unsqueeze(0).to(self.device))
-            token_embeds = self.model.embed_norm(token_embeds).squeeze(0)
-
-            # Phase 2用に最後のトークンを除く（evaluate()と同じ）
-            input_token_embeds = token_embeds[:-1]
-
-            # シーケンシャル処理（evaluate()と同じ方式）
-            # collect_all_layers=Trueで処理することで、完全に同じコードパスを通る
-            contexts, _, _ = self._forward_sequential(input_token_embeds, None, collect_all_layers=True)
-
-            # Effective Rank計算（共通関数を使用）
-            er = compute_effective_rank(contexts)
-
-        self.model.train()
-        return er
 
     @property
     def is_streaming(self) -> bool:

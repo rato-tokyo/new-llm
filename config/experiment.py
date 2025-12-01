@@ -74,12 +74,9 @@ class Phase1TrainerConfig:
     phase1_batch_size: int
     phase1_gradient_clip: float
 
-    # Validation Early Stopping
-    phase1_val_early_stopping: bool
-    phase1_val_frequency: int
-    phase1_val_sample_size: int
-    phase1_val_patience: int
-    phase1_extra_iterations_after_stop: int
+    # 収束率Early Stopping
+    phase1_early_stopping: bool
+    phase1_early_stopping_threshold: float
 
     # デバイス
     device: Union[str, torch.device]
@@ -94,7 +91,7 @@ class Phase1TrainerConfig:
         num_input_tokens: Optional[int] = None,
         phase1_learning_rate: Optional[float] = None,
         phase1_max_iterations: Optional[int] = None,
-        phase1_extra_iterations_after_stop: Optional[int] = None,
+        phase1_early_stopping_threshold: Optional[float] = None,
     ) -> "Phase1TrainerConfig":
         """Configから生成（オプションで上書き可能）"""
         return cls(
@@ -108,13 +105,10 @@ class Phase1TrainerConfig:
             phase1_context_noise=base.phase1_context_noise,
             phase1_batch_size=base.phase1_batch_size,
             phase1_gradient_clip=base.phase1_gradient_clip,
-            phase1_val_early_stopping=getattr(base, 'phase1_val_early_stopping', True),
-            phase1_val_frequency=getattr(base, 'phase1_val_frequency', 5),
-            phase1_val_sample_size=getattr(base, 'phase1_val_sample_size', 10000),
-            phase1_val_patience=getattr(base, 'phase1_val_patience', 1),
-            phase1_extra_iterations_after_stop=(
-                phase1_extra_iterations_after_stop if phase1_extra_iterations_after_stop is not None
-                else getattr(base, 'phase1_extra_iterations_after_stop', 0)
+            phase1_early_stopping=getattr(base, 'phase1_early_stopping', True),
+            phase1_early_stopping_threshold=(
+                phase1_early_stopping_threshold if phase1_early_stopping_threshold is not None
+                else getattr(base, 'phase1_early_stopping_threshold', 0.30)
             ),
             device=device,
         )

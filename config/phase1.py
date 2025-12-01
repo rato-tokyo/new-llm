@@ -21,9 +21,6 @@ class Phase1Config:
                                      # 0.1: 推奨（軽いノイズ）
                                      # 0.2: 強めのノイズ
 
-    # ========== Validation Early Stopping ==========
-    val_early_stopping = True        # Validation早期停止を有効化
-    val_frequency = 5                # N イテレーションごとに評価
-    val_sample_size = 10000          # サンプル数（10000以上推奨）
-    val_patience = 1                 # N回連続で改善なし→停止
-    extra_iterations_after_stop = 0  # Early Stop後の追加イテレーション数（検証用）
+    # ========== 収束率Early Stopping ==========
+    early_stopping = True            # 収束率による早期停止を有効化
+    early_stopping_threshold = 0.30  # 収束率がこの値以上で停止（30%）
