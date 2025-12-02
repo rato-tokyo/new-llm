@@ -234,15 +234,20 @@ def collect_dual_context_cache(
     model.eval()
     num_tokens = len(token_ids) - 1  # 最後のトークンは予測対象
 
-    # トークン埋め込みを取得
+    # トークン埋め込みを取得（CPUに保持してメモリ節約）
     with torch.no_grad():
-        all_embeds = model.token_embedding(token_ids)
+        all_embeds = model.token_embedding(token_ids.to(device))
         all_embeds = model.embed_norm(all_embeds)
+        # すぐにCPUへ移動
+        all_embeds_cpu = all_embeds.cpu()
+        del all_embeds
+        torch.cuda.empty_cache() if device.type == 'cuda' else None
 
     # 入力トークン（最後を除く）
-    input_embeds = all_embeds[:-1]  # [num_tokens, embed_dim]
+    input_embeds = all_embeds_cpu[:-1]  # [num_tokens, embed_dim] on CPU
+    del all_embeds_cpu
 
-    # 結果格納用
+    # 結果格納用（CPU）
     context_cache_a = torch.zeros(num_tokens, model.context_dim, device='cpu', dtype=torch.float32)
     context_cache_b = torch.zeros(num_tokens, model.context_dim, device='cpu', dtype=torch.float32)
 
@@ -255,7 +260,7 @@ def collect_dual_context_cache(
 
     with torch.no_grad():
         for i in range(num_tokens):
-            token_embed = input_embeds[i:i+1].to(device)
+            token_embed = input_embeds[i:i+1].to(device)  # 必要なときだけGPUへ
 
             # 両方のContextBlockを更新
             new_context_a = model.forward_context_a(context_a, token_embed)
@@ -276,7 +281,15 @@ def collect_dual_context_cache(
     # 連結
     context_cache = torch.cat([context_cache_a, context_cache_b], dim=-1)  # [num_tokens, 1000]
 
-    return context_cache, input_embeds
+    # メモリ解放
+    del context_cache_a, context_cache_b
+
+    # token_embedsもCPUに移動
+    token_embeds_cpu = input_embeds.cpu()
+    del input_embeds, all_embeds
+    torch.cuda.empty_cache() if device.type == 'cuda' else None
+
+    return context_cache, token_embeds_cpu
 
 
 class DualContextPhase2Trainer:
