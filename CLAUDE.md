@@ -117,6 +117,54 @@ combined_context = concat(context[0], context[1], ..., context[N-1])  # cd=conte
 
 ---
 
+## 🚨🚨 順次処理禁止 - 削除厳禁 (CRITICAL) 🚨🚨
+
+**⚠️ このセクションは過去に誤って削除されたことがあります。絶対に削除しないでください。**
+
+**順次処理（`for i in range(num_tokens)`でトークンを1つずつ処理）は厳禁。必ずshifted_prev_context方式で並列処理すること。**
+
+### 禁止パターン（絶対に使わない）
+
+```python
+# ❌ 禁止: 順次処理（非常に遅い、数百秒〜数千秒かかる）
+for i in range(num_tokens):
+    token_embed = input_embeds[i:i+1].to(device)
+    new_context = model.forward_context(prev_context, token_embed)
+    context_cache[i] = new_context.cpu()
+    prev_context = new_context  # 前の出力を次の入力に
+```
+
+### 推奨パターン（必ずこちらを使う）
+
+```python
+# ✅ 推奨: shifted_prev_context方式（並列処理、数秒で完了）
+# Phase 1と同様の反復処理で収束させる
+previous_contexts = torch.randn(num_tokens, context_dim) * 0.01  # ランダム初期化
+
+for iteration in range(max_iterations):
+    # shifted_prev_context: [initial_context, prev_contexts[:-1]]
+    shifted_prev_context = torch.cat([initial_context, previous_contexts[:-1]], dim=0)
+
+    # バッチ処理で一括forward
+    new_contexts = model.forward_context(shifted_prev_context, input_embeds)
+
+    # 収束判定
+    if converged:
+        break
+    previous_contexts = new_contexts
+```
+
+### なぜ並列処理が必要か
+
+| 方式 | 処理時間（2M tokens） | 処理時間（22k tokens） |
+|------|---------------------|----------------------|
+| 順次処理 | **983秒（16分）** | **9秒** |
+| 並列処理 | **5-10秒** | **0.1秒以下** |
+
+**順次処理は100倍以上遅い。Training/Validation両方で並列処理を使うこと。**
+
+---
+
 ## 💻 ローカル実験の注意事項 - CPU環境 (2025-12-01)
 
 **ローカル環境（Mac/CPU）では処理が遅いため、サンプル数を最小限に抑える。**
@@ -318,4 +366,4 @@ def __init__(self, base: Config, context_dim: int):
 
 ---
 
-Last Updated: 2025-12-02 (Initial Context Inheritance方式採用、可変ContextBlock数対応、1層固定アーキテクチャ)
+Last Updated: 2025-12-02 (順次処理禁止ルール追記、Initial Context Inheritance方式採用、可変ContextBlock数対応、1層固定アーキテクチャ)

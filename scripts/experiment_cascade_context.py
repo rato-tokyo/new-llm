@@ -354,14 +354,18 @@ def collect_context_cache_for_val(
     model: CascadeContextLLM,
     token_ids: torch.Tensor,
     device: torch.device,
+    max_iterations: int = 60,
+    convergence_threshold: float = 1e-6,
+    early_stopping_threshold: float = 0.90,
 ) -> Tuple[List[torch.Tensor], torch.Tensor]:
     """
-    Validation用: 全ContextBlockのキャッシュを収集（Initial Context Inheritance方式）
+    Validation用: 全ContextBlockのキャッシュを収集（並列処理版）
 
-    Initial Context Inheritance:
-    - 各ブロックは独立してRNN処理を行う
+    Initial Context Inheritance方式を並列処理で実装:
+    - 各ブロックは独立してRNN学習を行う
     - ブロック0: 初期入力はゼロベクトル
     - ブロック1以降: 初期入力は前のブロックの最終出力
+    - shifted_prev_context方式で並列処理（順次処理は禁止）
 
     Returns:
         (context_caches, token_embeds)
@@ -371,6 +375,7 @@ def collect_context_cache_for_val(
     model.eval()
     num_tokens = len(token_ids) - 1
     num_blocks = model.num_context_blocks
+    batch_size = 50000
 
     with torch.no_grad():
         all_embeds = model.token_embedding(token_ids.to(device))
@@ -383,33 +388,58 @@ def collect_context_cache_for_val(
     del all_embeds_cpu
 
     # 各ブロック用のキャッシュを準備
-    context_caches = [
-        torch.zeros(num_tokens, model.context_dim, device='cpu', dtype=torch.float32)
-        for _ in range(num_blocks)
-    ]
+    context_caches: List[torch.Tensor] = []
 
-    print_flush(f"    Collecting val cache ({num_tokens:,} tokens, {num_blocks} blocks)...")
+    print_flush(f"    Collecting val cache ({num_tokens:,} tokens, {num_blocks} blocks, parallel)...")
     collect_start = time.time()
 
     with torch.no_grad():
-        # 各ブロックを順に処理（Initial Context Inheritance方式）
         for block_idx in range(num_blocks):
+            # Initial Context Inheritance: 初期入力の準備
             if block_idx == 0:
-                # ブロック0: 初期入力はゼロベクトル
-                prev_context = torch.zeros(1, model.context_dim, device=device)
+                initial_context = torch.zeros(1, model.context_dim, device='cpu')
             else:
-                # ブロック1以降: 初期入力は前のブロックの最終出力
-                prev_context = context_caches[block_idx - 1][-1:].to(device)
+                # 前のブロックの最終出力
+                initial_context = context_caches[block_idx - 1][-1:].clone()
 
-            # RNN的に順次処理
-            for i in range(num_tokens):
-                token_embed = input_embeds[i:i+1].to(device)
-                new_context = model.forward_context(block_idx, prev_context, token_embed)
-                context_caches[block_idx][i] = new_context.cpu()
-                prev_context = new_context
+            # ランダム初期化
+            previous_contexts = torch.randn(num_tokens, model.context_dim, device='cpu') * 0.01
+
+            # 反復処理で収束させる（並列処理）
+            for iteration in range(max_iterations):
+                # shifted_prev_context: [initial_context, previous_contexts[:-1]]
+                shifted_prev_context = torch.cat([initial_context, previous_contexts[:-1]], dim=0)
+
+                all_contexts = []
+
+                # バッチ処理
+                for start_idx in range(0, num_tokens, batch_size):
+                    end_idx = min(start_idx + batch_size, num_tokens)
+
+                    batch_prev_context = shifted_prev_context[start_idx:end_idx].to(device)
+                    batch_token_embeds = input_embeds[start_idx:end_idx].to(device)
+
+                    batch_output = model.forward_context(block_idx, batch_prev_context, batch_token_embeds)
+                    all_contexts.append(batch_output.cpu())
+
+                    del batch_prev_context, batch_token_embeds, batch_output
+                    clear_gpu_cache(device)
+
+                contexts = torch.cat(all_contexts, dim=0)
+
+                # 収束判定
+                converged = ((contexts - previous_contexts) ** 2).mean(dim=1) < convergence_threshold
+                convergence_rate = converged.float().mean().item()
+
+                previous_contexts = contexts
+
+                if convergence_rate >= early_stopping_threshold:
+                    break
+
+            context_caches.append(previous_contexts)
 
             if block_idx < num_blocks - 1:
-                print_flush(f"      Block {block_idx} done")
+                print_flush(f"      Block {block_idx}: {iteration+1} iter, conv={convergence_rate*100:.0f}%")
 
     print_flush(f"    Val cache collected [{time.time() - collect_start:.1f}s]")
     clear_gpu_cache(device)
@@ -533,10 +563,29 @@ class CascadePhase1Trainer:
                 # Forward pass
                 batch_output = self.model.forward_context(self.block_idx, batch_prev_context, batch_token_embeds)
 
-                # 多様性損失
+                # 多様性損失（OACD）
                 from src.losses.diversity import oacd_loss
                 diversity_loss = oacd_loss(batch_output)
-                scaled_loss = diversity_loss / num_batches
+
+                # Context Continuity Loss（block_idx > 0の場合のみ）
+                # 最初のトークンの出力が前ブロックの最終出力に近づくように学習
+                # 目的: block[i-1]_final ≈ block[i]の最初の出力
+                if self.block_idx > 0 and self.prev_context_final is not None:
+                    # 最初のバッチの最初の出力を取得
+                    if start_idx == 0:
+                        first_output = batch_output[:1]
+                        continuity_loss = torch.nn.functional.mse_loss(
+                            first_output, self.prev_context_final.to(self.device)
+                        )
+                        # continuity_weightはOACDと同程度の重みで追加
+                        continuity_weight = 0.1
+                        total_batch_loss = diversity_loss + continuity_weight * continuity_loss
+                    else:
+                        total_batch_loss = diversity_loss
+                else:
+                    total_batch_loss = diversity_loss
+
+                scaled_loss = total_batch_loss / num_batches
 
                 if not torch.isnan(scaled_loss) and not torch.isinf(scaled_loss):
                     scaled_loss.backward()
