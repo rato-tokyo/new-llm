@@ -342,101 +342,82 @@ class CascadePhase2Trainer:
         return history
 
 
-def collect_context_cache_for_val(
+def collect_dual_context_cache_sequential(
     model: CascadeContextLLM,
     token_ids: torch.Tensor,
     device: torch.device,
-    max_iterations: int = 60,
-    convergence_threshold: float = 1e-6,
-    early_stopping_threshold: float = 0.90,
-) -> Tuple[List[torch.Tensor], torch.Tensor]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Validation用: 全ContextBlockのキャッシュを収集（並列処理版）
+    Dual方式用: 順次処理でコンテキストキャッシュを収集
 
-    Initial Context Inheritance方式を並列処理で実装:
-    - 各ブロックは独立してRNN学習を行う
-    - ブロック0: 初期入力はゼロベクトル
-    - ブロック1以降: 初期入力は前のブロックの最終出力
-    - shifted_prev_context方式で並列処理（順次処理は禁止）
+    dual_output.txt（PPL=111.9）と同じ方式:
+    - トークンを1つずつ順次処理
+    - 各トークンで両ブロックのcontextを計算
+    - prev_context_a[i] = context_a[i-1]
+    - prev_context_b[i] = context_b[i-1]
+
+    時間はかかるが（2M tokens で約983秒）、正確なRNN動作を再現。
 
     Returns:
-        (context_caches, token_embeds)
-        - context_caches: List of [num_tokens, context_dim] for each block
+        (combined_context_cache, token_embeds)
+        - combined_context_cache: [num_tokens, context_dim * 2]
         - token_embeds: [num_tokens, embed_dim]
     """
     model.eval()
     num_tokens = len(token_ids) - 1
-    num_blocks = model.num_context_blocks
-    batch_size = 50000
+    context_dim = model.context_dim
 
-    with torch.no_grad():
-        all_embeds = model.token_embedding(token_ids.to(device))
-        all_embeds = model.embed_norm(all_embeds)
-        all_embeds_cpu = all_embeds.cpu()
-        del all_embeds
-        clear_gpu_cache(device)
-
-    input_embeds = all_embeds_cpu[:-1]
-    del all_embeds_cpu
-
-    # 各ブロック用のキャッシュを準備
-    context_caches: List[torch.Tensor] = []
-
-    print_flush(f"    Collecting val cache ({num_tokens:,} tokens, {num_blocks} blocks, parallel)...")
+    print_flush(f"    Collecting dual context cache ({num_tokens:,} tokens)...")
     collect_start = time.time()
 
     with torch.no_grad():
-        for block_idx in range(num_blocks):
-            # Initial Context Inheritance: 初期入力の準備
-            if block_idx == 0:
-                initial_context = torch.zeros(1, model.context_dim, device='cpu')
-            else:
-                # 前のブロックの最終出力
-                initial_context = context_caches[block_idx - 1][-1:].clone()
+        # Token embeddings
+        all_embeds = model.token_embedding(token_ids.to(device))
+        all_embeds = model.embed_norm(all_embeds)
+        token_embeds = all_embeds[:-1].cpu()
+        del all_embeds
+        clear_gpu_cache(device)
 
-            # ランダム初期化
-            previous_contexts = torch.randn(num_tokens, model.context_dim, device='cpu') * 0.01
+        # キャッシュ準備
+        context_cache_a = torch.zeros(num_tokens, context_dim, device='cpu')
+        context_cache_b = torch.zeros(num_tokens, context_dim, device='cpu')
 
-            # 反復処理で収束させる（並列処理）
-            for iteration in range(max_iterations):
-                # shifted_prev_context: [initial_context, previous_contexts[:-1]]
-                shifted_prev_context = torch.cat([initial_context, previous_contexts[:-1]], dim=0)
+        # 初期context
+        prev_context_a = torch.zeros(1, context_dim, device=device)
+        prev_context_b = torch.zeros(1, context_dim, device=device)
 
-                all_contexts = []
+        # 順次処理
+        for i in range(num_tokens):
+            token_embed = token_embeds[i:i+1].to(device)
 
-                # バッチ処理
-                for start_idx in range(0, num_tokens, batch_size):
-                    end_idx = min(start_idx + batch_size, num_tokens)
+            # Block A: 入力は前のトークンのcontext_a
+            new_context_a = model.forward_context(0, prev_context_a, token_embed)
 
-                    batch_prev_context = shifted_prev_context[start_idx:end_idx].to(device)
-                    batch_token_embeds = input_embeds[start_idx:end_idx].to(device)
+            # Block B: 入力は前のトークンのcontext_b
+            new_context_b = model.forward_context(1, prev_context_b, token_embed)
 
-                    batch_output = model.forward_context(block_idx, batch_prev_context, batch_token_embeds)
-                    all_contexts.append(batch_output.cpu())
+            # キャッシュに保存
+            context_cache_a[i] = new_context_a.cpu()
+            context_cache_b[i] = new_context_b.cpu()
 
-                    del batch_prev_context, batch_token_embeds, batch_output
-                    clear_gpu_cache(device)
+            # 次のイテレーションのために更新
+            prev_context_a = new_context_a
+            prev_context_b = new_context_b
 
-                contexts = torch.cat(all_contexts, dim=0)
+            # 進捗表示
+            if (i + 1) % 100000 == 0:
+                print_flush(f"      {i+1:,}/{num_tokens:,} tokens processed...")
 
-                # 収束判定
-                converged = ((contexts - previous_contexts) ** 2).mean(dim=1) < convergence_threshold
-                convergence_rate = converged.float().mean().item()
+            del token_embed, new_context_a, new_context_b
 
-                previous_contexts = contexts
+        clear_gpu_cache(device)
 
-                if convergence_rate >= early_stopping_threshold:
-                    break
+    # 結合
+    combined_cache = torch.cat([context_cache_a, context_cache_b], dim=-1)
 
-            context_caches.append(previous_contexts)
+    print_flush(f"    Dual context cache collected [{time.time() - collect_start:.1f}s]")
 
-            if block_idx < num_blocks - 1:
-                print_flush(f"      Block {block_idx}: {iteration+1} iter, conv={convergence_rate*100:.0f}%")
-
-    print_flush(f"    Val cache collected [{time.time() - collect_start:.1f}s]")
-    clear_gpu_cache(device)
-
-    return context_caches, input_embeds
+    return combined_cache, token_embeds
 
 
 class Phase1ConfigWrapper:
@@ -477,7 +458,6 @@ def run_cascade_context_experiment(
     seed: int = 42,
     output_dir: Optional[str] = None,
     use_continuity_loss: bool = True,
-    use_phase1_cache: bool = False,
 ) -> Dict[str, Any]:
     """Cascade Context 実験を実行（Dual方式: 前半/後半分割）
 
@@ -488,7 +468,6 @@ def run_cascade_context_experiment(
         seed: 乱数シード
         output_dir: 出力ディレクトリ
         use_continuity_loss: Context Continuity Lossを使用するか（デフォルト: True）
-        use_phase1_cache: Phase 1のキャッシュを直接結合してPhase 2で使用（時間短縮）
     """
 
     set_seed(seed)
@@ -612,79 +591,23 @@ def run_cascade_context_experiment(
 
     phase1_total_time = sum(phase1_times)
 
-    # ========== Phase 2 Prep: キャッシュ収集 ==========
+    # ========== Phase 2 Prep: 順次処理でキャッシュ収集 ==========
+    # dual_output.txt（PPL=111.9）と同じ方式
+    print_flush("\n[Phase 2 Prep] Collecting dual context cache on full data...")
     cache_start = time.time()
 
-    if use_phase1_cache:
-        # --use-phase1-cache: Phase 1のキャッシュを直接結合（時間短縮）
-        # 前提: Context Continuity Lossにより、境界での損失が無視できるほど小さい
-        print_flush("\n[Phase 2 Prep] Using Phase 1 cache directly (--use-phase1-cache)...")
-
-        # Phase 1のキャッシュを結合
-        # cache_a: [split_point, context_dim], cache_b: [num_train - split_point, context_dim]
-        cache_a = train_context_caches[0]  # 前半データのキャッシュ
-        cache_b = train_context_caches[1]  # 後半データのキャッシュ
-
-        # 全データ用キャッシュを作成
-        # Block A: cache_a + ゼロパディング（後半はBlock Aで学習していないため）
-        # Block B: ゼロパディング（前半はBlock Bで学習していないため）+ cache_b
-        num_total = num_train_tokens - 1
-        train_cache_block_a = torch.zeros(num_total, context_dim, device='cpu')
-        train_cache_block_b = torch.zeros(num_total, context_dim, device='cpu')
-
-        # 前半にcache_aを配置
-        train_cache_block_a[:len(cache_a)] = cache_a
-        # 後半の最初のトークンはcache_aの最終値で初期化（Context Continuity）
-        train_cache_block_a[len(cache_a):] = cache_a[-1:]
-
-        # 前半はcache_bの初期値（＝cache_aの最終値）で埋める
-        train_cache_block_b[:split_point] = cache_a[-1:]
-        # 後半にcache_bを配置
-        train_cache_block_b[split_point:] = cache_b
-
-        train_context_cache = torch.cat([train_cache_block_a, train_cache_block_b], dim=-1)
-        print_flush(f"  Train cache (Phase 1 direct): {train_context_cache.shape}")
-
-        # Validationキャッシュは再収集が必要（学習時のデータではないため）
-        print_flush("  Collecting validation cache...")
-        val_context_caches, val_token_embeds = collect_context_cache_for_val(
-            model, val_token_ids, device
-        )
-        val_context_cache = torch.cat(val_context_caches, dim=-1)
-        print_flush(f"  Val cache: {val_context_cache.shape}")
-
-        # Token embeds for training
-        with torch.no_grad():
-            all_embeds = model.token_embedding(train_token_ids.to(device))
-            all_embeds = model.embed_norm(all_embeds)
-            train_token_embeds = all_embeds[:-1].cpu()
-            del all_embeds
-            clear_gpu_cache(device)
-
-        del train_context_caches, val_context_caches
-    else:
-        # デフォルト: 全データに対して両ブロックのキャッシュを収集
-        print_flush("\n[Phase 2 Prep] Collecting dual context cache on full data...")
-
-        train_context_caches_full, train_token_embeds = collect_context_cache_for_val(
-            model, train_token_ids, device
-        )
-        val_context_caches, val_token_embeds = collect_context_cache_for_val(
-            model, val_token_ids, device
-        )
-
-        # 連結
-        train_context_cache = torch.cat(train_context_caches_full, dim=-1)
-        val_context_cache = torch.cat(val_context_caches, dim=-1)
-
-        print_flush(f"  Train cache: {train_context_cache.shape}")
-        print_flush(f"  Val cache: {val_context_cache.shape}")
-
-        # メモリ解放
-        del train_context_caches, val_context_caches
+    # 順次処理でキャッシュ収集（正確なRNN動作を再現）
+    train_context_cache, train_token_embeds = collect_dual_context_cache_sequential(
+        model, train_token_ids, device
+    )
+    val_context_cache, val_token_embeds = collect_dual_context_cache_sequential(
+        model, val_token_ids, device
+    )
 
     cache_time = time.time() - cache_start
     print_flush(f"Cache collection: {cache_time:.1f}s")
+    print_flush(f"  Train cache: {train_context_cache.shape}")
+    print_flush(f"  Val cache: {val_context_cache.shape}")
 
     # Effective Rank計算
     train_metrics = analyze_fixed_points(train_context_cache, label="Train", verbose=False)
@@ -789,20 +712,16 @@ def main():
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--no-continuity-loss', action='store_true',
                         help='Disable Context Continuity Loss (for ablation study)')
-    parser.add_argument('--use-phase1-cache', action='store_true',
-                        help='Use Phase 1 cache directly for Phase 2 (skip recollection, faster)')
 
     args = parser.parse_args()
 
     # Dual方式は2ブロック固定
     num_context_blocks = 2
     use_continuity_loss = not args.no_continuity_loss
-    use_phase1_cache = args.use_phase1_cache
 
     # 出力ディレクトリ
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     suffix = "_no_cont_loss" if not use_continuity_loss else ""
-    suffix += "_p1cache" if use_phase1_cache else ""
     output_dir = args.output_dir or f"importants/logs/{timestamp}_dual_context{suffix}"
 
     combined_dim = args.context_dim * num_context_blocks
@@ -814,7 +733,6 @@ def main():
     print_flush(f"Context dim per block: {args.context_dim}")
     print_flush(f"Combined context dim: {combined_dim}")
     print_flush(f"Context Continuity Loss: {'enabled' if use_continuity_loss else 'disabled'}")
-    print_flush(f"Use Phase1 Cache: {'enabled' if use_phase1_cache else 'disabled'}")
     print_flush(f"Output: {output_dir}")
     print_flush("=" * 70)
 
@@ -825,7 +743,6 @@ def main():
         seed=args.seed,
         output_dir=output_dir,
         use_continuity_loss=use_continuity_loss,
-        use_phase1_cache=use_phase1_cache,
     )
 
     print_flush("\n" + "=" * 70)
