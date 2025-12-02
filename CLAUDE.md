@@ -15,21 +15,27 @@
 | C2T2-500 | 132.2 | 24.4% | 2層だが悪化 |
 | C1T1-1000 | 134.0 | 23.6% | context_dim増加は非効率 |
 
-### カスケード方式の特徴
+### カスケード方式の特徴（Cache-Direct方式）
+
+**Cache-Direct方式**: Phase 1で得られたキャッシュをそのままPhase 2で使用。再計算不要。
 
 ```
 Phase 1A: ContextBlock A を全データで学習
-  → context_a キャッシュ取得
+  → context_a[i] キャッシュ取得（各トークン位置の出力を保存）
 
-Phase 1B: ContextBlock B を全データで学習
+Phase 1B: ContextBlock B を学習
+  → 入力: context_a[i-1]（前のトークン位置のcontext_a）
+  → context_b[i] キャッシュ取得
 
-Cache Collection:
-  → context_b[i] = B(context_a[i], token_embed[i])
-  （context_a を ContextBlock B の入力に固定）
-
-Phase 2: concat(context_a, context_b) で TokenBlock 学習
-  → 連結contextでトークン予測
+Phase 2: TokenBlock 学習（順伝搬なし）
+  → 入力: context_a[i-1], context_b[i-1]（両方とも前トークン位置）
+  → 予測: token[i]
 ```
+
+**重要**: 次トークン予測では位置`i`を予測するのに位置`i-1`までのコンテキストを使用。
+Phase 1で得たキャッシュを1つシフトして使用するだけで、順伝搬は不要。
+
+**根拠**: 以前の実験で、0ベクトルから順伝搬した出力とキャッシュの差は無視可能と確認済み。
 
 ### なぜカスケード方式が良いのか
 

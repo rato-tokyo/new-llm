@@ -336,12 +336,22 @@ class CascadePhase2Trainer:
         return history
 
 
-def collect_context_a_cache(
+def collect_context_cache_for_val(
     model: CascadeContextLLM,
     token_ids: torch.Tensor,
     device: torch.device,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """ContextBlock A のキャッシュを収集"""
+) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """
+    Validation用: ContextBlock A と B のキャッシュを収集
+
+    Cache-Direct方式: 順伝搬でキャッシュを収集し、Phase 2ではシフトして使用
+
+    Returns:
+        (context_a_cache, context_b_cache, token_embeds)
+        - context_a_cache: [num_tokens, context_dim]
+        - context_b_cache: [num_tokens, context_dim]
+        - token_embeds: [num_tokens, embed_dim]
+    """
     model.eval()
     num_tokens = len(token_ids) - 1
 
@@ -356,8 +366,9 @@ def collect_context_a_cache(
     del all_embeds_cpu
 
     context_a_cache = torch.zeros(num_tokens, model.context_dim, device='cpu', dtype=torch.float32)
+    context_b_cache = torch.zeros(num_tokens, model.context_dim, device='cpu', dtype=torch.float32)
 
-    print_flush(f"    Collecting context_a cache ({num_tokens:,} tokens)...")
+    print_flush(f"    Collecting val cache ({num_tokens:,} tokens)...")
     collect_start = time.time()
 
     context_a = torch.zeros(1, model.context_dim, device=device)
@@ -365,48 +376,217 @@ def collect_context_a_cache(
     with torch.no_grad():
         for i in range(num_tokens):
             token_embed = input_embeds[i:i+1].to(device)
+
+            # ContextBlock A: 入力は前のcontext_a
             new_context_a = model.forward_context_a(context_a, token_embed)
             context_a_cache[i] = new_context_a.cpu()
+
+            # ContextBlock B: 入力は前のcontext_a（Cache-Direct方式）
+            new_context_b = model.forward_context_b(context_a, token_embed)
+            context_b_cache[i] = new_context_b.cpu()
+
             context_a = new_context_a
 
             if (i + 1) % 100000 == 0:
                 print_flush(f"      {i+1:,}/{num_tokens:,} tokens processed...")
 
-    print_flush(f"    Context A cache collected [{time.time() - collect_start:.1f}s]")
+    print_flush(f"    Val cache collected [{time.time() - collect_start:.1f}s]")
     clear_gpu_cache(device)
 
-    return context_a_cache, input_embeds
+    return context_a_cache, context_b_cache, input_embeds
 
 
-def collect_context_b_cache_with_fixed_a(
-    model: CascadeContextLLM,
-    token_embeds: torch.Tensor,
-    context_a_cache: torch.Tensor,
-    device: torch.device,
-) -> torch.Tensor:
-    """ContextBlock B のキャッシュを収集（context_a を固定入力として使用）"""
-    model.eval()
-    num_tokens = len(token_embeds)
+class CascadePhase1BTrainer:
+    """
+    Phase 1B用トレーナー: context_aを入力としてContextBlock Bを学習
 
-    context_b_cache = torch.zeros(num_tokens, model.context_dim, device='cpu', dtype=torch.float32)
+    Cache-Direct方式: context_a[i-1]を入力として学習し、得られたキャッシュを
+    そのままPhase 2で使用。順伝搬の再計算は不要。
+    """
 
-    print_flush(f"    Collecting context_b cache with fixed context_a ({num_tokens:,} tokens)...")
-    collect_start = time.time()
+    def __init__(
+        self,
+        model: CascadeContextLLM,
+        config: Any,
+        device: torch.device,
+        context_a_cache: torch.Tensor,
+        token_embeds: torch.Tensor
+    ):
+        self.model = model
+        self.config = config
+        self.device = device
+        self.context_a_cache = context_a_cache  # [num_tokens, context_dim]
+        self.token_embeds = token_embeds  # [num_tokens, embed_dim]
+        self._training_stats: Dict[str, Any] = {}
 
-    with torch.no_grad():
-        for i in range(num_tokens):
-            token_embed = token_embeds[i:i+1].to(device)
-            input_context = context_a_cache[i:i+1].to(device)
-            new_context_b = model.forward_context_b(input_context, token_embed)
-            context_b_cache[i] = new_context_b.cpu()
+    def train(self, label: str = "ContextB") -> torch.Tensor:
+        """
+        ContextBlock Bを学習（context_aを入力として使用）
 
-            if (i + 1) % 100000 == 0:
-                print_flush(f"      {i+1:,}/{num_tokens:,} tokens processed...")
+        Returns:
+            context_b_cache: [num_tokens, context_dim]
+        """
+        self.model.train()
+        num_tokens = len(self.token_embeds)
 
-    print_flush(f"    Context B cache collected [{time.time() - collect_start:.1f}s]")
-    clear_gpu_cache(device)
+        # ContextBlock Bのパラメータのみ学習
+        context_b_params = list(self.model.context_block_b.parameters())
+        print_flush(f"\n[Phase 1B] {label}: {num_tokens:,} tokens, {self.config.phase1_max_iterations} iterations")
+        print_flush("  Input: context_a[i-1] (Cache-Direct method)")
+        optimizer = torch.optim.Adam(context_b_params, lr=self.config.phase1_learning_rate)
 
-    return context_b_cache
+        # 収束率Early Stoppingの設定
+        early_stopping = getattr(self.config, 'phase1_early_stopping', True)
+        early_stopping_threshold = getattr(self.config, 'phase1_early_stopping_threshold', 0.30)
+        min_convergence_improvement = getattr(self.config, 'phase1_min_convergence_improvement', 0.01)
+
+        # Phase 2用: context_a[i-1]を入力として使用
+        # shifted_context_a: 位置iの予測には位置i-1のcontext_aを使用
+        initial_context = torch.zeros(1, self.model.context_dim, device='cpu')
+        shifted_context_a = torch.cat([initial_context, self.context_a_cache[:-1]], dim=0)
+
+        previous_contexts: Optional[torch.Tensor] = None
+        final_convergence_rate = 0.0
+        prev_convergence_rate = 0.0
+        no_improvement_count = 0
+        final_iter = 0
+
+        batch_size = self.config.phase1_batch_size
+
+        for iteration in range(self.config.phase1_max_iterations):
+            final_iter = iteration
+            iter_start = time.time()
+
+            if iteration == 0:
+                # Iteration 0: 小さなランダム値で初期化
+                previous_contexts = torch.randn(num_tokens, self.model.context_dim) * 0.01
+                print_flush("  Iter 1: random init")
+                continue
+
+            assert previous_contexts is not None
+            optimizer.zero_grad()
+
+            all_contexts = []
+            total_loss = 0.0
+            num_batches = (num_tokens + batch_size - 1) // batch_size
+
+            for start_idx in range(0, num_tokens, batch_size):
+                end_idx = min(start_idx + batch_size, num_tokens)
+                current_batch_size = end_idx - start_idx
+
+                # context_a[i-1]を入力として使用
+                batch_context_a = shifted_context_a[start_idx:end_idx].to(self.device)
+                batch_token_embeds = self.token_embeds[start_idx:end_idx].to(self.device)
+
+                # ノイズ追加
+                if self.config.phase1_context_noise > 0:
+                    noise = torch.randn_like(batch_context_a) * self.config.phase1_context_noise
+                    batch_context_a = batch_context_a + noise
+
+                # Forward pass
+                batch_output = self.model.forward_context_b(batch_context_a, batch_token_embeds)
+
+                # 多様性損失
+                from src.losses.diversity import oacd_loss
+                diversity_loss = oacd_loss(batch_output)
+                scaled_loss = diversity_loss / num_batches
+
+                if not torch.isnan(scaled_loss) and not torch.isinf(scaled_loss):
+                    scaled_loss.backward()
+
+                all_contexts.append(batch_output.detach().cpu())
+                total_loss += diversity_loss.item() * current_batch_size
+
+                del batch_context_a, batch_token_embeds, batch_output
+                clear_gpu_cache(self.device)
+
+            # パラメータ更新
+            torch.nn.utils.clip_grad_norm_(
+                self.model.context_block_b.parameters(),
+                max_norm=self.config.phase1_gradient_clip
+            )
+            optimizer.step()
+
+            # 収束率計算
+            contexts = torch.cat(all_contexts, dim=0)
+            converged = ((contexts - previous_contexts) ** 2).mean(dim=1) < self.config.phase1_convergence_threshold
+            convergence_rate = converged.float().mean().item()
+
+            previous_contexts = contexts
+            final_convergence_rate = convergence_rate
+
+            # 改善幅計算
+            improvement = convergence_rate - prev_convergence_rate
+            improvement_marker = ""
+            min_conv_for_check = 0.5
+
+            if convergence_rate >= min_conv_for_check:
+                if improvement < min_convergence_improvement:
+                    no_improvement_count += 1
+                    improvement_marker = f" (↑{improvement*100:.1f}%)"
+                else:
+                    no_improvement_count = 0
+
+            elapsed = time.time() - iter_start
+            avg_loss = total_loss / num_tokens
+            print_flush(
+                f"  Iter {iteration+1}: conv={convergence_rate*100:.0f}% "
+                f"loss={avg_loss:.4f} [{elapsed:.1f}s]{improvement_marker}"
+            )
+
+            prev_convergence_rate = convergence_rate
+
+            # Early Stopping
+            if early_stopping and convergence_rate >= early_stopping_threshold:
+                print_flush(f"  → Early stop: conv {convergence_rate*100:.0f}% >= {early_stopping_threshold*100:.0f}%")
+                break
+
+            if early_stopping and no_improvement_count >= 1 and convergence_rate >= min_conv_for_check:
+                print_flush(f"  → Early stop: improvement {improvement*100:.1f}% < {min_convergence_improvement*100:.0f}%")
+                break
+
+        self._training_stats = {
+            'iterations': final_iter + 1,
+            'convergence_rate': final_convergence_rate,
+            'num_tokens': num_tokens,
+        }
+
+        print_flush(f"  Done: {final_convergence_rate*100:.0f}% converged")
+
+        # context_bキャッシュを収集（学習後の最終状態）
+        # Phase 2ではshifted_context_a[i]を入力としてcontext_b[i]を計算した結果を使用
+        context_b_cache = self._collect_cache(shifted_context_a)
+
+        return context_b_cache
+
+    def _collect_cache(self, shifted_context_a: torch.Tensor) -> torch.Tensor:
+        """学習済みContextBlock Bでキャッシュを収集"""
+        self.model.eval()
+        num_tokens = len(self.token_embeds)
+        batch_size = 50000
+
+        context_b_cache = torch.zeros(num_tokens, self.model.context_dim, device='cpu', dtype=torch.float32)
+
+        print_flush("  Collecting context_b cache...")
+        collect_start = time.time()
+
+        with torch.no_grad():
+            for start_idx in range(0, num_tokens, batch_size):
+                end_idx = min(start_idx + batch_size, num_tokens)
+
+                batch_context_a = shifted_context_a[start_idx:end_idx].to(self.device)
+                batch_token_embeds = self.token_embeds[start_idx:end_idx].to(self.device)
+
+                batch_output = self.model.forward_context_b(batch_context_a, batch_token_embeds)
+                context_b_cache[start_idx:end_idx] = batch_output.cpu()
+
+                del batch_context_a, batch_token_embeds, batch_output
+                clear_gpu_cache(self.device)
+
+        print_flush(f"  Cache collected [{time.time() - collect_start:.1f}s]")
+        self.model.train()
+
+        return context_b_cache
 
 
 class Phase1ConfigWrapper:
@@ -515,15 +695,16 @@ def run_cascade_context_experiment(
         param.requires_grad = False
     print_flush("✓ ContextBlock A frozen")
 
-    # ========== Phase 1B: ContextBlock B の学習 ==========
-    print_flush("\n[Phase 1B] Training ContextBlock B on full data...")
-    print_flush("  Note: ContextBlock B will use context_a as input during cache collection")
-
-    wrapper_b = SingleContextWrapper(model, block='b')
-    trainer_b = MemoryPhase1Trainer(wrapper_b, config_wrapper, device)
+    # ========== Phase 1B: ContextBlock B の学習（Cache-Direct方式）==========
+    # context_a[i-1]を入力として学習し、キャッシュをそのままPhase 2で使用
+    trainer_b = CascadePhase1BTrainer(
+        model, config_wrapper, device,
+        context_a_cache=train_context_a_cache,
+        token_embeds=train_token_embeds
+    )
 
     phase1b_start = time.time()
-    _ = trainer_b.train(train_token_ids, label="ContextB", return_all_layers=True)
+    train_context_b_cache = trainer_b.train(label="ContextB")
     phase1b_time = time.time() - phase1b_start
 
     stats_b = trainer_b._training_stats
@@ -537,25 +718,16 @@ def run_cascade_context_experiment(
 
     phase1_total_time = phase1a_time + phase1b_time
 
-    # ========== キャッシュ収集: context_a を入力として context_b を計算 ==========
-    print_flush("\n[Cache Collection] Collecting context_b with fixed context_a...")
+    # ========== Validation キャッシュ収集 ==========
+    print_flush("\n[Val Cache] Collecting validation cache...")
     cache_start = time.time()
 
-    # Train data
-    train_context_b_cache = collect_context_b_cache_with_fixed_a(
-        model, train_token_embeds, train_context_a_cache, device
-    )
-
-    # Val data
-    val_context_a_cache, val_token_embeds = collect_context_a_cache(
+    val_context_a_cache, val_context_b_cache, val_token_embeds = collect_context_cache_for_val(
         model, val_token_ids, device
-    )
-    val_context_b_cache = collect_context_b_cache_with_fixed_a(
-        model, val_token_embeds, val_context_a_cache, device
     )
 
     cache_time = time.time() - cache_start
-    print_flush(f"Cache collection: {cache_time:.1f}s")
+    print_flush(f"Val cache collection: {cache_time:.1f}s")
 
     # 連結
     train_context_cache = torch.cat([train_context_a_cache, train_context_b_cache], dim=-1)
