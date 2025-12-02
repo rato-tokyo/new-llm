@@ -13,7 +13,7 @@ Dual方式:
 
   Phase 1B:
     - ContextBlock B を後半データで学習
-    - 初期入力: context_A_final（前のブロックの最終出力）
+    - 初期入力: ゼロベクトル（※Initial Context Inheritanceは使用しない）
     - データ: tokens[split:]
 
   Phase 2:
@@ -51,11 +51,12 @@ from config.experiment import DataConfig
 
 class CascadeContextLLM(nn.Module):
     """
-    Cascade Context LLM - N個のContextBlockをカスケード接続（1層固定）
+    Cascade Context LLM - N個のContextBlockをカスケード連結（1層固定）
 
-    Phase 1[0]: ContextBlock[0] を学習（入力: ゼロ初期化context）
-    Phase 1[i]: ContextBlock[i] を学習（入力: [i-1] の出力、固定）
-    Phase 2: concat(context[0..N-1]) で TokenBlock を学習
+    Dual方式:
+    - Phase 1[0]: ContextBlock[0] を前半データで学習（入力: ゼロベクトル）
+    - Phase 1[1]: ContextBlock[1] を後半データで学習（入力: ゼロベクトル）
+    - Phase 2: concat(context[0], context[1]) で TokenBlock を学習
 
     Args:
         vocab_size: 語彙サイズ
