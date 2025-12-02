@@ -226,9 +226,9 @@ def main():
     )
     parser.add_argument(
         '--mode', '-m',
-        choices=['c2t1', 'c1t2', 'c2t2', 'all'],
+        choices=['c1t1', 'c2t1', 'c1t2', 'c2t2', 'all'],
         default='c2t1',
-        help='Experiment mode: c2t1 (Context 2L, Token 1L), c1t2 (Context 1L, Token 2L), c2t2 (baseline), all (run all)'
+        help='Experiment mode: c1t1 (1L+1L), c2t1 (2L+1L), c1t2 (1L+2L), c2t2 (2L+2L), all (run all)'
     )
     parser.add_argument(
         '--samples', '-s',
@@ -279,6 +279,8 @@ def main():
 
     # 実験設定
     experiments = []
+    if args.mode == 'c1t1' or args.mode == 'all':
+        experiments.append({'context_layers': 1, 'token_layers': 1, 'name': 'C1T1'})
     if args.mode == 'c2t1' or args.mode == 'all':
         experiments.append({'context_layers': 2, 'token_layers': 1, 'name': 'C2T1'})
     if args.mode == 'c1t2' or args.mode == 'all':
