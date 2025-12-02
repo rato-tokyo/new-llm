@@ -56,7 +56,6 @@ from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
 from src.utils.initialization import count_parameters
 from config.experiment import DataConfig
-from src.losses.diversity import oacd_loss
 
 
 class CascadeContextLLM(nn.Module):
@@ -448,252 +447,6 @@ def collect_context_cache_for_val(
     return context_caches, input_embeds
 
 
-class CascadePhase1Trainer:
-    """
-    Phase 1用トレーナー: Initial Context Inheritance方式
-
-    Initial Context Inheritance:
-    - block_idx=0: 通常のRNN学習（初期入力: ゼロベクトル）
-    - block_idx>0: 通常のRNN学習だが、最初のトークンの入力のみ
-                   前のブロックの最終出力（context_prev_final）を使用
-
-    これにより、前のブロックの「文脈の継続性」を引き継ぎつつ、
-    全データでRNN学習を行う。Dual方式（前半/後半分割）と同様の効果を
-    全データで実現できる。
-
-    block_idx=0の場合: ゼロベクトルを初期入力として使用
-    block_idx>0の場合: context_prev_final を初期入力として使用
-    """
-
-    def __init__(
-        self,
-        model: CascadeContextLLM,
-        config: Any,
-        device: torch.device,
-        block_idx: int,
-        prev_context_final: Optional[torch.Tensor],  # block_idx>0の場合: 前のブロックの最終出力 [1, context_dim]
-        token_embeds: torch.Tensor
-    ):
-        self.model = model
-        self.config = config
-        self.device = device
-        self.block_idx = block_idx
-        self.prev_context_final = prev_context_final  # [1, context_dim] or None
-        self.token_embeds = token_embeds  # [num_tokens, embed_dim]
-        self._training_stats: Dict[str, Any] = {}
-
-    def train(self, label: str = "Context") -> torch.Tensor:
-        """
-        ContextBlockを学習（Initial Context Inheritance方式）
-
-        Initial Context Inheritance:
-        - 最初のトークン: prev_context_final（前のブロックの最終出力）を入力
-        - それ以降: previous_contexts[i-1]（自身の前の出力）を入力
-
-        Returns:
-            context_cache: [num_tokens, context_dim]
-        """
-        self.model.train()
-        num_tokens = len(self.token_embeds)
-
-        # このブロックのパラメータのみ学習
-        block_params = list(self.model.context_blocks[self.block_idx].parameters())
-        phase_label = f"Phase 1[{self.block_idx}]"
-        print_flush(f"\n[{phase_label}] {label}: {num_tokens:,} tokens, {self.config.phase1_max_iterations} iterations")
-
-        if self.block_idx == 0 or self.prev_context_final is None:
-            print_flush("  Initial input: zero vector (standard RNN)")
-        else:
-            print_flush(f"  Initial input: context[{self.block_idx-1}]_final (Initial Context Inheritance)")
-
-        optimizer = torch.optim.Adam(block_params, lr=self.config.phase1_learning_rate)
-
-        # 収束率Early Stoppingの設定
-        early_stopping = getattr(self.config, 'phase1_early_stopping', True)
-        early_stopping_threshold = getattr(self.config, 'phase1_early_stopping_threshold', 0.30)
-        min_convergence_improvement = getattr(self.config, 'phase1_min_convergence_improvement', 0.01)
-
-        # 初期入力コンテキストの準備
-        # Initial Context Inheritance: 最初のトークンの入力のみ prev_context_final を使用
-        if self.block_idx == 0 or self.prev_context_final is None:
-            initial_context = torch.zeros(1, self.model.context_dim, device='cpu')
-        else:
-            initial_context = self.prev_context_final.cpu()  # [1, context_dim]
-
-        previous_contexts: Optional[torch.Tensor] = None
-        final_convergence_rate = 0.0
-        prev_convergence_rate = 0.0
-        no_improvement_count = 0
-        final_iter = 0
-
-        batch_size = self.config.phase1_batch_size
-
-        for iteration in range(self.config.phase1_max_iterations):
-            final_iter = iteration
-            iter_start = time.time()
-
-            if iteration == 0:
-                # Iteration 0: 小さなランダム値で初期化
-                previous_contexts = torch.randn(num_tokens, self.model.context_dim) * 0.01
-                print_flush("  Iter 1: random init")
-                continue
-
-            assert previous_contexts is not None
-            optimizer.zero_grad()
-
-            # shifted_prev_context を作成（RNN的に previous_contexts[i-1] を使用）
-            # 最初のトークンの入力は initial_context（ゼロ or prev_context_final）
-            shifted_prev_context = torch.cat([initial_context, previous_contexts[:-1]], dim=0)
-
-            all_contexts = []
-            total_loss = 0.0
-            num_batches = (num_tokens + batch_size - 1) // batch_size
-
-            for start_idx in range(0, num_tokens, batch_size):
-                end_idx = min(start_idx + batch_size, num_tokens)
-                current_batch_size = end_idx - start_idx
-
-                batch_prev_context = shifted_prev_context[start_idx:end_idx].to(self.device)
-                batch_token_embeds = self.token_embeds[start_idx:end_idx].to(self.device)
-
-                # ノイズ追加
-                if self.config.phase1_context_noise > 0:
-                    noise = torch.randn_like(batch_prev_context) * self.config.phase1_context_noise
-                    batch_prev_context = batch_prev_context + noise
-
-                # Forward pass
-                batch_output = self.model.forward_context(self.block_idx, batch_prev_context, batch_token_embeds)
-
-                # 多様性損失（OACD）
-                diversity_loss = oacd_loss(batch_output)
-
-                # Context Continuity Loss（block_idx > 0の場合のみ）
-                # 最初のトークンの出力が前ブロックの最終出力に近づくように学習
-                # 目的: block[i-1]_final ≈ block[i]の最初の出力
-                if self.block_idx > 0 and self.prev_context_final is not None:
-                    # 最初のバッチの最初の出力を取得
-                    if start_idx == 0:
-                        first_output = batch_output[:1]
-                        continuity_loss = torch.nn.functional.mse_loss(
-                            first_output, self.prev_context_final.to(self.device)
-                        )
-                        # continuity_weightはOACDと同程度の重みで追加
-                        continuity_weight = 0.1
-                        total_batch_loss = diversity_loss + continuity_weight * continuity_loss
-                    else:
-                        total_batch_loss = diversity_loss
-                else:
-                    total_batch_loss = diversity_loss
-
-                scaled_loss = total_batch_loss / num_batches
-
-                if not torch.isnan(scaled_loss) and not torch.isinf(scaled_loss):
-                    scaled_loss.backward()
-
-                all_contexts.append(batch_output.detach().cpu())
-                total_loss += diversity_loss.item() * current_batch_size
-
-                del batch_prev_context, batch_token_embeds, batch_output
-                clear_gpu_cache(self.device)
-
-            # パラメータ更新
-            torch.nn.utils.clip_grad_norm_(
-                self.model.context_blocks[self.block_idx].parameters(),
-                max_norm=self.config.phase1_gradient_clip
-            )
-            optimizer.step()
-
-            # 収束率計算
-            contexts = torch.cat(all_contexts, dim=0)
-            converged = ((contexts - previous_contexts) ** 2).mean(dim=1) < self.config.phase1_convergence_threshold
-            convergence_rate = converged.float().mean().item()
-
-            previous_contexts = contexts
-            final_convergence_rate = convergence_rate
-
-            # 改善幅計算
-            improvement = convergence_rate - prev_convergence_rate
-            improvement_marker = ""
-            min_conv_for_check = 0.5
-
-            if convergence_rate >= min_conv_for_check:
-                if improvement < min_convergence_improvement:
-                    no_improvement_count += 1
-                    improvement_marker = f" (↑{improvement*100:.1f}%)"
-                else:
-                    no_improvement_count = 0
-
-            elapsed = time.time() - iter_start
-            avg_loss = total_loss / num_tokens
-            print_flush(
-                f"  Iter {iteration+1}: conv={convergence_rate*100:.0f}% "
-                f"loss={avg_loss:.4f} [{elapsed:.1f}s]{improvement_marker}"
-            )
-
-            prev_convergence_rate = convergence_rate
-
-            # Early Stopping
-            if early_stopping and convergence_rate >= early_stopping_threshold:
-                print_flush(f"  → Early stop: conv {convergence_rate*100:.0f}% >= {early_stopping_threshold*100:.0f}%")
-                break
-
-            if early_stopping and no_improvement_count >= 1 and convergence_rate >= min_conv_for_check:
-                print_flush(f"  → Early stop: improvement {improvement*100:.1f}% < {min_convergence_improvement*100:.0f}%")
-                break
-
-        self._training_stats = {
-            'iterations': final_iter + 1,
-            'convergence_rate': final_convergence_rate,
-            'num_tokens': num_tokens,
-        }
-
-        print_flush(f"  Done: {final_convergence_rate*100:.0f}% converged")
-
-        # キャッシュを収集（学習後の最終状態で再計算）
-        assert previous_contexts is not None
-        context_cache = self._collect_cache(initial_context, previous_contexts)
-
-        return context_cache
-
-    def _collect_cache(self, initial_context: torch.Tensor, previous_contexts: torch.Tensor) -> torch.Tensor:
-        """
-        学習済みContextBlockでキャッシュを収集
-
-        Args:
-            initial_context: 最初のトークンの入力 [1, context_dim]
-            previous_contexts: 学習後のコンテキスト [num_tokens, context_dim]
-        """
-        self.model.eval()
-        num_tokens = len(self.token_embeds)
-        batch_size = 50000
-
-        # shifted_prev_context を作成
-        shifted_prev_context = torch.cat([initial_context, previous_contexts[:-1]], dim=0)
-
-        context_cache = torch.zeros(num_tokens, self.model.context_dim, device='cpu', dtype=torch.float32)
-
-        print_flush(f"  Collecting context[{self.block_idx}] cache...")
-        collect_start = time.time()
-
-        with torch.no_grad():
-            for start_idx in range(0, num_tokens, batch_size):
-                end_idx = min(start_idx + batch_size, num_tokens)
-
-                batch_prev_context = shifted_prev_context[start_idx:end_idx].to(self.device)
-                batch_token_embeds = self.token_embeds[start_idx:end_idx].to(self.device)
-
-                batch_output = self.model.forward_context(self.block_idx, batch_prev_context, batch_token_embeds)
-                context_cache[start_idx:end_idx] = batch_output.cpu()
-
-                del batch_prev_context, batch_token_embeds, batch_output
-                clear_gpu_cache(self.device)
-
-        print_flush(f"  Cache collected [{time.time() - collect_start:.1f}s]")
-        self.model.train()
-
-        return context_cache
-
-
 class Phase1ConfigWrapper:
     """Phase1Trainer用のConfig wrapper"""
 
@@ -794,41 +547,39 @@ def run_cascade_context_experiment(
     train_token_embeds: Optional[torch.Tensor] = None
 
     for block_idx in range(num_context_blocks):
+        print_flush(f"\n[Phase 1[{block_idx}]] Training ContextBlock {block_idx} on full data...")
+        wrapper = SingleContextWrapper(model, block_idx=block_idx)
+        trainer = MemoryPhase1Trainer(wrapper, config_wrapper, device)
+
+        # Initial Context Inheritance: block_idx > 0 の場合、前ブロックの最終出力を使用
         if block_idx == 0:
-            # 最初のブロック: MemoryPhase1Trainerを使用（token_embedsも取得）
-            print_flush(f"\n[Phase 1[{block_idx}]] Training ContextBlock {block_idx} on full data...")
-            wrapper = SingleContextWrapper(model, block_idx=block_idx)
-            trainer = MemoryPhase1Trainer(wrapper, config_wrapper, device)
-
-            phase_start = time.time()
-            result = trainer.train(train_token_ids, label=f"Context{block_idx}", return_all_layers=True)
-            phase_time = time.time() - phase_start
-
-            assert result.cache is not None
-            assert result.token_embeds is not None
-            train_context_caches.append(result.cache)
-            train_token_embeds = result.token_embeds
-
-            stats = trainer._training_stats
+            initial_context = None
+            prev_context_final = None
         else:
-            # 後続ブロック: CascadePhase1Trainerを使用（Initial Context Inheritance）
-            assert train_token_embeds is not None
             # 前のブロックの最終出力を取得 [1, context_dim]
             prev_context_final = train_context_caches[block_idx - 1][-1:].clone()
-            trainer_cascade = CascadePhase1Trainer(
-                model, config_wrapper, device,
-                block_idx=block_idx,
-                prev_context_final=prev_context_final,
-                token_embeds=train_token_embeds
-            )
+            initial_context = prev_context_final
 
-            phase_start = time.time()
-            cache = trainer_cascade.train(label=f"Context{block_idx}")
-            phase_time = time.time() - phase_start
+        phase_start = time.time()
+        result = trainer.train(
+            train_token_ids,
+            label=f"Context{block_idx}",
+            return_all_layers=True,
+            initial_context=initial_context,
+            prev_context_final=prev_context_final,
+            token_embeds_precomputed=train_token_embeds,  # 再計算を避ける（2回目以降）
+        )
+        phase_time = time.time() - phase_start
 
-            train_context_caches.append(cache)
-            stats = trainer_cascade._training_stats
+        assert result.cache is not None
+        assert result.token_embeds is not None
+        train_context_caches.append(result.cache)
 
+        # token_embedsは最初のブロックで取得
+        if train_token_embeds is None:
+            train_token_embeds = result.token_embeds
+
+        stats = trainer._training_stats
         phase1_times.append(phase_time)
         phase1_stats.append(stats)
 
