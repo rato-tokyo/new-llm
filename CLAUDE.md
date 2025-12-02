@@ -388,12 +388,43 @@ use_weight_tying = True         # 推奨（デフォルト）
 1. **No Hardcoding**: All hyperparameters in config.py
 2. **Single Responsibility**: Each module has one clear purpose
 3. **Error Prevention**: Strict validation
+4. **Type Hints Required**: 関数・メソッドのパラメータには型注釈を必須
+
+### 🚨 型注釈ポリシー - 重要 (2025-12-02)
+
+**動的な属性アクセスによるAttributeErrorを防ぐため、型注釈を徹底する。**
+
+#### 問題の背景
+
+```python
+# ❌ 型注釈なし → mypy で属性不足を検出できない
+def __init__(self, base, context_dim, num_layers):
+    self.value = base.some_attribute  # 実行時エラーの可能性
+
+# ✅ 型注釈あり → mypy で属性不足を検出可能
+def __init__(self, base: Config, context_dim: int, num_layers: int):
+    self.value = base.some_attribute  # Config に属性がなければ mypy がエラー
+```
+
+#### ルール
+
+1. **関数・メソッドの引数には必ず型注釈を付ける**
+2. **特にConfigクラスを受け取る場合は必須**（属性アクセスが多いため）
+3. **ラッパークラスやアダプターは特に注意**
+
+#### 検出コマンド
+
+```bash
+# 型チェック（型注釈があればAttributeError相当を検出可能）
+python3 -m mypy scripts/experiment_dual_context.py --ignore-missing-imports
+```
 
 ### Anti-Patterns to Avoid
 
 - ❌ Changing architecture without full retraining
 - ❌ Using deprecated features
 - ❌ Leaving backward compatibility code
+- ❌ 型注釈なしでのConfig属性アクセス
 
 ---
 
@@ -411,4 +442,4 @@ use_weight_tying = True         # 推奨（デフォルト）
 
 ---
 
-Last Updated: 2025-12-02 (G案採用決定、num_layers=2推奨)
+Last Updated: 2025-12-02 (G案採用決定、num_layers=2推奨、型注釈ポリシー追加)
