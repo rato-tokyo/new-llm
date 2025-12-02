@@ -1,0 +1,149 @@
+remote: Enumerating objects: 20, done.
+remote: Counting objects: 100% (20/20), done.
+remote: Compressing objects: 100% (3/3), done.
+remote: Total 11 (delta 8), reused 11 (delta 8), pack-reused 0 (from 0)
+Unpacking objects: 100% (11/11), 6.16 KiB | 1.54 MiB/s, done.
+From https://github.com/rato-tokyo/new-llm
+ * branch            main       -> FETCH_HEAD
+   cfb713e..1cd8448  main       -> origin/main
+Updating cfb713e..1cd8448
+Fast-forward
+ scripts/context_mode_f_experiment.py | 403 +++++++++++++++++++++++++++++++++++
+ src/models/blocks.py                 |  20 +-
+ src/models/layers.py                 |  15 +-
+ src/models/llm.py                    |  41 +++-
+ src/trainers/phase2.py               |  22 +-
+ 5 files changed, 485 insertions(+), 16 deletions(-)
+ create mode 100644 scripts/context_mode_f_experiment.py
+================================================================================
+CONTEXT MODE EXPERIMENT (F案: First Layer Context Only)
+================================================================================
+Device: cuda
+GPU: NVIDIA L4
+Memory: 22.2GB
+
+Samples: 2000
+Context dim: 500
+Output: importants/logs/20251202_061406_context_mode_f
+
+Configurations to test:
+  - L2_F: layer=2, F案 (first layer context only)
+================================================================================
+
+[L2_F] layer=2, F案 (first layer context only)
+tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 181kB/s]
+config.json: 100% 665/665 [00:00<00:00, 5.24MB/s]
+vocab.json: 100% 1.04M/1.04M [00:00<00:00, 26.0MB/s]
+merges.txt: 100% 456k/456k [00:00<00:00, 19.4MB/s]
+tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 6.20MB/s]
+Loading training data...
+  Loading 2000 samples from UltraChat...
+README.md: 3.90kB [00:00, 20.8MB/s]
+data/train_sft-00000-of-00003-a3ecf92756(…): 100% 244M/244M [00:02<00:00, 122MB/s]
+data/train_sft-00001-of-00003-0a1804bcb6(…): 100% 244M/244M [00:01<00:00, 202MB/s]
+data/train_sft-00002-of-00003-ee46ed25cf(…): 100% 244M/244M [00:01<00:00, 225MB/s]    
+data/test_sft-00000-of-00001-f7dfac4afe5(…): 100% 81.2M/81.2M [00:00<00:00, 85.5MB/s]
+data/train_gen-00000-of-00003-a6c9fb894b(…): 100% 244M/244M [00:01<00:00, 230MB/s]  
+data/train_gen-00001-of-00003-d6a0402e41(…): 100% 243M/243M [00:01<00:00, 225MB/s]
+data/train_gen-00002-of-00003-c0db75b92a(…): 100% 243M/243M [00:01<00:00, 199MB/s]  
+data/test_gen-00000-of-00001-3d4cd830914(…): 100% 80.4M/80.4M [00:00<00:00, 97.8MB/s]
+Generating train_sft split: 100% 207865/207865 [00:04<00:00, 51424.96 examples/s]
+Generating test_sft split: 100% 23110/23110 [00:00<00:00, 55791.56 examples/s]
+Generating train_gen split: 100% 256032/256032 [00:03<00:00, 74254.81 examples/s]
+Generating test_gen split: 100% 28304/28304 [00:00<00:00, 73614.30 examples/s]
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_2000samples_full.pt
+Loading validation data...
+  Validation file not found, generating: ./cache/example_val.txt
+  Generated 20 validation samples (indices 50000-50019)
+  Train: 2403563 tokens (2000 samples)
+  Val:   22723 tokens
+    Data: 2,403,563 train, 22,723 val tokens
+2025-12-02 06:14:47.258792: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-12-02 06:14:47.274868: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1764656087.293155    1231 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764656087.298445    1231 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764656087.313379    1231 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764656087.313405    1231 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764656087.313408    1231 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764656087.313410    1231 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-12-02 06:14:47.318385: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+config.json: 100% 665/665 [00:00<00:00, 5.02MB/s]
+model.safetensors: 100% 548M/548M [00:00<00:00, 587MB/s]
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using F案 (first layer context only) architecture: ContextBlock(2 layers) + TokenBlock(2 layers)
+  num_input_tokens: 1
+  token継ぎ足し方式: 全レイヤーでtoken入力
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+    Model: 41,438,168 params (layers=2, first_layer_context_only=True)
+
+[Phase 1] OACD: 2,403,563 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=10.9875 [14.0s]
+  Iter 3: conv=0% loss=7.7581 [11.4s]
+  Iter 4: conv=0% loss=3.4540 [11.4s]
+  Iter 5: conv=0% loss=1.9233 [11.1s]
+  Iter 6: conv=0% loss=1.8302 [11.4s]
+  Iter 7: conv=1% loss=1.7434 [11.5s]
+  Iter 8: conv=3% loss=1.4737 [11.5s]
+  Iter 9: conv=9% loss=1.2778 [11.2s]
+  Iter 10: conv=26% loss=1.2125 [11.1s]
+  Iter 11: conv=58% loss=1.1598 [11.1s]
+  Iter 12: conv=80% loss=1.0135 [11.0s]
+  Iter 13: conv=89% loss=0.8133 [11.0s]
+  Iter 14: conv=93% loss=0.6638 [11.0s]
+  → Early stop: conv 93% >= 90%
+  Done: 93% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [12.6s]
+    Phase 1: 179.8s, 14 iter, conv=93%, ER=81.3%/79.6%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 1,569,792/41,438,168 parameters
+
+[Phase 2] 2,403,563 train / 22,723 val tokens, 20 epochs
+  Epoch 1: train_ppl=449.9 val_ppl=223.6 acc=20.2% [55.9s] ★
+  Epoch 2: train_ppl=213.7 val_ppl=181.8 acc=21.8% [55.2s] ★
+  Epoch 3: train_ppl=172.4 val_ppl=165.6 acc=22.5% [55.7s] ★
+  Epoch 4: train_ppl=150.3 val_ppl=156.5 acc=23.0% [55.4s] ★
+  Epoch 5: train_ppl=135.8 val_ppl=150.9 acc=23.4% [55.5s] ★
+  Epoch 6: train_ppl=125.4 val_ppl=147.2 acc=23.6% [55.5s] ★
+  Epoch 7: train_ppl=117.4 val_ppl=144.5 acc=23.8% [55.5s] ★
+  Epoch 8: train_ppl=111.1 val_ppl=142.6 acc=24.0% [55.6s] ★
+  Epoch 9: train_ppl=105.9 val_ppl=141.2 acc=24.0% [55.5s] ★
+  Epoch 10: train_ppl=101.5 val_ppl=140.0 acc=24.1% [55.5s] ★
+  Epoch 11: train_ppl=97.7 val_ppl=139.1 acc=24.2% [55.5s] ★
+  Epoch 12: train_ppl=94.5 val_ppl=138.5 acc=24.2% [55.5s] ★
+  Epoch 13: train_ppl=91.6 val_ppl=138.1 acc=24.3% [55.6s] ★
+  Epoch 14: train_ppl=89.1 val_ppl=137.9 acc=24.4% [55.5s] ★
+  Epoch 15: train_ppl=86.9 val_ppl=137.9 acc=24.4% [55.5s] ★
+  Epoch 16: train_ppl=84.8 val_ppl=138.0 acc=24.5% [55.5s]
+  → Early stop at epoch 16
+  Best: epoch 15, ppl=137.9, acc=24.4%
+    Phase 2: 888.5s, PPL=137.9, Acc=24.4%
+
+================================================================================
+SUMMARY
+================================================================================
+
+Config     Layers   Mode         Params       Val PPL    Acc      ER%      Time      
+------------------------------------------------------------------------------------------
+L2_F       2        F案           41,438,168  137.9      24.4    % 79.6     1068.3    s
+
+------------------------------------------------------------------------------------------
+
+Best PPL:  L2_F (PPL=137.9)
+Best Acc:  L2_F (Acc=24.4%)
+
+Total time: 1134.6s (18.9 min)
+
+Results saved to: importants/logs/20251202_061406_context_mode_f/results.txt
+
+================================================================================
+DONE
+================================================================================

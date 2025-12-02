@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """
-Context Mode F案実験スクリプト
+Context Mode G案実験スクリプト
 
-F案（first layer context only）を実験:
-- 1層目のみに最終contextを注入、2層目以降はcontextなし
+G案（prev and current context）を実験:
+- 1層目に1つ前のトークン時点のcontext、最終層に現在のcontextを注入
 
 使用方法:
   # Colab（GPU）: 2000サンプルで実験
-  python3 scripts/context_mode_f_experiment.py
+  python3 scripts/context_mode_g_experiment.py
 
   # カスタムサンプル数
-  python3 scripts/context_mode_f_experiment.py --samples 1000
+  python3 scripts/context_mode_g_experiment.py --samples 1000
 
   # context_dimを指定
-  python3 scripts/context_mode_f_experiment.py --context-dim 768
+  python3 scripts/context_mode_g_experiment.py --context-dim 768
 
   # 複数レイヤーを指定
-  python3 scripts/context_mode_f_experiment.py --layers 2 3
+  python3 scripts/context_mode_g_experiment.py --layers 2 3
 """
 
 import os
@@ -49,7 +49,7 @@ class ExperimentConfig:
     """実験設定"""
     name: str
     num_layers: int
-    use_first_layer_context_only: bool
+    use_prev_and_current_context: bool
     description: str
 
 
@@ -84,7 +84,7 @@ def run_single_experiment(
 
         print_flush(f"    Data: {num_train_tokens:,} train, {num_val_tokens:,} val tokens")
 
-        # モデル作成（F案: use_first_layer_context_only=True）
+        # モデル作成（G案: use_prev_and_current_context=True）
         set_seed(seed)
         model = LLM(
             vocab_size=base_config.vocab_size,
@@ -94,14 +94,14 @@ def run_single_experiment(
             num_input_tokens=base_config.num_input_tokens,
             use_pretrained_embeddings=base_config.use_pretrained_embeddings,
             use_weight_tying=base_config.use_weight_tying,
-            use_first_layer_context_only=exp_config.use_first_layer_context_only,
+            use_prev_and_current_context=exp_config.use_prev_and_current_context,
         )
         model.to(device)
 
         # パラメータ数を取得
         total_params = sum(p.numel() for p in model.parameters())
 
-        print_flush(f"    Model: {total_params:,} params (layers={exp_config.num_layers}, first_layer_context_only={exp_config.use_first_layer_context_only})")
+        print_flush(f"    Model: {total_params:,} params (layers={exp_config.num_layers}, prev_and_current_context={exp_config.use_prev_and_current_context})")
 
         # Phase 1用設定
         phase1_config = Phase1TrainerConfig.from_base(
@@ -116,7 +116,7 @@ def run_single_experiment(
         # Phase 1 実行
         phase1_start = time.time()
 
-        # F案の場合は最終contextのみ取得
+        # G案の場合も最終contextのみ取得（A案/F案と同じキャッシュ構造）
         train_result = phase1_trainer.train(
             train_token_ids,
             label="OACD",
@@ -132,7 +132,7 @@ def run_single_experiment(
         train_context_cache_full = train_result.cache.cpu() if train_result.cache.is_cuda else train_result.cache
         train_token_embeds = train_result.token_embeds.cpu() if train_result.token_embeds.is_cuda else train_result.token_embeds
 
-        # F案の場合は最終レイヤーの出力のみをキャッシュとして使用（A案と同じ）
+        # G案の場合は最終レイヤーの出力のみをキャッシュとして使用（A案/F案と同じ）
         # cache: [num_layers, num_tokens, context_dim] -> [num_tokens, context_dim]
         train_context_cache = train_context_cache_full[-1]  # 最終レイヤーの出力
 
@@ -153,7 +153,7 @@ def run_single_experiment(
         val_context_cache_full = val_result.cache.cpu() if val_result.cache.is_cuda else val_result.cache
         val_token_embeds = val_result.token_embeds.cpu() if val_result.token_embeds.is_cuda else val_result.token_embeds
 
-        # F案の場合は最終レイヤーの出力のみをキャッシュとして使用
+        # G案の場合は最終レイヤーの出力のみをキャッシュとして使用
         val_context_cache = val_context_cache_full[-1]
 
         # GPUメモリ解放
@@ -215,7 +215,7 @@ def run_single_experiment(
             'name': exp_config.name,
             'description': exp_config.description,
             'num_layers': exp_config.num_layers,
-            'use_first_layer_context_only': exp_config.use_first_layer_context_only,
+            'use_prev_and_current_context': exp_config.use_prev_and_current_context,
             'context_dim': context_dim,
             'num_samples': num_samples,
             'train_tokens': num_train_tokens,
@@ -243,7 +243,7 @@ def run_single_experiment(
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Context mode F案 experiment (first layer context only)'
+        description='Context mode G案 experiment (prev and current context)'
     )
     parser.add_argument(
         '--samples', '-s',
@@ -281,25 +281,25 @@ def main():
     if args.output_dir:
         output_dir = args.output_dir
     else:
-        output_dir = f"importants/logs/{timestamp}_context_mode_f"
+        output_dir = f"importants/logs/{timestamp}_context_mode_g"
 
     os.makedirs(output_dir, exist_ok=True)
 
-    # 実験設定を生成（F案のみ）
+    # 実験設定を生成（G案のみ）
     experiment_configs = []
     for num_layers in args.layers:
         experiment_configs.append(
             ExperimentConfig(
-                name=f"L{num_layers}_F",
+                name=f"L{num_layers}_G",
                 num_layers=num_layers,
-                use_first_layer_context_only=True,
-                description=f"layer={num_layers}, F案 (first layer context only)"
+                use_prev_and_current_context=True,
+                description=f"layer={num_layers}, G案 (prev and current context)"
             )
         )
 
     # 情報表示
     print_flush("=" * 80)
-    print_flush("CONTEXT MODE EXPERIMENT (F案: First Layer Context Only)")
+    print_flush("CONTEXT MODE EXPERIMENT (G案: Prev and Current Context)")
     print_flush("=" * 80)
     print_flush(f"Device: {device}")
     if device.type == "cuda":
@@ -348,7 +348,7 @@ def main():
     print_flush("-" * 90)
 
     for r in results:
-        mode = "F案"
+        mode = "G案"
         print_flush(f"{r['name']:<10} {r['num_layers']:<8} {mode:<12} "
                     f"{r['total_params']:>10,}  "
                     f"{r['val_ppl']:<10.1f} {r['val_acc']*100:<8.1f}% "
@@ -368,7 +368,7 @@ def main():
     # 結果をファイルに保存
     result_file = os.path.join(output_dir, "results.txt")
     with open(result_file, 'w') as f:
-        f.write("Context Mode Experiment Results (F案: First Layer Context Only)\n")
+        f.write("Context Mode Experiment Results (G案: Prev and Current Context)\n")
         f.write("=" * 60 + "\n\n")
         f.write(f"Samples: {args.samples}\n")
         f.write(f"Context dim: {args.context_dim}\n")
@@ -376,7 +376,7 @@ def main():
 
         for r in results:
             f.write(f"\n{r['name']}: {r['description']}\n")
-            f.write("  Mode: F案 (first_layer_only)\n")
+            f.write("  Mode: G案 (prev_and_current)\n")
             f.write(f"  Params: {r['total_params']:,}\n")
             f.write(f"  Train tokens: {r['train_tokens']:,}\n")
             f.write(f"  Val PPL: {r['val_ppl']:.2f}\n")
@@ -387,10 +387,11 @@ def main():
             f.write(f"  Total time: {r['total_time']:.1f}s\n")
 
         f.write("\n\n" + "=" * 60 + "\n")
-        f.write("Compare with E案 and A案 results from previous experiments:\n")
+        f.write("Compare with other context modes:\n")
         f.write("- E案 (layerwise): TokenBlock Layer i uses ContextBlock Layer i output\n")
         f.write("- A案 (final_only): All TokenBlock layers use final ContextBlock output\n")
         f.write("- F案 (first_layer_only): Only first TokenBlock layer uses context\n")
+        f.write("- G案 (prev_and_current): First layer uses prev context, last layer uses current\n")
 
     print_flush(f"\nResults saved to: {result_file}")
 

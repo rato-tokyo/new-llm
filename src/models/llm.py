@@ -12,7 +12,7 @@ Main features:
 4. GPT-2 pretrained embeddings support
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import torch
 import torch.nn as nn
@@ -32,6 +32,7 @@ class LLM(nn.Module):
     - E案 (default): TokenBlock Layer i は ContextBlock Layer i の出力を参照
     - A案 (use_final_context_only=True): 全TokenBlockレイヤーがContextBlockの最終出力のみを参照
     - F案 (use_first_layer_context_only=True): 1層目のみに最終contextを注入、2層目以降はcontextなし
+    - G案 (use_prev_and_current_context=True): 1層目に前のcontext、最終層に現在のcontext
 
     token継ぎ足し方式（2025-11-29に一本化）:
     - 全レイヤーでtoken入力
@@ -47,6 +48,7 @@ class LLM(nn.Module):
                           (reduces parameters by ~38M, GPT-2 style)
         use_final_context_only: If True, use A案 (all TokenBlock layers use final context)
         use_first_layer_context_only: If True, use F案 (only first layer uses context)
+        use_prev_and_current_context: If True, use G案 (first layer uses prev, last uses current)
     """
 
     def __init__(
@@ -59,7 +61,8 @@ class LLM(nn.Module):
         use_pretrained_embeddings: bool = True,
         use_weight_tying: bool = False,
         use_final_context_only: bool = False,
-        use_first_layer_context_only: bool = False
+        use_first_layer_context_only: bool = False,
+        use_prev_and_current_context: bool = False
     ) -> None:
         super().__init__()
 
@@ -73,6 +76,7 @@ class LLM(nn.Module):
         self.use_weight_tying = use_weight_tying
         self.use_final_context_only = use_final_context_only
         self.use_first_layer_context_only = use_first_layer_context_only
+        self.use_prev_and_current_context = use_prev_and_current_context
 
         # ========== Token Embeddings ==========
         if use_pretrained_embeddings:
@@ -83,7 +87,9 @@ class LLM(nn.Module):
         self.embed_norm = nn.LayerNorm(embed_dim)
 
         # ========== Separated Architecture ==========
-        if use_first_layer_context_only:
+        if use_prev_and_current_context:
+            context_mode = "G案 (prev and current context)"
+        elif use_first_layer_context_only:
             context_mode = "F案 (first layer context only)"
         elif use_final_context_only:
             context_mode = "A案 (final context only)"
@@ -102,7 +108,16 @@ class LLM(nn.Module):
         )
 
         # TokenBlock: トークン処理専用
-        if use_first_layer_context_only:
+        if use_prev_and_current_context:
+            # G案: 1層目に前のcontext、最終層に現在のcontext
+            self.token_block = TokenBlock(
+                num_layers=num_layers,
+                context_dim=context_dim,
+                embed_dim=embed_dim,
+                num_input_tokens=num_input_tokens,
+                use_prev_and_current_context=True,
+            )
+        elif use_first_layer_context_only:
             # F案: 1層目のみcontext入力、2層目以降はcontextなし
             self.token_block = TokenBlock(
                 num_layers=num_layers,
@@ -248,6 +263,29 @@ class LLM(nn.Module):
             token_out: [batch, embed_dim]
         """
         return self.token_block(final_context, token_embeds, context_list=None)
+
+    def forward_token_g(
+        self,
+        prev_context: torch.Tensor,
+        current_context: torch.Tensor,
+        token_embeds: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        TokenBlock forward pass with prev and current context (G案用)
+
+        1層目に前のcontext、最終層に現在のcontextを使用する。
+
+        Args:
+            prev_context: Previous context [batch, context_dim]
+            current_context: Current context [batch, context_dim]
+            token_embeds: [batch, embed_dim * num_input_tokens]
+
+        Returns:
+            token_out: [batch, embed_dim]
+        """
+        return self.token_block.forward_with_prev_and_current(
+            prev_context, current_context, token_embeds
+        )
 
     def freeze_context_block(self) -> None:
         """ContextBlockのパラメータをfreezeする（Phase 2用）"""
