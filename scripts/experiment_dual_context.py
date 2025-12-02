@@ -283,13 +283,10 @@ def collect_dual_context_cache(
 
     # メモリ解放
     del context_cache_a, context_cache_b
-
-    # token_embedsもCPUに移動
-    token_embeds_cpu = input_embeds.cpu()
-    del input_embeds, all_embeds
     torch.cuda.empty_cache() if device.type == 'cuda' else None
 
-    return context_cache, token_embeds_cpu
+    # input_embedsは既にCPU上（all_embeds_cpuから作成）なのでそのまま返す
+    return context_cache, input_embeds
 
 
 class DualContextPhase2Trainer:
