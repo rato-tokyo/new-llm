@@ -1,12 +1,10 @@
 # New-LLM Project Guidelines
 
-## 🎯 Initial Context Inheritance方式採用 (2025-12-02)
+## 🎯 Dual方式（前半/後半分割）採用 (2025-12-02)
 
-**1層固定アーキテクチャにInitial Context Inheritance方式を採用。複数レイヤーは不要。**
+**⚠️ 重要: Dual方式の成功要因は「異なるデータで学習」することです。**
 
-### 決定の背景
-
-Dual方式（前半/後半分割）の効果を全データで実現するため、Initial Context Inheritance方式を採用。
+### ベストプラクティス
 
 | 構成 | Val PPL | Val Acc | 備考 |
 |------|---------|---------|------|
@@ -15,59 +13,43 @@ Dual方式（前半/後半分割）の効果を全データで実現するため
 | C2T2-500 | 132.2 | 24.4% | 2層だが悪化 |
 | C1T1-1000 | 134.0 | 23.6% | context_dim増加は非効率 |
 
-### Initial Context Inheritance方式の特徴
+### Dual方式の正しい理解
 
-**核心**: 各ContextBlockは**独立してRNN学習**を行う。ブロック1以降は、**最初のトークンの入力として前のブロックの最終出力を使用**。
-
-**可変ブロック数対応**: ContextBlockの数は1, 2, 3, ... と柔軟に指定可能。
+**核心**: 各ContextBlockは**異なるデータ**で学習することで、**異なる表現**を獲得する。
 
 ```
-N個のContextBlockを順次学習:
+2ブロックの場合（Dual方式）:
 
-Phase 1[0]: ContextBlock[0] を全データで学習
+Phase 1[0]: ContextBlock[0] を前半データで学習
   → 初期入力: ゼロベクトル
-  → RNN学習: context_0[i] = ContextBlock_0(context_0[i-1], token[i])
-  → context_0_final を保存
+  → データ: tokens[0:split]（前半）
 
-Phase 1[1]: ContextBlock[1] を全データで学習
-  → 初期入力: context_0_final（前のブロックの最終出力）
-  → RNN学習: context_1[i] = ContextBlock_1(context_1[i-1], token[i])
-  → context_1_final を保存
-
-Phase 1[N-1]: ContextBlock[N-1] を全データで学習
-  → 初期入力: context_{N-2}_final
-  → RNN学習: 標準的なRNN
+Phase 1[1]: ContextBlock[1] を後半データで学習
+  → 初期入力: context[0]_final（前のブロックの最終出力）
+  → データ: tokens[split:]（後半）
+  → Context Continuity Loss: block1の最初の出力 ≈ block0の最終出力
 
 Phase 2: TokenBlock 学習
-  → 入力: concat(context_0[i-1], ..., context_{N-1}[i-1])
+  → 入力: concat(context_0[i-1], context_1[i-1])
   → 予測: token[i]
 ```
 
-**Dual方式との違い**:
-- Dual: ブロックAは前半データ、ブロックBは後半データで学習
-- Initial Context Inheritance: 全ブロックが全データで学習（初期入力のみ継承）
+### ❌ 間違った理解（全データ学習）
 
-### なぜInitial Context Inheritance方式が良いのか
+以下は**間違い**です:
+- 「全ブロックが全データで学習」
+- 「初期入力の継承だけで異なる表現を獲得できる」
 
-1. **文脈の継続性**: 前のブロックの最終状態を継承
-2. **全データ活用**: 全ブロックが全データで学習
-3. **Dual方式と同様の効果**: 前半で学習した文脈を後半に引き継ぐ
-4. **並列処理可能**: 標準的なRNN学習と同じ速度
+全データで2つのBlockを学習しても、Initial Contextが違うだけでは**同じような表現**になってしまいます。
 
 ### 実験の実行
 
 ```bash
-# Colab（GPU）: 本格実験（デフォルト: 2ブロック）
+# Colab（GPU）: 本格実験
 python3 scripts/experiment_cascade_context.py -s 2000
 
-# ブロック数指定（1, 2, 3, ...）
-python3 scripts/experiment_cascade_context.py -s 2000 -n 1  # 1ブロック（カスケードなし）
-python3 scripts/experiment_cascade_context.py -s 2000 -n 2  # 2ブロック（デフォルト）
-python3 scripts/experiment_cascade_context.py -s 2000 -n 3  # 3ブロック
-
-# context_dim指定（各ContextBlockの次元）
-python3 scripts/experiment_cascade_context.py -s 2000 -c 500 -n 2  # 500×2=1000次元
-python3 scripts/experiment_cascade_context.py -s 2000 -c 300 -n 3  # 300×3=900次元
+# Context Continuity Lossを無効化（検証用）
+python3 scripts/experiment_cascade_context.py -s 2000 --no-continuity-loss
 ```
 
 ---

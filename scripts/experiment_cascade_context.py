@@ -1,36 +1,28 @@
 #!/usr/bin/env python3
 """
-Cascade Context 実験スクリプト（Initial Context Inheritance方式）
+Dual Context 実験スクリプト（前半/後半分割方式）
 
-Initial Context Inheritance方式:
-N個のContextBlockを順次学習し、各ブロックは独立してRNN学習を行う。
-ブロック1以降は、最初のトークンの入力として前のブロックの最終出力を使用。
+Dual方式:
+2つのContextBlockを異なるデータで学習し、異なる表現を獲得する。
 
-これにより、前のブロックの「文脈の継続性」を引き継ぎつつ、
-全データでRNN学習を行う。Dual方式（前半/後半分割）と同様の効果を
-全データで実現できる。
-
-アーキテクチャ（1層固定、可変ブロック数）:
-  Phase 1[0]:
-    - ContextBlock[0] を全データで学習
+アーキテクチャ（1層固定、2ブロック）:
+  Phase 1A:
+    - ContextBlock A を前半データで学習
     - 初期入力: ゼロベクトル
-    - 出力: context[0] (キャッシュ)
+    - データ: tokens[0:split]
 
-  Phase 1[1..N-1]:
-    - ContextBlock[i] を全データで学習
-    - 初期入力: context[i-1]_final（前のブロックの最終出力）
-    - それ以降の入力: 自身の前の出力（標準RNN）
-    - 出力: context[i] (キャッシュ)
+  Phase 1B:
+    - ContextBlock B を後半データで学習
+    - 初期入力: context_A_final（前のブロックの最終出力）
+    - データ: tokens[split:]
+    - Context Continuity Loss: block_Bの最初の出力 ≈ block_Aの最終出力
 
   Phase 2:
-    - 全context[0..N-1]を連結 → cd=context_dim*N
-    - TokenBlock で学習
+    - concat(context_A, context_B) で TokenBlock を学習
 
 使用方法:
-  python3 scripts/experiment_cascade_context.py
-  python3 scripts/experiment_cascade_context.py -s 2000 -n 2  # デフォルト: 2ブロック
-  python3 scripts/experiment_cascade_context.py -s 2000 -n 3  # 3ブロック
-  python3 scripts/experiment_cascade_context.py -s 2000 -n 1  # 1ブロック（カスケードなし）
+  python3 scripts/experiment_cascade_context.py -s 2000
+  python3 scripts/experiment_cascade_context.py -s 2000 --no-continuity-loss  # 損失無効化
 """
 
 import os
@@ -484,15 +476,17 @@ def run_cascade_context_experiment(
     num_context_blocks: int = 2,
     seed: int = 42,
     output_dir: Optional[str] = None,
+    use_continuity_loss: bool = True,
 ) -> Dict[str, Any]:
-    """Cascade Context 実験を実行
+    """Cascade Context 実験を実行（Dual方式: 前半/後半分割）
 
     Args:
         num_samples: サンプル数
         context_dim: 各ContextBlockの出力次元
-        num_context_blocks: ContextBlockの数（1以上）
+        num_context_blocks: ContextBlockの数（2固定、Dual方式）
         seed: 乱数シード
         output_dir: 出力ディレクトリ
+        use_continuity_loss: Context Continuity Lossを使用するか（デフォルト: True）
     """
 
     set_seed(seed)
@@ -519,6 +513,12 @@ def run_cascade_context_experiment(
     num_val_tokens = len(val_token_ids)
     print_flush(f"Data: {num_train_tokens:,} train, {num_val_tokens:,} val tokens")
 
+    # Dual方式: 前半/後半に分割
+    split_point = num_train_tokens // 2
+    train_token_ids_first_half = train_token_ids[:split_point + 1]  # +1 for overlap
+    train_token_ids_second_half = train_token_ids[split_point:]
+    print_flush(f"Split: A={len(train_token_ids_first_half)-1:,}, B={len(train_token_ids_second_half)-1:,} tokens")
+
     # モデル作成
     combined_dim = context_dim * num_context_blocks
     print_flush(f"\nCreating CascadeContextLLM (cd={context_dim}x{num_context_blocks}={combined_dim})...")
@@ -540,72 +540,93 @@ def run_cascade_context_experiment(
 
     config_wrapper = Phase1ConfigWrapper(base_config, context_dim)
 
-    # ========== Phase 1: 各ContextBlockを順次学習 ==========
+    # ========== Phase 1: Dual方式（前半/後半分割）で学習 ==========
     train_context_caches: List[torch.Tensor] = []
     phase1_times: List[float] = []
     phase1_stats: List[Dict[str, Any]] = []
-    train_token_embeds: Optional[torch.Tensor] = None
 
-    for block_idx in range(num_context_blocks):
-        print_flush(f"\n[Phase 1[{block_idx}]] Training ContextBlock {block_idx} on full data...")
-        wrapper = SingleContextWrapper(model, block_idx=block_idx)
-        trainer = MemoryPhase1Trainer(wrapper, config_wrapper, device)
+    # Block 0: 前半データで学習
+    print_flush("\n[Phase 1A] Training ContextBlock A on first half...")
+    wrapper_a = SingleContextWrapper(model, block_idx=0)
+    trainer_a = MemoryPhase1Trainer(wrapper_a, config_wrapper, device)
 
-        # Initial Context Inheritance: block_idx > 0 の場合、前ブロックの最終出力を使用
-        if block_idx == 0:
-            initial_context = None
-            prev_context_final = None
-        else:
-            # 前のブロックの最終出力を取得 [1, context_dim]
-            prev_context_final = train_context_caches[block_idx - 1][-1:].clone()
-            initial_context = prev_context_final
+    phase_start = time.time()
+    result_a = trainer_a.train(
+        train_token_ids_first_half,
+        label="ContextA",
+        return_all_layers=True,
+        initial_context=None,
+        prev_context_final=None,
+    )
+    phase_time_a = time.time() - phase_start
 
-        phase_start = time.time()
-        result = trainer.train(
-            train_token_ids,
-            label=f"Context{block_idx}",
-            return_all_layers=True,
-            initial_context=initial_context,
-            prev_context_final=prev_context_final,
-            token_embeds_precomputed=train_token_embeds,  # 再計算を避ける（2回目以降）
-        )
-        phase_time = time.time() - phase_start
+    assert result_a.cache is not None
+    train_context_caches.append(result_a.cache)
 
-        assert result.cache is not None
-        assert result.token_embeds is not None
-        train_context_caches.append(result.cache)
+    stats_a = trainer_a._training_stats
+    phase1_times.append(phase_time_a)
+    phase1_stats.append(stats_a)
 
-        # token_embedsは最初のブロックで取得
-        if train_token_embeds is None:
-            train_token_embeds = result.token_embeds
+    print_flush(f"Phase 1A: {phase_time_a:.1f}s, {stats_a.get('iterations', 0)} iter, "
+                f"conv={stats_a.get('convergence_rate', 0)*100:.0f}%")
 
-        stats = trainer._training_stats
-        phase1_times.append(phase_time)
-        phase1_stats.append(stats)
+    model.freeze_context_block(0)
+    print_flush("✓ ContextBlock A frozen")
 
-        print_flush(f"Phase 1[{block_idx}]: {phase_time:.1f}s, {stats.get('iterations', 0)} iter, "
-                    f"conv={stats.get('convergence_rate', 0)*100:.0f}%")
+    # Block 1: 後半データで学習
+    print_flush("\n[Phase 1B] Training ContextBlock B on second half...")
+    wrapper_b = SingleContextWrapper(model, block_idx=1)
+    trainer_b = MemoryPhase1Trainer(wrapper_b, config_wrapper, device)
 
-        # このブロックをfreeze
-        model.freeze_context_block(block_idx)
-        print_flush(f"✓ ContextBlock {block_idx} frozen")
+    # 前のブロックの最終出力を取得 [1, context_dim]
+    prev_context_final = train_context_caches[0][-1:].clone()
+    initial_context = prev_context_final
+
+    # Context Continuity Lossを使用するかどうか
+    continuity_loss_target = prev_context_final if use_continuity_loss else None
+
+    phase_start = time.time()
+    result_b = trainer_b.train(
+        train_token_ids_second_half,
+        label="ContextB",
+        return_all_layers=True,
+        initial_context=initial_context,
+        prev_context_final=continuity_loss_target,
+    )
+    phase_time_b = time.time() - phase_start
+
+    assert result_b.cache is not None
+    train_context_caches.append(result_b.cache)
+
+    stats_b = trainer_b._training_stats
+    phase1_times.append(phase_time_b)
+    phase1_stats.append(stats_b)
+
+    print_flush(f"Phase 1B: {phase_time_b:.1f}s, {stats_b.get('iterations', 0)} iter, "
+                f"conv={stats_b.get('convergence_rate', 0)*100:.0f}%")
+
+    model.freeze_context_block(1)
+    print_flush("✓ ContextBlock B frozen")
 
     phase1_total_time = sum(phase1_times)
-    assert train_token_embeds is not None
 
-    # ========== Validation キャッシュ収集 ==========
-    print_flush("\n[Val Cache] Collecting validation cache...")
+    # ========== Phase 2 Prep: 全データでのキャッシュ収集 ==========
+    print_flush("\n[Phase 2 Prep] Collecting dual context cache on full data...")
     cache_start = time.time()
 
+    # Dual方式: 全データに対して両ブロックのキャッシュを収集
+    train_context_caches_full, train_token_embeds = collect_context_cache_for_val(
+        model, train_token_ids, device
+    )
     val_context_caches, val_token_embeds = collect_context_cache_for_val(
         model, val_token_ids, device
     )
 
     cache_time = time.time() - cache_start
-    print_flush(f"Val cache collection: {cache_time:.1f}s")
+    print_flush(f"Cache collection: {cache_time:.1f}s")
 
     # 連結
-    train_context_cache = torch.cat(train_context_caches, dim=-1)
+    train_context_cache = torch.cat(train_context_caches_full, dim=-1)
     val_context_cache = torch.cat(val_context_caches, dim=-1)
 
     print_flush(f"  Train cache: {train_context_cache.shape}")
@@ -652,18 +673,16 @@ def run_cascade_context_experiment(
 
     # ========== 結果サマリー ==========
     print_flush("\n" + "=" * 70)
-    print_flush("SUMMARY - Cascade Context Experiment (Initial Context Inheritance)")
+    print_flush("SUMMARY - Dual Context Experiment")
     print_flush("=" * 70)
-    print_flush(f"Architecture: CascadeContextLLM ({num_context_blocks} blocks, 1L each)")
-    for i in range(num_context_blocks):
-        if i == 0:
-            print_flush(f"  ContextBlock {i}: cd={context_dim}, initial_input=zero")
-        else:
-            print_flush(f"  ContextBlock {i}: cd={context_dim}, initial_input=context[{i-1}]_final")
+    print_flush("Architecture: DualContextLLM (A+B, 1L each)")
+    print_flush(f"  ContextBlock A: cd={context_dim}, trained on first {split_point:,} tokens")
+    print_flush(f"  ContextBlock B: cd={context_dim}, trained on last {num_train_tokens - split_point:,} tokens")
     print_flush(f"  TokenBlock: cd={combined_dim} (concatenated)")
+    print_flush(f"  Context Continuity Loss: {'enabled' if use_continuity_loss else 'disabled'}")
     print_flush(f"Parameters: {params['total']:,}")
-    for i in range(num_context_blocks):
-        print_flush(f"Phase 1[{i}]: {phase1_times[i]:.1f}s, conv={phase1_stats[i].get('convergence_rate', 0)*100:.0f}%")
+    print_flush(f"Phase 1A: {phase1_times[0]:.1f}s, conv={phase1_stats[0].get('convergence_rate', 0)*100:.0f}%")
+    print_flush(f"Phase 1B: {phase1_times[1]:.1f}s, conv={phase1_stats[1].get('convergence_rate', 0)*100:.0f}%")
     print_flush(f"Cache collection: {cache_time:.1f}s")
     print_flush(f"Phase 2: {phase2_time:.1f}s, epoch {best_epoch}")
     print_flush(f"Effective Rank: {val_er_pct:.1f}% (of {combined_dim})")
@@ -712,37 +731,44 @@ def run_cascade_context_experiment(
 
 
 def main():
-    parser = argparse.ArgumentParser(description='Cascade Context Experiment')
+    parser = argparse.ArgumentParser(description='Dual Context Experiment (前半/後半分割)')
     parser.add_argument('--samples', '-s', type=int, default=2000, help='Number of samples')
     parser.add_argument('--context-dim', '-c', type=int, default=500, help='Context dim per block')
-    parser.add_argument('--num-blocks', '-n', type=int, default=2, help='Number of context blocks (1, 2, 3, ...)')
     parser.add_argument('--output-dir', '-o', help='Output directory')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--no-continuity-loss', action='store_true',
+                        help='Disable Context Continuity Loss (for ablation study)')
 
     args = parser.parse_args()
 
+    # Dual方式は2ブロック固定
+    num_context_blocks = 2
+    use_continuity_loss = not args.no_continuity_loss
+
     # 出力ディレクトリ
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_dir = args.output_dir or f"importants/logs/{timestamp}_cascade_context"
+    suffix = "_no_cont_loss" if not use_continuity_loss else ""
+    output_dir = args.output_dir or f"importants/logs/{timestamp}_dual_context{suffix}"
 
-    combined_dim = args.context_dim * args.num_blocks
+    combined_dim = args.context_dim * num_context_blocks
 
     print_flush("=" * 70)
-    print_flush("CASCADE CONTEXT EXPERIMENT")
+    print_flush("DUAL CONTEXT EXPERIMENT")
     print_flush("=" * 70)
     print_flush(f"Samples: {args.samples}")
     print_flush(f"Context dim per block: {args.context_dim}")
-    print_flush(f"Num context blocks: {args.num_blocks}")
     print_flush(f"Combined context dim: {combined_dim}")
+    print_flush(f"Context Continuity Loss: {'enabled' if use_continuity_loss else 'disabled'}")
     print_flush(f"Output: {output_dir}")
     print_flush("=" * 70)
 
     run_cascade_context_experiment(
         num_samples=args.samples,
         context_dim=args.context_dim,
-        num_context_blocks=args.num_blocks,
+        num_context_blocks=num_context_blocks,
         seed=args.seed,
         output_dir=output_dir,
+        use_continuity_loss=use_continuity_loss,
     )
 
     print_flush("\n" + "=" * 70)
