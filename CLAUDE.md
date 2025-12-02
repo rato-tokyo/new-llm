@@ -27,7 +27,9 @@ Phase 1[0]: ContextBlock[0] を前半データで学習
 Phase 1[1]: ContextBlock[1] を後半データで学習
   → 初期入力: context[0]_final（前のブロックの最終出力）
   → データ: tokens[split:]（後半）
-  → Context Continuity Loss: block1の最初の出力 ≈ block0の最終出力
+
+Phase 2 Prep: 順次処理でキャッシュ収集
+  → 全データを順次処理してcontext_0, context_1を収集
 
 Phase 2: TokenBlock 学習
   → 入力: concat(context_0[i-1], context_1[i-1])
@@ -47,9 +49,6 @@ Phase 2: TokenBlock 学習
 ```bash
 # Colab（GPU）: 本格実験
 python3 scripts/experiment_cascade_context.py -s 2000
-
-# Context Continuity Lossを無効化（検証用）
-python3 scripts/experiment_cascade_context.py -s 2000 --no-continuity-loss
 ```
 
 ### Phase 2 Prepのキャッシュ収集
@@ -88,45 +87,6 @@ def oacd_loss(contexts, centroid_weight=0.1):
 
 ---
 
-## 🔗 Context Continuity Loss - 削除厳禁 (2025-12-02)
-
-**⚠️ このセクションは重要な設計決定を記録しています。削除しないでください。**
-
-**block_idx > 0 のContextBlockでは、Context Continuity Lossを追加。**
-
-### 目的
-
-前のブロックの最終出力（`prev_context_final`）と、現在のブロックの**最初のトークンの出力**を近づける。
-
-```python
-# Context Continuity Loss（block_idx > 0の場合のみ）
-if block_idx > 0 and prev_context_final is not None:
-    if start_idx == 0:  # 最初のバッチの最初の出力
-        first_output = batch_output[:1]
-        continuity_loss = MSE(first_output, prev_context_final)
-        total_loss = diversity_loss + 0.1 * continuity_loss
-```
-
-### なぜ「最初の出力」を使うのか
-
-RNN収束後の理論的性質：
-- Phase 1のOACD学習が収束すると（conv=90%+）、RNNは**固定点に収束**
-- 収束後: `block_first ≈ block_final`（全トークンの出力が同じ値に収束）
-- したがって、「最初の出力を近づける」と「最終出力を近づける」は理論的に同等
-
-**「最初の出力」を選んだ理由**:
-1. `initial_context`として`prev_context_final`を入力しているため、入力→出力の因果関係が直接的
-2. Dual方式の成功（PPL=111.9）と同様の「文脈継続」イメージに合致
-3. 実装がシンプル（最初のバッチで計算）
-
-### 重要な注意
-
-- この損失は**全てのcontext出力ではなく、最初の1つだけ**に適用
-- OACDの多様性損失と併用（weight=0.1）
-- block_idx=0（最初のブロック）では使用しない
-
----
-
 ## 🚨 1層固定アーキテクチャ (2025-12-02)
 
 **カスケード連結方式により、複数レイヤーは不要。**
@@ -148,51 +108,50 @@ combined_context = concat(context[0], context[1], ..., context[N-1])  # cd=conte
 
 ---
 
-## 🚨🚨 順次処理禁止 - 削除厳禁 (CRITICAL) 🚨🚨
+## 🚨🚨 Phase 1学習では順次処理禁止 (CRITICAL) 🚨🚨
 
 **⚠️ このセクションは過去に誤って削除されたことがあります。絶対に削除しないでください。**
 
-**順次処理（`for i in range(num_tokens)`でトークンを1つずつ処理）は厳禁。必ずshifted_prev_context方式で並列処理すること。**
+**Phase 1学習では、順次処理（`for i in range(num_tokens)`でトークンを1つずつ処理）は厳禁。必ずshifted_prev_context方式で並列処理すること。**
 
-### 禁止パターン（絶対に使わない）
+### Phase 1学習での禁止パターン
 
 ```python
-# ❌ 禁止: 順次処理（非常に遅い、数百秒〜数千秒かかる）
+# ❌ 禁止: Phase 1学習で順次処理（非常に遅い）
 for i in range(num_tokens):
     token_embed = input_embeds[i:i+1].to(device)
     new_context = model.forward_context(prev_context, token_embed)
-    context_cache[i] = new_context.cpu()
-    prev_context = new_context  # 前の出力を次の入力に
+    prev_context = new_context
 ```
 
-### 推奨パターン（必ずこちらを使う）
+### Phase 1学習での推奨パターン
 
 ```python
 # ✅ 推奨: shifted_prev_context方式（並列処理、数秒で完了）
-# Phase 1と同様の反復処理で収束させる
-previous_contexts = torch.randn(num_tokens, context_dim) * 0.01  # ランダム初期化
+previous_contexts = torch.randn(num_tokens, context_dim) * 0.01
 
 for iteration in range(max_iterations):
-    # shifted_prev_context: [initial_context, prev_contexts[:-1]]
     shifted_prev_context = torch.cat([initial_context, previous_contexts[:-1]], dim=0)
-
-    # バッチ処理で一括forward
     new_contexts = model.forward_context(shifted_prev_context, input_embeds)
-
-    # 収束判定
     if converged:
         break
     previous_contexts = new_contexts
 ```
 
-### なぜ並列処理が必要か
+### Phase 2 Prepでは順次処理を使用
 
-| 方式 | 処理時間（2M tokens） | 処理時間（22k tokens） |
-|------|---------------------|----------------------|
-| 順次処理 | **983秒（16分）** | **9秒** |
-| 並列処理 | **5-10秒** | **0.1秒以下** |
+**Phase 2 Prepのキャッシュ収集では、正確なRNN動作を再現するため順次処理を使用する。**
 
-**順次処理は100倍以上遅い。Training/Validation両方で並列処理を使うこと。**
+```python
+# ✅ Phase 2 Prep: 順次処理（正確なRNN動作）
+for i in range(num_tokens):
+    new_context_a = model.forward_context(0, prev_context_a, token_embed)
+    new_context_b = model.forward_context(1, prev_context_b, token_embed)
+    prev_context_a = new_context_a
+    prev_context_b = new_context_b
+```
+
+**処理時間**: 2M tokens で約983秒（約16分）。時間はかかるが正確な結果を得る。
 
 ---
 
@@ -397,4 +356,4 @@ def __init__(self, base: Config, context_dim: int):
 
 ---
 
-Last Updated: 2025-12-02 (Context Continuity Loss追加、順次処理禁止ルール追記、Initial Context Inheritance方式採用、可変ContextBlock数対応、1層固定アーキテクチャ)
+Last Updated: 2025-12-02 (Context Continuity Loss削除、Phase 2 Prep順次処理、Initial Context Inheritance方式採用、可変ContextBlock数対応、1層固定アーキテクチャ)

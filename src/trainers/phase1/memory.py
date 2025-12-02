@@ -56,7 +56,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         return_all_layers: bool = False,
         val_token_ids: Optional[torch.Tensor] = None,
         initial_context: Optional[torch.Tensor] = None,
-        prev_context_final: Optional[torch.Tensor] = None,
         token_embeds_precomputed: Optional[torch.Tensor] = None,
     ) -> Phase1Result:
         """
@@ -68,7 +67,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
             return_all_layers: Trueの場合、全レイヤー出力も返す（Phase 2キャッシュ用）
             val_token_ids: 検証用トークンID（早期停止用、オプション）
             initial_context: 初期入力コンテキスト [1, context_dim] (Initial Context Inheritance用)
-            prev_context_final: 前ブロックの最終出力 [1, context_dim] (Context Continuity Loss用)
             token_embeds_precomputed: 事前計算済みトークン埋め込み（再計算を避ける）
 
         Returns:
@@ -79,7 +77,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
             return_all_layers=return_all_layers,
             val_token_ids=val_token_ids,
             initial_context=initial_context,
-            prev_context_final=prev_context_final,
             token_embeds_precomputed=token_embeds_precomputed,
         )
 
@@ -90,7 +87,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         return_all_layers: bool = False,
         val_token_ids: Optional[torch.Tensor] = None,
         initial_context: Optional[torch.Tensor] = None,
-        prev_context_final: Optional[torch.Tensor] = None,
         token_embeds_precomputed: Optional[torch.Tensor] = None,
     ) -> Phase1Result:
         """
@@ -103,7 +99,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         Args:
             initial_context: 初期入力コンテキスト（Initial Context Inheritance用）
-            prev_context_final: 前ブロックの最終出力（Context Continuity Loss用）
             token_embeds_precomputed: 事前計算済みトークン埋め込み
         """
         self.model.train()
@@ -132,7 +127,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
             self._run_training_loop(
                 token_embeds, num_tokens, optimizer, val_token_ids,
                 initial_context=initial_context,
-                prev_context_final=prev_context_final,
             )
         )
 
@@ -181,14 +175,12 @@ class MemoryPhase1Trainer(Phase1Trainer):
         optimizer: torch.optim.Optimizer,
         val_token_ids: Optional[torch.Tensor],
         initial_context: Optional[torch.Tensor] = None,
-        prev_context_final: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, float, bool, float, int]:
         """
         訓練ループを実行
 
         Args:
             initial_context: 初期入力コンテキスト（Initial Context Inheritance用）
-            prev_context_final: 前ブロックの最終出力（Context Continuity Loss用）
 
         Returns:
             (previous_contexts, final_convergence_rate, early_stopped, best_convergence_rate, final_iter)
@@ -226,7 +218,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
             contexts, total_loss, convergence_rate, elapsed = self._train_iteration(
                 token_embeds, previous_contexts, num_tokens, optimizer,
                 initial_context=init_ctx,
-                prev_context_final=prev_context_final,
             )
 
             previous_contexts = contexts.detach().cpu()
@@ -276,7 +267,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         num_tokens: int,
         optimizer: torch.optim.Optimizer,
         initial_context: Optional[torch.Tensor] = None,
-        prev_context_final: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, float, float, float]:
         """
         単一イテレーションの処理
@@ -286,7 +276,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         Args:
             initial_context: 初期入力コンテキスト（Initial Context Inheritance用）
-            prev_context_final: 前ブロックの最終出力（Context Continuity Loss用）
 
         Returns:
             (contexts, total_loss, convergence_rate, elapsed_time)
@@ -297,7 +286,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         contexts, total_loss, _ = self._forward_parallel_with_grad_accum(
             token_embeds, previous_contexts, optimizer,
             initial_context=initial_context,
-            prev_context_final=prev_context_final,
         )
 
         # 収束率計算（バッチ処理で省メモリ）
@@ -532,7 +520,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         previous_contexts: torch.Tensor,
         optimizer: torch.optim.Optimizer,
         initial_context: Optional[torch.Tensor] = None,
-        prev_context_final: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, float, float]:
         """
         勾配累積付き並列処理（メモリ効率版）
@@ -542,13 +529,10 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         Args:
             initial_context: 初期入力コンテキスト（Initial Context Inheritance用）
-            prev_context_final: 前ブロックの最終出力（Context Continuity Loss用）
 
         Returns:
             (contexts, total_loss, diversity_loss)
         """
-        import torch.nn.functional as F
-
         num_tokens = len(token_embeds)
         batch_size = self.config.phase1_batch_size
         num_input_tokens = self.config.num_input_tokens
@@ -592,21 +576,11 @@ class MemoryPhase1Trainer(Phase1Trainer):
             # Forward pass
             batch_output = self.model.context_block(batch_contexts, batch_combined)
 
-            # バッチごとの損失計算（多様性損失）
+            # バッチごとの損失計算（多様性損失のみ）
             diversity_loss = self._compute_diversity_loss(batch_output)
 
-            # Context Continuity Loss（prev_context_finalが指定されている場合のみ）
-            # 最初のバッチの最初の出力を前ブロックの最終出力に近づける
-            if prev_context_final is not None and start_idx == 0:
-                first_output = batch_output[:1]
-                continuity_loss = F.mse_loss(first_output, prev_context_final.to(self.device))
-                continuity_weight = 0.1
-                batch_loss = diversity_loss + continuity_weight * continuity_loss
-            else:
-                batch_loss = diversity_loss
-
             # 勾配累積のためにバッチ数で割る
-            scaled_loss = batch_loss / num_batches
+            scaled_loss = diversity_loss / num_batches
 
             # Backward（勾配累積）
             if not torch.isnan(scaled_loss) and not torch.isinf(scaled_loss):
@@ -617,10 +591,10 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
             # 損失の記録
             total_diversity_loss += diversity_loss.item() * current_batch_size
-            total_loss_sum += batch_loss.item() * current_batch_size
+            total_loss_sum += diversity_loss.item() * current_batch_size
 
             # メモリ解放
-            del batch_combined, batch_output, batch_loss, scaled_loss, batch_contexts
+            del batch_combined, batch_output, scaled_loss, batch_contexts
             clear_gpu_cache(self.device)
 
         # 勾配クリッピングとパラメータ更新

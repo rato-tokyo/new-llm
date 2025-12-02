@@ -15,14 +15,13 @@ Dual方式:
     - ContextBlock B を後半データで学習
     - 初期入力: context_A_final（前のブロックの最終出力）
     - データ: tokens[split:]
-    - Context Continuity Loss: block_Bの最初の出力 ≈ block_Aの最終出力
 
   Phase 2:
+    - 順次処理で全データのコンテキストキャッシュを収集
     - concat(context_A, context_B) で TokenBlock を学習
 
 使用方法:
   python3 scripts/experiment_cascade_context.py -s 2000
-  python3 scripts/experiment_cascade_context.py -s 2000 --no-continuity-loss  # 損失無効化
 """
 
 import os
@@ -457,7 +456,6 @@ def run_cascade_context_experiment(
     num_context_blocks: int = 2,
     seed: int = 42,
     output_dir: Optional[str] = None,
-    use_continuity_loss: bool = True,
 ) -> Dict[str, Any]:
     """Cascade Context 実験を実行（Dual方式: 前半/後半分割）
 
@@ -467,7 +465,6 @@ def run_cascade_context_experiment(
         num_context_blocks: ContextBlockの数（2固定、Dual方式）
         seed: 乱数シード
         output_dir: 出力ディレクトリ
-        use_continuity_loss: Context Continuity Lossを使用するか（デフォルト: True）
     """
 
     set_seed(seed)
@@ -537,7 +534,6 @@ def run_cascade_context_experiment(
         label="ContextA",
         return_all_layers=True,
         initial_context=None,
-        prev_context_final=None,
     )
     phase_time_a = time.time() - phase_start
 
@@ -559,12 +555,8 @@ def run_cascade_context_experiment(
     wrapper_b = SingleContextWrapper(model, block_idx=1)
     trainer_b = MemoryPhase1Trainer(wrapper_b, config_wrapper, device)
 
-    # 前のブロックの最終出力を取得 [1, context_dim]
-    prev_context_final = train_context_caches[0][-1:].clone()
-    initial_context = prev_context_final
-
-    # Context Continuity Lossを使用するかどうか
-    continuity_loss_target = prev_context_final if use_continuity_loss else None
+    # 前のブロックの最終出力を初期コンテキストとして使用 [1, context_dim]
+    initial_context = train_context_caches[0][-1:].clone()
 
     phase_start = time.time()
     result_b = trainer_b.train(
@@ -572,7 +564,6 @@ def run_cascade_context_experiment(
         label="ContextB",
         return_all_layers=True,
         initial_context=initial_context,
-        prev_context_final=continuity_loss_target,
     )
     phase_time_b = time.time() - phase_start
 
@@ -653,7 +644,6 @@ def run_cascade_context_experiment(
     print_flush(f"  ContextBlock A: cd={context_dim}, trained on first {split_point:,} tokens")
     print_flush(f"  ContextBlock B: cd={context_dim}, trained on last {num_train_tokens - split_point:,} tokens")
     print_flush(f"  TokenBlock: cd={combined_dim} (concatenated)")
-    print_flush(f"  Context Continuity Loss: {'enabled' if use_continuity_loss else 'disabled'}")
     print_flush(f"Parameters: {params['total']:,}")
     print_flush(f"Phase 1A: {phase1_times[0]:.1f}s, conv={phase1_stats[0].get('convergence_rate', 0)*100:.0f}%")
     print_flush(f"Phase 1B: {phase1_times[1]:.1f}s, conv={phase1_stats[1].get('convergence_rate', 0)*100:.0f}%")
@@ -710,19 +700,15 @@ def main():
     parser.add_argument('--context-dim', '-c', type=int, default=500, help='Context dim per block')
     parser.add_argument('--output-dir', '-o', help='Output directory')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
-    parser.add_argument('--no-continuity-loss', action='store_true',
-                        help='Disable Context Continuity Loss (for ablation study)')
 
     args = parser.parse_args()
 
     # Dual方式は2ブロック固定
     num_context_blocks = 2
-    use_continuity_loss = not args.no_continuity_loss
 
     # 出力ディレクトリ
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    suffix = "_no_cont_loss" if not use_continuity_loss else ""
-    output_dir = args.output_dir or f"importants/logs/{timestamp}_dual_context{suffix}"
+    output_dir = args.output_dir or f"importants/logs/{timestamp}_dual_context"
 
     combined_dim = args.context_dim * num_context_blocks
 
@@ -732,7 +718,6 @@ def main():
     print_flush(f"Samples: {args.samples}")
     print_flush(f"Context dim per block: {args.context_dim}")
     print_flush(f"Combined context dim: {combined_dim}")
-    print_flush(f"Context Continuity Loss: {'enabled' if use_continuity_loss else 'disabled'}")
     print_flush(f"Output: {output_dir}")
     print_flush("=" * 70)
 
@@ -742,7 +727,6 @@ def main():
         num_context_blocks=num_context_blocks,
         seed=args.seed,
         output_dir=output_dir,
-        use_continuity_loss=use_continuity_loss,
     )
 
     print_flush("\n" + "=" * 70)
