@@ -188,10 +188,12 @@ class MemoryPhase1Trainer(Phase1Trainer):
             final_convergence_rate = convergence_rate
             best_convergence_rate = max(best_convergence_rate, convergence_rate)
 
-            # 改善幅計算
+            # 改善幅計算（収束率50%以上で有効化）
             improvement = convergence_rate - prev_convergence_rate
             improvement_marker = ""
-            if iteration >= 2:  # Iter 2以降で改善幅チェック
+            min_conv_for_improvement_check = 0.5  # 50%以上で改善幅チェック開始
+
+            if convergence_rate >= min_conv_for_improvement_check:
                 if improvement < min_convergence_improvement:
                     no_improvement_count += 1
                     improvement_marker = f" (↑{improvement*100:.1f}%)"
@@ -211,8 +213,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 print_flush(f"  → Early stop: conv {convergence_rate*100:.0f}% >= {early_stopping_threshold*100:.0f}%")
                 break
 
-            # 収束率改善Early Stopping（改善幅不足）
-            if early_stopping and no_improvement_count >= 1 and iteration >= 2:
+            # 収束率改善Early Stopping（改善幅不足、50%以上で有効）
+            if early_stopping and no_improvement_count >= 1 and convergence_rate >= min_conv_for_improvement_check:
                 early_stopped = True
                 print_flush(
                     f"  → Early stop: improvement {improvement*100:.1f}% < {min_convergence_improvement*100:.0f}%"
