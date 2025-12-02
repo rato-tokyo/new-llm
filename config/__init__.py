@@ -36,6 +36,7 @@ class Config(BaseConfig):
     phase1_context_noise = Phase1Config.context_noise
     phase1_early_stopping = Phase1Config.early_stopping
     phase1_early_stopping_threshold = Phase1Config.early_stopping_threshold
+    phase1_min_convergence_improvement = Phase1Config.min_convergence_improvement
 
     # ========== Phase 2 設定 ==========
     phase2_learning_rate = Phase2Config.learning_rate
