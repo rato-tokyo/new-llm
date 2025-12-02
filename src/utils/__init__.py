@@ -16,6 +16,7 @@ from .device import is_cuda_device, clear_gpu_cache, synchronize_device
 from .cache import (
     collect_context_cache_sequential,
     collect_context_cache_sequential_multiblock,
+    collect_token_embeds_chunked,
 )
 
 __all__ = [
@@ -37,4 +38,5 @@ __all__ = [
     # Cache utilities
     'collect_context_cache_sequential',
     'collect_context_cache_sequential_multiblock',
+    'collect_token_embeds_chunked',
 ]

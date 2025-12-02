@@ -253,14 +253,39 @@ with torch.no_grad():
 
 ```python
 # スクリプト固有の実装ではなく、共通コードを使用すること
-from src.utils.cache import collect_context_cache_sequential
+from src.utils.cache import (
+    collect_context_cache_sequential,
+    collect_context_cache_sequential_multiblock,
+    collect_token_embeds_chunked,
+)
 
-# 単一ブロック用
+# 単一ブロック用 context cache
 context_cache = collect_context_cache_sequential(model, token_ids, device)
 
-# 複数ブロック用
-from src.utils.cache import collect_context_cache_sequential_multiblock
+# 複数ブロック用 context cache
 context_caches = collect_context_cache_sequential_multiblock(model, token_ids, device, num_blocks)
+
+# Token embeddings（Phase 2で使用）
+token_embeds = collect_token_embeds_chunked(model, token_ids, device)
+```
+
+### ⚠️ スクリプト固有の実装禁止
+
+**同じ機能をスクリプト内にローカル実装しないこと。**
+
+理由：
+1. バグ修正が一箇所で済む
+2. 別スクリプトでも同じ修正が適用される
+3. コードの重複を避ける
+
+```python
+# ❌ 禁止: スクリプト内にローカル実装
+def _collect_token_embeds_chunked(model, token_ids, device):
+    ...  # これはダメ
+
+# ✅ 推奨: src/utils/cache.py の共通コードを使用
+from src.utils.cache import collect_token_embeds_chunked
+token_embeds = collect_token_embeds_chunked(model, token_ids, device)
 ```
 
 ---
@@ -429,4 +454,4 @@ def __init__(self, base: Config, context_dim: int):
 
 ---
 
-Last Updated: 2025-12-03 (Phase 2 PrepのGPUメモリリーク防止、共通コードsrc/utils/cache.py追加)
+Last Updated: 2025-12-03 (GPUメモリリーク防止、collect_token_embeds_chunked追加、スクリプト固有実装禁止ポリシー追加)

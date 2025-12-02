@@ -3,6 +3,9 @@ Context Cache Collection Utilities
 
 Phase 2 Prep用のコンテキストキャッシュ収集関数
 GPUメモリを効率的に使用するため、チャンク処理を行う
+
+重要: 全データを一度にGPUにロードすると7GB+のメモリを消費する。
+必ずチャンク単位で処理すること。
 """
 
 from typing import Protocol
@@ -11,6 +14,17 @@ import torch.nn as nn
 
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
+
+# デフォルトチャンクサイズ
+DEFAULT_CONTEXT_CHUNK_SIZE = 10000  # context cache収集用
+DEFAULT_EMBED_CHUNK_SIZE = 50000    # token embedding収集用
+
+
+class EmbeddingModel(Protocol):
+    """Token embedding収集に必要なモデルインターフェース"""
+    embed_dim: int
+    token_embedding: nn.Embedding
+    embed_norm: nn.LayerNorm
 
 
 class ContextModel(Protocol):
@@ -169,3 +183,50 @@ def collect_context_cache_sequential_multiblock(
                 print_flush(f"      {processed:,}/{num_tokens-1:,} tokens processed...")
 
     return context_caches
+
+
+def collect_token_embeds_chunked(
+    model: EmbeddingModel,
+    token_ids: torch.Tensor,
+    device: torch.device,
+    chunk_size: int = DEFAULT_EMBED_CHUNK_SIZE,
+) -> torch.Tensor:
+    """
+    Token embeddingsをチャンク単位で収集（GPUメモリ節約）
+
+    全token_idsを一度にGPUにロードすると7GB+のメモリを消費する。
+    チャンク単位で処理することで、最大メモリ使用量を150MB程度に抑える。
+
+    Args:
+        model: EmbeddingModel プロトコルを満たすモデル
+        token_ids: トークンID [num_tokens]
+        device: デバイス
+        chunk_size: 一度にGPUに転送するトークン数（デフォルト50000）
+
+    Returns:
+        token_embeds: [num_tokens-1, embed_dim] on CPU
+    """
+    num_tokens = len(token_ids)
+    embed_dim = model.embed_dim
+
+    # 結果格納（CPU）
+    token_embeds = torch.zeros(num_tokens - 1, embed_dim, device='cpu')
+
+    with torch.no_grad():
+        for chunk_start in range(0, num_tokens - 1, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, num_tokens - 1)
+
+            # チャンク分だけGPUに転送
+            chunk_ids = token_ids[chunk_start:chunk_end].to(device)
+            chunk_embeds = model.token_embedding(chunk_ids)
+            chunk_embeds = model.embed_norm(chunk_embeds)
+
+            # CPUに保存
+            token_embeds[chunk_start:chunk_end] = chunk_embeds.cpu()
+
+            # GPUメモリ解放
+            del chunk_ids, chunk_embeds
+
+        clear_gpu_cache(device)
+
+    return token_embeds
