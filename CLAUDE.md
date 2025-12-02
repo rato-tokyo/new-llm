@@ -1,38 +1,34 @@
 # New-LLM Project Guidelines
 
-## 🎯 Dual方式（前半/後半分割）採用 (2025-12-02)
+## 🎯 Multi Context方式（N分割）採用 (2025-12-02)
 
-**⚠️ 重要: Dual方式の成功要因は「異なるデータで学習」することです。**
+**⚠️ 重要: 成功要因は「異なるデータで学習」することです。**
 
 ### ベストプラクティス
 
 | 構成 | Val PPL | Val Acc | 備考 |
 |------|---------|---------|------|
-| **Dual (500×2=1000)** | **111.9** | **25.6%** | **前半/後半分割** |
+| **2-block (500×2=1000)** | **111.9** | **25.6%** | **2分割** |
 | C1T1-500 | 127.2 | 24.7% | 標準構成 |
 | C2T2-500 | 132.2 | 24.4% | 2層だが悪化 |
 | C1T1-1000 | 134.0 | 23.6% | context_dim増加は非効率 |
 
-### Dual方式の正しい理解
+### N分割方式の正しい理解
 
 **核心**: 各ContextBlockは**異なるデータ**で学習することで、**異なる表現**を獲得する。
 
 ```
-2ブロックの場合（Dual方式）:
+N分割方式（--num-blocks N で指定）:
 
-Phase 1[0]: ContextBlock[0] を前半データで学習
+Phase 1[i]: ContextBlock[i] を i 番目のデータ区間で学習
   → 初期入力: ゼロベクトル
-  → データ: tokens[0:split]（前半）
-
-Phase 1[1]: ContextBlock[1] を後半データで学習
-  → 初期入力: ゼロベクトル（※Initial Context Inheritanceは使用しない）
-  → データ: tokens[split:]（後半）
+  → データ: tokens[i*split:(i+1)*split]
 
 Phase 2 Prep: 順次処理でキャッシュ収集
-  → 全データを順次処理してcontext_0, context_1を収集
+  → 全データを順次処理してcontext_0, ..., context_{N-1}を収集
 
 Phase 2: TokenBlock 学習
-  → 入力: concat(context_0[i-1], context_1[i-1])
+  → 入力: concat(context_0[i-1], ..., context_{N-1}[i-1])
   → 予測: token[i]
 ```
 
@@ -47,8 +43,11 @@ Phase 2: TokenBlock 学習
 ### 実験の実行
 
 ```bash
-# Colab（GPU）: 本格実験
+# Colab（GPU）: 2ブロック（デフォルト）
 python3 scripts/experiment_cascade_context.py -s 2000
+
+# Colab（GPU）: 4ブロック
+python3 scripts/experiment_cascade_context.py -s 2000 -n 4
 ```
 
 ### Phase 2 Prepのキャッシュ収集
