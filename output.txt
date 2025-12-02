@@ -2,27 +2,24 @@ remote: Enumerating objects: 11, done.
 remote: Counting objects: 100% (11/11), done.
 remote: Compressing objects: 100% (1/1), done.
 remote: Total 6 (delta 5), reused 6 (delta 5), pack-reused 0 (from 0)
-Unpacking objects: 100% (6/6), 4.12 KiB | 247.00 KiB/s, done.
+Unpacking objects: 100% (6/6), 3.69 KiB | 1.23 MiB/s, done.
 From https://github.com/rato-tokyo/new-llm
  * branch            main       -> FETCH_HEAD
-   8ae0e95..b3d61a1  main       -> origin/main
-Updating 8ae0e95..b3d61a1
+   b3d61a1..3c1d295  main       -> origin/main
+Updating b3d61a1..3c1d295
 Fast-forward
- CLAUDE.md                             |  18 +++
- dual_output.txt                       | 210 +++++++++++++++++++++++++
- output.txt                            | 285 ++++++++++++++++------------------
- scripts/experiment_cascade_context.py |  93 ++++++++---
- 4 files changed, 435 insertions(+), 171 deletions(-)
- create mode 100644 dual_output.txt
+ CLAUDE.md                             |  20 +--
+ output.txt                            | 255 +++++++++++++++++-----------------
+ scripts/experiment_cascade_context.py | 199 ++++++++------------------
+ 3 files changed, 193 insertions(+), 281 deletions(-)
 ======================================================================
 DUAL CONTEXT EXPERIMENT
 ======================================================================
 Samples: 2000
 Context dim per block: 500
 Combined context dim: 1000
-Context Continuity Loss: enabled
-Use Phase1 Cache: enabled
-Output: importants/logs/20251202_130133_dual_context_p1cache
+Context Continuity Loss: disabled
+Output: importants/logs/20251202_131526_dual_context_no_cont_loss
 ======================================================================
 Device: cuda (NVIDIA L4, 22.2GB)
 Loading data...
@@ -36,16 +33,16 @@ Data: 2,403,563 train, 22,723 val tokens
 Split: A=1,201,781, B=1,201,781 tokens
 
 Creating CascadeContextLLM (cd=500x2=1000)...
-2025-12-02 13:01:37.134507: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
-2025-12-02 13:01:37.242029: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+2025-12-02 13:15:29.042525: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-12-02 13:15:29.057975: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
 WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-E0000 00:00:1764680497.270862   80540 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
-E0000 00:00:1764680497.280374   80540 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
-W0000 00:00:1764680497.318950   80540 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764680497.318984   80540 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764680497.318987   80540 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764680497.318990   80540 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-2025-12-02 13:01:37.335755: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+E0000 00:00:1764681329.079143   84089 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764681329.085755   84089 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764681329.102150   84089 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764681329.102180   84089 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764681329.102183   84089 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764681329.102186   84089 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-12-02 13:15:29.107262: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
 To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
 Loading GPT-2 pretrained embeddings...
 ✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
@@ -61,34 +58,34 @@ Parameters: 41,230,040 total
 [Phase 1] ContextA: 1,201,782 tokens, 60 iterations
   Initial input: zero vector (standard RNN)
   Iter 1: random init
-  Iter 2: conv=0% loss=11.2763 [7.3s]
+  Iter 2: conv=0% loss=11.2763 [6.7s]
   Iter 3: conv=0% loss=13.1935 [6.1s]
   Iter 4: conv=0% loss=10.6984 [5.1s]
-  Iter 5: conv=0% loss=7.2667 [5.1s]
-  Iter 6: conv=0% loss=4.6423 [5.0s]
-  Iter 7: conv=0% loss=3.4091 [5.1s]
-  Iter 8: conv=0% loss=3.0891 [5.1s]
-  Iter 9: conv=0% loss=3.0212 [5.1s]
+  Iter 5: conv=0% loss=7.2667 [5.2s]
+  Iter 6: conv=0% loss=4.6423 [5.1s]
+  Iter 7: conv=0% loss=3.4091 [5.2s]
+  Iter 8: conv=0% loss=3.0891 [5.2s]
+  Iter 9: conv=0% loss=3.0212 [5.2s]
   Iter 10: conv=1% loss=2.9584 [5.1s]
   Iter 11: conv=1% loss=2.8995 [5.1s]
   Iter 12: conv=1% loss=2.8369 [5.1s]
   Iter 13: conv=2% loss=2.7363 [5.1s]
-  Iter 14: conv=3% loss=2.5687 [5.1s]
+  Iter 14: conv=3% loss=2.5687 [5.3s]
   Iter 15: conv=5% loss=2.3403 [5.1s]
-  Iter 16: conv=8% loss=2.1033 [5.1s]
-  Iter 17: conv=11% loss=1.9120 [5.2s]
+  Iter 16: conv=8% loss=2.1033 [5.0s]
+  Iter 17: conv=11% loss=1.9120 [5.3s]
   Iter 18: conv=17% loss=1.7692 [5.1s]
-  Iter 19: conv=25% loss=1.6510 [5.2s]
+  Iter 19: conv=25% loss=1.6510 [5.1s]
   Iter 20: conv=33% loss=1.5469 [5.1s]
-  Iter 21: conv=43% loss=1.4549 [5.1s]
-  Iter 22: conv=53% loss=1.3674 [5.1s]
-  Iter 23: conv=62% loss=1.2780 [5.1s]
+  Iter 21: conv=43% loss=1.4549 [5.2s]
+  Iter 22: conv=53% loss=1.3674 [5.2s]
+  Iter 23: conv=62% loss=1.2780 [5.3s]
   Iter 24: conv=69% loss=1.1922 [5.1s]
-  Iter 25: conv=74% loss=1.1194 [5.0s]
+  Iter 25: conv=74% loss=1.1194 [5.3s]
   Iter 26: conv=79% loss=1.0628 [5.1s]
   Iter 27: conv=84% loss=1.0208 [5.1s]
-  Iter 28: conv=87% loss=0.9951 [5.1s]
-  Iter 29: conv=90% loss=0.9862 [5.1s]
+  Iter 28: conv=87% loss=0.9951 [5.3s]
+  Iter 29: conv=90% loss=0.9862 [5.2s]
   Iter 30: conv=92% loss=0.9849 [5.1s]
   → Early stop: conv 92% >= 90%
   Done: 92% converged
@@ -96,7 +93,7 @@ Parameters: 41,230,040 total
     Preparing combined tokens (1,201,781 tokens)...
     Combined tokens ready [0.0s]
   Cache collected (parallel) [3.0s]
-Phase 1A: 164.5s, 30 iter, conv=92%
+Phase 1A: 166.0s, 30 iter, conv=92%
 ✓ ContextBlock A frozen
 
 [Phase 1B] Training ContextBlock B on second half...
@@ -104,52 +101,76 @@ Phase 1A: 164.5s, 30 iter, conv=92%
 [Phase 1] ContextB: 1,201,782 tokens, 60 iterations
   Initial input: prev_context_final (Initial Context Inheritance)
   Iter 1: random init
-  Iter 2: conv=0% loss=11.2817 [5.2s]
-  Iter 3: conv=0% loss=12.4609 [4.9s]
-  Iter 4: conv=0% loss=9.7791 [5.0s]
-  Iter 5: conv=0% loss=6.4407 [4.9s]
-  Iter 6: conv=0% loss=4.2448 [5.0s]
-  Iter 7: conv=0% loss=3.1770 [5.0s]
-  Iter 8: conv=0% loss=2.7422 [5.1s]
-  Iter 9: conv=0% loss=2.6633 [5.0s]
-  Iter 10: conv=0% loss=2.7206 [5.0s]
-  Iter 11: conv=0% loss=2.6895 [5.0s]
-  Iter 12: conv=0% loss=2.4675 [5.0s]
-  Iter 13: conv=1% loss=2.1420 [5.0s]
-  Iter 14: conv=2% loss=1.8745 [5.0s]
-  Iter 15: conv=3% loss=1.7577 [5.0s]
-  Iter 16: conv=6% loss=1.7719 [5.0s]
-  Iter 17: conv=10% loss=1.8304 [5.0s]
-  Iter 18: conv=16% loss=1.8442 [5.0s]
-  Iter 19: conv=25% loss=1.7836 [4.9s]
-  Iter 20: conv=34% loss=1.6813 [5.1s]
-  Iter 21: conv=43% loss=1.5838 [5.0s]
-  Iter 22: conv=53% loss=1.5091 [5.0s]
-  Iter 23: conv=63% loss=1.4419 [5.0s]
-  Iter 24: conv=72% loss=1.3531 [5.1s]
-  Iter 25: conv=79% loss=1.2290 [5.0s]
-  Iter 26: conv=83% loss=1.0913 [5.0s]
-  Iter 27: conv=86% loss=0.9856 [5.0s]
-  Iter 28: conv=89% loss=0.9354 [5.0s]
-  Iter 29: conv=92% loss=0.9228 [5.0s]
+  Iter 2: conv=0% loss=11.2812 [5.1s]
+  Iter 3: conv=0% loss=12.4622 [5.1s]
+  Iter 4: conv=0% loss=9.7819 [5.1s]
+  Iter 5: conv=0% loss=6.4450 [5.1s]
+  Iter 6: conv=0% loss=4.2489 [5.1s]
+  Iter 7: conv=0% loss=3.1795 [5.1s]
+  Iter 8: conv=0% loss=2.7425 [5.1s]
+  Iter 9: conv=0% loss=2.6632 [5.1s]
+  Iter 10: conv=0% loss=2.7220 [5.1s]
+  Iter 11: conv=0% loss=2.6919 [5.1s]
+  Iter 12: conv=0% loss=2.4698 [5.1s]
+  Iter 13: conv=1% loss=2.1440 [5.1s]
+  Iter 14: conv=2% loss=1.8758 [5.1s]
+  Iter 15: conv=3% loss=1.7583 [5.1s]
+  Iter 16: conv=6% loss=1.7726 [5.1s]
+  Iter 17: conv=10% loss=1.8317 [5.1s]
+  Iter 18: conv=16% loss=1.8457 [5.3s]
+  Iter 19: conv=25% loss=1.7847 [5.2s]
+  Iter 20: conv=34% loss=1.6817 [5.0s]
+  Iter 21: conv=43% loss=1.5836 [5.1s]
+  Iter 22: conv=53% loss=1.5084 [5.1s]
+  Iter 23: conv=63% loss=1.4408 [5.1s]
+  Iter 24: conv=72% loss=1.3518 [5.1s]
+  Iter 25: conv=79% loss=1.2282 [5.1s]
+  Iter 26: conv=83% loss=1.0915 [5.1s]
+  Iter 27: conv=86% loss=0.9868 [5.1s]
+  Iter 28: conv=89% loss=0.9369 [5.1s]
+  Iter 29: conv=92% loss=0.9239 [5.1s]
   → Early stop: conv 92% >= 90%
   Done: 92% converged
   Collecting cache (parallel)...
     Preparing combined tokens (1,201,781 tokens)...
     Combined tokens ready [0.0s]
-  Cache collected (parallel) [2.9s]
-Phase 1B: 153.7s, 29 iter, conv=92%
+  Cache collected (parallel) [3.0s]
+Phase 1B: 156.7s, 29 iter, conv=92%
 ✓ ContextBlock B frozen
 
-[Phase 2 Prep] Using Phase 1 cache directly (--use-phase1-cache)...
-  Train cache (Phase 1 direct): torch.Size([2403562, 1000])
-  Collecting validation cache...
-    Collecting val cache (22,722 tokens, 2 blocks, parallel)...
-      Block 0: 26 iter, conv=91%
-    Val cache collected [3.2s]
+[Phase 2 Prep] Collecting dual context cache on full data...
+    Collecting dual context cache (2,403,562 tokens)...
+      100,000/2,403,562 tokens processed...
+      200,000/2,403,562 tokens processed...
+      300,000/2,403,562 tokens processed...
+      400,000/2,403,562 tokens processed...
+      500,000/2,403,562 tokens processed...
+      600,000/2,403,562 tokens processed...
+      700,000/2,403,562 tokens processed...
+      800,000/2,403,562 tokens processed...
+      900,000/2,403,562 tokens processed...
+      1,000,000/2,403,562 tokens processed...
+      1,100,000/2,403,562 tokens processed...
+      1,200,000/2,403,562 tokens processed...
+      1,300,000/2,403,562 tokens processed...
+      1,400,000/2,403,562 tokens processed...
+      1,500,000/2,403,562 tokens processed...
+      1,600,000/2,403,562 tokens processed...
+      1,700,000/2,403,562 tokens processed...
+      1,800,000/2,403,562 tokens processed...
+      1,900,000/2,403,562 tokens processed...
+      2,000,000/2,403,562 tokens processed...
+      2,100,000/2,403,562 tokens processed...
+      2,200,000/2,403,562 tokens processed...
+      2,300,000/2,403,562 tokens processed...
+      2,400,000/2,403,562 tokens processed...
+    Dual context cache collected [1065.9s]
+    Collecting dual context cache (22,722 tokens)...
+    Dual context cache collected [10.0s]
+Cache collection: 1076.3s
+  Train cache: torch.Size([2403562, 1000])
   Val cache: torch.Size([22722, 1000])
-Cache collection: 10.5s
-Effective Rank: Train=69.3%, Val=73.7%
+Effective Rank: Train=75.3%, Val=73.6%
 
 [Phase 2] Training TokenBlock with concatenated context (cd=1000)...
 ✓ All 2 ContextBlocks frozen
@@ -157,14 +178,23 @@ Effective Rank: Train=69.3%, Val=73.7%
 ✓ Training TokenBlock only: 1,360,128/41,230,040 parameters
 
 [Phase 2] 2,403,562 train / 22,722 val tokens, 20 epochs
-  Epoch 1: train_ppl=382.4 val_ppl=434.6 acc=13.4% [56.5s] ★
-  Epoch 2: train_ppl=206.0 val_ppl=440.2 acc=13.3% [55.8s]
-  → Early stop at epoch 2
-  Best: epoch 1, ppl=434.6, acc=13.4%
+  Epoch 1: train_ppl=332.6 val_ppl=170.9 acc=22.1% [56.6s] ★
+  Epoch 2: train_ppl=163.5 val_ppl=143.2 acc=23.4% [55.9s] ★
+  Epoch 3: train_ppl=135.3 val_ppl=133.0 acc=24.0% [56.5s] ★
+  Epoch 4: train_ppl=121.3 val_ppl=128.0 acc=24.3% [56.1s] ★
+  Epoch 5: train_ppl=112.6 val_ppl=125.2 acc=24.6% [56.4s] ★
+  Epoch 6: train_ppl=106.6 val_ppl=123.2 acc=24.7% [56.2s] ★
+  Epoch 7: train_ppl=102.2 val_ppl=121.9 acc=24.8% [56.2s] ★
+  Epoch 8: train_ppl=98.7 val_ppl=121.0 acc=25.0% [56.3s] ★
+  Epoch 9: train_ppl=96.0 val_ppl=120.3 acc=25.2% [56.2s] ★
+  Epoch 10: train_ppl=93.6 val_ppl=119.9 acc=25.3% [56.2s] ★
+  Epoch 11: train_ppl=91.7 val_ppl=119.5 acc=25.3% [56.2s] ★
+  → Early stop at epoch 11 (PPL improvement 0.35 < 0.4)
+  Best: epoch 11, ppl=119.5, acc=25.3%
 
-Phase 2: 112.3s, Best epoch 1
-Result: PPL=434.6, Acc=13.4%
-Total time: 441.1s
+Phase 2: 618.7s, Best epoch 11
+Result: PPL=119.5, Acc=25.3%
+Total time: 2017.8s
 
 ======================================================================
 SUMMARY - Dual Context Experiment
@@ -173,19 +203,19 @@ Architecture: DualContextLLM (A+B, 1L each)
   ContextBlock A: cd=500, trained on first 1,201,781 tokens
   ContextBlock B: cd=500, trained on last 1,201,782 tokens
   TokenBlock: cd=1000 (concatenated)
-  Context Continuity Loss: enabled
+  Context Continuity Loss: disabled
 Parameters: 41,230,040
-Phase 1A: 164.5s, conv=92%
-Phase 1B: 153.7s, conv=92%
-Cache collection: 10.5s
-Phase 2: 112.3s, epoch 1
-Effective Rank: 73.7% (of 1000)
-Val PPL: 434.6
-Val Acc: 13.4%
-Total time: 441.1s
+Phase 1A: 166.0s, conv=92%
+Phase 1B: 156.7s, conv=92%
+Cache collection: 1076.3s
+Phase 2: 618.7s, epoch 11
+Effective Rank: 73.6% (of 1000)
+Val PPL: 119.5
+Val Acc: 25.3%
+Total time: 2017.8s
 ======================================================================
 
-Results saved to: importants/logs/20251202_130133_dual_context_p1cache/results.txt
+Results saved to: importants/logs/20251202_131526_dual_context_no_cont_loss/results.txt
 
 ======================================================================
 DONE

@@ -25,7 +25,7 @@ Phase 1[0]: ContextBlock[0] を前半データで学習
   → データ: tokens[0:split]（前半）
 
 Phase 1[1]: ContextBlock[1] を後半データで学習
-  → 初期入力: context[0]_final（前のブロックの最終出力）
+  → 初期入力: ゼロベクトル（※Initial Context Inheritanceは使用しない）
   → データ: tokens[split:]（後半）
 
 Phase 2 Prep: 順次処理でキャッシュ収集
@@ -36,13 +36,13 @@ Phase 2: TokenBlock 学習
   → 予測: token[i]
 ```
 
-### ❌ 間違った理解（全データ学習）
+### ❌ 間違った理解
 
 以下は**間違い**です:
-- 「全ブロックが全データで学習」
-- 「初期入力の継承だけで異なる表現を獲得できる」
+- 「全ブロックが全データで学習」→ 同じような表現になってしまう
+- 「Initial Context Inheritanceで異なる表現を獲得できる」→ PPL悪化（119.5 vs 111.9）
 
-全データで2つのBlockを学習しても、Initial Contextが違うだけでは**同じような表現**になってしまいます。
+**成功の鍵**: 異なるデータで学習すること。初期入力の違いではなく、学習データの違いが重要。
 
 ### 実験の実行
 
@@ -129,9 +129,10 @@ for i in range(num_tokens):
 ```python
 # ✅ 推奨: shifted_prev_context方式（並列処理、数秒で完了）
 previous_contexts = torch.randn(num_tokens, context_dim) * 0.01
+zero_init = torch.zeros(1, context_dim)  # 常にゼロベクトルから開始
 
 for iteration in range(max_iterations):
-    shifted_prev_context = torch.cat([initial_context, previous_contexts[:-1]], dim=0)
+    shifted_prev_context = torch.cat([zero_init, previous_contexts[:-1]], dim=0)
     new_contexts = model.forward_context(shifted_prev_context, input_embeds)
     if converged:
         break
@@ -356,4 +357,4 @@ def __init__(self, base: Config, context_dim: int):
 
 ---
 
-Last Updated: 2025-12-02 (Context Continuity Loss削除、Phase 2 Prep順次処理、Initial Context Inheritance方式採用、可変ContextBlock数対応、1層固定アーキテクチャ)
+Last Updated: 2025-12-02 (Initial Context Inheritance削除、Context Continuity Loss削除、Phase 2 Prep順次処理、可変ContextBlock数対応、1層固定アーキテクチャ)

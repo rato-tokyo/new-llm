@@ -533,7 +533,6 @@ def run_cascade_context_experiment(
         train_token_ids_first_half,
         label="ContextA",
         return_all_layers=True,
-        initial_context=None,
     )
     phase_time_a = time.time() - phase_start
 
@@ -550,20 +549,16 @@ def run_cascade_context_experiment(
     model.freeze_context_block(0)
     print_flush("✓ ContextBlock A frozen")
 
-    # Block 1: 後半データで学習
+    # Block 1: 後半データで学習（ゼロベクトルから開始）
     print_flush("\n[Phase 1B] Training ContextBlock B on second half...")
     wrapper_b = SingleContextWrapper(model, block_idx=1)
     trainer_b = MemoryPhase1Trainer(wrapper_b, config_wrapper, device)
-
-    # 前のブロックの最終出力を初期コンテキストとして使用 [1, context_dim]
-    initial_context = train_context_caches[0][-1:].clone()
 
     phase_start = time.time()
     result_b = trainer_b.train(
         train_token_ids_second_half,
         label="ContextB",
         return_all_layers=True,
-        initial_context=initial_context,
     )
     phase_time_b = time.time() - phase_start
 

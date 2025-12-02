@@ -55,7 +55,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         label: str = "Train",
         return_all_layers: bool = False,
         val_token_ids: Optional[torch.Tensor] = None,
-        initial_context: Optional[torch.Tensor] = None,
         token_embeds_precomputed: Optional[torch.Tensor] = None,
     ) -> Phase1Result:
         """
@@ -66,7 +65,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
             label: ラベル
             return_all_layers: Trueの場合、全レイヤー出力も返す（Phase 2キャッシュ用）
             val_token_ids: 検証用トークンID（早期停止用、オプション）
-            initial_context: 初期入力コンテキスト [1, context_dim] (Initial Context Inheritance用)
             token_embeds_precomputed: 事前計算済みトークン埋め込み（再計算を避ける）
 
         Returns:
@@ -76,7 +74,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
             token_ids, label,
             return_all_layers=return_all_layers,
             val_token_ids=val_token_ids,
-            initial_context=initial_context,
             token_embeds_precomputed=token_embeds_precomputed,
         )
 
@@ -86,7 +83,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         label: str = "Train",
         return_all_layers: bool = False,
         val_token_ids: Optional[torch.Tensor] = None,
-        initial_context: Optional[torch.Tensor] = None,
         token_embeds_precomputed: Optional[torch.Tensor] = None,
     ) -> Phase1Result:
         """
@@ -98,7 +94,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         - _collect_layer_cache(): 全レイヤーキャッシュ収集
 
         Args:
-            initial_context: 初期入力コンテキスト（Initial Context Inheritance用）
             token_embeds_precomputed: 事前計算済みトークン埋め込み
         """
         self.model.train()
@@ -107,12 +102,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         # ContextBlockのパラメータのみ学習
         context_params = list(self.model.context_block.parameters())
         print_flush(f"\n[Phase 1] {label}: {num_tokens:,} tokens, {self.config.phase1_max_iterations} iterations")
-
-        # Initial Context Inheritanceの情報を表示
-        if initial_context is not None:
-            print_flush("  Initial input: prev_context_final (Initial Context Inheritance)")
-        else:
-            print_flush("  Initial input: zero vector (standard RNN)")
 
         optimizer = torch.optim.Adam(context_params, lr=self.config.phase1_learning_rate)
 
@@ -126,7 +115,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         previous_contexts, final_convergence_rate, val_early_stopped, best_val_er, final_iter = (
             self._run_training_loop(
                 token_embeds, num_tokens, optimizer, val_token_ids,
-                initial_context=initial_context,
             )
         )
 
@@ -174,13 +162,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
         num_tokens: int,
         optimizer: torch.optim.Optimizer,
         val_token_ids: Optional[torch.Tensor],
-        initial_context: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, float, bool, float, int]:
         """
         訓練ループを実行
-
-        Args:
-            initial_context: 初期入力コンテキスト（Initial Context Inheritance用）
 
         Returns:
             (previous_contexts, final_convergence_rate, early_stopped, best_convergence_rate, final_iter)
@@ -189,12 +173,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         early_stopping = getattr(self.config, 'phase1_early_stopping', True)
         early_stopping_threshold = getattr(self.config, 'phase1_early_stopping_threshold', 0.30)
         min_convergence_improvement = getattr(self.config, 'phase1_min_convergence_improvement', 0.01)
-
-        # Initial Context Inheritance: initial_contextの準備
-        if initial_context is None:
-            init_ctx = torch.zeros(1, self.model.context_dim, device='cpu')
-        else:
-            init_ctx = initial_context.cpu()
 
         previous_contexts: Optional[torch.Tensor] = None
         final_convergence_rate = 0.0
@@ -217,7 +195,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
             assert previous_contexts is not None
             contexts, total_loss, convergence_rate, elapsed = self._train_iteration(
                 token_embeds, previous_contexts, num_tokens, optimizer,
-                initial_context=init_ctx,
             )
 
             previous_contexts = contexts.detach().cpu()
@@ -266,16 +243,12 @@ class MemoryPhase1Trainer(Phase1Trainer):
         previous_contexts: torch.Tensor,
         num_tokens: int,
         optimizer: torch.optim.Optimizer,
-        initial_context: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, float, float, float]:
         """
         単一イテレーションの処理
 
         大規模データでのOOMを防ぐため、token_embedsとprevious_contextsは
         CPUに保持し、バッチ処理内で必要な分だけGPUに転送する。
-
-        Args:
-            initial_context: 初期入力コンテキスト（Initial Context Inheritance用）
 
         Returns:
             (contexts, total_loss, convergence_rate, elapsed_time)
@@ -285,7 +258,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         # CPUのまま渡す（_forward_parallel_with_grad_accum内でバッチごとにGPU転送）
         contexts, total_loss, _ = self._forward_parallel_with_grad_accum(
             token_embeds, previous_contexts, optimizer,
-            initial_context=initial_context,
         )
 
         # 収束率計算（バッチ処理で省メモリ）
@@ -519,16 +491,12 @@ class MemoryPhase1Trainer(Phase1Trainer):
         token_embeds: torch.Tensor,
         previous_contexts: torch.Tensor,
         optimizer: torch.optim.Optimizer,
-        initial_context: Optional[torch.Tensor] = None,
     ) -> tuple[torch.Tensor, float, float]:
         """
         勾配累積付き並列処理（メモリ効率版）
 
         バッチごとに勾配を計算・累積し、最後にまとめてパラメータ更新。
         これにより、大規模データでもOOMを回避できる。
-
-        Args:
-            initial_context: 初期入力コンテキスト（Initial Context Inheritance用）
 
         Returns:
             (contexts, total_loss, diversity_loss)
@@ -547,12 +515,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
         total_diversity_loss = 0.0
         total_loss_sum = 0.0
 
-        # Initial Context Inheritance: shifted_prev_contextを作成
-        # [initial_context, previous_contexts[:-1]]
-        if initial_context is None:
-            init_ctx = torch.zeros(1, self.model.context_dim, device='cpu')
-        else:
-            init_ctx = initial_context.cpu()
+        # shifted_prev_contextを作成（ゼロベクトルから開始）
+        # [zero_vector, previous_contexts[:-1]]
+        init_ctx = torch.zeros(1, self.model.context_dim, device='cpu')
         shifted_prev_context = torch.cat([init_ctx, previous_contexts[:-1]], dim=0)
 
         # バッチ処理（勾配累積）
