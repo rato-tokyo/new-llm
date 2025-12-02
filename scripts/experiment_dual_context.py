@@ -521,8 +521,9 @@ def run_dual_context_experiment(
 
     # Phase1Trainerのconfig属性を設定
     class Phase1ConfigWrapper:
-        def __init__(self, base, context_dim, num_layers):
+        def __init__(self, base: Config, context_dim: int, num_layers: int):
             self.phase1_max_iterations = base.phase1_max_iterations
+            self.phase1_convergence_threshold = base.phase1_convergence_threshold
             self.phase1_learning_rate = base.phase1_learning_rate
             self.phase1_batch_size = base.phase1_batch_size
             self.phase1_gradient_clip = base.phase1_gradient_clip
