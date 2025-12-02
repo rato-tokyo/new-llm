@@ -1,64 +1,52 @@
 # New-LLM Project Guidelines
 
-## 🎯 G案（prev_and_current_context）採用決定 (2025-12-02)
+## 🎯 カスケード連結方式（Cascade Context）採用決定 (2025-12-02)
 
-**Context ModeはG案に一本化。E案/A案/F案は削除予定。**
+**1層固定アーキテクチャにカスケード連結方式を採用。複数レイヤーは不要。**
 
 ### 決定の背景
 
-4つのContext Modeを比較実験した結果：
+実験結果より、カスケード連結方式が最良の結果を達成：
 
-| Mode | Val PPL | Val Acc | メモリ効率 | 拡張性 |
-|------|---------|---------|-----------|--------|
-| E案 (layerwise) | **128.1** | **24.9%** | ❌ 低い | ❌ 低い |
-| G案 (prev_and_current) | 132.2 | 24.4% | ✅ 高い | ✅ 高い |
-| A案 (final_only) | 136.9 | 24.6% | ✅ 高い | △ |
-| F案 (first_layer_only) | 137.9 | 24.4% | ✅ 高い | ❌ |
+| 構成 | Val PPL | Val Acc | 備考 |
+|------|---------|---------|------|
+| **Cascade (500×2=1000)** | **111.9** | **25.6%** | **最良** |
+| C1T1-500 | 127.2 | 24.7% | 標準構成 |
+| C2T2-500 | 132.2 | 24.4% | 2層だが悪化 |
+| C1T1-1000 | 134.0 | 23.6% | context_dim増加は非効率 |
 
-### E案が理論上は最良だが、G案を選択する理由
+### カスケード方式の特徴
 
-**1. メモリ効率**
 ```
-E案: cache = [num_layers, num_tokens, context_dim]  # レイヤー数倍
-G案: cache = [num_tokens, context_dim]              # 固定
-```
-大規模データでE案はメモリが厳しくなる。
+Phase 1A: ContextBlock A を全データで学習
+  → context_a キャッシュ取得
 
-**2. 拡張性**
-```python
-# G案は3層以上に自然に拡張可能
-# Layer 1 ← context[i-2]  (2つ前)
-# Layer 2 ← context[i-1]  (1つ前)
-# Layer 3 ← context[i]    (現在)
-```
+Phase 1B: ContextBlock B を全データで学習
 
-**3. メンテナンス性**
-複数のContext Modeを維持するコストが高い。
+Cache Collection:
+  → context_b[i] = B(context_a[i], token_embed[i])
+  （context_a を ContextBlock B の入力に固定）
 
-### 精度差は許容範囲
-
-- PPL差: 4.1 (+3.2%)
-- Acc差: 0.5%
-
-データ量増加でどちらも改善するため、この差は許容可能。
-
-### G案の動作
-
-```python
-# 2層の場合
-TokenBlock Layer 1 ← context_cache[i-1]  # 前トークン時点
-TokenBlock Layer 2 ← context_cache[i]    # 現在トークン時点
-
-# 最初のトークン(i=0)では prev = current
+Phase 2: concat(context_a, context_b) で TokenBlock 学習
+  → 連結contextでトークン予測
 ```
 
-### 将来的なE案復活条件
+### なぜカスケード方式が良いのか
 
-E案が必要になった場合の対応：
-1. オンデマンド計算（Phase 2でContextBlock再計算）
-2. 大容量GPU使用
+1. **データ活用効率**: 全データで両ContextBlockを学習
+2. **cd=500の効率性維持**: 各ブロックで92%収束を達成
+3. **連結による表現力**: 1000次元の表現力を獲得しつつ、各ブロックの効率性を維持
+4. **コード簡素化**: 複数レイヤーロジック不要
 
-詳細: `importants/experiment-results-20251202-context-mode-all-comparison.md`
+### 実験の実行
+
+```bash
+# Colab（GPU）: 本格実験
+python3 scripts/experiment_cascade_context.py -s 2000
+
+# context_dim指定（各ContextBlockの次元）
+python3 scripts/experiment_cascade_context.py -s 2000 -c 500
+```
 
 ---
 
@@ -84,43 +72,25 @@ def oacd_loss(contexts, centroid_weight=0.1):
 - 「自己平衡」効果を維持（相対的目標）
 - シンプルな損失関数で高いEffective Rank（80%+）を達成
 
-### 実験結果 (context_dim=500)
-
-| サンプル | トークン | Val PPL | Acc | ER% | α値 |
-|---------|---------|---------|-----|-----|-----|
-| 50 | 62,891 | 573.8 | 17.8% | 81.2% | - |
-| 100 | 122,795 | 383.4 | 19.3% | 81.2% | - |
-| 200 | 240,132 | **290.1** | **20.2%** | 81.3% | **-0.509** |
-
-### 実験の実行
-
-```bash
-# ローカル（CPU）: 動作確認
-python3 scripts/run_experiment.py -s 2
-
-# Colab（GPU）: 本格実験
-python3 scripts/run_experiment.py -s 50 100 200
-
-# context_dim指定
-python3 scripts/run_experiment.py -s 50 100 200 -c 500
-```
-
 ---
 
-## 🚨 num_layers = 2 推奨 (2025-12-02更新)
+## 🚨 1層固定アーキテクチャ (2025-12-02)
 
-**G案採用により、2層以上が標準構成。**
+**カスケード連結方式により、複数レイヤーは不要。**
 
 ```python
-# config.py
-num_layers = 2  # G案では2層以上が必要（prev/currentの差分活用）
+# 各ブロック1層固定
+ContextBlock: 1層
+TokenBlock: 1層
+
+# カスケード連結で表現力を確保
+combined_context = concat(context_a, context_b)  # cd=500×2=1000
 ```
 
 **理由**:
-- G案は「前のcontext」と「現在のcontext」を異なるレイヤーに注入
-- 1層ではG案の意味がない（prev = currentになる）
-- 2層: Layer1=prev, Layer2=current
-- 3層: Layer1=prev, Layer2=none, Layer3=current（拡張可能）
+- C2T2（2層）がC1T1（1層）より**悪化**した実験結果
+- カスケード連結で十分な表現力を確保
+- コードの大幅な簡素化
 
 ---
 
@@ -128,22 +98,13 @@ num_layers = 2  # G案では2層以上が必要（prev/currentの差分活用）
 
 **ローカル環境（Mac/CPU）では処理が遅いため、サンプル数を最小限に抑える。**
 
-### 推奨設定
-
 ```bash
 # ローカル実験（CPU）: 2-5サンプルで十分
-python3 scripts/run_experiment.py -s 2
+python3 scripts/experiment_cascade_context.py -s 2
 
-# Colab（GPU）: 100サンプル以上で本格実験
-python3 scripts/run_experiment.py -s 50 100 200
+# Colab（GPU）: 2000サンプルで本格実験
+python3 scripts/experiment_cascade_context.py -s 2000
 ```
-
-### ローカル vs Colab 比較
-
-| 環境 | 推奨サンプル数 | 処理時間目安 |
-|------|--------------|-------------|
-| **ローカル（CPU）** | 2-5 | 数分〜十数分 |
-| **Colab（GPU）** | 100-500 | 数分 |
 
 ---
 
@@ -151,30 +112,14 @@ python3 scripts/run_experiment.py -s 50 100 200
 
 **大規模データ（2000サンプル以上）でOOMを防ぐため、テンソルのデバイス管理を徹底。**
 
-### 問題の症状
-
-```
-RuntimeError: Expected all tensors to be on the same device, but got tensors is on cpu,
-different from other tensors on cuda:0
-```
-
-### 根本原因
-
-OOM対策でテンソルをCPUに保持する設計に変更した際、GPU転送漏れが発生：
-1. `previous_contexts`: CPUに保持 → バッチ処理時にGPU転送必要
-2. `token_embeds`: CPUに保持 → `combine_batch`後にGPU転送必要
-3. `last_context`: CPU上で取得 → GPU転送必要
-
 ### 修正パターン
 
 ```python
 # ❌ 修正前: CPUテンソルをそのまま使用
 batch_contexts = previous_contexts[start_idx:end_idx].detach()
-batch_combined = self._build_combined_tokens_batch(token_embeds, ...)
 
 # ✅ 修正後: 明示的にGPU転送
 batch_contexts = previous_contexts[start_idx:end_idx].detach().to(self.device)
-batch_combined = self._build_combined_tokens_batch(token_embeds, ...).to(self.device)
 ```
 
 ### チェックリスト（OOM対策コード変更時）
@@ -183,35 +128,6 @@ batch_combined = self._build_combined_tokens_batch(token_embeds, ...).to(self.de
 - [ ] GPU演算に渡す前に`.to(self.device)`を追加
 - [ ] ループ内のすべてのテンソル転送を確認
 - [ ] `torch.cat`や演算の入力デバイスを統一
-
----
-
-## 🚨 Effective Rank計算の整合性 - 重要教訓 (2025-12-01)
-
-**Phase 1 Validation Early StoppingのVal ERと最終評価のERが大幅に乖離する問題を修正。**
-
-### 問題の症状
-
-- `_quick_validate()` が返すVal ER: 3-30%
-- 最終評価のVal ER: 64%
-- **約2-20倍の乖離**
-
-### 根本原因（3つ）
-
-**1. サンプルサイズの違い（最大の原因）**
-- `_quick_validate()`: 500トークン → **ERが低く出る**
-- 最終評価: 31,024トークン → ERが正確に出る
-- **修正**: `phase1_val_sample_size = 10000` に増加
-
-**2. ER計算方法の違い**
-- `_quick_validate()`: 共分散行列の固有値分解を使用
-- `analyze_fixed_points()`: SVDの特異値を使用
-- **修正**: 両方ともSVDベースに統一
-
-**3. コードパスの違い**
-- `_quick_validate()`: `collect_all_layers=False`
-- `evaluate()`: `collect_all_layers=True`、`token_embeds[:-1]`で最後のトークンを除く
-- **修正**: `_quick_validate()`を`evaluate()`と完全に同じ処理に変更
 
 ---
 
@@ -232,8 +148,8 @@ batch_combined = self._build_combined_tokens_batch(token_embeds, ...).to(self.de
 # 1. リポジトリ更新
 !cd /content/new-llm && git pull
 
-# 2. 実験実行（検証ファイルは自動生成される）
-!cd /content/new-llm && python3 scripts/run_experiment.py -s 50 100 200
+# 2. 実験実行
+!cd /content/new-llm && python3 scripts/experiment_cascade_context.py -s 2000
 ```
 
 ---
@@ -249,9 +165,9 @@ python3 -m ruff check src/
 # Type check (mypy)
 python3 -m mypy src/ --ignore-missing-imports
 
-# 特定ファイルのみ
-python3 -m ruff check src/trainers/phase1/memory.py
-python3 -m mypy src/trainers/phase1/memory.py --ignore-missing-imports
+# 実験スクリプト
+python3 -m ruff check scripts/experiment_cascade_context.py
+python3 -m mypy scripts/experiment_cascade_context.py --ignore-missing-imports
 ```
 
 ---
@@ -263,42 +179,8 @@ python3 -m mypy src/trainers/phase1/memory.py --ignore-missing-imports
 ### 禁止事項
 
 1. **オプション引数での分岐禁止**
-   ```python
-   # ❌ 禁止: 古いパスを残す
-   def func(cache=None):
-       if cache is None:
-           cache = build_cache()  # 古いパス
-
-   # ✅ 正解: 必須引数にする
-   def func(cache):
-       pass  # キャッシュは呼び出し元で必ず準備
-   ```
-
 2. **古いメソッドの残存禁止**
-   - 新しい設計に置き換えたら、古いメソッドは即座に削除
-   - 「念のため」で残すと、誤って古いパスが実行される
-
----
-
-## 🚀 PHASE 2 CACHE REUSE - Phase 1キャッシュ再利用 (2025-11-29)
-
-**Phase 1で計算した全レイヤー出力をPhase 2で再利用し、627秒のキャッシュ再構築を省略。**
-
-### 新方式: Phase 1からキャッシュを渡す
-
-```python
-# Phase 1: return_all_layers=True で全レイヤー出力も取得
-train_contexts, train_context_cache, train_token_embeds = phase1_trainer.train(
-    ..., return_all_layers=True
-)
-
-# Phase 2: キャッシュを受け取り、再構築をスキップ
-phase2_trainer.train_full(
-    ...,
-    train_context_cache=train_context_cache,
-    train_token_embeds=train_token_embeds,
-)
-```
+3. **「念のため」で残さない**
 
 ---
 
@@ -306,20 +188,10 @@ phase2_trainer.train_full(
 
 **Phase 2でEmbedding凍結を標準採用。**
 
-### 実験結果
-
 | 指標 | Embedding学習 | Embedding凍結 | 改善率 |
 |------|--------------|--------------|--------|
-| Val PPL (500samples) | 1189.15 | **334.31** | **-71.9%** |
-| Val Acc (500samples) | 11.58% | **18.88%** | **+63.0%** |
-
-### 設定
-
-```python
-# config.py
-phase2_freeze_embedding = True  # 推奨（デフォルト）
-use_weight_tying = True         # 推奨（デフォルト）
-```
+| Val PPL | 1189.15 | **334.31** | **-71.9%** |
+| Val Acc | 11.58% | **18.88%** | **+63.0%** |
 
 ---
 
@@ -338,46 +210,42 @@ use_weight_tying = True         # 推奨（デフォルト）
 
 ### 絶対遵守: すべての実験結果は具体的な数値で報告する
 
-**禁止事項**:
-- ❌ "GOOD", "EXCELLENT" などの抽象的表現での報告
-- ❌ 数値を伴わない判定結果の報告
-
 **必須報告項目**:
-- ✅ **収束率**: 具体的なパーセンテージ (例: 1.9%)
-- ✅ Effective Rank: **実数値/総次元数とパーセンテージ** (例: 406/500 = 81.2%)
-- ✅ Val PPL: **実数値** (例: 290.1)
-- ✅ Val Acc: **実数値** (例: 20.2%)
-- ✅ α値: **実数値** (例: -0.509)
+- ✅ **収束率**: 具体的なパーセンテージ (例: 92%)
+- ✅ Effective Rank: **実数値/総次元数とパーセンテージ** (例: 736/1000 = 73.6%)
+- ✅ Val PPL: **実数値** (例: 111.9)
+- ✅ Val Acc: **実数値** (例: 25.6%)
 
 ---
 
 ## 📐 アーキテクチャ仕様
 
-### Core Components
+### Core Components（1層固定）
 
 **1. ContextLayer / TokenLayer**
-- ContextLayer: 文脈処理専用（token継ぎ足し方式）
-- TokenLayer: トークン処理専用
+- ContextLayer: 文脈処理専用（単一レイヤー）
+- TokenLayer: トークン処理専用（単一レイヤー）
 
 **2. ContextBlock / TokenBlock**
-- ContextBlock: Phase 1で学習、Phase 2でfreeze
-- TokenBlock: Phase 2で学習
+- ContextBlock: 1層固定、Phase 1で学習、Phase 2でfreeze
+- TokenBlock: 1層固定、Phase 2で学習
 
-**3. LLM (Main Model)**
-- Token Embedding: GPT-2 pretrained (768-dim, frozen in Phase 2)
+**3. CascadeContextLLM（実験用モデル）**
+- ContextBlock A + ContextBlock B（カスケード連結）
+- TokenBlock（連結されたcontext入力）
+- Token Embedding: GPT-2 pretrained (768-dim, frozen)
 - Weight Tying: token_output shares weights with token_embedding
 
 ### Phase 1: 多様性学習（OACD）
 
 - **学習対象**: ContextBlockのみ
-- **TokenBlock**: 未使用
-- **損失**: 多様性損失のみ（OACD）
+- **損失**: OACD（多様性損失）
 
 ### Phase 2: トークン予測
 
 - **ContextBlock**: frozen（重み固定）
 - **TokenBlock**: 学習
-- **損失**: CrossEntropy（次トークン予測）のみ
+- **損失**: CrossEntropy（次トークン予測）
 
 ---
 
@@ -394,29 +262,14 @@ use_weight_tying = True         # 推奨（デフォルト）
 
 **動的な属性アクセスによるAttributeErrorを防ぐため、型注釈を徹底する。**
 
-#### 問題の背景
-
 ```python
 # ❌ 型注釈なし → mypy で属性不足を検出できない
-def __init__(self, base, context_dim, num_layers):
-    self.value = base.some_attribute  # 実行時エラーの可能性
+def __init__(self, base, context_dim):
+    self.value = base.some_attribute
 
 # ✅ 型注釈あり → mypy で属性不足を検出可能
-def __init__(self, base: Config, context_dim: int, num_layers: int):
-    self.value = base.some_attribute  # Config に属性がなければ mypy がエラー
-```
-
-#### ルール
-
-1. **関数・メソッドの引数には必ず型注釈を付ける**
-2. **特にConfigクラスを受け取る場合は必須**（属性アクセスが多いため）
-3. **ラッパークラスやアダプターは特に注意**
-
-#### 検出コマンド
-
-```bash
-# 型チェック（型注釈があればAttributeError相当を検出可能）
-python3 -m mypy scripts/experiment_dual_context.py --ignore-missing-imports
+def __init__(self, base: Config, context_dim: int):
+    self.value = base.some_attribute
 ```
 
 ### Anti-Patterns to Avoid
@@ -431,15 +284,15 @@ python3 -m mypy scripts/experiment_dual_context.py --ignore-missing-imports
 ## File Structure
 
 **Main Scripts**:
-- `scripts/run_experiment.py` - 標準実験スクリプト（Phase 1 + Phase 2）
-- `config.py` - 設定ファイル
+- `scripts/experiment_cascade_context.py` - カスケード連結実験スクリプト
 
 **Core Implementation**:
 - `src/trainers/phase1/memory.py` - Phase 1訓練ロジック
-- `src/trainers/phase2.py` - Phase 2訓練ロジック
-- `src/models/llm.py` - モデルアーキテクチャ
+- `src/models/blocks.py` - ContextBlock/TokenBlock（1層固定）
+- `src/models/layers.py` - ContextLayer/TokenLayer
+- `src/models/llm.py` - 基本LLMモデル
 - `src/losses/diversity.py` - OACDアルゴリズム
 
 ---
 
-Last Updated: 2025-12-02 (G案採用決定、num_layers=2推奨、型注釈ポリシー追加)
+Last Updated: 2025-12-02 (カスケード連結方式採用、1層固定アーキテクチャ、複数レイヤー削除)
