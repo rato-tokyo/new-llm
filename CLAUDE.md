@@ -50,7 +50,25 @@ python3 scripts/experiment_cascade_context.py -s 2000
 
 # Context Continuity Lossを無効化（検証用）
 python3 scripts/experiment_cascade_context.py -s 2000 --no-continuity-loss
+
+# Phase 1キャッシュを直接使用（時間短縮）
+python3 scripts/experiment_cascade_context.py -s 2000 --use-phase1-cache
 ```
+
+### --use-phase1-cache オプション
+
+**Phase 2 Prepでの全データキャッシュ再収集をスキップし、Phase 1で得たキャッシュを直接結合して使用。**
+
+**前提条件**:
+- Context Continuity Lossにより、前半/後半の境界での損失が無視できるほど小さい
+- RNN収束後は全トークンの出力が同じ固定点に収束するため、結合しても理論的に問題なし
+
+**動作**:
+1. Block A: 前半キャッシュ + 後半は最終値で埋める
+2. Block B: 前半はBlock Aの最終値で埋める + 後半キャッシュ
+3. Validationキャッシュのみ再収集（学習データではないため）
+
+**効果**: Training dataの再収集（数分〜十数分）をスキップし、大幅な時間短縮
 
 ---
 

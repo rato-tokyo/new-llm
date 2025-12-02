@@ -477,6 +477,7 @@ def run_cascade_context_experiment(
     seed: int = 42,
     output_dir: Optional[str] = None,
     use_continuity_loss: bool = True,
+    use_phase1_cache: bool = False,
 ) -> Dict[str, Any]:
     """Cascade Context 実験を実行（Dual方式: 前半/後半分割）
 
@@ -487,6 +488,7 @@ def run_cascade_context_experiment(
         seed: 乱数シード
         output_dir: 出力ディレクトリ
         use_continuity_loss: Context Continuity Lossを使用するか（デフォルト: True）
+        use_phase1_cache: Phase 1のキャッシュを直接結合してPhase 2で使用（時間短縮）
     """
 
     set_seed(seed)
@@ -610,30 +612,79 @@ def run_cascade_context_experiment(
 
     phase1_total_time = sum(phase1_times)
 
-    # ========== Phase 2 Prep: 全データでのキャッシュ収集 ==========
-    print_flush("\n[Phase 2 Prep] Collecting dual context cache on full data...")
+    # ========== Phase 2 Prep: キャッシュ収集 ==========
     cache_start = time.time()
 
-    # Dual方式: 全データに対して両ブロックのキャッシュを収集
-    train_context_caches_full, train_token_embeds = collect_context_cache_for_val(
-        model, train_token_ids, device
-    )
-    val_context_caches, val_token_embeds = collect_context_cache_for_val(
-        model, val_token_ids, device
-    )
+    if use_phase1_cache:
+        # --use-phase1-cache: Phase 1のキャッシュを直接結合（時間短縮）
+        # 前提: Context Continuity Lossにより、境界での損失が無視できるほど小さい
+        print_flush("\n[Phase 2 Prep] Using Phase 1 cache directly (--use-phase1-cache)...")
+
+        # Phase 1のキャッシュを結合
+        # cache_a: [split_point, context_dim], cache_b: [num_train - split_point, context_dim]
+        cache_a = train_context_caches[0]  # 前半データのキャッシュ
+        cache_b = train_context_caches[1]  # 後半データのキャッシュ
+
+        # 全データ用キャッシュを作成
+        # Block A: cache_a + ゼロパディング（後半はBlock Aで学習していないため）
+        # Block B: ゼロパディング（前半はBlock Bで学習していないため）+ cache_b
+        num_total = num_train_tokens - 1
+        train_cache_block_a = torch.zeros(num_total, context_dim, device='cpu')
+        train_cache_block_b = torch.zeros(num_total, context_dim, device='cpu')
+
+        # 前半にcache_aを配置
+        train_cache_block_a[:len(cache_a)] = cache_a
+        # 後半の最初のトークンはcache_aの最終値で初期化（Context Continuity）
+        train_cache_block_a[len(cache_a):] = cache_a[-1:]
+
+        # 前半はcache_bの初期値（＝cache_aの最終値）で埋める
+        train_cache_block_b[:split_point] = cache_a[-1:]
+        # 後半にcache_bを配置
+        train_cache_block_b[split_point:] = cache_b
+
+        train_context_cache = torch.cat([train_cache_block_a, train_cache_block_b], dim=-1)
+        print_flush(f"  Train cache (Phase 1 direct): {train_context_cache.shape}")
+
+        # Validationキャッシュは再収集が必要（学習時のデータではないため）
+        print_flush("  Collecting validation cache...")
+        val_context_caches, val_token_embeds = collect_context_cache_for_val(
+            model, val_token_ids, device
+        )
+        val_context_cache = torch.cat(val_context_caches, dim=-1)
+        print_flush(f"  Val cache: {val_context_cache.shape}")
+
+        # Token embeds for training
+        with torch.no_grad():
+            all_embeds = model.token_embedding(train_token_ids.to(device))
+            all_embeds = model.embed_norm(all_embeds)
+            train_token_embeds = all_embeds[:-1].cpu()
+            del all_embeds
+            clear_gpu_cache(device)
+
+        del train_context_caches, val_context_caches
+    else:
+        # デフォルト: 全データに対して両ブロックのキャッシュを収集
+        print_flush("\n[Phase 2 Prep] Collecting dual context cache on full data...")
+
+        train_context_caches_full, train_token_embeds = collect_context_cache_for_val(
+            model, train_token_ids, device
+        )
+        val_context_caches, val_token_embeds = collect_context_cache_for_val(
+            model, val_token_ids, device
+        )
+
+        # 連結
+        train_context_cache = torch.cat(train_context_caches_full, dim=-1)
+        val_context_cache = torch.cat(val_context_caches, dim=-1)
+
+        print_flush(f"  Train cache: {train_context_cache.shape}")
+        print_flush(f"  Val cache: {val_context_cache.shape}")
+
+        # メモリ解放
+        del train_context_caches, val_context_caches
 
     cache_time = time.time() - cache_start
     print_flush(f"Cache collection: {cache_time:.1f}s")
-
-    # 連結
-    train_context_cache = torch.cat(train_context_caches_full, dim=-1)
-    val_context_cache = torch.cat(val_context_caches, dim=-1)
-
-    print_flush(f"  Train cache: {train_context_cache.shape}")
-    print_flush(f"  Val cache: {val_context_cache.shape}")
-
-    # メモリ解放
-    del train_context_caches, val_context_caches
 
     # Effective Rank計算
     train_metrics = analyze_fixed_points(train_context_cache, label="Train", verbose=False)
@@ -738,16 +789,20 @@ def main():
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--no-continuity-loss', action='store_true',
                         help='Disable Context Continuity Loss (for ablation study)')
+    parser.add_argument('--use-phase1-cache', action='store_true',
+                        help='Use Phase 1 cache directly for Phase 2 (skip recollection, faster)')
 
     args = parser.parse_args()
 
     # Dual方式は2ブロック固定
     num_context_blocks = 2
     use_continuity_loss = not args.no_continuity_loss
+    use_phase1_cache = args.use_phase1_cache
 
     # 出力ディレクトリ
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     suffix = "_no_cont_loss" if not use_continuity_loss else ""
+    suffix += "_p1cache" if use_phase1_cache else ""
     output_dir = args.output_dir or f"importants/logs/{timestamp}_dual_context{suffix}"
 
     combined_dim = args.context_dim * num_context_blocks
@@ -759,6 +814,7 @@ def main():
     print_flush(f"Context dim per block: {args.context_dim}")
     print_flush(f"Combined context dim: {combined_dim}")
     print_flush(f"Context Continuity Loss: {'enabled' if use_continuity_loss else 'disabled'}")
+    print_flush(f"Use Phase1 Cache: {'enabled' if use_phase1_cache else 'disabled'}")
     print_flush(f"Output: {output_dir}")
     print_flush("=" * 70)
 
@@ -769,6 +825,7 @@ def main():
         seed=args.seed,
         output_dir=output_dir,
         use_continuity_loss=use_continuity_loss,
+        use_phase1_cache=use_phase1_cache,
     )
 
     print_flush("\n" + "=" * 70)
