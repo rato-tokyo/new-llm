@@ -56,6 +56,7 @@ from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
 from src.utils.initialization import count_parameters
 from config.experiment import DataConfig
+from src.losses.diversity import oacd_loss
 
 
 class CascadeContextLLM(nn.Module):
@@ -564,7 +565,6 @@ class CascadePhase1Trainer:
                 batch_output = self.model.forward_context(self.block_idx, batch_prev_context, batch_token_embeds)
 
                 # 多様性損失（OACD）
-                from src.losses.diversity import oacd_loss
                 diversity_loss = oacd_loss(batch_output)
 
                 # Context Continuity Loss（block_idx > 0の場合のみ）
