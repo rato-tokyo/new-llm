@@ -7,8 +7,7 @@ context_dim を n 刻みで増加させ（10, 20, 30, ...）、
 val PPL が2回連続で悪化した時点で停止する。
 
 特徴:
-- 重み再利用: dim=10 → 20 への拡張時、既存の重みを再利用
-- 拡張部分: 小さいランダム値で初期化（0だと収束しない可能性）
+- 毎回新規モデル作成（シンプルで安定）
 - ContextBlock: 1つのみで実験
 - 早期停止: val PPL が2回連続悪化 or 上限到達
 
@@ -41,11 +40,9 @@ from src.utils.initialization import count_parameters
 from config.experiment import DataConfig
 
 
-class ExpandableContextBlock(nn.Module):
+class SimpleContextBlock(nn.Module):
     """
-    拡張可能な ContextBlock
-
-    context_dim を拡張する際、既存の重みを再利用できる。
+    シンプルな ContextBlock（探索実験用）
     """
 
     def __init__(
@@ -72,8 +69,6 @@ class ExpandableContextBlock(nn.Module):
 
         # LayerNorm
         self.context_norm = nn.LayerNorm(context_dim)
-
-        # 残差射影なし（context_input_dim == context_output_dim）
 
         self._init_weights()
 
@@ -112,98 +107,13 @@ class ExpandableContextBlock(nn.Module):
     ) -> torch.Tensor:
         """
         Batch forward pass（キャッシュ収集用）
-
-        forward() と同一だが、明示的なバッチ処理用メソッド。
-
-        Args:
-            context: [batch, context_dim]
-            token_embeds: [batch, token_input_dim]
-
-        Returns:
-            new_context: [batch, context_dim]
         """
         return self.forward(context, token_embeds)
 
-    def expand_context_dim(self, new_context_dim: int, noise_scale: float = 0.01) -> None:
-        """
-        context_dim を拡張
 
-        既存の重みを保持し、拡張部分は小さいランダム値で初期化。
-
-        Args:
-            new_context_dim: 新しい context_dim
-            noise_scale: 拡張部分のノイズスケール
-        """
-        if new_context_dim <= self.context_dim:
-            raise ValueError(f"new_context_dim ({new_context_dim}) must be > current ({self.context_dim})")
-
-        old_context_dim = self.context_dim
-        expansion = new_context_dim - old_context_dim
-
-        # 旧FFN Linear層の重み・バイアス取得
-        old_linear = self.fnn[0]
-        old_weight = old_linear.weight.data  # [old_out, old_in]
-        old_bias = old_linear.bias.data if old_linear.bias is not None else None
-
-        # 新FFN作成
-        new_input_dim = new_context_dim + self.token_input_dim
-        new_fnn = nn.Sequential(
-            nn.Linear(new_input_dim, new_context_dim),
-            nn.GELU()
-        )
-
-        # 重みコピー（拡張部分はランダム）
-        new_linear = new_fnn[0]
-        with torch.no_grad():
-            # 出力次元（行）: 既存部分コピー、拡張部分ランダム
-            # 入力次元（列）: 既存context部分コピー、拡張context部分ランダム、token部分コピー
-
-            # まずゼロで初期化
-            new_linear.weight.zero_()
-            if new_linear.bias is not None:
-                new_linear.bias.zero_()
-
-            # 既存の出力次元×既存のcontext入力次元をコピー
-            new_linear.weight[:old_context_dim, :old_context_dim] = old_weight[:, :old_context_dim]
-
-            # 既存の出力次元×拡張context入力次元は小さいランダム
-            new_linear.weight[:old_context_dim, old_context_dim:new_context_dim] = (
-                torch.randn(old_context_dim, expansion) * noise_scale
-            )
-
-            # 既存の出力次元×token入力次元をコピー
-            new_linear.weight[:old_context_dim, new_context_dim:] = old_weight[:, old_context_dim:]
-
-            # 拡張出力次元×全入力次元は小さいランダム
-            new_linear.weight[old_context_dim:, :] = (
-                torch.randn(expansion, new_input_dim) * noise_scale
-            )
-
-            # バイアス: 既存部分コピー、拡張部分ゼロ
-            if old_bias is not None and new_linear.bias is not None:
-                new_linear.bias[:old_context_dim] = old_bias
-                new_linear.bias[old_context_dim:] = 0
-
-        self.fnn = new_fnn
-
-        # LayerNorm拡張
-        old_norm = self.context_norm
-        new_norm = nn.LayerNorm(new_context_dim)
-        with torch.no_grad():
-            new_norm.weight[:old_context_dim] = old_norm.weight
-            new_norm.weight[old_context_dim:] = 1.0
-            new_norm.bias[:old_context_dim] = old_norm.bias
-            new_norm.bias[old_context_dim:] = 0
-
-        self.context_norm = new_norm
-        self.context_dim = new_context_dim
-
-
-class ExpandableTokenBlock(nn.Module):
+class SimpleTokenBlock(nn.Module):
     """
-    拡張可能な TokenBlock
-
-    context_dim が拡張される際、入力次元を調整する。
+    シンプルな TokenBlock（探索実験用）
     """
 
     def __init__(
@@ -272,64 +182,12 @@ class ExpandableTokenBlock(nn.Module):
         new_token = self.token_norm(residual + delta_token)
         return new_token
 
-    def expand_context_dim(self, new_context_dim: int, noise_scale: float = 0.01) -> None:
-        """
-        context_dim を拡張（入力次元のみ変更）
 
-        Args:
-            new_context_dim: 新しい context_dim
-            noise_scale: 拡張部分のノイズスケール
-        """
-        if new_context_dim <= self.context_dim:
-            raise ValueError(f"new_context_dim ({new_context_dim}) must be > current ({self.context_dim})")
-
-        old_context_dim = self.context_dim
-        expansion = new_context_dim - old_context_dim
-
-        # 旧FFN Linear層の重み・バイアス取得
-        old_linear = self.fnn[0]
-        old_weight = old_linear.weight.data  # [embed_dim, old_context + token_input]
-        old_bias = old_linear.bias.data if old_linear.bias is not None else None
-
-        # 新FFN作成
-        new_input_dim = new_context_dim + self.token_input_dim
-        new_fnn = nn.Sequential(
-            nn.Linear(new_input_dim, self.embed_dim),
-            nn.GELU()
-        )
-
-        # 重みコピー
-        new_linear = new_fnn[0]
-        with torch.no_grad():
-            new_linear.weight.zero_()
-            if new_linear.bias is not None:
-                new_linear.bias.zero_()
-
-            # 既存context入力部分をコピー
-            new_linear.weight[:, :old_context_dim] = old_weight[:, :old_context_dim]
-
-            # 拡張context入力部分は小さいランダム
-            new_linear.weight[:, old_context_dim:new_context_dim] = (
-                torch.randn(self.embed_dim, expansion) * noise_scale
-            )
-
-            # token入力部分をコピー
-            new_linear.weight[:, new_context_dim:] = old_weight[:, old_context_dim:]
-
-            # バイアスコピー
-            if old_bias is not None and new_linear.bias is not None:
-                new_linear.bias.copy_(old_bias)
-
-        self.fnn = new_fnn
-        self.context_dim = new_context_dim
-
-
-class SearchableLLM(nn.Module):
+class SimpleLLM(nn.Module):
     """
     context_dim 探索用LLM
 
     単一ContextBlock + TokenBlock
-    context_dim を拡張可能
     """
 
     def __init__(
@@ -350,15 +208,15 @@ class SearchableLLM(nn.Module):
         self._load_pretrained_embeddings()
         self.embed_norm = nn.LayerNorm(embed_dim)
 
-        # ContextBlock（拡張可能）
-        self.context_block = ExpandableContextBlock(
+        # ContextBlock
+        self.context_block = SimpleContextBlock(
             context_dim=context_dim,
             embed_dim=embed_dim,
             num_input_tokens=num_input_tokens,
         )
 
-        # TokenBlock（拡張可能）
-        self.token_block = ExpandableTokenBlock(
+        # TokenBlock
+        self.token_block = SimpleTokenBlock(
             context_dim=context_dim,
             embed_dim=embed_dim,
             num_input_tokens=num_input_tokens,
@@ -394,22 +252,6 @@ class SearchableLLM(nn.Module):
         """TokenBlock の順伝搬"""
         return self.token_block(context, token_embeds)
 
-    def expand_context_dim(self, new_context_dim: int, noise_scale: float = 0.01) -> None:
-        """
-        context_dim を拡張
-
-        ContextBlock と TokenBlock の両方を拡張する。
-
-        Args:
-            new_context_dim: 新しい context_dim
-            noise_scale: 拡張部分のノイズスケール
-        """
-        print_flush(f"  Expanding context_dim: {self.context_dim} -> {new_context_dim}")
-
-        self.context_block.expand_context_dim(new_context_dim, noise_scale)
-        self.token_block.expand_context_dim(new_context_dim, noise_scale)
-        self.context_dim = new_context_dim
-
     def freeze_context_block(self) -> None:
         """ContextBlockをfreeze"""
         for param in self.context_block.parameters():
@@ -440,9 +282,9 @@ class SearchableLLM(nn.Module):
 
 
 class SingleContextWrapper(nn.Module):
-    """Phase 1 用: SearchableLLM のラッパー"""
+    """Phase 1 用: SimpleLLM のラッパー"""
 
-    def __init__(self, model: SearchableLLM):
+    def __init__(self, model: SimpleLLM):
         super().__init__()
         self.cascade_model = model
 
@@ -464,7 +306,7 @@ class SingleContextWrapper(nn.Module):
 class Phase1ConfigWrapper:
     """Phase1Trainer用のConfig wrapper"""
 
-    def __init__(self, base: Config, context_dim: int):
+    def __init__(self, base: Config, context_dim: int, patience: int = 2):
         self.phase1_max_iterations = base.phase1_max_iterations
         self.phase1_convergence_threshold = base.phase1_convergence_threshold
         self.phase1_learning_rate = base.phase1_learning_rate
@@ -473,7 +315,9 @@ class Phase1ConfigWrapper:
         self.phase1_context_noise = base.phase1_context_noise
         self.phase1_early_stopping = base.phase1_early_stopping
         self.phase1_early_stopping_threshold = base.phase1_early_stopping_threshold
+        # Early stopping patience: 2回待つ
         self.phase1_min_convergence_improvement = base.phase1_min_convergence_improvement
+        self.phase1_no_improvement_patience = patience
         self.context_dim = context_dim
         self.embed_dim = base.embed_dim
         self.vocab_size = base.vocab_size
@@ -487,59 +331,65 @@ class Phase2ConfigWrapper:
         self.phase2_learning_rate = base.phase2_learning_rate
         self.phase2_epochs = base.phase2_epochs
         self.phase2_patience = base.phase2_patience
-        self.phase2_batch_size = base.phase2_batch_size
+        # batch_sizeがNoneの場合はデフォルト値を使用
+        self.phase2_batch_size: int = base.effective_phase2_batch_size
         self.phase2_gradient_clip = base.phase2_gradient_clip
         self.phase2_min_ppl_improvement = base.phase2_min_ppl_improvement
 
 
 def collect_context_cache_sequential(
-    model: SearchableLLM,
+    model: SimpleLLM,
     token_ids: torch.Tensor,
     device: torch.device,
 ) -> torch.Tensor:
     """
-    順次処理でコンテキストキャッシュを収集
+    Phase 2 Prep: コンテキストキャッシュを順次処理で収集
+
+    正確なRNN動作を再現するため、トークンを1つずつ処理する。
 
     Args:
-        model: SearchableLLM
-        token_ids: トークンID
+        model: SimpleLLM
+        token_ids: トークンID [num_tokens]
         device: デバイス
 
     Returns:
-        context_cache: [num_tokens, context_dim]
+        context_cache: [num_tokens-1, context_dim]
     """
     model.eval()
-    num_tokens = len(token_ids) - 1
+    num_tokens = len(token_ids)
     context_dim = model.context_dim
 
-    context_cache = torch.zeros(num_tokens, context_dim, device='cpu')
-
+    # Token embeddings
     with torch.no_grad():
-        # Token embeddings
-        all_embeds = model.token_embedding(token_ids.to(device))
-        all_embeds = model.embed_norm(all_embeds)
-        token_embeds_all = all_embeds[:-1].cpu()
-        del all_embeds
-        clear_gpu_cache(device)
+        token_embeds = model.token_embedding(token_ids.to(device))
+        token_embeds = model.embed_norm(token_embeds)
 
-        # 初期context
-        prev_context = torch.zeros(1, context_dim, device=device)
+    # 結果格納
+    context_cache = torch.zeros(num_tokens - 1, context_dim, device='cpu')
 
-        # 順次処理
-        for i in range(num_tokens):
-            token_embed = token_embeds_all[i:i+1].to(device)
+    # 初期context
+    prev_context = torch.zeros(1, context_dim, device=device)
+
+    # 順次処理
+    with torch.no_grad():
+        for i in range(num_tokens - 1):
+            token_embed = token_embeds[i:i+1]
             new_context = model.forward_context(prev_context, token_embed)
-            context_cache[i] = new_context.cpu().squeeze(0)
+
+            # キャッシュに保存
+            context_cache[i] = new_context.cpu()
+
             prev_context = new_context
 
+            # 進捗表示
             if (i + 1) % 100000 == 0:
-                print_flush(f"      {i+1:,}/{num_tokens:,} tokens processed...")
+                print_flush(f"      {i+1:,}/{num_tokens-1:,} tokens processed...")
 
     return context_cache
 
 
 def train_phase2(
-    model: SearchableLLM,
+    model: SimpleLLM,
     train_token_ids: torch.Tensor,
     val_token_ids: torch.Tensor,
     train_context_cache: torch.Tensor,
@@ -549,131 +399,164 @@ def train_phase2(
     config: Phase2ConfigWrapper,
     device: torch.device,
 ) -> Dict[str, Any]:
-    """Phase 2 学習を実行"""
-    from torch.optim import AdamW
+    """
+    Phase 2: TokenBlock 学習
 
-    model.to(device)
+    Args:
+        model: SimpleLLM
+        train/val_token_ids: トークンID
+        train/val_context_cache: コンテキストキャッシュ
+        train/val_token_embeds: トークン埋め込み
+        config: 設定
+        device: デバイス
+
+    Returns:
+        history: 学習履歴
+    """
     model.freeze_context_block()
+
+    # Embedding freeze
     model.token_embedding.weight.requires_grad = False
     print_flush("✓ Embedding frozen")
 
-    # 学習対象のパラメータ
+    # TokenBlockのみ学習
     trainable_params = [p for p in model.token_block.parameters() if p.requires_grad]
-    total_trainable = sum(p.numel() for p in trainable_params)
-    total_params = model.num_params()['total']
-    print_flush(f"✓ Training TokenBlock only: {total_trainable:,}/{total_params:,} parameters")
+    total_params = sum(p.numel() for p in model.parameters())
+    trainable_count = sum(p.numel() for p in trainable_params)
+    print_flush(f"✓ Training TokenBlock only: {trainable_count:,}/{total_params:,} parameters")
 
-    optimizer = AdamW(trainable_params, lr=config.phase2_learning_rate)
+    optimizer = torch.optim.Adam(trainable_params, lr=config.phase2_learning_rate)
     criterion = nn.CrossEntropyLoss()
 
-    # ターゲット
-    train_targets = train_token_ids[1:].to(device)
-    val_targets = val_token_ids[1:].to(device)
+    num_train = len(train_context_cache)
+    num_val = len(val_context_cache)
+    batch_size = config.phase2_batch_size
+
+    train_labels = train_token_ids[1:].to(device)
+    val_labels = val_token_ids[1:].to(device)
+
+    print_flush(f"\n[Phase 2] {num_train:,} train / {num_val:,} val tokens, {config.phase2_epochs} epochs")
 
     history: Dict[str, Any] = {
-        'train_ppl': [],
-        'val_ppl': [],
-        'val_acc': [],
-        'best_epoch': 1,
+        'train_loss': [], 'train_ppl': [],
+        'val_loss': [], 'val_ppl': [], 'val_acc': [],
     }
-
     best_val_ppl = float('inf')
+    best_epoch = 0
     patience_counter = 0
-    prev_val_ppl = float('inf')
-
-    num_train = len(train_targets)
-    batch_size = config.phase2_batch_size or 1000
-
-    print_flush(f"\n[Phase 2] {num_train:,} train / {len(val_targets):,} val tokens, "
-                f"{config.phase2_epochs} epochs")
 
     for epoch in range(1, config.phase2_epochs + 1):
         epoch_start = time.time()
 
-        # === Training ===
+        # Training
         model.train()
-        total_loss = 0.0
+        train_loss_sum = 0.0
+        train_batches = 0
 
         for start_idx in range(0, num_train, batch_size):
             end_idx = min(start_idx + batch_size, num_train)
 
-            batch_token_embeds = train_token_embeds[start_idx:end_idx].to(device)
-            batch_targets = train_targets[start_idx:end_idx]
             batch_context = train_context_cache[start_idx:end_idx].to(device)
+            batch_token = train_token_embeds[start_idx:end_idx].to(device)
+            batch_labels = train_labels[start_idx:end_idx]
 
             optimizer.zero_grad()
-            token_out = model.forward_token(batch_context, batch_token_embeds)
+
+            token_out = model.forward_token(batch_context, batch_token)
             logits = model.token_output(token_out)
+            loss = criterion(logits, batch_labels)
 
-            loss = criterion(logits, batch_targets)
             loss.backward()
-
-            torch.nn.utils.clip_grad_norm_(trainable_params, config.phase2_gradient_clip)
+            if config.phase2_gradient_clip > 0:
+                torch.nn.utils.clip_grad_norm_(trainable_params, config.phase2_gradient_clip)
             optimizer.step()
 
-            total_loss += loss.item() * (end_idx - start_idx)
+            train_loss_sum += loss.item() * (end_idx - start_idx)
+            train_batches += 1
 
-        train_ppl = torch.exp(torch.tensor(total_loss / num_train)).item()
+        train_loss = train_loss_sum / num_train
+        train_ppl = min(torch.exp(torch.tensor(train_loss)).item(), 1e7)
 
-        # === Validation ===
+        # Validation
         model.eval()
-        val_loss = 0.0
-        correct = 0
-        num_val = len(val_targets)
+        val_loss_sum = 0.0
+        val_correct = 0
 
         with torch.no_grad():
             for start_idx in range(0, num_val, batch_size):
                 end_idx = min(start_idx + batch_size, num_val)
 
-                batch_token_embeds = val_token_embeds[start_idx:end_idx].to(device)
-                batch_targets = val_targets[start_idx:end_idx]
                 batch_context = val_context_cache[start_idx:end_idx].to(device)
+                batch_token = val_token_embeds[start_idx:end_idx].to(device)
+                batch_labels = val_labels[start_idx:end_idx]
 
-                token_out = model.forward_token(batch_context, batch_token_embeds)
+                token_out = model.forward_token(batch_context, batch_token)
                 logits = model.token_output(token_out)
+                loss = criterion(logits, batch_labels)
 
-                val_loss += criterion(logits, batch_targets).item() * (end_idx - start_idx)
-                correct += (logits.argmax(dim=-1) == batch_targets).sum().item()
+                val_loss_sum += loss.item() * (end_idx - start_idx)
+                val_correct += (logits.argmax(dim=-1) == batch_labels).sum().item()
 
-        val_ppl = torch.exp(torch.tensor(val_loss / num_val)).item()
-        val_acc = correct / num_val
+        val_loss = val_loss_sum / num_val
+        val_ppl = min(torch.exp(torch.tensor(val_loss)).item(), 1e7)
+        val_acc = val_correct / num_val
 
+        epoch_time = time.time() - epoch_start
+
+        history['train_loss'].append(train_loss)
         history['train_ppl'].append(train_ppl)
+        history['val_loss'].append(val_loss)
         history['val_ppl'].append(val_ppl)
         history['val_acc'].append(val_acc)
 
-        is_best = val_ppl < best_val_ppl
-        marker = " *" if is_best else ""
-
-        if is_best:
+        improved = ""
+        if val_ppl < best_val_ppl - config.phase2_min_ppl_improvement:
             best_val_ppl = val_ppl
-            history['best_epoch'] = epoch
+            best_epoch = epoch
             patience_counter = 0
+            improved = " *"
         else:
             patience_counter += 1
 
-        elapsed = time.time() - epoch_start
         print_flush(f"    Epoch {epoch}: train_ppl={train_ppl:.1f} val_ppl={val_ppl:.1f} "
-                    f"acc={val_acc*100:.1f}% [{elapsed:.1f}s]{marker}")
-
-        # Early stopping
-        ppl_improvement = prev_val_ppl - val_ppl
-        min_improvement = getattr(config, 'phase2_min_ppl_improvement', 0.4)
-
-        if epoch > 1 and ppl_improvement < min_improvement and ppl_improvement >= 0:
-            print_flush(f"    → Early stop at epoch {epoch}")
-            break
+                    f"acc={val_acc*100:.1f}% [{epoch_time:.1f}s]{improved}")
 
         if patience_counter >= config.phase2_patience:
             print_flush(f"    → Early stop at epoch {epoch}")
             break
 
-        prev_val_ppl = val_ppl
+    print_flush(f"    Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}, acc={history['val_acc'][best_epoch-1]*100:.1f}%")
 
-    print_flush(f"    Best: epoch {history['best_epoch']}, ppl={best_val_ppl:.1f}, "
-                f"acc={history['val_acc'][history['best_epoch']-1]*100:.1f}%")
+    history['best_epoch'] = best_epoch
+    history['best_val_ppl'] = best_val_ppl
 
     return history
+
+
+def create_model(
+    base_config: Config,
+    context_dim: int,
+    device: torch.device,
+) -> SimpleLLM:
+    """
+    新規モデルを作成
+
+    Args:
+        base_config: 基本設定
+        context_dim: コンテキスト次元
+        device: デバイス
+
+    Returns:
+        SimpleLLM
+    """
+    model = SimpleLLM(
+        vocab_size=base_config.vocab_size,
+        embed_dim=base_config.embed_dim,
+        context_dim=context_dim,
+        num_input_tokens=base_config.num_input_tokens,
+    )
+    model.to(device)
+    return model
 
 
 def run_context_dim_search(
@@ -684,19 +567,29 @@ def run_context_dim_search(
     output_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
-    context_dim 探索実験を実行
+    Context Dim 探索を実行
 
     Args:
         num_samples: サンプル数
-        dim_step: context_dim の増加幅
+        dim_step: dim の刻み幅（例: 10 なら 10, 20, 30...）
         max_dim: 最大 context_dim
-        seed: 乱数シード
+        seed: ランダムシード
         output_dir: 出力ディレクトリ
 
     Returns:
-        実験結果
+        結果の辞書
     """
     set_seed(seed)
+
+    print_flush("=" * 70)
+    print_flush("CONTEXT DIM SEARCH EXPERIMENT")
+    print_flush("=" * 70)
+    print_flush(f"Samples: {num_samples}")
+    print_flush(f"Dim step: {dim_step}")
+    print_flush(f"Max dim: {max_dim}")
+    if output_dir:
+        print_flush(f"Output: {output_dir}")
+    print_flush("=" * 70)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -720,46 +613,29 @@ def run_context_dim_search(
     num_val_tokens = len(val_token_ids)
     print_flush(f"Data: {num_train_tokens:,} train, {num_val_tokens:,} val tokens")
 
-    # 初期モデル作成（dim_step から開始）
-    initial_dim = dim_step
-    print_flush(f"\nCreating SearchableLLM (initial context_dim={initial_dim})...")
-    model = SearchableLLM(
-        vocab_size=base_config.vocab_size,
-        embed_dim=base_config.embed_dim,
-        context_dim=initial_dim,
-        num_input_tokens=base_config.num_input_tokens,
-    )
-    model.to(device)
-
     # 結果記録
     results: List[Dict[str, Any]] = []
     worse_count = 0
     best_ppl = float('inf')
-    best_dim = initial_dim
+    best_dim = dim_step
 
-    current_dim = initial_dim
+    current_dim = dim_step
 
     while current_dim <= max_dim:
         print_flush(f"\n{'='*70}")
         print_flush(f"[DIM={current_dim}] Starting experiment...")
-        print_flush(f"{'='*70}")
+        print_flush("=" * 70)
 
-        # 拡張が必要な場合
-        if current_dim > model.context_dim:
-            model.expand_context_dim(current_dim, noise_scale=0.01)
-            model.to(device)
+        # 新規モデル作成
+        print_flush(f"\nCreating SimpleLLM (context_dim={current_dim})...")
+        model = create_model(base_config, current_dim, device)
 
-        # ContextBlock をunfreeze
-        model.unfreeze_context_block()
-
-        # Phase 1 Config を更新
-        config_wrapper = Phase1ConfigWrapper(base_config, current_dim)
+        # Phase 1 Config
+        config_wrapper = Phase1ConfigWrapper(base_config, current_dim, patience=2)
 
         # Phase 1: ContextBlock 学習
         print_flush(f"\n[Phase 1] Training ContextBlock (context_dim={current_dim})...")
         wrapper = SingleContextWrapper(model)
-        # wrapperのcontext_dimも更新
-        wrapper.context_dim = current_dim
         trainer = MemoryPhase1Trainer(wrapper, config_wrapper, device)
 
         phase1_start = time.time()
@@ -860,7 +736,7 @@ def run_context_dim_search(
         current_dim += dim_step
 
         # メモリ解放
-        del train_context_cache, val_context_cache
+        del model, train_context_cache, val_context_cache
         del train_token_embeds, val_token_embeds
         clear_gpu_cache(device)
 
@@ -900,12 +776,8 @@ def run_context_dim_search(
                         f"{r['val_er_pct']:>5.1f}% | {r['total_time']:>7.1f}s{marker}\n")
             f.write("-" * 50 + "\n")
             f.write(f"\nBest: dim={best_dim}, PPL={best_ppl:.1f}\n")
-        print_flush(f"\nResults saved to: {result_file}")
 
-    # メモリ解放
-    del model
-    data_provider.close()
-    clear_gpu_cache(device)
+        print_flush(f"\nResults saved to: {result_file}")
 
     return {
         'results': results,
@@ -914,28 +786,27 @@ def run_context_dim_search(
     }
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description='Context Dim Search Experiment')
-    parser.add_argument('--samples', '-s', type=int, default=2000, help='Number of samples')
-    parser.add_argument('--dim-step', '-n', type=int, default=10, help='Context dim step')
-    parser.add_argument('--max-dim', '-m', type=int, default=500, help='Max context dim')
-    parser.add_argument('--output-dir', '-o', help='Output directory')
-    parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--samples', '-s', type=int, default=2000,
+                        help='Number of training samples')
+    parser.add_argument('--dim-step', '-n', type=int, default=10,
+                        help='Context dim step size (e.g., 10 means 10,20,30...)')
+    parser.add_argument('--max-dim', '-m', type=int, default=500,
+                        help='Maximum context dim to search')
+    parser.add_argument('--seed', type=int, default=42,
+                        help='Random seed')
+    parser.add_argument('--output', '-o', type=str, default=None,
+                        help='Output directory for results')
 
     args = parser.parse_args()
 
     # 出力ディレクトリ
-    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    output_dir = args.output_dir or f"importants/logs/{timestamp}_context_dim_search"
-
-    print_flush("=" * 70)
-    print_flush("CONTEXT DIM SEARCH EXPERIMENT")
-    print_flush("=" * 70)
-    print_flush(f"Samples: {args.samples}")
-    print_flush(f"Dim step: {args.dim_step}")
-    print_flush(f"Max dim: {args.max_dim}")
-    print_flush(f"Output: {output_dir}")
-    print_flush("=" * 70)
+    if args.output:
+        output_dir = args.output
+    else:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_dir = f"importants/logs/{timestamp}_context_dim_search"
 
     run_context_dim_search(
         num_samples=args.samples,
@@ -950,5 +821,5 @@ def main():
     print_flush("=" * 70)
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()

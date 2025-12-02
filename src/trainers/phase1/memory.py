@@ -173,6 +173,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         early_stopping = getattr(self.config, 'phase1_early_stopping', True)
         early_stopping_threshold = getattr(self.config, 'phase1_early_stopping_threshold', 0.30)
         min_convergence_improvement = getattr(self.config, 'phase1_min_convergence_improvement', 0.01)
+        no_improvement_patience = getattr(self.config, 'phase1_no_improvement_patience', 2)
 
         previous_contexts: Optional[torch.Tensor] = None
         final_convergence_rate = 0.0
@@ -226,11 +227,11 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 print_flush(f"  → Early stop: conv {convergence_rate*100:.0f}% >= {early_stopping_threshold*100:.0f}%")
                 break
 
-            # 収束率改善Early Stopping（改善幅不足、50%以上で有効）
-            if early_stopping and no_improvement_count >= 1 and convergence_rate >= min_conv_for_improvement_check:
+            # 収束率改善Early Stopping（改善幅不足、50%以上で有効、patience回待つ）
+            if early_stopping and no_improvement_count >= no_improvement_patience and convergence_rate >= min_conv_for_improvement_check:
                 early_stopped = True
                 print_flush(
-                    f"  → Early stop: improvement {improvement*100:.1f}% < {min_convergence_improvement*100:.0f}%"
+                    f"  → Early stop: no improvement for {no_improvement_patience} iterations"
                 )
                 break
 
