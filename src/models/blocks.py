@@ -13,6 +13,7 @@ import torch
 import torch.nn as nn
 
 from .layers import ContextLayer, TokenLayer
+from src.utils.initialization import count_parameters
 
 
 class ContextBlock(nn.Module):
@@ -86,7 +87,7 @@ class ContextBlock(nn.Module):
 
     def num_params(self) -> int:
         """パラメータ数を返す"""
-        return sum(p.numel() for p in self.parameters())
+        return count_parameters(self)
 
 
 class TokenBlock(nn.Module):
@@ -145,4 +146,4 @@ class TokenBlock(nn.Module):
 
     def num_params(self) -> int:
         """パラメータ数を返す"""
-        return sum(p.numel() for p in self.parameters())
+        return count_parameters(self)

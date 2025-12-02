@@ -11,7 +11,7 @@ import torch
 import torch.nn as nn
 
 from src.models.ffn import FFN
-from src.utils.initialization import init_linear_weights
+from src.utils.initialization import init_linear_weights, count_parameters
 
 
 class ContextLayer(nn.Module):
@@ -87,7 +87,7 @@ class ContextLayer(nn.Module):
 
     def num_params(self) -> int:
         """このレイヤーのパラメータ数を返す"""
-        return sum(p.numel() for p in self.parameters())
+        return count_parameters(self)
 
 
 class TokenLayer(nn.Module):
@@ -164,4 +164,4 @@ class TokenLayer(nn.Module):
 
     def num_params(self) -> int:
         """このレイヤーのパラメータ数を返す"""
-        return sum(p.numel() for p in self.parameters())
+        return count_parameters(self)

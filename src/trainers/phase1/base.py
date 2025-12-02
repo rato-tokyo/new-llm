@@ -4,10 +4,27 @@ Phase1Trainer - 多様性学習トレーナーの抽象基底クラス
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Protocol
 import torch
 
 from src.utils.io import print_flush
+
+
+class Phase1ConfigProtocol(Protocol):
+    """Phase1Trainerが要求するConfig属性の型定義"""
+    embed_dim: int
+    context_dim: int
+    vocab_size: int
+    num_input_tokens: int
+    phase1_max_iterations: int
+    phase1_convergence_threshold: float
+    phase1_learning_rate: float
+    phase1_batch_size: int
+    phase1_gradient_clip: float
+    phase1_context_noise: float
+    phase1_early_stopping: bool
+    phase1_early_stopping_threshold: float
+    phase1_min_convergence_improvement: float
 
 # Phase 2キャッシュ用の型定義
 # G案: 最終レイヤー出力のみ [num_tokens, context_dim]
@@ -43,7 +60,7 @@ class Phase1Result:
 class Phase1Trainer(ABC):
     """Phase 1トレーナーの抽象基底クラス"""
 
-    def __init__(self, model: torch.nn.Module, config: Any, device: torch.device) -> None:
+    def __init__(self, model: torch.nn.Module, config: Phase1ConfigProtocol, device: torch.device) -> None:
         self.model = model
         self.config = config
         self.device = device

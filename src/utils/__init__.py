@@ -11,7 +11,7 @@ from .memory import (
     can_fit_in_memory,
     print_memory_report
 )
-from .initialization import init_linear_weights
+from .initialization import init_linear_weights, count_parameters
 
 __all__ = [
     # Memory utilities
@@ -24,4 +24,5 @@ __all__ = [
     'print_memory_report',
     # Initialization utilities
     'init_linear_weights',
+    'count_parameters',
 ]

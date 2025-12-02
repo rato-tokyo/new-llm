@@ -1,10 +1,24 @@
 """
-Weight initialization utilities for new-llm.
+Weight initialization and parameter utilities for new-llm.
 
-Provides shared initialization functions for consistent layer initialization.
+Provides shared initialization functions for consistent layer initialization
+and parameter counting utilities.
 """
 
 import torch.nn as nn
+
+
+def count_parameters(module: nn.Module) -> int:
+    """
+    Count total parameters in a module.
+
+    Args:
+        module: PyTorch module to count parameters for
+
+    Returns:
+        Total number of parameters
+    """
+    return sum(p.numel() for p in module.parameters())
 
 
 def init_linear_weights(

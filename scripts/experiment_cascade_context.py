@@ -45,6 +45,7 @@ from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
+from src.utils.initialization import count_parameters
 from config.experiment import DataConfig
 
 
@@ -143,13 +144,13 @@ class CascadeContextLLM(nn.Module):
             param.requires_grad = False
         print_flush("✓ Both ContextBlocks frozen")
 
-    def num_params(self) -> dict:
+    def num_params(self) -> Dict[str, int]:
         """パラメータ数を返す"""
         embedding_params = self.token_embedding.weight.numel()
-        embed_norm_params = sum(p.numel() for p in self.embed_norm.parameters())
-        context_a_params = sum(p.numel() for p in self.context_block_a.parameters())
-        context_b_params = sum(p.numel() for p in self.context_block_b.parameters())
-        token_block_params = sum(p.numel() for p in self.token_block.parameters())
+        embed_norm_params = count_parameters(self.embed_norm)
+        context_a_params = count_parameters(self.context_block_a)
+        context_b_params = count_parameters(self.context_block_b)
+        token_block_params = count_parameters(self.token_block)
 
         total = embedding_params + embed_norm_params + context_a_params + context_b_params + token_block_params
 

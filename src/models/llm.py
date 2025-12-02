@@ -23,6 +23,7 @@ import torch.nn as nn
 
 from .blocks import ContextBlock, TokenBlock
 from src.utils.io import print_flush
+from src.utils.initialization import count_parameters
 
 
 class LLM(nn.Module):
@@ -164,7 +165,7 @@ class LLM(nn.Module):
             パラメータ数の詳細辞書
         """
         embedding_params = self.token_embedding.weight.numel()
-        embed_norm_params = sum(p.numel() for p in self.embed_norm.parameters())
+        embed_norm_params = count_parameters(self.embed_norm)
         context_block_params = self.context_block.num_params()
         token_block_params = self.token_block.num_params()
 
