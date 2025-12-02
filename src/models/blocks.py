@@ -3,9 +3,11 @@ Block components for New-LLM architecture.
 
 ContextBlock: 文脈処理ブロック（Phase 1で学習、Phase 2でfreeze）
 TokenBlock: トークン処理ブロック（Phase 2で学習）
-"""
 
-from typing import List, Union
+G案 Context Mode (2025-12-02採用):
+- Phase 2では最終レイヤー出力のみ使用
+- キャッシュ形式: [num_tokens, context_dim]（固定、レイヤー数に依存しない）
+"""
 
 import torch
 import torch.nn as nn
@@ -63,71 +65,40 @@ class ContextBlock(nn.Module):
         self,
         context: torch.Tensor,
         token_embeds: torch.Tensor,
-        return_intermediates: bool = False
-    ) -> Union[torch.Tensor, List[torch.Tensor]]:
+    ) -> torch.Tensor:
         """
         Execute all context layers sequentially
 
         Args:
             context: [batch, context_dim]
             token_embeds: [batch, embed_dim * num_input_tokens]
-            return_intermediates: If True, return all layer outputs (E案用)
 
         Returns:
-            return_intermediates=False: context [batch, context_dim]
-            return_intermediates=True: List of outputs [context_1, ..., context_N]
+            context: [batch, context_dim] - 最終レイヤー出力
         """
-        if return_intermediates:
-            outputs = []
-            for layer in self.layers:
-                context = layer(context, token_embeds)
-                outputs.append(context)
-            return outputs
-        else:
-            for layer in self.layers:
-                context = layer(context, token_embeds)
-            return context
+        for layer in self.layers:
+            context = layer(context, token_embeds)
+        return context
 
-    def forward_with_intermediates(self, context: torch.Tensor, token_embeds: torch.Tensor) -> List[torch.Tensor]:
-        """各レイヤーの中間出力を返す"""
-        result = self.forward(context, token_embeds, return_intermediates=True)
-        assert isinstance(result, list)
-        return result
+    def forward_batch(self, contexts: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
+        """
+        バッチ並列で最終レイヤー出力を計算（G案用）
+
+        Args:
+            contexts: [num_tokens, context_dim] - 入力context
+            token_embeds: [num_tokens, embed_dim * num_input_tokens]
+
+        Returns:
+            outputs: [num_tokens, context_dim] - 最終レイヤー出力
+        """
+        current_context = contexts
+        for layer in self.layers:
+            current_context = layer(current_context, token_embeds)
+        return current_context
 
     def num_params(self) -> int:
         """このブロックのパラメータ数を返す"""
         return sum(p.numel() for p in self.parameters())
-
-    def forward_with_intermediates_batch(self, contexts: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
-        """
-        バッチ並列で全レイヤーの中間出力を計算
-
-        Phase 1で確定したcontextsを入力として、各レイヤーの出力を並列計算。
-        シーケンシャル処理と異なり、全トークンを同時に処理できる。
-
-        Args:
-            contexts: [num_tokens, context_dim] - 確定済みのcontext（Phase 1の出力）
-            token_embeds: [num_tokens, embed_dim * num_input_tokens]
-
-        Returns:
-            outputs: [num_layers, num_tokens, context_dim] - 各レイヤーの出力
-        """
-        num_tokens = contexts.shape[0]
-        device = contexts.device
-
-        # 結果を格納するテンソル
-        outputs = torch.zeros(
-            self.num_layers, num_tokens, self.context_dim,
-            device=device, dtype=contexts.dtype
-        )
-
-        # token継ぎ足し方式: 全レイヤーでtoken入力
-        current_context = contexts
-        for layer_idx, layer in enumerate(self.layers):
-            current_context = layer(current_context, token_embeds)
-            outputs[layer_idx] = current_context
-
-        return outputs
 
 
 class TokenBlock(nn.Module):

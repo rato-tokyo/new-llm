@@ -205,7 +205,8 @@ class ExperimentRunner:
         assert train_result.cache is not None
         assert train_result.token_embeds is not None
         train_contexts = train_result.contexts
-        train_context_cache = train_result.cache[-1]
+        # G案: cacheは既に [num_tokens, context_dim] 形式
+        train_context_cache = train_result.cache
         train_token_embeds = train_result.token_embeds
 
         phase1_stats = phase1_trainer._training_stats
@@ -217,7 +218,8 @@ class ExperimentRunner:
         assert val_result.cache is not None
         assert val_result.token_embeds is not None
         val_contexts = val_result.contexts
-        val_context_cache = val_result.cache[-1]
+        # G案: cacheは既に [num_tokens, context_dim] 形式
+        val_context_cache = val_result.cache
         val_token_embeds = val_result.token_embeds
 
         # Effective Rank計算

@@ -10,7 +10,7 @@ import torch
 from src.utils.io import print_flush
 
 # Phase 2キャッシュ用の型定義
-# token継ぎ足し方式: 全レイヤー同じcontext_dimなのでテンソル形式のみ
+# G案: 最終レイヤー出力のみ [num_tokens, context_dim]
 ContextCache = torch.Tensor
 
 
@@ -21,9 +21,13 @@ class Phase1Result:
 
     型安全なデータ受け渡しを保証し、条件付き戻り値の脆弱性を解消。
 
+    G案 (2025-12-02):
+    - cacheは最終レイヤー出力のみ [num_tokens, context_dim]
+    - メモリ効率向上（レイヤー数に依存しない）
+
     Attributes:
         contexts: コンテキストベクトル [num_tokens, context_dim]
-        cache: 全レイヤー出力キャッシュ（Phase 2用）[num_layers, num_tokens, context_dim]
+        cache: コンテキストキャッシュ（Phase 2用）[num_tokens, context_dim]
         token_embeds: トークン埋め込み（Phase 2用）[num_tokens, embed_dim * num_input_tokens]
     """
     contexts: torch.Tensor

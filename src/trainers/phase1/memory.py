@@ -122,14 +122,14 @@ class MemoryPhase1Trainer(Phase1Trainer):
         if not return_all_layers:
             return Phase1Result(contexts=final_contexts)
 
-        # 全レイヤーキャッシュ収集
-        all_layer_contexts, token_embeds_combined = self._collect_layer_cache(
+        # G案: 最終レイヤー出力のみキャッシュ [num_tokens, context_dim]
+        context_cache, token_embeds_combined = self._collect_layer_cache(
             token_embeds, previous_contexts
         )
 
         return Phase1Result(
             contexts=final_contexts,
-            cache=all_layer_contexts,
+            cache=context_cache,
             token_embeds=token_embeds_combined
         )
 
@@ -238,13 +238,15 @@ class MemoryPhase1Trainer(Phase1Trainer):
         previous_contexts: torch.Tensor
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Phase 2用の全レイヤーキャッシュを収集
+        Phase 2用のコンテキストキャッシュを収集（G案: 最終レイヤー出力のみ）
 
         大規模データでのOOMを防ぐため、token_embedsとprevious_contextsは
         CPUに保持し、バッチ処理内で必要な分だけGPUに転送する。
 
         Returns:
-            (all_layer_contexts, token_embeds_combined)
+            (context_cache, token_embeds_combined)
+            - context_cache: [num_tokens, context_dim] - 最終レイヤー出力
+            - token_embeds_combined: [num_tokens, embed_dim * num_input_tokens]
         """
         cache_start = time.time()
         print_flush("  Collecting cache (parallel)...")
@@ -265,9 +267,9 @@ class MemoryPhase1Trainer(Phase1Trainer):
         # バッチサイズ決定
         cache_batch_size = self._compute_cache_batch_size()
 
-        num_layers = self.model.num_layers
-        all_layer_contexts = torch.zeros(
-            num_layers, num_input_tokens_total, self.model.context_dim,
+        # G案: 最終レイヤー出力のみ保持 [num_tokens, context_dim]
+        context_cache = torch.zeros(
+            num_input_tokens_total, self.model.context_dim,
             device='cpu', dtype=torch.float32
         )
 
@@ -285,11 +287,12 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 batch_contexts = shifted_contexts[batch_start:batch_end].to(self.device)
                 batch_embeds = token_embeds_combined[batch_start:batch_end].to(self.device)
 
-                batch_results = self.model.context_block.forward_with_intermediates_batch(
+                # G案: forward_batchで最終レイヤー出力のみ取得
+                batch_results = self.model.context_block.forward_batch(
                     batch_contexts, batch_embeds
                 )
 
-                all_layer_contexts[:, batch_start:batch_end, :] = batch_results.cpu()
+                context_cache[batch_start:batch_end, :] = batch_results.cpu()
 
                 del batch_results, batch_embeds, batch_contexts
                 clear_gpu_cache(self.device)
@@ -300,7 +303,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         self.model.train()
         clear_gpu_cache(self.device)
 
-        return all_layer_contexts, token_embeds_combined
+        return context_cache, token_embeds_combined
 
     def _compute_cache_batch_size(self) -> int:
         """キャッシュ収集用のバッチサイズを計算"""
@@ -373,16 +376,19 @@ class MemoryPhase1Trainer(Phase1Trainer):
         collect_all_layers: bool = False
     ) -> tuple[torch.Tensor, Optional[ContextCache], Optional[torch.Tensor]]:
         """
-        シーケンシャル処理（Iteration 0用 or 全レイヤー収集用）- 勾配なし
+        シーケンシャル処理（Iteration 0用 or キャッシュ収集用）- 勾配なし
+
+        G案: 最終レイヤー出力のみ保持
 
         Args:
             token_embeds: トークン埋め込み [num_tokens, embed_dim]
             previous_contexts: 前回のコンテキスト（Noneの場合はゼロ初期化）
-            collect_all_layers: 全レイヤー出力を収集するか
+            collect_all_layers: キャッシュを収集するか
 
         Returns:
             collect_all_layers=False: (contexts, None, None)
             collect_all_layers=True: (contexts, context_cache, token_embeds_combined)
+                - context_cache: [num_tokens, context_dim] (G案: 最終レイヤーのみ)
         """
         num_tokens = len(token_embeds)
         num_input_tokens = self.config.num_input_tokens
@@ -399,18 +405,14 @@ class MemoryPhase1Trainer(Phase1Trainer):
         # トークン履歴を初期化（空リスト）
         token_history: list[torch.Tensor] = []
 
-        # 全レイヤー収集用の変数を初期化
+        # キャッシュ収集用の変数を初期化
         context_cache: Optional[ContextCache] = None
         token_embeds_combined: Optional[torch.Tensor] = None
 
         if collect_all_layers:
-            # Phase 2用キャッシュ形式で初期化
-            # token継ぎ足し方式: 全レイヤー同じcontext_dim
-            num_layers = self.model.num_layers
-            context_dim = self.model.context_dim
-
+            # G案: 最終レイヤー出力のみ [num_tokens, context_dim]
             context_cache = torch.zeros(
-                num_layers, num_tokens, context_dim,
+                num_tokens, self.model.context_dim,
                 device=self.device, dtype=torch.float32
             )
 
@@ -430,25 +432,16 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 if len(token_history) >= num_input_tokens:
                     token_history = token_history[-(num_input_tokens - 1):]
 
+                # forward処理
+                context = self.model.context_block(context, combined_tokens.unsqueeze(0))
+                contexts[i] = context.squeeze(0)
+
                 if collect_all_layers:
-                    # 全レイヤー出力を取得
+                    # G案: 最終レイヤー出力をキャッシュ
+                    assert context_cache is not None
                     assert token_embeds_combined is not None
+                    context_cache[i] = context.squeeze(0)
                     token_embeds_combined[i] = combined_tokens
-
-                    context_outputs = self.model.forward_context_with_intermediates(
-                        context, combined_tokens.unsqueeze(0)
-                    )
-
-                    for layer_idx, ctx_out in enumerate(context_outputs):
-                        assert context_cache is not None
-                        context_cache[layer_idx, i] = ctx_out.squeeze(0)
-
-                    context = context_outputs[-1]
-                    contexts[i] = context.squeeze(0)
-                else:
-                    # 通常処理（最終レイヤーのみ）
-                    context = self.model.context_block(context, combined_tokens.unsqueeze(0))
-                    contexts[i] = context.squeeze(0)
 
         return contexts, context_cache, token_embeds_combined
 
