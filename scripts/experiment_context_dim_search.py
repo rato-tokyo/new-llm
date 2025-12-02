@@ -37,6 +37,7 @@ from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
 from src.utils.initialization import count_parameters
+from src.utils.cache import collect_context_cache_sequential
 from config.experiment import DataConfig
 
 # ============================================================
@@ -340,57 +341,6 @@ class Phase2ConfigWrapper:
         self.phase2_batch_size: int = base.effective_phase2_batch_size
         self.phase2_gradient_clip = base.phase2_gradient_clip
         self.phase2_min_ppl_improvement = base.phase2_min_ppl_improvement
-
-
-def collect_context_cache_sequential(
-    model: SimpleLLM,
-    token_ids: torch.Tensor,
-    device: torch.device,
-) -> torch.Tensor:
-    """
-    Phase 2 Prep: コンテキストキャッシュを順次処理で収集
-
-    正確なRNN動作を再現するため、トークンを1つずつ処理する。
-
-    Args:
-        model: SimpleLLM
-        token_ids: トークンID [num_tokens]
-        device: デバイス
-
-    Returns:
-        context_cache: [num_tokens-1, context_dim]
-    """
-    model.eval()
-    num_tokens = len(token_ids)
-    context_dim = model.context_dim
-
-    # Token embeddings
-    with torch.no_grad():
-        token_embeds = model.token_embedding(token_ids.to(device))
-        token_embeds = model.embed_norm(token_embeds)
-
-    # 結果格納
-    context_cache = torch.zeros(num_tokens - 1, context_dim, device='cpu')
-
-    # 初期context
-    prev_context = torch.zeros(1, context_dim, device=device)
-
-    # 順次処理
-    with torch.no_grad():
-        for i in range(num_tokens - 1):
-            token_embed = token_embeds[i:i+1]
-            new_context = model.forward_context(prev_context, token_embed)
-
-            # キャッシュに保存
-            context_cache[i] = new_context.cpu()
-
-            prev_context = new_context
-
-            # 進捗表示
-            if (i + 1) % 100000 == 0:
-                print_flush(f"      {i+1:,}/{num_tokens-1:,} tokens processed...")
-
-    return context_cache
 
 
 def train_phase2(
