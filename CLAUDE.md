@@ -192,6 +192,79 @@ batch_contexts = previous_contexts[start_idx:end_idx].detach().to(self.device)
 
 ---
 
+## 🚨🚨 Phase 2 Prep: GPUメモリリーク防止 (CRITICAL) (2025-12-03) 🚨🚨
+
+**⚠️ Phase 2 Prepのキャッシュ収集でGPUメモリが15GB+消費される問題が発生した。**
+
+### 問題の原因
+
+```python
+# ❌ 禁止: 全token_embedsをGPUに一度にロード
+with torch.no_grad():
+    token_embeds = model.token_embedding(token_ids.to(device))  # 全データをGPUに！
+    token_embeds = model.embed_norm(token_embeds)
+
+for i in range(num_tokens - 1):
+    token_embed = token_embeds[i:i+1]  # GPUメモリに全体が残る
+    new_context = model.forward_context(prev_context, token_embed)
+    prev_context = new_context  # 計算グラフが蓄積
+```
+
+**問題点**:
+1. 全token_embeds（240万トークン×768次元×4bytes ≈ 7GB）がGPUに常駐
+2. `prev_context = new_context` で計算グラフが蓄積
+3. ループ中にメモリが増加し続ける
+
+### 正しい実装（チャンク処理）
+
+```python
+# ✅ 推奨: チャンク単位でGPUに転送し、即座に解放
+# src/utils/cache.py の collect_context_cache_sequential を使用
+
+with torch.no_grad():
+    for chunk_start in range(0, num_tokens - 1, chunk_size):
+        chunk_end = min(chunk_start + chunk_size, num_tokens - 1)
+
+        # チャンク分だけGPUに転送
+        chunk_token_ids = token_ids[chunk_start:chunk_end + 1].to(device)
+        chunk_embeds = model.token_embedding(chunk_token_ids)
+        chunk_embeds = model.embed_norm(chunk_embeds)
+
+        for i in range(chunk_end - chunk_start):
+            token_embed = chunk_embeds[i:i+1]
+            new_context = model.forward_context(prev_context, token_embed)
+            context_cache[chunk_start + i] = new_context.cpu()
+            prev_context = new_context.detach()  # ← 計算グラフを切断！
+
+        # チャンク完了後にGPUメモリを解放
+        del chunk_token_ids, chunk_embeds
+        clear_gpu_cache(device)
+```
+
+### 必須チェックリスト（Phase 2 Prep実装時）
+
+- [ ] **全データを一度にGPUにロードしていないか**
+- [ ] **チャンク単位で処理しているか**（デフォルト: 10,000トークン）
+- [ ] **`.detach()`で計算グラフを切断しているか**
+- [ ] **チャンク完了後に`del`と`clear_gpu_cache()`を呼んでいるか**
+- [ ] **共通コード`src/utils/cache.py`を使用しているか**
+
+### 共通コードの使用
+
+```python
+# スクリプト固有の実装ではなく、共通コードを使用すること
+from src.utils.cache import collect_context_cache_sequential
+
+# 単一ブロック用
+context_cache = collect_context_cache_sequential(model, token_ids, device)
+
+# 複数ブロック用
+from src.utils.cache import collect_context_cache_sequential_multiblock
+context_caches = collect_context_cache_sequential_multiblock(model, token_ids, device, num_blocks)
+```
+
+---
+
 ## ⚠️ COLAB環境リセット対策 (2025-11-29)
 
 **Colabは頻繁に環境がリセットされるため、以下のファイルが消失する可能性がある。**
@@ -356,4 +429,4 @@ def __init__(self, base: Config, context_dim: int):
 
 ---
 
-Last Updated: 2025-12-02 (Initial Context Inheritance削除、Context Continuity Loss削除、Phase 2 Prep順次処理、可変ContextBlock数対応、1層固定アーキテクチャ)
+Last Updated: 2025-12-03 (Phase 2 PrepのGPUメモリリーク防止、共通コードsrc/utils/cache.py追加)
