@@ -17,7 +17,7 @@ Context Mode (G案採用 - 2025-12-02):
 - メモリ効率と拡張性を優先しG案に一本化
 """
 
-from typing import Dict
+from typing import Dict, List, Optional
 
 import torch
 import torch.nn as nn
@@ -60,8 +60,8 @@ class LLM(nn.Module):
         embed_dim: int,
         context_dim: int,
         num_layers: int = 2,
-        context_layers: int | None = None,
-        token_layers: int | None = None,
+        context_layers: Optional[int] = None,
+        token_layers: Optional[int] = None,
         num_input_tokens: int = 1,
         use_pretrained_embeddings: bool = True,
         use_weight_tying: bool = False,
@@ -165,7 +165,7 @@ class LLM(nn.Module):
 
     def forward_context_with_intermediates(
         self, context: torch.Tensor, token_embeds: torch.Tensor
-    ) -> list[torch.Tensor]:
+    ) -> List[torch.Tensor]:
         """
         ContextBlock forward pass with intermediate outputs (Phase 1評価用)
 
