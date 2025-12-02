@@ -17,6 +17,8 @@ from .cache import (
     collect_context_cache_sequential,
     collect_context_cache_sequential_multiblock,
     collect_token_embeds_chunked,
+    collect_multiblock_cache_to_files,
+    ChunkedCacheDataset,
 )
 
 __all__ = [
@@ -39,4 +41,6 @@ __all__ = [
     'collect_context_cache_sequential',
     'collect_context_cache_sequential_multiblock',
     'collect_token_embeds_chunked',
+    'collect_multiblock_cache_to_files',
+    'ChunkedCacheDataset',
 ]

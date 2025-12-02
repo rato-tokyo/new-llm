@@ -23,7 +23,7 @@ import sys
 import argparse
 import time
 from datetime import datetime
-from typing import Dict, Optional, Tuple, Any, List
+from typing import Dict, Optional, Any, List
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -40,6 +40,7 @@ from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
 from src.utils.initialization import count_parameters
+from src.utils.cache import collect_multiblock_cache_to_files, ChunkedCacheDataset
 from config.experiment import DataConfig
 
 
@@ -335,192 +336,6 @@ class CascadePhase2Trainer:
         return history
 
 
-def collect_multi_context_cache_chunked(
-    model: CascadeContextLLM,
-    token_ids: torch.Tensor,
-    device: torch.device,
-    cache_dir: str,
-    prefix: str = "cache",
-    chunk_size: int = 100000,
-) -> Tuple[int, int, List[str]]:
-    """
-    N-block方式用: チャンク単位でファイル保存しながらコンテキストキャッシュを収集
-
-    メモリ効率を大幅に改善（~17GB → ~2GB）
-
-    Args:
-        model: CascadeContextLLM
-        token_ids: トークンID
-        device: デバイス
-        cache_dir: キャッシュ保存ディレクトリ
-        prefix: ファイル名プレフィックス（"train" or "val"）
-        chunk_size: チャンクサイズ（デフォルト: 100,000トークン）
-
-    Returns:
-        (num_tokens, combined_dim, chunk_files): トークン数、結合次元、チャンクファイルリスト
-    """
-    model.eval()
-    num_tokens = len(token_ids) - 1
-    context_dim = model.context_dim
-    num_blocks = model.num_context_blocks
-    combined_dim = context_dim * num_blocks
-
-    os.makedirs(cache_dir, exist_ok=True)
-
-    print_flush(f"    Collecting {prefix} cache ({num_tokens:,} tokens, {num_blocks} blocks, chunk={chunk_size:,})...")
-    collect_start = time.time()
-
-    chunk_files: List[str] = []
-    num_chunks = (num_tokens + chunk_size - 1) // chunk_size
-
-    with torch.no_grad():
-        # Token embeddings（チャンクごとに処理するため、全体を一度に計算）
-        all_embeds = model.token_embedding(token_ids.to(device))
-        all_embeds = model.embed_norm(all_embeds)
-        token_embeds_all = all_embeds[:-1].cpu()
-        del all_embeds
-        clear_gpu_cache(device)
-
-        # 初期context（各ブロック用）
-        prev_contexts = [
-            torch.zeros(1, context_dim, device=device)
-            for _ in range(num_blocks)
-        ]
-
-        # チャンクごとに処理
-        for chunk_idx in range(num_chunks):
-            chunk_start = chunk_idx * chunk_size
-            chunk_end = min((chunk_idx + 1) * chunk_size, num_tokens)
-            current_chunk_size = chunk_end - chunk_start
-
-            # チャンク用キャッシュ（メモリ上に一時保持）
-            chunk_context_cache = torch.zeros(current_chunk_size, combined_dim, device='cpu')
-            chunk_token_embeds = token_embeds_all[chunk_start:chunk_end].clone()
-
-            # 順次処理
-            for i in range(current_chunk_size):
-                global_idx = chunk_start + i
-                token_embed = token_embeds_all[global_idx:global_idx+1].to(device)
-
-                # 全ブロックを処理して結合
-                contexts_list = []
-                for block_idx in range(num_blocks):
-                    new_context = model.forward_context(
-                        block_idx, prev_contexts[block_idx], token_embed
-                    )
-                    contexts_list.append(new_context.cpu())
-                    prev_contexts[block_idx] = new_context
-
-                # 結合してキャッシュに保存
-                chunk_context_cache[i] = torch.cat(contexts_list, dim=-1).squeeze(0)
-
-                del token_embed, contexts_list
-
-            # チャンクをファイルに保存
-            chunk_file = os.path.join(cache_dir, f"{prefix}_chunk_{chunk_idx:04d}.pt")
-            torch.save({
-                'context_cache': chunk_context_cache,
-                'token_embeds': chunk_token_embeds,
-                'chunk_start': chunk_start,
-                'chunk_end': chunk_end,
-            }, chunk_file)
-            chunk_files.append(chunk_file)
-
-            del chunk_context_cache, chunk_token_embeds
-
-            # 進捗表示
-            print_flush(f"      Chunk {chunk_idx+1}/{num_chunks} saved ({chunk_end:,}/{num_tokens:,} tokens)")
-
-        # token_embeds_allを解放
-        del token_embeds_all
-        clear_gpu_cache(device)
-
-    print_flush(f"    Cache collected [{time.time() - collect_start:.1f}s] -> {len(chunk_files)} chunks")
-
-    return num_tokens, combined_dim, chunk_files
-
-
-class ChunkedCacheDataset(torch.utils.data.Dataset):
-    """
-    チャンクファイルからデータを読み込むDataset
-
-    Phase 2学習で使用。メモリ効率が良い。
-    """
-
-    def __init__(self, chunk_files: List[str]):
-        """
-        Args:
-            chunk_files: チャンクファイルパスのリスト
-        """
-        self.chunk_files = chunk_files
-
-        # 全体のサイズを計算
-        self.total_size = 0
-        self.chunk_info: List[Tuple[int, int, str]] = []  # (start, end, file)
-
-        for chunk_file in chunk_files:
-            data = torch.load(chunk_file, weights_only=True)
-            chunk_start = data['chunk_start']
-            chunk_end = data['chunk_end']
-            self.chunk_info.append((chunk_start, chunk_end, chunk_file))
-            self.total_size = max(self.total_size, chunk_end)
-            del data
-
-        # 現在ロード中のチャンク
-        self._current_chunk_idx: Optional[int] = None
-        self._current_data: Optional[Dict[str, torch.Tensor]] = None
-
-    def __len__(self) -> int:
-        return self.total_size
-
-    def _load_chunk(self, chunk_idx: int) -> None:
-        """チャンクをロード"""
-        if self._current_chunk_idx != chunk_idx:
-            self._current_data = torch.load(self.chunk_info[chunk_idx][2], weights_only=True)
-            self._current_chunk_idx = chunk_idx
-
-    def _find_chunk(self, idx: int) -> int:
-        """インデックスが属するチャンクを見つける"""
-        for chunk_idx, (start, end, _) in enumerate(self.chunk_info):
-            if start <= idx < end:
-                return chunk_idx
-        raise IndexError(f"Index {idx} out of range")
-
-    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        Returns:
-            (context_cache[idx], token_embed[idx])
-        """
-        chunk_idx = self._find_chunk(idx)
-        self._load_chunk(chunk_idx)
-
-        assert self._current_data is not None
-        local_idx = idx - self.chunk_info[chunk_idx][0]
-
-        return (
-            self._current_data['context_cache'][local_idx],
-            self._current_data['token_embeds'][local_idx],
-        )
-
-    def get_all_data(self) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-        全データをメモリにロード（小規模データ用）
-
-        Returns:
-            (context_cache, token_embeds)
-        """
-        all_context = []
-        all_embeds = []
-
-        for chunk_file in self.chunk_files:
-            data = torch.load(chunk_file, weights_only=True)
-            all_context.append(data['context_cache'])
-            all_embeds.append(data['token_embeds'])
-            del data
-
-        return torch.cat(all_context, dim=0), torch.cat(all_embeds, dim=0)
-
-
 class Phase1ConfigWrapper:
     """Phase1Trainer用のConfig wrapper"""
 
@@ -674,11 +489,11 @@ def run_cascade_context_experiment(
     print_flush(f"\n[Phase 2 Prep] Collecting multi context cache (chunked, {num_context_blocks} blocks)...")
     cache_start = time.time()
 
-    # チャンク単位でキャッシュ収集（メモリ効率が良い）
-    train_num_tokens, _, train_chunk_files = collect_multi_context_cache_chunked(
+    # チャンク単位でキャッシュ収集（メモリ効率が良い、GPU最適化済み）
+    train_num_tokens, _, train_chunk_files = collect_multiblock_cache_to_files(
         model, train_token_ids, device, cache_dir, prefix="train"
     )
-    val_num_tokens, _, val_chunk_files = collect_multi_context_cache_chunked(
+    val_num_tokens, _, val_chunk_files = collect_multiblock_cache_to_files(
         model, val_token_ids, device, cache_dir, prefix="val"
     )
 
