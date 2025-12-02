@@ -105,6 +105,25 @@ class ExpandableContextBlock(nn.Module):
         new_context = self.context_norm(context + delta_context)
         return new_context
 
+    def forward_batch(
+        self,
+        context: torch.Tensor,
+        token_embeds: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Batch forward pass（キャッシュ収集用）
+
+        forward() と同一だが、明示的なバッチ処理用メソッド。
+
+        Args:
+            context: [batch, context_dim]
+            token_embeds: [batch, token_input_dim]
+
+        Returns:
+            new_context: [batch, context_dim]
+        """
+        return self.forward(context, token_embeds)
+
     def expand_context_dim(self, new_context_dim: int, noise_scale: float = 0.01) -> None:
         """
         context_dim を拡張
