@@ -1,18 +1,25 @@
 #!/usr/bin/env python3
 """
-Cascade Context 実験スクリプト
+Cascade Context 実験スクリプト（Initial Context Inheritance方式）
 
-カスケード方式: N個のContextBlockを順次学習し、
-各ブロックは前のブロックの出力を固定入力として使用。
+Initial Context Inheritance方式:
+N個のContextBlockを順次学習し、各ブロックは独立してRNN学習を行う。
+ブロック1以降は、最初のトークンの入力として前のブロックの最終出力を使用。
+
+これにより、前のブロックの「文脈の継続性」を引き継ぎつつ、
+全データでRNN学習を行う。Dual方式（前半/後半分割）と同様の効果を
+全データで実現できる。
 
 アーキテクチャ（1層固定、可変ブロック数）:
   Phase 1[0]:
-    - ContextBlock[0] を全データで学習（入力: ゼロベクトル）
+    - ContextBlock[0] を全データで学習
+    - 初期入力: ゼロベクトル
     - 出力: context[0] (キャッシュ)
 
   Phase 1[1..N-1]:
-    - ContextBlock[i] を学習
-    - 入力: context[i-1] (前のブロックの出力、固定)
+    - ContextBlock[i] を全データで学習
+    - 初期入力: context[i-1]_final（前のブロックの最終出力）
+    - それ以降の入力: 自身の前の出力（標準RNN）
     - 出力: context[i] (キャッシュ)
 
   Phase 2:
@@ -349,9 +356,12 @@ def collect_context_cache_for_val(
     device: torch.device,
 ) -> Tuple[List[torch.Tensor], torch.Tensor]:
     """
-    Validation用: 全ContextBlockのキャッシュを収集
+    Validation用: 全ContextBlockのキャッシュを収集（Initial Context Inheritance方式）
 
-    Cache-Direct方式: 順伝搬でキャッシュを収集し、Phase 2ではシフトして使用
+    Initial Context Inheritance:
+    - 各ブロックは独立してRNN処理を行う
+    - ブロック0: 初期入力はゼロベクトル
+    - ブロック1以降: 初期入力は前のブロックの最終出力
 
     Returns:
         (context_caches, token_embeds)
@@ -381,29 +391,25 @@ def collect_context_cache_for_val(
     print_flush(f"    Collecting val cache ({num_tokens:,} tokens, {num_blocks} blocks)...")
     collect_start = time.time()
 
-    # 最初のブロックの入力はゼロベクトル
-    prev_context = torch.zeros(1, model.context_dim, device=device)
-
     with torch.no_grad():
-        for i in range(num_tokens):
-            token_embed = input_embeds[i:i+1].to(device)
+        # 各ブロックを順に処理（Initial Context Inheritance方式）
+        for block_idx in range(num_blocks):
+            if block_idx == 0:
+                # ブロック0: 初期入力はゼロベクトル
+                prev_context = torch.zeros(1, model.context_dim, device=device)
+            else:
+                # ブロック1以降: 初期入力は前のブロックの最終出力
+                prev_context = context_caches[block_idx - 1][-1:].to(device)
 
-            # 各ブロックを順に処理
-            current_context = prev_context
-            for block_idx in range(num_blocks):
-                new_context = model.forward_context(block_idx, current_context, token_embed)
+            # RNN的に順次処理
+            for i in range(num_tokens):
+                token_embed = input_embeds[i:i+1].to(device)
+                new_context = model.forward_context(block_idx, prev_context, token_embed)
                 context_caches[block_idx][i] = new_context.cpu()
+                prev_context = new_context
 
-                # 次のブロックへの入力は前のブロックの出力（ただしblock 0のみ更新用に保存）
-                if block_idx == 0:
-                    next_prev_context = new_context
-                # 後続ブロックは現在のprev_contextを使用（Cache-Direct方式）
-                # Note: block_idx > 0 では current_context = prev_context のまま
-
-            prev_context = next_prev_context
-
-            if (i + 1) % 100000 == 0:
-                print_flush(f"      {i+1:,}/{num_tokens:,} tokens processed...")
+            if block_idx < num_blocks - 1:
+                print_flush(f"      Block {block_idx} done")
 
     print_flush(f"    Val cache collected [{time.time() - collect_start:.1f}s]")
     clear_gpu_cache(device)
@@ -413,13 +419,19 @@ def collect_context_cache_for_val(
 
 class CascadePhase1Trainer:
     """
-    Phase 1用トレーナー: 前のブロックのキャッシュを入力としてContextBlockを学習
+    Phase 1用トレーナー: Initial Context Inheritance方式
 
-    Cache-Direct方式: prev_context[i-1]を入力として学習し、得られたキャッシュを
-    そのままPhase 2で使用。順伝搬の再計算は不要。
+    Initial Context Inheritance:
+    - block_idx=0: 通常のRNN学習（初期入力: ゼロベクトル）
+    - block_idx>0: 通常のRNN学習だが、最初のトークンの入力のみ
+                   前のブロックの最終出力（context_prev_final）を使用
 
-    block_idx=0の場合: ゼロベクトルを入力として使用
-    block_idx>0の場合: 前のブロックのキャッシュを入力として使用
+    これにより、前のブロックの「文脈の継続性」を引き継ぎつつ、
+    全データでRNN学習を行う。Dual方式（前半/後半分割）と同様の効果を
+    全データで実現できる。
+
+    block_idx=0の場合: ゼロベクトルを初期入力として使用
+    block_idx>0の場合: context_prev_final を初期入力として使用
     """
 
     def __init__(
@@ -428,20 +440,24 @@ class CascadePhase1Trainer:
         config: Any,
         device: torch.device,
         block_idx: int,
-        prev_context_cache: Optional[torch.Tensor],  # block_idx=0の場合はNone
+        prev_context_final: Optional[torch.Tensor],  # block_idx>0の場合: 前のブロックの最終出力 [1, context_dim]
         token_embeds: torch.Tensor
     ):
         self.model = model
         self.config = config
         self.device = device
         self.block_idx = block_idx
-        self.prev_context_cache = prev_context_cache  # [num_tokens, context_dim] or None
+        self.prev_context_final = prev_context_final  # [1, context_dim] or None
         self.token_embeds = token_embeds  # [num_tokens, embed_dim]
         self._training_stats: Dict[str, Any] = {}
 
     def train(self, label: str = "Context") -> torch.Tensor:
         """
-        ContextBlockを学習
+        ContextBlockを学習（Initial Context Inheritance方式）
+
+        Initial Context Inheritance:
+        - 最初のトークン: prev_context_final（前のブロックの最終出力）を入力
+        - それ以降: previous_contexts[i-1]（自身の前の出力）を入力
 
         Returns:
             context_cache: [num_tokens, context_dim]
@@ -454,10 +470,10 @@ class CascadePhase1Trainer:
         phase_label = f"Phase 1[{self.block_idx}]"
         print_flush(f"\n[{phase_label}] {label}: {num_tokens:,} tokens, {self.config.phase1_max_iterations} iterations")
 
-        if self.block_idx == 0:
-            print_flush("  Input: zero vector")
+        if self.block_idx == 0 or self.prev_context_final is None:
+            print_flush("  Initial input: zero vector (standard RNN)")
         else:
-            print_flush(f"  Input: context[{self.block_idx-1}][i-1] (Cache-Direct method)")
+            print_flush(f"  Initial input: context[{self.block_idx-1}]_final (Initial Context Inheritance)")
 
         optimizer = torch.optim.Adam(block_params, lr=self.config.phase1_learning_rate)
 
@@ -466,14 +482,12 @@ class CascadePhase1Trainer:
         early_stopping_threshold = getattr(self.config, 'phase1_early_stopping_threshold', 0.30)
         min_convergence_improvement = getattr(self.config, 'phase1_min_convergence_improvement', 0.01)
 
-        # 入力コンテキストの準備
-        if self.block_idx == 0 or self.prev_context_cache is None:
-            # block_idx=0: ゼロベクトルを入力として使用
-            shifted_prev_context = torch.zeros(num_tokens, self.model.context_dim, device='cpu')
-        else:
-            # block_idx>0: prev_context[i-1]を入力として使用
+        # 初期入力コンテキストの準備
+        # Initial Context Inheritance: 最初のトークンの入力のみ prev_context_final を使用
+        if self.block_idx == 0 or self.prev_context_final is None:
             initial_context = torch.zeros(1, self.model.context_dim, device='cpu')
-            shifted_prev_context = torch.cat([initial_context, self.prev_context_cache[:-1]], dim=0)
+        else:
+            initial_context = self.prev_context_final.cpu()  # [1, context_dim]
 
         previous_contexts: Optional[torch.Tensor] = None
         final_convergence_rate = 0.0
@@ -495,6 +509,10 @@ class CascadePhase1Trainer:
 
             assert previous_contexts is not None
             optimizer.zero_grad()
+
+            # shifted_prev_context を作成（RNN的に previous_contexts[i-1] を使用）
+            # 最初のトークンの入力は initial_context（ゼロ or prev_context_final）
+            shifted_prev_context = torch.cat([initial_context, previous_contexts[:-1]], dim=0)
 
             all_contexts = []
             total_loss = 0.0
@@ -582,16 +600,26 @@ class CascadePhase1Trainer:
 
         print_flush(f"  Done: {final_convergence_rate*100:.0f}% converged")
 
-        # キャッシュを収集（学習後の最終状態）
-        context_cache = self._collect_cache(shifted_prev_context)
+        # キャッシュを収集（学習後の最終状態で再計算）
+        assert previous_contexts is not None
+        context_cache = self._collect_cache(initial_context, previous_contexts)
 
         return context_cache
 
-    def _collect_cache(self, shifted_prev_context: torch.Tensor) -> torch.Tensor:
-        """学習済みContextBlockでキャッシュを収集"""
+    def _collect_cache(self, initial_context: torch.Tensor, previous_contexts: torch.Tensor) -> torch.Tensor:
+        """
+        学習済みContextBlockでキャッシュを収集
+
+        Args:
+            initial_context: 最初のトークンの入力 [1, context_dim]
+            previous_contexts: 学習後のコンテキスト [num_tokens, context_dim]
+        """
         self.model.eval()
         num_tokens = len(self.token_embeds)
         batch_size = 50000
+
+        # shifted_prev_context を作成
+        shifted_prev_context = torch.cat([initial_context, previous_contexts[:-1]], dim=0)
 
         context_cache = torch.zeros(num_tokens, self.model.context_dim, device='cpu', dtype=torch.float32)
 
@@ -734,12 +762,14 @@ def run_cascade_context_experiment(
 
             stats = trainer._training_stats
         else:
-            # 後続ブロック: CascadePhase1Trainerを使用
+            # 後続ブロック: CascadePhase1Trainerを使用（Initial Context Inheritance）
             assert train_token_embeds is not None
+            # 前のブロックの最終出力を取得 [1, context_dim]
+            prev_context_final = train_context_caches[block_idx - 1][-1:].clone()
             trainer_cascade = CascadePhase1Trainer(
                 model, config_wrapper, device,
                 block_idx=block_idx,
-                prev_context_cache=train_context_caches[block_idx - 1],
+                prev_context_final=prev_context_final,
                 token_embeds=train_token_embeds
             )
 
@@ -822,14 +852,14 @@ def run_cascade_context_experiment(
 
     # ========== 結果サマリー ==========
     print_flush("\n" + "=" * 70)
-    print_flush("SUMMARY - Cascade Context Experiment")
+    print_flush("SUMMARY - Cascade Context Experiment (Initial Context Inheritance)")
     print_flush("=" * 70)
-    print_flush(f"Architecture: CascadeContextLLM ({num_context_blocks} blocks cascade, 1L each)")
+    print_flush(f"Architecture: CascadeContextLLM ({num_context_blocks} blocks, 1L each)")
     for i in range(num_context_blocks):
         if i == 0:
-            print_flush(f"  ContextBlock {i}: cd={context_dim}, input=zero vector")
+            print_flush(f"  ContextBlock {i}: cd={context_dim}, initial_input=zero")
         else:
-            print_flush(f"  ContextBlock {i}: cd={context_dim}, input=context[{i-1}] (fixed)")
+            print_flush(f"  ContextBlock {i}: cd={context_dim}, initial_input=context[{i-1}]_final")
     print_flush(f"  TokenBlock: cd={combined_dim} (concatenated)")
     print_flush(f"Parameters: {params['total']:,}")
     for i in range(num_context_blocks):

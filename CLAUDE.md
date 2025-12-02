@@ -1,23 +1,23 @@
 # New-LLM Project Guidelines
 
-## 🎯 カスケード連結方式（Cascade Context）採用決定 (2025-12-02)
+## 🎯 Initial Context Inheritance方式採用 (2025-12-02)
 
-**1層固定アーキテクチャにカスケード連結方式を採用。複数レイヤーは不要。**
+**1層固定アーキテクチャにInitial Context Inheritance方式を採用。複数レイヤーは不要。**
 
 ### 決定の背景
 
-実験結果より、カスケード連結方式が最良の結果を達成：
+Dual方式（前半/後半分割）の効果を全データで実現するため、Initial Context Inheritance方式を採用。
 
 | 構成 | Val PPL | Val Acc | 備考 |
 |------|---------|---------|------|
-| **Cascade (500×2=1000)** | **111.9** | **25.6%** | **最良** |
+| **Dual (500×2=1000)** | **111.9** | **25.6%** | **前半/後半分割** |
 | C1T1-500 | 127.2 | 24.7% | 標準構成 |
 | C2T2-500 | 132.2 | 24.4% | 2層だが悪化 |
 | C1T1-1000 | 134.0 | 23.6% | context_dim増加は非効率 |
 
-### カスケード方式の特徴（Cache-Direct方式、可変ブロック数対応）
+### Initial Context Inheritance方式の特徴
 
-**Cache-Direct方式**: Phase 1で得られたキャッシュをそのままPhase 2で使用。再計算不要。
+**核心**: 各ContextBlockは**独立してRNN学習**を行う。ブロック1以降は、**最初のトークンの入力として前のブロックの最終出力を使用**。
 
 **可変ブロック数対応**: ContextBlockの数は1, 2, 3, ... と柔軟に指定可能。
 
@@ -25,33 +25,34 @@
 N個のContextBlockを順次学習:
 
 Phase 1[0]: ContextBlock[0] を全データで学習
-  → 入力: ゼロベクトル
-  → context[0][i] キャッシュ取得
+  → 初期入力: ゼロベクトル
+  → RNN学習: context_0[i] = ContextBlock_0(context_0[i-1], token[i])
+  → context_0_final を保存
 
-Phase 1[1]: ContextBlock[1] を学習
-  → 入力: context[0][i-1]（前のトークン位置のcontext[0]）
-  → context[1][i] キャッシュ取得
+Phase 1[1]: ContextBlock[1] を全データで学習
+  → 初期入力: context_0_final（前のブロックの最終出力）
+  → RNN学習: context_1[i] = ContextBlock_1(context_1[i-1], token[i])
+  → context_1_final を保存
 
-Phase 1[N-1]: ContextBlock[N-1] を学習
-  → 入力: context[N-2][i-1]
-  → context[N-1][i] キャッシュ取得
+Phase 1[N-1]: ContextBlock[N-1] を全データで学習
+  → 初期入力: context_{N-2}_final
+  → RNN学習: 標準的なRNN
 
-Phase 2: TokenBlock 学習（順伝搬なし）
-  → 入力: concat(context[0][i-1], ..., context[N-1][i-1])
+Phase 2: TokenBlock 学習
+  → 入力: concat(context_0[i-1], ..., context_{N-1}[i-1])
   → 予測: token[i]
 ```
 
-**重要**: 次トークン予測では位置`i`を予測するのに位置`i-1`までのコンテキストを使用。
-Phase 1で得たキャッシュを1つシフトして使用するだけで、順伝搬は不要。
+**Dual方式との違い**:
+- Dual: ブロックAは前半データ、ブロックBは後半データで学習
+- Initial Context Inheritance: 全ブロックが全データで学習（初期入力のみ継承）
 
-**根拠**: 以前の実験で、0ベクトルから順伝搬した出力とキャッシュの差は無視可能と確認済み。
+### なぜInitial Context Inheritance方式が良いのか
 
-### なぜカスケード方式が良いのか
-
-1. **データ活用効率**: 全データで全ContextBlockを学習
-2. **cd=500の効率性維持**: 各ブロックで92%収束を達成
-3. **連結による表現力**: N×500次元の表現力を獲得しつつ、各ブロックの効率性を維持
-4. **柔軟性**: ブロック数を増やすことで表現力を拡張可能
+1. **文脈の継続性**: 前のブロックの最終状態を継承
+2. **全データ活用**: 全ブロックが全データで学習
+3. **Dual方式と同様の効果**: 前半で学習した文脈を後半に引き継ぐ
+4. **並列処理可能**: 標準的なRNN学習と同じ速度
 
 ### 実験の実行
 
@@ -317,4 +318,4 @@ def __init__(self, base: Config, context_dim: int):
 
 ---
 
-Last Updated: 2025-12-02 (可変ContextBlock数対応、カスケード連結方式採用、1層固定アーキテクチャ)
+Last Updated: 2025-12-02 (Initial Context Inheritance方式採用、可変ContextBlock数対応、1層固定アーキテクチャ)
