@@ -1,9 +1,6 @@
 """Experiment utilities for New-LLM"""
 
-from .runner import ExperimentRunner, ExperimentConfig, ExperimentResult
+# カスケード方式への移行により、ExperimentRunnerは削除
+# 実験は scripts/experiment_cascade_context.py で直接実行
 
-__all__ = [
-    'ExperimentRunner',
-    'ExperimentConfig',
-    'ExperimentResult',
-]
+__all__ = []

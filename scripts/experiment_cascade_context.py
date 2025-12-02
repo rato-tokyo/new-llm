@@ -5,7 +5,7 @@ Cascade Context 実験スクリプト
 カスケード方式: ContextBlock A → B の順で学習し、
 B の学習時は A の出力を固定入力として使用。
 
-アーキテクチャ:
+アーキテクチャ（1層固定）:
   Phase 1A:
     - ContextBlock A を全データで学習
     - 出力: context_a (キャッシュ)
@@ -18,12 +18,6 @@ B の学習時は A の出力を固定入力として使用。
   Phase 2:
     - context_a と context_b を連結 → cd=1000
     - TokenBlock (cd=1000入力) で学習
-    - Phase 2 Prep 不要（Phase 1で既にキャッシュ取得済み）
-
-利点:
-  - サンプル分割不要（全データで学習）
-  - Phase 2 Prep の順伝搬不要（983秒削減）
-  - カスケード構造で情報の流れが自然
 
 使用方法:
   python3 scripts/experiment_cascade_context.py
@@ -56,7 +50,7 @@ from config.experiment import DataConfig
 
 class CascadeContextLLM(nn.Module):
     """
-    Cascade Context LLM - 2つのContextBlockをカスケード接続
+    Cascade Context LLM - 2つのContextBlockをカスケード接続（1層固定）
 
     Phase 1A: ContextBlock A を学習（入力: ゼロ初期化context）
     Phase 1B: ContextBlock B を学習（入力: A の出力、固定）
@@ -66,7 +60,6 @@ class CascadeContextLLM(nn.Module):
         vocab_size: 語彙サイズ
         embed_dim: トークン埋め込み次元
         context_dim: 各ContextBlockの出力次元（連結後は2倍）
-        num_layers: 各ブロックのレイヤー数
         num_input_tokens: 入力トークン数
     """
 
@@ -74,8 +67,7 @@ class CascadeContextLLM(nn.Module):
         self,
         vocab_size: int,
         embed_dim: int,
-        context_dim: int,  # 各ContextBlockの次元（500）
-        num_layers: int = 1,
+        context_dim: int,
         num_input_tokens: int = 1,
     ) -> None:
         super().__init__()
@@ -84,30 +76,26 @@ class CascadeContextLLM(nn.Module):
         self.embed_dim = embed_dim
         self.context_dim = context_dim
         self.combined_context_dim = context_dim * 2
-        self.num_layers = num_layers
         self.num_input_tokens = num_input_tokens
 
         # Token Embeddings (GPT-2 pretrained)
         self._load_pretrained_embeddings()
         self.embed_norm = nn.LayerNorm(embed_dim)
 
-        # 2つのContextBlock
+        # 2つのContextBlock（各1層）
         self.context_block_a = ContextBlock(
-            num_layers=num_layers,
             context_dim=context_dim,
             embed_dim=embed_dim,
             num_input_tokens=num_input_tokens,
         )
         self.context_block_b = ContextBlock(
-            num_layers=num_layers,
             context_dim=context_dim,
             embed_dim=embed_dim,
             num_input_tokens=num_input_tokens,
         )
 
-        # TokenBlock（連結されたcontext用、cd=1000）
+        # TokenBlock（連結されたcontext用、cd=1000、1層）
         self.token_block = TokenBlock(
-            num_layers=num_layers,
             context_dim=self.combined_context_dim,
             embed_dim=embed_dim,
             num_input_tokens=num_input_tokens,
@@ -143,14 +131,9 @@ class CascadeContextLLM(nn.Module):
         """ContextBlock B の順伝搬"""
         return self.context_block_b(context, token_embeds)
 
-    def forward_token(
-        self,
-        prev_context: torch.Tensor,
-        current_context: torch.Tensor,
-        token_embeds: torch.Tensor
-    ) -> torch.Tensor:
-        """TokenBlock の順伝搬"""
-        return self.token_block(prev_context, current_context, token_embeds)
+    def forward_token(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
+        """TokenBlock の順伝搬（1層固定、contextは連結済み）"""
+        return self.token_block(context, token_embeds)
 
     def freeze_context_blocks(self) -> None:
         """両方のContextBlockをfreeze"""
@@ -180,13 +163,13 @@ class CascadeContextLLM(nn.Module):
         }
 
 
-class SingleContextWrapperA(nn.Module):
+class SingleContextWrapper(nn.Module):
     """
-    Phase 1A 用: ContextBlock A のラッパー
-    入力contextはゼロ初期化から開始。
+    Phase 1 用: ContextBlock のラッパー
+    MemoryPhase1Trainer と互換性を持たせる。
     """
 
-    def __init__(self, cascade_model: CascadeContextLLM):
+    def __init__(self, cascade_model: CascadeContextLLM, block: str = 'a'):
         super().__init__()
         self.cascade_model = cascade_model
 
@@ -197,68 +180,19 @@ class SingleContextWrapperA(nn.Module):
         self.embed_dim = cascade_model.embed_dim
         self.num_input_tokens = cascade_model.num_input_tokens
         self.vocab_size = cascade_model.vocab_size
-        self.num_layers = cascade_model.num_layers
-        self.context_block = cascade_model.context_block_a
+
+        if block == 'a':
+            self.context_block = cascade_model.context_block_a
+        else:
+            self.context_block = cascade_model.context_block_b
 
     def forward_context(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
-        """ContextBlock A の順伝搬"""
-        return self.context_block(context, token_embeds)
-
-
-class SingleContextWrapperB(nn.Module):
-    """
-    Phase 1B 用: ContextBlock B のラッパー
-    入力contextは Phase 1A の出力（固定）を使用。
-    """
-
-    def __init__(
-        self,
-        cascade_model: CascadeContextLLM,
-        context_a_cache: torch.Tensor,
-        device: torch.device
-    ):
-        super().__init__()
-        self.cascade_model = cascade_model
-        self.context_a_cache = context_a_cache  # [num_tokens, context_dim]
-        self.device = device
-
-        # Phase1Trainerが期待するプロパティ
-        self.token_embedding = cascade_model.token_embedding
-        self.embed_norm = cascade_model.embed_norm
-        self.context_dim = cascade_model.context_dim
-        self.embed_dim = cascade_model.embed_dim
-        self.num_input_tokens = cascade_model.num_input_tokens
-        self.vocab_size = cascade_model.vocab_size
-        self.num_layers = cascade_model.num_layers
-        self.context_block = cascade_model.context_block_b
-
-        # 内部カウンタ（Phase1Trainerのイテレーション毎にリセット）
-        self._token_idx = 0
-
-    def reset_token_idx(self) -> None:
-        """トークンインデックスをリセット"""
-        self._token_idx = 0
-
-    def forward_context(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
-        """
-        ContextBlock B の順伝搬
-
-        注意: Phase1Trainerは context を渡してくるが、
-        カスケード方式では context_a_cache を入力として使う。
-        ただし、Phase1Trainer内部のcontext更新ロジックと
-        整合性を取るため、ここでは普通に forward_context を呼ぶ。
-
-        context_a の情報は token_embeds に concat して渡す方式ではなく、
-        ContextBlock B 自体は通常通り動作させ、
-        学習後のキャッシュ収集時に context_a を考慮する。
-        """
+        """ContextBlock の順伝搬"""
         return self.context_block(context, token_embeds)
 
 
 class CascadePhase2Trainer:
-    """
-    Cascade Context 用の Phase 2 トレーナー
-    """
+    """Cascade Context 用の Phase 2 トレーナー"""
 
     def __init__(self, model: CascadeContextLLM, config: Any, device: torch.device):
         self.model = model
@@ -324,20 +258,10 @@ class CascadePhase2Trainer:
 
                 batch_token_embeds = train_token_embeds[start_idx:end_idx].to(self.device)
                 batch_targets = train_targets[start_idx:end_idx]
-
-                # G案: prev_context と current_context
-                current_context = train_context_cache[start_idx:end_idx].to(self.device)
-
-                if start_idx == 0:
-                    # 最初のバッチ: prev = current (最初のトークンはprev=current)
-                    prev_context = current_context.clone()
-                    if end_idx > 1:
-                        prev_context[1:] = train_context_cache[start_idx:end_idx-1].to(self.device)
-                else:
-                    prev_context = train_context_cache[start_idx-1:end_idx-1].to(self.device)
+                batch_context = train_context_cache[start_idx:end_idx].to(self.device)
 
                 optimizer.zero_grad()
-                token_out = self.model.forward_token(prev_context, current_context, batch_token_embeds)
+                token_out = self.model.forward_token(batch_context, batch_token_embeds)
                 logits = self.model.token_output(token_out)
 
                 loss = criterion(logits, batch_targets)
@@ -362,17 +286,9 @@ class CascadePhase2Trainer:
 
                     batch_token_embeds = val_token_embeds[start_idx:end_idx].to(self.device)
                     batch_targets = val_targets[start_idx:end_idx]
+                    batch_context = val_context_cache[start_idx:end_idx].to(self.device)
 
-                    current_context = val_context_cache[start_idx:end_idx].to(self.device)
-
-                    if start_idx == 0:
-                        prev_context = current_context.clone()
-                        if end_idx > 1:
-                            prev_context[1:] = val_context_cache[start_idx:end_idx-1].to(self.device)
-                    else:
-                        prev_context = val_context_cache[start_idx-1:end_idx-1].to(self.device)
-
-                    token_out = self.model.forward_token(prev_context, current_context, batch_token_embeds)
+                    token_out = self.model.forward_token(batch_context, batch_token_embeds)
                     logits = self.model.token_output(token_out)
 
                     val_loss += criterion(logits, batch_targets).item() * (end_idx - start_idx)
@@ -424,13 +340,7 @@ def collect_context_a_cache(
     token_ids: torch.Tensor,
     device: torch.device,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
-    """
-    ContextBlock A のキャッシュを収集
-
-    Returns:
-        context_a_cache: [num_tokens, context_dim]
-        token_embeds: [num_tokens, embed_dim]
-    """
+    """ContextBlock A のキャッシュを収集"""
     model.eval()
     num_tokens = len(token_ids) - 1
 
@@ -473,30 +383,7 @@ def collect_context_b_cache_with_fixed_a(
     context_a_cache: torch.Tensor,
     device: torch.device,
 ) -> torch.Tensor:
-    """
-    ContextBlock B のキャッシュを収集（context_a を固定入力として使用）
-
-    重要: ContextBlock B への「入力context」は context_a_cache を使用。
-    ただし、ContextBlock B 自体は独自の context 状態を持つ。
-
-    ここでは、ContextBlock B を context_a を「追加入力」として
-    受け取る形に変更するのではなく、
-    ContextBlock B は通常通り動作させる。
-
-    ※ 設計の解釈:
-    「context_a の出力を context_b の入力にする」という意味は、
-    ContextBlock B の forward に渡す context を、
-    ContextBlock B 自身の前回出力ではなく、context_a にするということ。
-
-    Args:
-        model: CascadeContextLLM
-        token_embeds: [num_tokens, embed_dim] on CPU
-        context_a_cache: [num_tokens, context_dim] on CPU
-        device: デバイス
-
-    Returns:
-        context_b_cache: [num_tokens, context_dim]
-    """
+    """ContextBlock B のキャッシュを収集（context_a を固定入力として使用）"""
     model.eval()
     num_tokens = len(token_embeds)
 
@@ -508,12 +395,7 @@ def collect_context_b_cache_with_fixed_a(
     with torch.no_grad():
         for i in range(num_tokens):
             token_embed = token_embeds[i:i+1].to(device)
-
-            # ContextBlock B への入力として context_a[i] を使用
-            # これは「前のContextBlockの出力を次のContextBlockの入力にする」設計
             input_context = context_a_cache[i:i+1].to(device)
-
-            # ContextBlock B の順伝搬
             new_context_b = model.forward_context_b(input_context, token_embed)
             context_b_cache[i] = new_context_b.cpu()
 
@@ -529,7 +411,7 @@ def collect_context_b_cache_with_fixed_a(
 class Phase1ConfigWrapper:
     """Phase1Trainer用のConfig wrapper"""
 
-    def __init__(self, base: Config, context_dim: int, num_layers: int):
+    def __init__(self, base: Config, context_dim: int):
         self.phase1_max_iterations = base.phase1_max_iterations
         self.phase1_convergence_threshold = base.phase1_convergence_threshold
         self.phase1_learning_rate = base.phase1_learning_rate
@@ -540,7 +422,6 @@ class Phase1ConfigWrapper:
         self.phase1_early_stopping_threshold = base.phase1_early_stopping_threshold
         self.phase1_min_convergence_improvement = base.phase1_min_convergence_improvement
         self.context_dim = context_dim
-        self.num_layers = num_layers
         self.embed_dim = base.embed_dim
         self.vocab_size = base.vocab_size
         self.num_input_tokens = base.num_input_tokens
@@ -561,7 +442,6 @@ class Phase2ConfigWrapper:
 def run_cascade_context_experiment(
     num_samples: int = 2000,
     context_dim: int = 500,
-    num_layers: int = 1,
     seed: int = 42,
     output_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -598,7 +478,6 @@ def run_cascade_context_experiment(
         vocab_size=base_config.vocab_size,
         embed_dim=base_config.embed_dim,
         context_dim=context_dim,
-        num_layers=num_layers,
         num_input_tokens=base_config.num_input_tokens,
     )
     model.to(device)
@@ -611,9 +490,9 @@ def run_cascade_context_experiment(
 
     # ========== Phase 1A: ContextBlock A の学習 ==========
     print_flush("\n[Phase 1A] Training ContextBlock A on full data...")
-    wrapper_a = SingleContextWrapperA(model)
+    wrapper_a = SingleContextWrapper(model, block='a')
 
-    config_wrapper = Phase1ConfigWrapper(base_config, context_dim, num_layers)
+    config_wrapper = Phase1ConfigWrapper(base_config, context_dim)
     trainer_a = MemoryPhase1Trainer(wrapper_a, config_wrapper, device)
 
     phase1a_start = time.time()
@@ -624,11 +503,11 @@ def run_cascade_context_experiment(
     print_flush(f"Phase 1A: {phase1a_time:.1f}s, {stats_a.get('iterations', 0)} iter, "
                 f"conv={stats_a.get('convergence_rate', 0)*100:.0f}%")
 
-    # Context A のキャッシュを取得（Phase 1A完了時に既に持っている）
+    # Context A のキャッシュを取得
     assert result_a.cache is not None
     assert result_a.token_embeds is not None
-    train_context_a_cache = result_a.cache  # [num_tokens, context_dim]
-    train_token_embeds = result_a.token_embeds  # [num_tokens, embed_dim]
+    train_context_a_cache = result_a.cache
+    train_token_embeds = result_a.token_embeds
 
     # ContextBlock A を freeze
     for param in model.context_block_a.parameters():
@@ -636,18 +515,11 @@ def run_cascade_context_experiment(
     print_flush("✓ ContextBlock A frozen")
 
     # ========== Phase 1B: ContextBlock B の学習 ==========
-    # 重要: ContextBlock B は context_a を入力として使う
-    # しかし、MemoryPhase1Trainer は内部で context を管理するため、
-    # ここでは ContextBlock B を通常通り学習させ、
-    # 学習後に context_a を入力としてキャッシュを収集する
-
     print_flush("\n[Phase 1B] Training ContextBlock B on full data...")
     print_flush("  Note: ContextBlock B will use context_a as input during cache collection")
 
-    wrapper_b_for_training = SingleContextWrapperA(model)  # 一時的にAと同じラッパーを使用
-    wrapper_b_for_training.context_block = model.context_block_b  # B を指すように変更
-
-    trainer_b = MemoryPhase1Trainer(wrapper_b_for_training, config_wrapper, device)
+    wrapper_b = SingleContextWrapper(model, block='b')
+    trainer_b = MemoryPhase1Trainer(wrapper_b, config_wrapper, device)
 
     phase1b_start = time.time()
     _ = trainer_b.train(train_token_ids, label="ContextB", return_all_layers=True)
@@ -735,7 +607,7 @@ def run_cascade_context_experiment(
     print_flush("\n" + "=" * 70)
     print_flush("SUMMARY - Cascade Context Experiment")
     print_flush("=" * 70)
-    print_flush("Architecture: CascadeContextLLM (A→B cascade)")
+    print_flush("Architecture: CascadeContextLLM (A→B cascade, 1L each)")
     print_flush(f"  ContextBlock A: cd={context_dim}, trained on full data")
     print_flush(f"  ContextBlock B: cd={context_dim}, input=context_a (fixed)")
     print_flush(f"  TokenBlock: cd={combined_dim} (concatenated)")
@@ -759,8 +631,7 @@ def run_cascade_context_experiment(
             f.write("=" * 50 + "\n\n")
             f.write(f"Samples: {num_samples}\n")
             f.write(f"Context dim per block: {context_dim}\n")
-            f.write(f"Combined context dim: {combined_dim}\n")
-            f.write(f"Num layers: {num_layers}\n\n")
+            f.write(f"Combined context dim: {combined_dim}\n\n")
             f.write(f"Train tokens: {num_train_tokens:,}\n")
             f.write(f"Val tokens: {num_val_tokens:,}\n\n")
             f.write(f"Phase 1A time: {phase1a_time:.1f}s\n")
@@ -794,7 +665,6 @@ def main():
     parser = argparse.ArgumentParser(description='Cascade Context Experiment')
     parser.add_argument('--samples', '-s', type=int, default=2000, help='Number of samples')
     parser.add_argument('--context-dim', '-c', type=int, default=500, help='Context dim per block')
-    parser.add_argument('--num-layers', '-l', type=int, default=1, help='Number of layers')
     parser.add_argument('--output-dir', '-o', help='Output directory')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
 
@@ -810,14 +680,12 @@ def main():
     print_flush(f"Samples: {args.samples}")
     print_flush(f"Context dim per block: {args.context_dim}")
     print_flush(f"Combined context dim: {args.context_dim * 2}")
-    print_flush(f"Num layers: {args.num_layers}")
     print_flush(f"Output: {output_dir}")
     print_flush("=" * 70)
 
     run_cascade_context_experiment(
         num_samples=args.samples,
         context_dim=args.context_dim,
-        num_layers=args.num_layers,
         seed=args.seed,
         output_dir=output_dir,
     )

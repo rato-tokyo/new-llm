@@ -104,7 +104,6 @@ class Phase1Trainer(ABC):
             'model_state_dict': self.model.state_dict(),
             'epoch': 'phase1_complete',
             'config': {
-                'num_layers': self.config.num_layers,
                 'embed_dim': self.config.embed_dim,
                 'context_dim': self.config.context_dim,
                 'vocab_size': self.config.vocab_size,
