@@ -5,7 +5,7 @@ ContextBlock: 文脈処理ブロック（Phase 1で学習、Phase 2でfreeze）
 TokenBlock: トークン処理ブロック（Phase 2で学習）
 """
 
-from typing import List, Optional, Union
+from typing import List, Union
 
 import torch
 import torch.nn as nn
@@ -136,6 +136,11 @@ class TokenBlock(nn.Module):
 
     Phase 2で学習
 
+    G案 Context Mode (2025-12-02採用):
+    - 1層目に前トークン時点のcontext (prev_context)
+    - 最終層に現在トークン時点のcontext (current_context)
+    - 中間層(3層以上の場合)はcontextなし
+
     token継ぎ足し方式（num_input_tokens=1の場合）:
     - 入力: embed_dim
     - 出力: embed_dim
@@ -146,21 +151,11 @@ class TokenBlock(nn.Module):
     - 出力: embed_dim
     - 各レイヤーで次元を減少
 
-    context_mode:
-        - 'layerwise' (E案): 各レイヤーはContextBlockの対応するレイヤーの出力を参照
-        - 'final_only' (A案): 全レイヤーがContextBlockの最終出力のみを参照
-        - 'first_layer_only' (F案): 1層目のみに最終contextを注入、2層目以降はcontextなし
-        - 'prev_and_current' (G案): 1層目に前のcontext、最終層に現在のcontext
-
     Args:
-        num_layers: Number of token layers
-        context_dim: Final context vector dimension
+        num_layers: Number of token layers (2以上推奨)
+        context_dim: Context vector dimension
         embed_dim: Token embedding dimension (最終出力次元)
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
-        context_dims_list: List of context dimensions from ContextBlock (for E案)
-        use_final_context_only: If True, all layers use final context (A案)
-        use_first_layer_context_only: If True, only first layer uses context (F案)
-        use_prev_and_current_context: If True, first layer uses prev context, last layer uses current (G案)
     """
 
     def __init__(
@@ -169,10 +164,6 @@ class TokenBlock(nn.Module):
         context_dim: int,
         embed_dim: int,
         num_input_tokens: int = 1,
-        context_dims_list: Optional[List[int]] = None,
-        use_final_context_only: bool = False,
-        use_first_layer_context_only: bool = False,
-        use_prev_and_current_context: bool = False
     ) -> None:
         super().__init__()
 
@@ -180,9 +171,6 @@ class TokenBlock(nn.Module):
         self.num_input_tokens = num_input_tokens
         self.embed_dim = embed_dim
         self.context_dim = context_dim
-        self.use_final_context_only = use_final_context_only
-        self.use_first_layer_context_only = use_first_layer_context_only
-        self.use_prev_and_current_context = use_prev_and_current_context
 
         # 次元計算
         # 入力次元: embed_dim * num_input_tokens
@@ -198,29 +186,16 @@ class TokenBlock(nn.Module):
             dim = input_token_dim - (total_reduction * i) // num_layers
             self.token_dims.append(dim)
 
-        # ContextBlockからの次元リスト
-        if use_prev_and_current_context:
-            # G案: 1層目と最終層のみcontext入力、中間層はcontext_dim=0
-            # 2レイヤーの場合: [context_dim, context_dim]
-            # 3レイヤー以上の場合: [context_dim, 0, ..., 0, context_dim]
-            if num_layers == 1:
-                self.context_dims_list = [context_dim]
-            elif num_layers == 2:
-                self.context_dims_list = [context_dim, context_dim]
-            else:
-                self.context_dims_list = [context_dim] + [0] * (num_layers - 2) + [context_dim]
-        elif use_first_layer_context_only:
-            # F案: 1層目のみcontext入力、2層目以降はcontext_dim=0
-            self.context_dims_list = [context_dim] + [0] * (num_layers - 1)
-        elif use_final_context_only:
-            # A案: 全レイヤーで最終context次元（context_dim）を使用
-            self.context_dims_list = [context_dim] * num_layers
-        elif context_dims_list is None:
-            # デフォルト: 全レイヤーで同じ次元
-            self.context_dims_list = [context_dim] * num_layers
+        # G案: 1層目と最終層のみcontext入力、中間層はcontext_dim=0
+        # 1レイヤー: [context_dim]（1層目=最終層）
+        # 2レイヤー: [context_dim, context_dim]
+        # 3レイヤー以上: [context_dim, 0, ..., 0, context_dim]
+        if num_layers == 1:
+            self.context_dims_list = [context_dim]
+        elif num_layers == 2:
+            self.context_dims_list = [context_dim, context_dim]
         else:
-            # E案: ContextBlockの各レイヤー出力次元を使用
-            self.context_dims_list = context_dims_list
+            self.context_dims_list = [context_dim] + [0] * (num_layers - 2) + [context_dim]
 
         # Stack of Token layers
         self.layers = nn.ModuleList()
@@ -233,58 +208,16 @@ class TokenBlock(nn.Module):
                 )
             )
 
-    def forward(self, context: Optional[torch.Tensor], token_embeds: torch.Tensor, context_list: Optional[List[torch.Tensor]] = None) -> torch.Tensor:
-        """
-        Execute all token layers sequentially
-
-        Args:
-            context: [batch, context_dim] - 単一context（A案/F案用、context_list=Noneの場合）
-            token_embeds: [batch, embed_dim * num_input_tokens]
-            context_list: List of context outputs（E案用）
-                          [context_1, ..., context_N] len == num_layers
-                          指定時はcontextは無視される
-
-        Returns:
-            token: Updated token [batch, embed_dim]
-
-        Raises:
-            ValueError: if context_list provided but len != num_layers
-        """
-        if context_list is not None:
-            # E案: レイヤーごとに異なるcontextを使用
-            if len(context_list) != self.num_layers:
-                raise ValueError(
-                    f"context_list length ({len(context_list)}) must equal "
-                    f"num_layers ({self.num_layers})"
-                )
-            for i, layer in enumerate(self.layers):
-                token_embeds = layer(context_list[i], token_embeds)
-        elif self.use_first_layer_context_only:
-            # F案: 1層目のみcontextを使用、2層目以降はNone
-            for i, layer in enumerate(self.layers):
-                if i == 0:
-                    token_embeds = layer(context, token_embeds)
-                else:
-                    token_embeds = layer(None, token_embeds)
-        else:
-            # A案: 全レイヤーで同じcontextを使用
-            for layer in self.layers:
-                token_embeds = layer(context, token_embeds)
-
-        return token_embeds
-
-    def forward_with_contexts(self, context_list: List[torch.Tensor], token_embeds: torch.Tensor) -> torch.Tensor:
-        """各レイヤーが対応するcontextを使用"""
-        return self.forward(None, token_embeds, context_list=context_list)
-
-    def forward_with_prev_and_current(
+    def forward(
         self,
         prev_context: torch.Tensor,
         current_context: torch.Tensor,
         token_embeds: torch.Tensor
     ) -> torch.Tensor:
         """
-        G案用: 1層目に前のcontext、最終層に現在のcontextを使用
+        Execute all token layers sequentially (G案)
+
+        1層目に前のcontext、最終層に現在のcontextを使用。
 
         Args:
             prev_context: [batch, context_dim] - 前のトークン時点のcontext

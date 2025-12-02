@@ -10,9 +10,14 @@ Main features:
 2. Token prediction with residual connections (TokenBlock)
 3. LayerNorm for stable training
 4. GPT-2 pretrained embeddings support
+
+Context Mode (G案採用 - 2025-12-02):
+- Layer 1: prev_context (前トークン時点のcontext)
+- Layer N: current_context (現在トークン時点のcontext)
+- メモリ効率と拡張性を優先しG案に一本化
 """
 
-from typing import Dict, List
+from typing import Dict
 
 import torch
 import torch.nn as nn
@@ -28,11 +33,10 @@ class LLM(nn.Module):
     - ContextBlock: 文脈処理専用（Phase 1で学習、Phase 2でfreeze）
     - TokenBlock: トークン処理専用（Phase 2で学習）
 
-    context_mode:
-    - E案 (default): TokenBlock Layer i は ContextBlock Layer i の出力を参照
-    - A案 (use_final_context_only=True): 全TokenBlockレイヤーがContextBlockの最終出力のみを参照
-    - F案 (use_first_layer_context_only=True): 1層目のみに最終contextを注入、2層目以降はcontextなし
-    - G案 (use_prev_and_current_context=True): 1層目に前のcontext、最終層に現在のcontext
+    G案 Context Mode (2025-12-02採用):
+    - 1層目に前トークン時点のcontext、最終層に現在トークン時点のcontextを注入
+    - メモリ効率: cache = [num_tokens, context_dim] (固定、レイヤー数に依存しない)
+    - 拡張性: 3層以上に自然に拡張可能
 
     token継ぎ足し方式（2025-11-29に一本化）:
     - 全レイヤーでtoken入力
@@ -41,14 +45,13 @@ class LLM(nn.Module):
         vocab_size: Vocabulary size
         embed_dim: Token embedding dimension (単一トークンの次元)
         context_dim: Context vector dimension
-        num_layers: Number of layers in both ContextBlock and TokenBlock
+        num_layers: Number of layers (deprecated, use context_layers/token_layers)
+        context_layers: Number of layers in ContextBlock (Noneでnum_layersを使用)
+        token_layers: Number of layers in TokenBlock (Noneでnum_layersを使用)
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
         use_weight_tying: Whether to tie token_embedding and token_output weights
                           (reduces parameters by ~38M, GPT-2 style)
-        use_final_context_only: If True, use A案 (all TokenBlock layers use final context)
-        use_first_layer_context_only: If True, use F案 (only first layer uses context)
-        use_prev_and_current_context: If True, use G案 (first layer uses prev, last uses current)
     """
 
     def __init__(
@@ -56,27 +59,26 @@ class LLM(nn.Module):
         vocab_size: int,
         embed_dim: int,
         context_dim: int,
-        num_layers: int = 6,
+        num_layers: int = 2,
+        context_layers: int | None = None,
+        token_layers: int | None = None,
         num_input_tokens: int = 1,
         use_pretrained_embeddings: bool = True,
         use_weight_tying: bool = False,
-        use_final_context_only: bool = False,
-        use_first_layer_context_only: bool = False,
-        use_prev_and_current_context: bool = False
     ) -> None:
         super().__init__()
+
+        # Context層とToken層の数を決定
+        self._context_layers = context_layers if context_layers is not None else num_layers
+        self._token_layers = token_layers if token_layers is not None else num_layers
 
         # Save configuration
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.context_dim = context_dim
-        self.num_layers = num_layers
+        self.num_layers = num_layers  # 後方互換性のため保持
         self.num_input_tokens = num_input_tokens
-        self.use_separated_architecture = True  # Always true now
         self.use_weight_tying = use_weight_tying
-        self.use_final_context_only = use_final_context_only
-        self.use_first_layer_context_only = use_first_layer_context_only
-        self.use_prev_and_current_context = use_prev_and_current_context
 
         # ========== Token Embeddings ==========
         if use_pretrained_embeddings:
@@ -86,65 +88,29 @@ class LLM(nn.Module):
 
         self.embed_norm = nn.LayerNorm(embed_dim)
 
-        # ========== Separated Architecture ==========
-        if use_prev_and_current_context:
-            context_mode = "G案 (prev and current context)"
-        elif use_first_layer_context_only:
-            context_mode = "F案 (first layer context only)"
-        elif use_final_context_only:
-            context_mode = "A案 (final context only)"
-        else:
-            context_mode = "E案 (layerwise)"
-        print(f"Using {context_mode} architecture: ContextBlock({num_layers} layers) + TokenBlock({num_layers} layers)")
+        # ========== Separated Architecture (G案) ==========
+        print(f"Using G案 architecture: ContextBlock({self._context_layers}L) + TokenBlock({self._token_layers}L)")
         print(f"  num_input_tokens: {num_input_tokens}")
-        print("  token継ぎ足し方式: 全レイヤーでtoken入力")
+        if self._token_layers >= 2:
+            print("  Context injection: Layer1=prev, LayerN=current")
+        else:
+            print("  Context injection: Layer1=current (single layer)")
 
         # ContextBlock: 文脈処理専用
         self.context_block = ContextBlock(
-            num_layers=num_layers,
+            num_layers=self._context_layers,
             context_dim=context_dim,
             embed_dim=embed_dim,
             num_input_tokens=num_input_tokens,
         )
 
-        # TokenBlock: トークン処理専用
-        if use_prev_and_current_context:
-            # G案: 1層目に前のcontext、最終層に現在のcontext
-            self.token_block = TokenBlock(
-                num_layers=num_layers,
-                context_dim=context_dim,
-                embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens,
-                use_prev_and_current_context=True,
-            )
-        elif use_first_layer_context_only:
-            # F案: 1層目のみcontext入力、2層目以降はcontextなし
-            self.token_block = TokenBlock(
-                num_layers=num_layers,
-                context_dim=context_dim,
-                embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens,
-                use_first_layer_context_only=True,
-            )
-        elif use_final_context_only:
-            # A案: 全レイヤーで最終context出力のみ使用
-            self.token_block = TokenBlock(
-                num_layers=num_layers,
-                context_dim=context_dim,
-                embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens,
-                use_final_context_only=True,
-            )
-        else:
-            # E案: ContextBlockの各レイヤー出力次元をTokenBlockに渡す
-            context_dims_for_token = self.context_block.context_dims[1:]
-            self.token_block = TokenBlock(
-                num_layers=num_layers,
-                context_dim=context_dim,
-                embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens,
-                context_dims_list=context_dims_for_token,
-            )
+        # TokenBlock: トークン処理専用（G案: prev/current context）
+        self.token_block = TokenBlock(
+            num_layers=self._token_layers,
+            context_dim=context_dim,
+            embed_dim=embed_dim,
+            num_input_tokens=num_input_tokens,
+        )
 
         # ========== Output Head (Weight Tying) ==========
         # Token EmbeddingとOutput Headで重みを共有（GPT-2と同じ手法）
@@ -197,81 +163,14 @@ class LLM(nn.Module):
         result: torch.Tensor = self.context_block(context, token_embeds)
         return result
 
-    def forward_context_with_intermediates(
-        self, context: torch.Tensor, token_embeds: torch.Tensor
-    ) -> List[torch.Tensor]:
-        """
-        ContextBlock forward pass with intermediate outputs (E案用)
-
-        Args:
-            context: [batch, context_dim] (初期コンテキスト)
-            token_embeds: [batch, embed_dim * num_input_tokens]
-
-        Returns:
-            context_outputs: List of context outputs [context_1, ..., context_N]
-        """
-        return self.context_block.forward_with_intermediates(context, token_embeds)
-
-    def forward_token_e(
-        self, context_list: List[torch.Tensor], token_embeds: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        TokenBlock forward pass with layer-specific contexts (E案用)
-
-        TokenBlock Layer i は context_list[i] を参照する。
-
-        Args:
-            context_list: List of context outputs from ContextBlock
-                          [context_1, context_2, ..., context_N]
-            token_embeds: [batch, embed_dim * num_input_tokens]
-
-        Returns:
-            token_out: [batch, embed_dim]
-        """
-        return self.token_block.forward_with_contexts(context_list, token_embeds)
-
-    def forward_token_a(
-        self, final_context: torch.Tensor, token_embeds: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        TokenBlock forward pass with final context only (A案用)
-
-        全TokenBlockレイヤーが同じfinal_contextを使用する。
-
-        Args:
-            final_context: Final context from ContextBlock [batch, context_dim]
-            token_embeds: [batch, embed_dim * num_input_tokens]
-
-        Returns:
-            token_out: [batch, embed_dim]
-        """
-        return self.token_block(final_context, token_embeds, context_list=None)
-
-    def forward_token_f(
-        self, final_context: torch.Tensor, token_embeds: torch.Tensor
-    ) -> torch.Tensor:
-        """
-        TokenBlock forward pass with first layer context only (F案用)
-
-        1層目のみfinal_contextを使用し、2層目以降はcontextなし。
-
-        Args:
-            final_context: Final context from ContextBlock [batch, context_dim]
-            token_embeds: [batch, embed_dim * num_input_tokens]
-
-        Returns:
-            token_out: [batch, embed_dim]
-        """
-        return self.token_block(final_context, token_embeds, context_list=None)
-
-    def forward_token_g(
+    def forward_token(
         self,
         prev_context: torch.Tensor,
         current_context: torch.Tensor,
         token_embeds: torch.Tensor
     ) -> torch.Tensor:
         """
-        TokenBlock forward pass with prev and current context (G案用)
+        TokenBlock forward pass (G案)
 
         1層目に前のcontext、最終層に現在のcontextを使用する。
 
@@ -283,9 +182,7 @@ class LLM(nn.Module):
         Returns:
             token_out: [batch, embed_dim]
         """
-        return self.token_block.forward_with_prev_and_current(
-            prev_context, current_context, token_embeds
-        )
+        return self.token_block(prev_context, current_context, token_embeds)
 
     def freeze_context_block(self) -> None:
         """ContextBlockのパラメータをfreezeする（Phase 2用）"""

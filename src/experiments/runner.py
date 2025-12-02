@@ -25,7 +25,7 @@ from config.experiment import DataConfig, Phase1TrainerConfig, Phase2TrainerConf
 class ExperimentConfig:
     """実験設定"""
     # アーキテクチャ
-    num_layers: int = 6
+    num_layers: int = 2  # G案は2以上推奨
     context_dim: int = 768
     embed_dim: int = 768
     num_input_tokens: int = 1
@@ -147,7 +147,9 @@ class ExperimentRunner:
         )
         # Phase1Result dataclass から値を取得
         train_contexts = train_result.contexts
-        train_context_cache = train_result.cache
+        # G案: 最終レイヤーのキャッシュのみ使用 [num_tokens, context_dim]
+        assert train_result.cache is not None
+        train_context_cache = train_result.cache[-1]
         train_token_embeds = train_result.token_embeds
 
         # Phase 1 訓練統計を取得
@@ -157,7 +159,9 @@ class ExperimentRunner:
         val_result = phase1_trainer.evaluate(val_token_ids, return_all_layers=True)
         # Phase1Result dataclass から値を取得
         val_contexts = val_result.contexts
-        val_context_cache = val_result.cache
+        # G案: 最終レイヤーのキャッシュのみ使用 [num_tokens, context_dim]
+        assert val_result.cache is not None
+        val_context_cache = val_result.cache[-1]
         val_token_embeds = val_result.token_embeds
 
         # Effective Rank計算
@@ -171,9 +175,7 @@ class ExperimentRunner:
 
         # Phase 2 実行
         # キャッシュは return_all_layers=True で取得したので必ず存在
-        assert train_context_cache is not None, "train_context_cache must not be None"
         assert train_token_embeds is not None, "train_token_embeds must not be None"
-        assert val_context_cache is not None, "val_context_cache must not be None"
         assert val_token_embeds is not None, "val_token_embeds must not be None"
 
         phase2_config = config.get_phase2_config(self.base_config, self.device)

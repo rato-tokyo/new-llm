@@ -1,19 +1,26 @@
 #!/usr/bin/env python3
 """
-Phase 1 + Phase 2 実験スクリプト
+非対称レイヤー実験スクリプト
 
-OACDアルゴリズムでPhase 1を実行し、その後Phase 2でトークン予測を学習。
-α値（スケーリング指数）を計算して報告。
+ContextBlockとTokenBlockのレイヤー数を別々に設定して比較実験。
+
+比較パターン:
+- C2T1: ContextBlock 2層, TokenBlock 1層
+- C1T2: ContextBlock 1層, TokenBlock 2層
+- C2T2: ContextBlock 2層, TokenBlock 2層（ベースライン）
 
 使用方法:
-  # ローカル（CPU）: 2サンプルで動作確認
-  python3 scripts/run_experiment.py -s 2
+  # C2T1実験（Context 2層, Token 1層）
+  python3 scripts/layer_asymmetric_experiment.py --mode c2t1
 
-  # Colab（GPU）: 50-200サンプルで本格実験
-  python3 scripts/run_experiment.py -s 50 100 200
+  # C1T2実験（Context 1層, Token 2層）
+  python3 scripts/layer_asymmetric_experiment.py --mode c1t2
 
-  # context_dimを指定
-  python3 scripts/run_experiment.py -s 50 100 200 -c 500
+  # カスタムサンプル数
+  python3 scripts/layer_asymmetric_experiment.py --mode c2t1 --samples 1000
+
+  # context_dim指定
+  python3 scripts/layer_asymmetric_experiment.py --mode c1t2 --context-dim 500
 """
 
 import os
@@ -33,27 +40,30 @@ from config.experiment import DataConfig, Phase1TrainerConfig, Phase2TrainerConf
 from src.models import LLM
 from src.trainers.phase1 import MemoryPhase1Trainer
 from src.trainers.phase2 import Phase2Trainer
-from src.evaluation.metrics import analyze_fixed_points, calculate_scaling_law
+from src.evaluation.metrics import analyze_fixed_points
 from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
 
 
-# =============================================================================
-# 単一実験実行
-# =============================================================================
-
-def run_single_experiment(
+def run_asymmetric_experiment(
     num_samples: int,
+    context_layers: int,
+    token_layers: int,
     base_config: Config,
     device: torch.device,
     seed: int = 42,
     context_dim: int = 500,
 ) -> Dict[str, Any]:
-    """単一の実験を実行（Phase 1 + Phase 2）"""
+    """非対称レイヤー実験を実行"""
 
     set_seed(seed)
+
+    config_name = f"C{context_layers}T{token_layers}"
+    print_flush(f"\n{'='*60}")
+    print_flush(f"Running {config_name}: Context {context_layers}L, Token {token_layers}L")
+    print_flush(f"{'='*60}")
 
     # データ読み込み用設定
     data_config = DataConfig.from_base(base_config, num_samples=num_samples)
@@ -67,25 +77,33 @@ def run_single_experiment(
     num_train_tokens = len(train_token_ids)
     num_val_tokens = len(val_token_ids)
 
-    print_flush(f"    Data: {num_train_tokens:,} train, {num_val_tokens:,} val tokens")
+    print_flush(f"Data: {num_train_tokens:,} train, {num_val_tokens:,} val tokens")
 
-    # モデル作成
+    # モデル作成（非対称レイヤー）
     set_seed(seed)
     model = LLM(
         vocab_size=base_config.vocab_size,
         embed_dim=base_config.embed_dim,
         context_dim=context_dim,
-        num_layers=base_config.num_layers,
+        context_layers=context_layers,
+        token_layers=token_layers,
         num_input_tokens=base_config.num_input_tokens,
         use_pretrained_embeddings=base_config.use_pretrained_embeddings,
         use_weight_tying=base_config.use_weight_tying,
     )
     model.to(device)
 
-    # Phase 1用設定
+    # パラメータ数表示
+    params = model.num_params()
+    print_flush(f"Parameters: {params['total']:,} total")
+    print_flush(f"  ContextBlock: {params['context_block']:,}")
+    print_flush(f"  TokenBlock: {params['token_block']:,}")
+
+    # Phase 1用設定（context_layersを使用）
     phase1_config = Phase1TrainerConfig.from_base(
         base_config, device,
         context_dim=context_dim,
+        num_layers=context_layers,  # Phase1はContextBlockのレイヤー数
     )
 
     # Phase 1 トレーナー作成
@@ -102,11 +120,10 @@ def run_single_experiment(
     phase1_time = time.time() - phase1_start
 
     # Phase1Result dataclass から値を取得
-    # return_all_layers=Trueなのでcache, token_embedsは必ず存在
     assert train_result.cache is not None
     assert train_result.token_embeds is not None
     train_contexts = train_result.contexts
-    # G案: 最終レイヤーのキャッシュのみ使用 [num_tokens, context_dim]
+    # G案: 最終レイヤーのキャッシュのみ使用
     train_context_cache = train_result.cache[-1]
     train_token_embeds = train_result.token_embeds
 
@@ -117,11 +134,9 @@ def run_single_experiment(
 
     # 検証データのキャッシュ収集
     val_result = phase1_trainer.evaluate(val_token_ids, return_all_layers=True)
-    # Phase1Result dataclass から値を取得
     assert val_result.cache is not None
     assert val_result.token_embeds is not None
     val_contexts = val_result.contexts
-    # G案: 最終レイヤーのキャッシュのみ使用 [num_tokens, context_dim]
     val_context_cache = val_result.cache[-1]
     val_token_embeds = val_result.token_embeds
 
@@ -133,13 +148,14 @@ def run_single_experiment(
     train_er_pct = train_er / context_dim * 100
     val_er_pct = val_er / context_dim * 100
 
-    print_flush(f"    Phase 1: {phase1_time:.1f}s, {phase1_iterations} iter, "
+    print_flush(f"Phase 1: {phase1_time:.1f}s, {phase1_iterations} iter, "
                 f"conv={convergence_rate*100:.0f}%, ER={train_er_pct:.1f}%/{val_er_pct:.1f}%")
 
-    # Phase 2用設定
+    # Phase 2用設定（token_layersを使用）
     phase2_config = Phase2TrainerConfig.from_base(
         base_config, device,
         context_dim=context_dim,
+        num_layers=token_layers,  # Phase2はTokenBlockのレイヤー数
     )
 
     # Phase 2 トレーナー作成
@@ -163,9 +179,11 @@ def run_single_experiment(
     best_acc = history['val_acc'][best_epoch - 1]
     best_train_ppl = history['train_ppl'][best_epoch - 1]
 
-    print_flush(f"    Phase 2: {phase2_time:.1f}s, PPL={best_ppl:.1f}, Acc={best_acc*100:.1f}%")
-
     total_time = phase1_time + phase2_time
+
+    print_flush(f"Phase 2: {phase2_time:.1f}s, Best epoch {best_epoch}")
+    print_flush(f"Result: PPL={best_ppl:.1f}, Acc={best_acc*100:.1f}%")
+    print_flush(f"Total time: {total_time:.1f}s")
 
     # メモリ解放
     del model, phase1_trainer, phase2_trainer
@@ -176,10 +194,16 @@ def run_single_experiment(
     clear_gpu_cache(device)
 
     return {
+        'config_name': config_name,
+        'context_layers': context_layers,
+        'token_layers': token_layers,
         'context_dim': context_dim,
         'num_samples': num_samples,
         'train_tokens': num_train_tokens,
         'val_tokens': num_val_tokens,
+        'total_params': params['total'],
+        'context_block_params': params['context_block'],
+        'token_block_params': params['token_block'],
         'phase1_iterations': phase1_iterations,
         'phase1_time': phase1_time,
         'train_er': train_er,
@@ -196,20 +220,21 @@ def run_single_experiment(
     }
 
 
-# =============================================================================
-# メイン
-# =============================================================================
-
 def main():
     parser = argparse.ArgumentParser(
-        description='Run Phase 1 + Phase 2 experiment with OACD algorithm'
+        description='Run asymmetric layer experiment (Context vs Token layers)'
+    )
+    parser.add_argument(
+        '--mode', '-m',
+        choices=['c2t1', 'c1t2', 'c2t2', 'all'],
+        default='c2t1',
+        help='Experiment mode: c2t1 (Context 2L, Token 1L), c1t2 (Context 1L, Token 2L), c2t2 (baseline), all (run all)'
     )
     parser.add_argument(
         '--samples', '-s',
-        nargs='+',
         type=int,
-        default=[50, 100, 200],
-        help='Sample sizes to test (default: 50 100 200)'
+        default=2000,
+        help='Number of samples (default: 2000)'
     )
     parser.add_argument(
         '--context-dim', '-c',
@@ -234,32 +259,42 @@ def main():
     if args.output_dir:
         output_dir = args.output_dir
     else:
-        output_dir = f"importants/logs/{timestamp}_experiment"
+        output_dir = f"importants/logs/{timestamp}_asymmetric_{args.mode}"
 
     os.makedirs(output_dir, exist_ok=True)
 
     # 情報表示
     print_flush("=" * 70)
-    print_flush("OACD EXPERIMENT")
+    print_flush("ASYMMETRIC LAYER EXPERIMENT")
     print_flush("=" * 70)
     print_flush(f"Device: {device}")
     if device.type == "cuda":
         print_flush(f"GPU: {torch.cuda.get_device_name(0)}")
         print_flush(f"Memory: {torch.cuda.get_device_properties(0).total_memory / (1024**3):.1f}GB")
-    print_flush(f"\nSample sizes: {args.samples}")
+    print_flush(f"\nMode: {args.mode}")
+    print_flush(f"Samples: {args.samples}")
     print_flush(f"Context dim: {args.context_dim}")
     print_flush(f"Output: {output_dir}")
     print_flush("=" * 70)
 
+    # 実験設定
+    experiments = []
+    if args.mode == 'c2t1' or args.mode == 'all':
+        experiments.append({'context_layers': 2, 'token_layers': 1, 'name': 'C2T1'})
+    if args.mode == 'c1t2' or args.mode == 'all':
+        experiments.append({'context_layers': 1, 'token_layers': 2, 'name': 'C1T2'})
+    if args.mode == 'c2t2' or args.mode == 'all':
+        experiments.append({'context_layers': 2, 'token_layers': 2, 'name': 'C2T2'})
+
     # 実験実行
     results = []
 
-    for num_samples in args.samples:
-        print_flush(f"\n  Samples: {num_samples}")
-
+    for exp in experiments:
         try:
-            result = run_single_experiment(
-                num_samples=num_samples,
+            result = run_asymmetric_experiment(
+                num_samples=args.samples,
+                context_layers=exp['context_layers'],
+                token_layers=exp['token_layers'],
                 base_config=config,
                 device=device,
                 seed=42,
@@ -267,41 +302,49 @@ def main():
             )
             results.append(result)
         except Exception as e:
-            print_flush(f"    ERROR: {e}")
+            print_flush(f"ERROR in {exp['name']}: {e}")
             import traceback
             traceback.print_exc()
             continue
 
-    if results:
-        # スケーリング則計算
-        scaling = calculate_scaling_law(results)
-
-        print_flush("\nScaling Law:")
-        if scaling['alpha'] is not None:
-            print_flush(f"  α = {scaling['alpha']:.4f}")
-            print_flush(f"  A = {scaling['A']:.2e}")
-            print_flush(f"  R² = {scaling['r_squared']:.4f}")
-        else:
-            print_flush("  Could not calculate (insufficient data)")
-
     # サマリー表示
-    print_flush("\n" + "=" * 70)
-    print_flush("SUMMARY")
-    print_flush("=" * 70)
+    if results:
+        print_flush("\n" + "=" * 70)
+        print_flush("SUMMARY")
+        print_flush("=" * 70)
 
-    print_flush(f"\n{'Samples':<10} {'Tokens':<12} {'Val PPL':<10} "
-                f"{'Acc':<8} {'ER%':<8} {'Conv%':<8} {'Iter':<6}")
-    print_flush("-" * 70)
+        print_flush(f"\n{'Config':<10} {'Context':<8} {'Token':<8} {'Params':<12} "
+                    f"{'Val PPL':<10} {'Acc':<8} {'ER%':<8} {'Time':<8}")
+        print_flush("-" * 80)
 
-    for r in results:
-        print_flush(f"{r['num_samples']:<10} {r['train_tokens']:<12,} "
-                   f"{r['val_ppl']:<10.1f} {r['val_acc']*100:<8.1f} "
-                   f"{r['val_er_pct']:<8.1f} {r['convergence_rate']*100:<8.1f} "
-                   f"{r['phase1_iterations']:<6}")
+        for r in results:
+            print_flush(f"{r['config_name']:<10} {r['context_layers']:<8} {r['token_layers']:<8} "
+                       f"{r['total_params']:,}  {r['val_ppl']:<10.1f} "
+                       f"{r['val_acc']*100:<8.1f} {r['val_er_pct']:<8.1f} {r['total_time']:<8.1f}")
 
-    if results and scaling['alpha'] is not None:
-        print_flush("\n" + "-" * 70)
-        print_flush(f"\nα = {scaling['alpha']:.4f}, A = {scaling['A']:.2e}, R² = {scaling['r_squared']:.4f}")
+        # 結果をファイルに保存
+        output_file = os.path.join(output_dir, f"results_{args.mode}.txt")
+        with open(output_file, 'w') as f:
+            f.write(f"Asymmetric Layer Experiment Results\n")
+            f.write(f"Mode: {args.mode}\n")
+            f.write(f"Samples: {args.samples}\n")
+            f.write(f"Context dim: {args.context_dim}\n")
+            f.write(f"Device: {device}\n\n")
+
+            for r in results:
+                f.write(f"\n{r['config_name']}: Context {r['context_layers']}L, Token {r['token_layers']}L\n")
+                f.write(f"  Parameters: {r['total_params']:,}\n")
+                f.write(f"    ContextBlock: {r['context_block_params']:,}\n")
+                f.write(f"    TokenBlock: {r['token_block_params']:,}\n")
+                f.write(f"  Train tokens: {r['train_tokens']:,}\n")
+                f.write(f"  Val PPL: {r['val_ppl']:.2f}\n")
+                f.write(f"  Val Acc: {r['val_acc']*100:.2f}%\n")
+                f.write(f"  Val ER: {r['val_er_pct']:.1f}%\n")
+                f.write(f"  Phase 1: {r['phase1_iterations']} iter, {r['phase1_time']:.1f}s\n")
+                f.write(f"  Phase 2: epoch {r['best_epoch']}, {r['phase2_time']:.1f}s\n")
+                f.write(f"  Total time: {r['total_time']:.1f}s\n")
+
+        print_flush(f"\nResults saved to: {output_file}")
 
     print_flush("\n" + "=" * 70)
     print_flush("DONE")

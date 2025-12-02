@@ -11,7 +11,7 @@ class BaseConfig:
     """基本設定クラス"""
 
     # ========== モデルアーキテクチャ ==========
-    num_layers = 1                  # ContextBlock と TokenBlock のレイヤー数（固定）
+    num_layers = 2                  # ContextBlock と TokenBlock のレイヤー数（G案は2以上推奨）
     embed_dim = 768                 # トークン埋め込み次元数（GPT-2: 768固定）
     context_dim = 500               # コンテキストベクトル次元数
     vocab_size = 50257              # GPT-2トークナイザーの語彙数

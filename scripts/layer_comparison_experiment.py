@@ -138,7 +138,9 @@ def run_single_experiment(
         assert train_result.cache is not None
         assert train_result.token_embeds is not None
         train_contexts = train_result.contexts.cpu() if train_result.contexts.is_cuda else train_result.contexts
-        train_context_cache = train_result.cache.cpu() if train_result.cache.is_cuda else train_result.cache
+        # G案: 最終レイヤーのキャッシュのみ使用 [num_tokens, context_dim]
+        full_cache = train_result.cache.cpu() if train_result.cache.is_cuda else train_result.cache
+        train_context_cache = full_cache[-1]
         train_token_embeds = train_result.token_embeds.cpu() if train_result.token_embeds.is_cuda else train_result.token_embeds
 
         # GPUメモリ解放
@@ -155,7 +157,9 @@ def run_single_experiment(
         assert val_result.cache is not None
         assert val_result.token_embeds is not None
         val_contexts = val_result.contexts.cpu() if val_result.contexts.is_cuda else val_result.contexts
-        val_context_cache = val_result.cache.cpu() if val_result.cache.is_cuda else val_result.cache
+        # G案: 最終レイヤーのキャッシュのみ使用 [num_tokens, context_dim]
+        full_val_cache = val_result.cache.cpu() if val_result.cache.is_cuda else val_result.cache
+        val_context_cache = full_val_cache[-1]
         val_token_embeds = val_result.token_embeds.cpu() if val_result.token_embeds.is_cuda else val_result.token_embeds
 
         # GPUメモリ解放

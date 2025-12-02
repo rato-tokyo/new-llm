@@ -17,21 +17,19 @@ Phase 1で学習したContextBlockを固定（freeze）し、TokenBlockのみを
 - ContextBlock計算: エポックごとに1回のみ（従来: トークン数×エポック回）
 - TokenBlock: 真のバッチ並列処理（GPU効率大幅向上）
 
-## 分離アーキテクチャ - E案 / A案 / F案 / G案
+## 分離アーキテクチャ - G案採用 (2025-12-02)
 
 ### ContextBlock（Phase 1で学習済み、Phase 2でfreeze）
 - 入力: [context_in, token_embed]
-- 出力: 各レイヤーのcontext出力 [context_1, context_2, ..., context_N]
+- 出力: context_out [num_tokens, context_dim]
 - Phase 2では重みが固定されているため、同じ入力 → 同じ出力が保証される
 
 ### TokenBlock（Phase 2で学習）
-- **E案 (default)**: TokenBlock Layer i は ContextBlock Layer i の出力を参照
-- **A案 (use_final_context_only=True)**: 全レイヤーがContextBlockの最終出力のみを参照
-- **F案 (use_first_layer_context_only=True)**: 1層目のみ最終context注入、2層目以降はcontextなし
-- **G案 (use_prev_and_current_context=True)**: 1層目に前のcontext、最終層に現在のcontext
-- 入力: [context_i, token_{i-1}]
-- 出力: token_i
-- 最終token_Nから次トークンを予測
+- G案: 1層目に前のcontext、最終層に現在のcontext
+- context_cache: [num_tokens, context_dim]（固定サイズ、レイヤー数に依存しない）
+- 入力: [prev_context, current_context, token_embed]
+- 出力: token_out
+- token_outから次トークンを予測
 
 ## 自動メモリ管理 (2025-11-29)
 
@@ -43,7 +41,7 @@ Phase 1で学習したContextBlockを固定（freeze）し、TokenBlockのみを
 import torch
 import torch.nn as nn
 import time
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple
 
 from src.utils.io import print_flush
 from src.utils.memory import can_fit_in_memory, calculate_optimal_batch_size
@@ -106,11 +104,11 @@ class Phase2Trainer:
         token_ids: torch.Tensor,
         device: torch.device,
         batch_size: int,
-        context_cache: Union[torch.Tensor, List[torch.Tensor]],
+        context_cache: torch.Tensor,
         token_embeds: torch.Tensor
     ) -> Tuple[float, float]:
         """
-        1エポックの訓練（キャッシュ方式）
+        1エポックの訓練（キャッシュ方式 - G案）
 
         処理フロー:
         TokenBlockをバッチ並列処理（キャッシュはPhase 1から渡される）
@@ -119,9 +117,7 @@ class Phase2Trainer:
             token_ids: トークンID [seq_len]
             device: デバイス
             batch_size: ミニバッチサイズ（必須）
-            context_cache: Phase 1から渡されたキャッシュ（必須）
-                - E案: [num_layers, num_tokens, context_dim]
-                - A案/F案: [num_tokens, context_dim]（最終context出力のみ）
+            context_cache: Phase 1から渡されたキャッシュ [num_tokens, context_dim]（必須）
             token_embeds: Phase 1から渡されたトークン埋め込み（必須）
 
         Returns:
@@ -135,10 +131,6 @@ class Phase2Trainer:
 
         # TokenBlockバッチ並列処理
         total_loss = 0.0
-        num_layers = self.model.num_layers
-        use_final_context_only = getattr(self.model, 'use_final_context_only', False)
-        use_first_layer_context_only = getattr(self.model, 'use_first_layer_context_only', False)
-        use_prev_and_current_context = getattr(self.model, 'use_prev_and_current_context', False)
 
         for batch_start in range(0, num_tokens, batch_size):
             batch_end = min(batch_start + batch_size, num_tokens)
@@ -146,41 +138,18 @@ class Phase2Trainer:
 
             # バッチ内のデータを取得（GPUに転送）
             batch_targets = target_ids[batch_start:batch_end].to(device)
-            batch_token_embeds = token_embeds[batch_start:batch_end].to(device)  # [batch, embed_dim * num_input_tokens]
+            batch_token_embeds = token_embeds[batch_start:batch_end].to(device)
 
-            if use_prev_and_current_context:
-                # G案: 1層目に前のcontext、最終層に現在のcontext
-                # current_context = context_cache[batch_start:batch_end]
-                # prev_context = context_cache[batch_start-1:batch_end-1] (batch_start=0の場合は同じ)
-                batch_current_context = context_cache[batch_start:batch_end].to(device)  # type: ignore[union-attr]
-                if batch_start == 0:
-                    batch_prev_context = batch_current_context
-                else:
-                    batch_prev_context = context_cache[batch_start - 1:batch_end - 1].to(device)  # type: ignore[union-attr]
-                batch_token_out = self.model.forward_token_g(
-                    batch_prev_context, batch_current_context, batch_token_embeds
-                )
-            elif use_first_layer_context_only:
-                # F案: 1層目のみcontext注入、2層目以降はcontextなし
-                # context_cache: [num_tokens, context_dim]（最終context出力のみ）
-                batch_final_context = context_cache[batch_start:batch_end].to(device)  # type: ignore[union-attr]
-                batch_token_out = self.model.forward_token_f(batch_final_context, batch_token_embeds)
-            elif use_final_context_only:
-                # A案: 最終context出力のみ使用
-                # context_cache: [num_tokens, context_dim]
-                batch_final_context = context_cache[batch_start:batch_end].to(device)  # type: ignore[union-attr]
-                batch_token_out = self.model.forward_token_a(batch_final_context, batch_token_embeds)
+            # G案: 1層目に前のcontext、最終層に現在のcontext
+            batch_current_context = context_cache[batch_start:batch_end].to(device)
+            if batch_start == 0:
+                batch_prev_context = batch_current_context
             else:
-                # E案: 各レイヤーのcontext出力を使用
-                # context_cache: テンソル [num_layers, num_tokens, context_dim] またはリスト
-                batch_context_list = []
-                for layer_idx in range(num_layers):
-                    if isinstance(context_cache, list):
-                        layer_contexts = context_cache[layer_idx][batch_start:batch_end].to(device)
-                    else:
-                        layer_contexts = context_cache[layer_idx, batch_start:batch_end].to(device)
-                    batch_context_list.append(layer_contexts)
-                batch_token_out = self.model.forward_token_e(batch_context_list, batch_token_embeds)
+                batch_prev_context = context_cache[batch_start - 1:batch_end - 1].to(device)
+
+            batch_token_out = self.model.forward_token(
+                batch_prev_context, batch_current_context, batch_token_embeds
+            )
 
             # 予測
             batch_logits = self.model.token_output(batch_token_out)
@@ -212,18 +181,16 @@ class Phase2Trainer:
         self,
         token_ids: torch.Tensor,
         device: torch.device,
-        context_cache: Union[torch.Tensor, List[torch.Tensor]],
+        context_cache: torch.Tensor,
         token_embeds: torch.Tensor
     ) -> Tuple[float, float, float]:
         """
-        評価（検証データ）- キャッシュ方式
+        評価（検証データ）- キャッシュ方式（G案）
 
         Args:
             token_ids: トークンID [seq_len]
             device: デバイス
-            context_cache: Phase 1から渡されたキャッシュ（必須）
-                - E案: [num_layers, num_tokens, context_dim]
-                - A案/F案: [num_tokens, context_dim]（最終context出力のみ）
+            context_cache: Phase 1から渡されたキャッシュ [num_tokens, context_dim]（必須）
             token_embeds: Phase 1から渡されたトークン埋め込み（必須）
 
         Returns:
@@ -238,59 +205,32 @@ class Phase2Trainer:
 
         total_loss = 0.0
         correct = 0
-        num_layers = self.model.num_layers
-        use_final_context_only = getattr(self.model, 'use_final_context_only', False)
-        use_first_layer_context_only = getattr(self.model, 'use_first_layer_context_only', False)
-        use_prev_and_current_context = getattr(self.model, 'use_prev_and_current_context', False)
 
         # バッチサイズを取得（train_fullで設定された値を使用）
-        # 評価時はbackwardがないので訓練より少しだけ大きくできるが、安全のため同じ値を使用
         eval_batch_size = getattr(self, '_effective_batch_size', None)
         if eval_batch_size is None:
-            # train_fullで設定されていない場合のフォールバック
             eval_batch_size = getattr(self.config, 'phase2_batch_size', None) or 2048
 
         with torch.no_grad():
-            # バッチ処理で評価（大量トークンでのOOM防止）
             for batch_start in range(0, num_tokens, eval_batch_size):
                 batch_end = min(batch_start + eval_batch_size, num_tokens)
 
                 # バッチのトークン埋め込み（GPUに転送）
                 batch_token_embeds = token_embeds[batch_start:batch_end].to(device)
 
-                if use_prev_and_current_context:
-                    # G案: 1層目に前のcontext、最終層に現在のcontext
-                    # current_context = context_cache[batch_start:batch_end]
-                    # prev_context = context_cache[batch_start-1:batch_end-1] (batch_start=0の場合は同じ)
-                    batch_current_context = context_cache[batch_start:batch_end].to(device)  # type: ignore[union-attr]
-                    if batch_start == 0:
-                        batch_prev_context = batch_current_context
-                    else:
-                        batch_prev_context = context_cache[batch_start - 1:batch_end - 1].to(device)  # type: ignore[union-attr]
-                    token_out = self.model.forward_token_g(
-                        batch_prev_context, batch_current_context, batch_token_embeds
-                    )
-                elif use_first_layer_context_only:
-                    # F案: 1層目のみcontext注入、2層目以降はcontextなし
-                    batch_final_context = context_cache[batch_start:batch_end].to(device)  # type: ignore[union-attr]
-                    token_out = self.model.forward_token_f(batch_final_context, batch_token_embeds)
-                elif use_final_context_only:
-                    # A案: 最終context出力のみ使用
-                    batch_final_context = context_cache[batch_start:batch_end].to(device)  # type: ignore[union-attr]
-                    token_out = self.model.forward_token_a(batch_final_context, batch_token_embeds)
+                # G案: 1層目に前のcontext、最終層に現在のcontext
+                batch_current_context = context_cache[batch_start:batch_end].to(device)
+                if batch_start == 0:
+                    batch_prev_context = batch_current_context
                 else:
-                    # E案: 各レイヤーのcontext出力を使用
-                    context_list = []
-                    for layer_idx in range(num_layers):
-                        if isinstance(context_cache, list):
-                            layer_contexts = context_cache[layer_idx][batch_start:batch_end].to(device)
-                        else:
-                            layer_contexts = context_cache[layer_idx, batch_start:batch_end].to(device)
-                        context_list.append(layer_contexts)
-                    token_out = self.model.forward_token_e(context_list, batch_token_embeds)
+                    batch_prev_context = context_cache[batch_start - 1:batch_end - 1].to(device)
+
+                token_out = self.model.forward_token(
+                    batch_prev_context, batch_current_context, batch_token_embeds
+                )
 
                 # 予測
-                logits = self.model.token_output(token_out)  # [batch_size, vocab_size]
+                logits = self.model.token_output(token_out)
 
                 # バッチのターゲット（GPUに転送）
                 batch_targets = target_ids[batch_start:batch_end].to(device)
@@ -369,24 +309,24 @@ class Phase2Trainer:
         train_token_ids: torch.Tensor,
         val_token_ids: torch.Tensor,
         device: torch.device,
-        train_context_cache: Union[torch.Tensor, List[torch.Tensor]],
+        train_context_cache: torch.Tensor,
         train_token_embeds: torch.Tensor,
-        val_context_cache: Union[torch.Tensor, List[torch.Tensor]],
+        val_context_cache: torch.Tensor,
         val_token_embeds: torch.Tensor,
         epochs: Optional[int] = None,
         patience: Optional[int] = None,
         batch_size: Optional[int] = None
     ) -> Dict[str, Any]:
         """
-        フル訓練ループ（早期停止あり + 自動メモリ管理）
+        フル訓練ループ（早期停止あり + 自動メモリ管理）- G案
 
         Args:
             train_token_ids: 訓練トークンID
             val_token_ids: 検証トークンID
             device: デバイス
-            train_context_cache: Phase 1から渡されたキャッシュ（必須）
+            train_context_cache: Phase 1から渡されたキャッシュ [num_tokens, context_dim]（必須）
             train_token_embeds: Phase 1から渡されたトークン埋め込み（必須）
-            val_context_cache: Phase 1から渡されたキャッシュ（必須）
+            val_context_cache: Phase 1から渡されたキャッシュ [num_tokens, context_dim]（必須）
             val_token_embeds: Phase 1から渡されたトークン埋め込み（必須）
             epochs: エポック数
             patience: 早期停止の忍耐回数
@@ -397,7 +337,6 @@ class Phase2Trainer:
 
         Note:
             キャッシュは必ずPhase 1から渡す必要があります。
-            Phase 1でreturn_all_layers=Trueを指定してください。
         """
         if epochs is None:
             epochs = self.config.phase2_epochs
@@ -415,16 +354,9 @@ class Phase2Trainer:
 
         print_flush(f"\n[Phase 2] {train_tokens:,} train / {val_tokens:,} val tokens, {epochs} epochs")
 
-        # 実際のキャッシュサイズを計算
-        def _calc_cache_size(cache: Union[torch.Tensor, List[torch.Tensor]]) -> float:
-            """キャッシュサイズを計算（テンソルまたはリスト対応）"""
-            if isinstance(cache, list):
-                return sum(t.numel() for t in cache) * 4 / (1024 * 1024)
-            else:
-                return cache.numel() * 4 / (1024 * 1024)
-
-        train_cache_mb = _calc_cache_size(train_context_cache)
-        val_cache_mb = _calc_cache_size(val_context_cache)
+        # キャッシュサイズを計算
+        train_cache_mb = train_context_cache.numel() * 4 / (1024 * 1024)
+        val_cache_mb = val_context_cache.numel() * 4 / (1024 * 1024)
         total_cache_gb = (train_cache_mb + val_cache_mb) / 1024
 
         # キャッシュ構築後にバッチサイズを自動調整
