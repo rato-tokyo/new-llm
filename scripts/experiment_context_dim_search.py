@@ -44,6 +44,51 @@ from config.experiment import DataConfig
 # Search Experiment Configuration
 # ============================================================
 SEARCH_PPL_WORSE_PATIENCE = 2  # Val PPL が何回連続で悪化したら停止するか
+TOKEN_EMBED_CHUNK_SIZE = 50000  # Token embedding収集時のチャンクサイズ
+
+
+def _collect_token_embeds_chunked(
+    model: nn.Module,
+    token_ids: torch.Tensor,
+    device: torch.device,
+    chunk_size: int = TOKEN_EMBED_CHUNK_SIZE,
+) -> torch.Tensor:
+    """
+    Token embeddingsをチャンク単位で収集（GPUメモリ節約）
+
+    Args:
+        model: token_embedding と embed_norm を持つモデル
+        token_ids: トークンID [num_tokens]
+        device: デバイス
+        chunk_size: チャンクサイズ
+
+    Returns:
+        token_embeds: [num_tokens-1, embed_dim] on CPU
+    """
+    num_tokens = len(token_ids)
+    embed_dim = model.embed_dim  # type: ignore
+
+    # 結果格納（CPU）
+    token_embeds = torch.zeros(num_tokens - 1, embed_dim, device='cpu')
+
+    with torch.no_grad():
+        for chunk_start in range(0, num_tokens - 1, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, num_tokens - 1)
+
+            # チャンク分だけGPUに転送
+            chunk_ids = token_ids[chunk_start:chunk_end].to(device)
+            chunk_embeds = model.token_embedding(chunk_ids)  # type: ignore
+            chunk_embeds = model.embed_norm(chunk_embeds)  # type: ignore
+
+            # CPUに保存
+            token_embeds[chunk_start:chunk_end] = chunk_embeds.cpu()
+
+            # GPUメモリ解放
+            del chunk_ids, chunk_embeds
+
+        clear_gpu_cache(device)
+
+    return token_embeds
 
 
 class SimpleContextBlock(nn.Module):
@@ -612,15 +657,10 @@ def run_context_dim_search(
         train_context_cache = collect_context_cache_sequential(model, train_token_ids, device)
         val_context_cache = collect_context_cache_sequential(model, val_token_ids, device)
 
-        # Token embeddings
-        with torch.no_grad():
-            train_embeds = model.token_embedding(train_token_ids.to(device))
-            train_embeds = model.embed_norm(train_embeds)
-            train_token_embeds = train_embeds[:-1].cpu()
-
-            val_embeds = model.token_embedding(val_token_ids.to(device))
-            val_embeds = model.embed_norm(val_embeds)
-            val_token_embeds = val_embeds[:-1].cpu()
+        # Token embeddings（チャンク処理でGPUメモリを節約）
+        print_flush("    Collecting token embeddings (chunked)...")
+        train_token_embeds = _collect_token_embeds_chunked(model, train_token_ids, device)
+        val_token_embeds = _collect_token_embeds_chunked(model, val_token_ids, device)
 
         cache_time = time.time() - cache_start
         print_flush(f"Cache collection: {cache_time:.1f}s")
