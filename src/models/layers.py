@@ -94,11 +94,11 @@ class TokenLayer(nn.Module):
     """
     Token Layer - トークン処理専用レイヤー
 
-    入力: [context, token_embeds]
+    入力: [context, token_embeds] または token_embeds のみ（F案用）
     出力: token_out（tokenのみ更新、contextは参照のみ）
 
     Args:
-        context_dim: Context vector dimension
+        context_dim: Context vector dimension (0 for no context input)
         token_input_dim: Input token dimension
         token_output_dim: Output token dimension
     """
@@ -116,6 +116,7 @@ class TokenLayer(nn.Module):
         self.token_output_dim = token_output_dim
 
         # FNN: [context + token_embeds] -> token_output_dim
+        # context_dim=0の場合はtoken_embedsのみ
         input_dim = context_dim + token_input_dim
         self.fnn = FFN(input_dim, token_output_dim)
 
@@ -129,19 +130,23 @@ class TokenLayer(nn.Module):
 
         init_linear_weights(self)
 
-    def forward(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
+    def forward(self, context: Optional[torch.Tensor], token_embeds: torch.Tensor) -> torch.Tensor:
         """
         Forward pass: Update token only
 
         Args:
             context: Context vector [batch, context_dim] (参照のみ)
+                     None if context_dim=0 (F案の2層目など)
             token_embeds: Token embeddings [batch, token_input_dim]
 
         Returns:
             new_token: Updated token [batch, token_output_dim]
         """
-        # Concatenate inputs
-        fnn_input = torch.cat([context, token_embeds], dim=-1)
+        # Concatenate inputs (context is optional)
+        if context is not None and self.context_dim > 0:
+            fnn_input = torch.cat([context, token_embeds], dim=-1)
+        else:
+            fnn_input = token_embeds
 
         # FNN forward -> delta_token
         delta_token = self.fnn(fnn_input)

@@ -31,6 +31,7 @@ class LLM(nn.Module):
     context_mode:
     - E案 (default): TokenBlock Layer i は ContextBlock Layer i の出力を参照
     - A案 (use_final_context_only=True): 全TokenBlockレイヤーがContextBlockの最終出力のみを参照
+    - F案 (use_first_layer_context_only=True): 1層目のみに最終contextを注入、2層目以降はcontextなし
 
     token継ぎ足し方式（2025-11-29に一本化）:
     - 全レイヤーでtoken入力
@@ -45,6 +46,7 @@ class LLM(nn.Module):
         use_weight_tying: Whether to tie token_embedding and token_output weights
                           (reduces parameters by ~38M, GPT-2 style)
         use_final_context_only: If True, use A案 (all TokenBlock layers use final context)
+        use_first_layer_context_only: If True, use F案 (only first layer uses context)
     """
 
     def __init__(
@@ -56,7 +58,8 @@ class LLM(nn.Module):
         num_input_tokens: int = 1,
         use_pretrained_embeddings: bool = True,
         use_weight_tying: bool = False,
-        use_final_context_only: bool = False
+        use_final_context_only: bool = False,
+        use_first_layer_context_only: bool = False
     ) -> None:
         super().__init__()
 
@@ -69,6 +72,7 @@ class LLM(nn.Module):
         self.use_separated_architecture = True  # Always true now
         self.use_weight_tying = use_weight_tying
         self.use_final_context_only = use_final_context_only
+        self.use_first_layer_context_only = use_first_layer_context_only
 
         # ========== Token Embeddings ==========
         if use_pretrained_embeddings:
@@ -79,7 +83,12 @@ class LLM(nn.Module):
         self.embed_norm = nn.LayerNorm(embed_dim)
 
         # ========== Separated Architecture ==========
-        context_mode = "A案 (final context only)" if use_final_context_only else "E案 (layerwise)"
+        if use_first_layer_context_only:
+            context_mode = "F案 (first layer context only)"
+        elif use_final_context_only:
+            context_mode = "A案 (final context only)"
+        else:
+            context_mode = "E案 (layerwise)"
         print(f"Using {context_mode} architecture: ContextBlock({num_layers} layers) + TokenBlock({num_layers} layers)")
         print(f"  num_input_tokens: {num_input_tokens}")
         print("  token継ぎ足し方式: 全レイヤーでtoken入力")
@@ -93,7 +102,16 @@ class LLM(nn.Module):
         )
 
         # TokenBlock: トークン処理専用
-        if use_final_context_only:
+        if use_first_layer_context_only:
+            # F案: 1層目のみcontext入力、2層目以降はcontextなし
+            self.token_block = TokenBlock(
+                num_layers=num_layers,
+                context_dim=context_dim,
+                embed_dim=embed_dim,
+                num_input_tokens=num_input_tokens,
+                use_first_layer_context_only=True,
+            )
+        elif use_final_context_only:
             # A案: 全レイヤーで最終context出力のみ使用
             self.token_block = TokenBlock(
                 num_layers=num_layers,
@@ -204,6 +222,23 @@ class LLM(nn.Module):
         TokenBlock forward pass with final context only (A案用)
 
         全TokenBlockレイヤーが同じfinal_contextを使用する。
+
+        Args:
+            final_context: Final context from ContextBlock [batch, context_dim]
+            token_embeds: [batch, embed_dim * num_input_tokens]
+
+        Returns:
+            token_out: [batch, embed_dim]
+        """
+        return self.token_block(final_context, token_embeds, context_list=None)
+
+    def forward_token_f(
+        self, final_context: torch.Tensor, token_embeds: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        TokenBlock forward pass with first layer context only (F案用)
+
+        1層目のみfinal_contextを使用し、2層目以降はcontextなし。
 
         Args:
             final_context: Final context from ContextBlock [batch, context_dim]

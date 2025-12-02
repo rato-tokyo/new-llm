@@ -149,6 +149,7 @@ class TokenBlock(nn.Module):
     context_mode:
         - 'layerwise' (E案): 各レイヤーはContextBlockの対応するレイヤーの出力を参照
         - 'final_only' (A案): 全レイヤーがContextBlockの最終出力のみを参照
+        - 'first_layer_only' (F案): 1層目のみに最終contextを注入、2層目以降はcontextなし
 
     Args:
         num_layers: Number of token layers
@@ -157,6 +158,7 @@ class TokenBlock(nn.Module):
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
         context_dims_list: List of context dimensions from ContextBlock (for E案)
         use_final_context_only: If True, all layers use final context (A案)
+        use_first_layer_context_only: If True, only first layer uses context (F案)
     """
 
     def __init__(
@@ -166,7 +168,8 @@ class TokenBlock(nn.Module):
         embed_dim: int,
         num_input_tokens: int = 1,
         context_dims_list: Optional[List[int]] = None,
-        use_final_context_only: bool = False
+        use_final_context_only: bool = False,
+        use_first_layer_context_only: bool = False
     ) -> None:
         super().__init__()
 
@@ -175,6 +178,7 @@ class TokenBlock(nn.Module):
         self.embed_dim = embed_dim
         self.context_dim = context_dim
         self.use_final_context_only = use_final_context_only
+        self.use_first_layer_context_only = use_first_layer_context_only
 
         # 次元計算
         # 入力次元: embed_dim * num_input_tokens
@@ -191,7 +195,10 @@ class TokenBlock(nn.Module):
             self.token_dims.append(dim)
 
         # ContextBlockからの次元リスト
-        if use_final_context_only:
+        if use_first_layer_context_only:
+            # F案: 1層目のみcontext入力、2層目以降はcontext_dim=0
+            self.context_dims_list = [context_dim] + [0] * (num_layers - 1)
+        elif use_final_context_only:
             # A案: 全レイヤーで最終context次元（context_dim）を使用
             self.context_dims_list = [context_dim] * num_layers
         elif context_dims_list is None:
@@ -217,7 +224,7 @@ class TokenBlock(nn.Module):
         Execute all token layers sequentially
 
         Args:
-            context: [batch, context_dim] - 単一context（A案用、context_list=Noneの場合）
+            context: [batch, context_dim] - 単一context（A案/F案用、context_list=Noneの場合）
             token_embeds: [batch, embed_dim * num_input_tokens]
             context_list: List of context outputs（E案用）
                           [context_1, ..., context_N] len == num_layers
@@ -238,6 +245,13 @@ class TokenBlock(nn.Module):
                 )
             for i, layer in enumerate(self.layers):
                 token_embeds = layer(context_list[i], token_embeds)
+        elif self.use_first_layer_context_only:
+            # F案: 1層目のみcontextを使用、2層目以降はNone
+            for i, layer in enumerate(self.layers):
+                if i == 0:
+                    token_embeds = layer(context, token_embeds)
+                else:
+                    token_embeds = layer(None, token_embeds)
         else:
             # A案: 全レイヤーで同じcontextを使用
             for layer in self.layers:
