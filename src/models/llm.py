@@ -163,6 +163,23 @@ class LLM(nn.Module):
         result: torch.Tensor = self.context_block(context, token_embeds)
         return result
 
+    def forward_context_with_intermediates(
+        self, context: torch.Tensor, token_embeds: torch.Tensor
+    ) -> list[torch.Tensor]:
+        """
+        ContextBlock forward pass with intermediate outputs (Phase 1評価用)
+
+        各レイヤーの出力をリストで返す。
+
+        Args:
+            context: [batch, context_dim]
+            token_embeds: [batch, embed_dim * num_input_tokens]
+
+        Returns:
+            List of context outputs from each layer: [context_1, ..., context_N]
+        """
+        return self.context_block.forward_with_intermediates(context, token_embeds)
+
     def forward_token(
         self,
         prev_context: torch.Tensor,
