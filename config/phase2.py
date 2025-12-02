@@ -17,6 +17,11 @@ class Phase2Config:
     patience = 1                     # Early stopping patience
     gradient_clip = 1.0              # 勾配クリッピング値
 
+    # ========== PPL改善閾値 ==========
+    min_ppl_improvement = 0.4        # PPL改善がこの値未満なら早期停止
+                                     # 例: 133.0 → 132.6 (0.4改善) はギリギリ継続
+                                     # 例: 133.0 → 132.8 (0.2改善) は停止
+
     # ========== バッチサイズ ==========
     batch_size = None                # Noneで自動計算（GPUメモリベース）
     min_batch_size = 256             # 最小バッチサイズ

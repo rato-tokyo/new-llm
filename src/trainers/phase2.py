@@ -377,9 +377,12 @@ class Phase2Trainer:
             'best_epoch': None
         }
 
-        best_val_loss = float('inf')
+        best_val_ppl = float('inf')
         best_epoch = 0
         patience_counter = 0
+
+        # PPL改善閾値
+        min_ppl_improvement = getattr(self.config, 'phase2_min_ppl_improvement', 0.4)
 
         for epoch in range(1, epochs + 1):
             start_time = time.time()
@@ -407,12 +410,24 @@ class Phase2Trainer:
 
             # Print progress (1行で)
             best_marker = ""
-            if val_loss < best_val_loss:
-                best_val_loss = val_loss
-                best_epoch = epoch
-                patience_counter = 0
-                best_marker = " ★"
+            ppl_improvement = best_val_ppl - val_ppl
+
+            if val_ppl < best_val_ppl:
+                # 改善があった場合
+                if ppl_improvement >= min_ppl_improvement or epoch == 1:
+                    # 十分な改善（または初回）
+                    best_val_ppl = val_ppl
+                    best_epoch = epoch
+                    patience_counter = 0
+                    best_marker = " ★"
+                else:
+                    # 改善幅が小さい（0.4未満）→ 停止準備
+                    patience_counter += 1
+                    best_val_ppl = val_ppl  # 記録は更新
+                    best_epoch = epoch
+                    best_marker = f" (↓{ppl_improvement:.1f})"
             else:
+                # 悪化した場合
                 patience_counter += 1
 
             print_flush(
@@ -422,7 +437,13 @@ class Phase2Trainer:
 
             # Early stopping check
             if patience_counter >= patience:
-                print_flush(f"  → Early stop at epoch {epoch}")
+                if ppl_improvement >= 0 and ppl_improvement < min_ppl_improvement:
+                    print_flush(
+                        f"  → Early stop at epoch {epoch} "
+                        f"(PPL improvement {ppl_improvement:.2f} < {min_ppl_improvement})"
+                    )
+                else:
+                    print_flush(f"  → Early stop at epoch {epoch}")
                 history['early_stopped'] = True
                 history['stopped_epoch'] = epoch
                 break

@@ -130,6 +130,7 @@ class Phase2TrainerConfig:
     phase2_batch_size: Optional[int]
     phase2_gradient_clip: float
     phase2_freeze_embedding: bool
+    phase2_min_ppl_improvement: float
 
     # メモリ管理
     phase2_memory_safety_factor: float
@@ -162,6 +163,7 @@ class Phase2TrainerConfig:
             phase2_batch_size=base.phase2_batch_size,
             phase2_gradient_clip=base.phase2_gradient_clip,
             phase2_freeze_embedding=base.phase2_freeze_embedding,
+            phase2_min_ppl_improvement=getattr(base, 'phase2_min_ppl_improvement', 0.4),
             phase2_memory_safety_factor=base.phase2_memory_safety_factor,
             phase2_min_batch_size=base.phase2_min_batch_size,
             phase2_max_batch_size=base.phase2_max_batch_size,

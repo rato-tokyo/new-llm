@@ -47,6 +47,7 @@ class Config(BaseConfig):
     phase2_max_batch_size = Phase2Config.max_batch_size
     phase2_memory_safety_factor = Phase2Config.memory_safety_factor
     phase2_freeze_embedding = Phase2Config.freeze_embedding
+    phase2_min_ppl_improvement = Phase2Config.min_ppl_improvement
 
     @property
     def effective_phase2_batch_size(self) -> int:

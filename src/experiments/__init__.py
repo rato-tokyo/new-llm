@@ -1,12 +1,9 @@
 """Experiment utilities for New-LLM"""
 
-from .runner import ExperimentRunner, ExperimentConfig
-from .config import DataConfig, Phase1Config, Phase2Config
+from .runner import ExperimentRunner, ExperimentConfig, ExperimentResult
 
 __all__ = [
     'ExperimentRunner',
     'ExperimentConfig',
-    'DataConfig',
-    'Phase1Config',
-    'Phase2Config',
+    'ExperimentResult',
 ]
