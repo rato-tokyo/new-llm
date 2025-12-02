@@ -39,6 +39,11 @@ from src.utils.seed import set_seed
 from src.utils.initialization import count_parameters
 from config.experiment import DataConfig
 
+# ============================================================
+# Search Experiment Configuration
+# ============================================================
+SEARCH_PPL_WORSE_PATIENCE = 2  # Val PPL が何回連続で悪化したら停止するか
+
 
 class SimpleContextBlock(nn.Module):
     """
@@ -725,11 +730,11 @@ def run_context_dim_search(
             print_flush(f"  ★ New best! dim={best_dim}, PPL={best_ppl:.1f}")
         else:
             worse_count += 1
-            print_flush(f"  ↓ PPL increased ({worse_count}/2 consecutive)")
+            print_flush(f"  ↓ PPL increased ({worse_count}/{SEARCH_PPL_WORSE_PATIENCE} consecutive)")
 
-        # 2回連続悪化で停止
-        if worse_count >= 2:
-            print_flush("\n⛔ Stopping: PPL increased 2 times consecutively")
+        # N回連続悪化で停止
+        if worse_count >= SEARCH_PPL_WORSE_PATIENCE:
+            print_flush(f"\n⛔ Stopping: PPL increased {SEARCH_PPL_WORSE_PATIENCE} times consecutively")
             break
 
         # 次の dim
