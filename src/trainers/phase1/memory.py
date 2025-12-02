@@ -159,10 +159,13 @@ class MemoryPhase1Trainer(Phase1Trainer):
         # 収束率Early Stoppingの設定
         early_stopping = getattr(self.config, 'phase1_early_stopping', True)
         early_stopping_threshold = getattr(self.config, 'phase1_early_stopping_threshold', 0.30)
+        min_convergence_improvement = getattr(self.config, 'phase1_min_convergence_improvement', 0.01)
 
         previous_contexts: Optional[torch.Tensor] = None
         final_convergence_rate = 0.0
         best_convergence_rate = 0.0
+        prev_convergence_rate = 0.0  # 前回の収束率（改善幅チェック用）
+        no_improvement_count = 0     # 改善なしカウント
         early_stopped = False
         final_iter = 0
 
@@ -185,15 +188,35 @@ class MemoryPhase1Trainer(Phase1Trainer):
             final_convergence_rate = convergence_rate
             best_convergence_rate = max(best_convergence_rate, convergence_rate)
 
+            # 改善幅計算
+            improvement = convergence_rate - prev_convergence_rate
+            improvement_marker = ""
+            if iteration >= 2:  # Iter 2以降で改善幅チェック
+                if improvement < min_convergence_improvement:
+                    no_improvement_count += 1
+                    improvement_marker = f" (↑{improvement*100:.1f}%)"
+                else:
+                    no_improvement_count = 0
+
             print_flush(
                 f"  Iter {iteration+1}: conv={convergence_rate*100:.0f}% "
-                f"loss={total_loss:.4f} [{elapsed:.1f}s]"
+                f"loss={total_loss:.4f} [{elapsed:.1f}s]{improvement_marker}"
             )
 
-            # 収束率Early Stopping
+            prev_convergence_rate = convergence_rate
+
+            # 収束率Early Stopping（閾値達成）
             if early_stopping and convergence_rate >= early_stopping_threshold:
                 early_stopped = True
                 print_flush(f"  → Early stop: conv {convergence_rate*100:.0f}% >= {early_stopping_threshold*100:.0f}%")
+                break
+
+            # 収束率改善Early Stopping（改善幅不足）
+            if early_stopping and no_improvement_count >= 1 and iteration >= 2:
+                early_stopped = True
+                print_flush(
+                    f"  → Early stop: improvement {improvement*100:.1f}% < {min_convergence_improvement*100:.0f}%"
+                )
                 break
 
         assert previous_contexts is not None
@@ -274,9 +297,12 @@ class MemoryPhase1Trainer(Phase1Trainer):
         )
 
         # token_embeds_combined を準備（CPUで）
+        print_flush(f"    Preparing combined tokens ({num_input_tokens_total:,} tokens)...")
+        combine_start = time.time()
         token_embeds_combined = self._prepare_combined_token_embeds(
             input_token_embeds, num_input_tokens_total
         )
+        print_flush(f"    Combined tokens ready [{time.time() - combine_start:.1f}s]")
 
         # バッチ処理（バッチごとにGPU転送）
         with torch.no_grad():

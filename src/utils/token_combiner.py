@@ -105,7 +105,7 @@ class TokenCombiner:
         device: torch.device
     ) -> torch.Tensor:
         """
-        全トークンの結合（キャッシュ収集用）
+        全トークンの結合（キャッシュ収集用）- ベクトル化版
 
         Args:
             token_embeds: 全トークン埋め込み [num_tokens, embed_dim]
@@ -118,27 +118,25 @@ class TokenCombiner:
             return token_embeds.to(device)
 
         num_tokens = len(token_embeds)
-        combined = torch.zeros(
-            num_tokens,
-            self.combined_dim,
-            device=device,
+        n = self.num_input_tokens
+
+        # 先頭にゼロパディングを追加（n-1個）
+        padding = torch.zeros(
+            n - 1, self.embed_dim,
+            device=token_embeds.device,
             dtype=token_embeds.dtype
         )
+        padded = torch.cat([padding, token_embeds], dim=0)
 
-        for i in range(num_tokens):
-            start_idx = max(0, i - self.num_input_tokens + 1)
-            token_window = token_embeds[start_idx:i+1]
+        # スライディングウィンドウをベクトル化で構築
+        # indices[i] = [i, i+1, ..., i+n-1] のインデックスを各行に持つ
+        indices = torch.arange(num_tokens, device=token_embeds.device).unsqueeze(1) + \
+                  torch.arange(n, device=token_embeds.device).unsqueeze(0)
 
-            if len(token_window) < self.num_input_tokens:
-                # 不足分をゼロパディング
-                padding = torch.zeros(
-                    self.num_input_tokens - len(token_window),
-                    self.embed_dim,
-                    device=token_embeds.device,
-                    dtype=token_embeds.dtype
-                )
-                token_window = torch.cat([padding, token_window], dim=0)
+        # padded[indices] で [num_tokens, n, embed_dim] を取得
+        windows = padded[indices]  # [num_tokens, n, embed_dim]
 
-            combined[i] = token_window.flatten()
+        # flattenして [num_tokens, n * embed_dim] に
+        combined = windows.view(num_tokens, -1)
 
-        return combined
+        return combined.to(device)
