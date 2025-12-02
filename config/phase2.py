@@ -13,7 +13,7 @@ class Phase2Config:
 
     # ========== 学習パラメータ ==========
     learning_rate = 0.001            # 学習率
-    epochs = 20                      # 訓練エポック数
+    epochs = 40                      # 訓練エポック数
     patience = 1                     # Early stopping patience
     gradient_clip = 1.0              # 勾配クリッピング値
 
