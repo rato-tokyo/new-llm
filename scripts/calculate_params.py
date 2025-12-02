@@ -34,7 +34,8 @@ def main():
         vocab_size=config.vocab_size,
         embed_dim=config.embed_dim,
         context_dim=config.context_dim,
-        num_layers=config.num_layers,
+        context_layers=config.num_layers,
+        token_layers=config.num_layers,
         num_input_tokens=config.num_input_tokens,
         use_pretrained_embeddings=False,  # 計算用なのでGPT-2ロード不要
         use_weight_tying=config.use_weight_tying,

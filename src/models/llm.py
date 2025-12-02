@@ -17,12 +17,13 @@ Context Mode (G案採用 - 2025-12-02):
 - メモリ効率と拡張性を優先しG案に一本化
 """
 
-from typing import Dict, List, Optional
+from typing import Dict, List
 
 import torch
 import torch.nn as nn
 
 from .blocks import ContextBlock, TokenBlock
+from src.utils.io import print_flush
 
 
 class LLM(nn.Module):
@@ -45,9 +46,8 @@ class LLM(nn.Module):
         vocab_size: Vocabulary size
         embed_dim: Token embedding dimension (単一トークンの次元)
         context_dim: Context vector dimension
-        num_layers: Number of layers (deprecated, use context_layers/token_layers)
-        context_layers: Number of layers in ContextBlock (Noneでnum_layersを使用)
-        token_layers: Number of layers in TokenBlock (Noneでnum_layersを使用)
+        context_layers: Number of layers in ContextBlock
+        token_layers: Number of layers in TokenBlock
         num_input_tokens: Number of input tokens (1 = current only, 2+ = with history)
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
         use_weight_tying: Whether to tie token_embedding and token_output weights
@@ -59,24 +59,22 @@ class LLM(nn.Module):
         vocab_size: int,
         embed_dim: int,
         context_dim: int,
-        num_layers: int = 2,
-        context_layers: Optional[int] = None,
-        token_layers: Optional[int] = None,
+        context_layers: int,
+        token_layers: int,
         num_input_tokens: int = 1,
         use_pretrained_embeddings: bool = True,
         use_weight_tying: bool = False,
     ) -> None:
         super().__init__()
 
-        # Context層とToken層の数を決定
-        self._context_layers = context_layers if context_layers is not None else num_layers
-        self._token_layers = token_layers if token_layers is not None else num_layers
+        # Context層とToken層の数
+        self._context_layers = context_layers
+        self._token_layers = token_layers
 
         # Save configuration
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.context_dim = context_dim
-        self.num_layers = num_layers  # 後方互換性のため保持
         self.num_input_tokens = num_input_tokens
         self.use_weight_tying = use_weight_tying
 
@@ -89,12 +87,12 @@ class LLM(nn.Module):
         self.embed_norm = nn.LayerNorm(embed_dim)
 
         # ========== Separated Architecture (G案) ==========
-        print(f"Using G案 architecture: ContextBlock({self._context_layers}L) + TokenBlock({self._token_layers}L)")
-        print(f"  num_input_tokens: {num_input_tokens}")
+        print_flush(f"Using G案 architecture: ContextBlock({self._context_layers}L) + TokenBlock({self._token_layers}L)")
+        print_flush(f"  num_input_tokens: {num_input_tokens}")
         if self._token_layers >= 2:
-            print("  Context injection: Layer1=prev, LayerN=current")
+            print_flush("  Context injection: Layer1=prev, LayerN=current")
         else:
-            print("  Context injection: Layer1=current (single layer)")
+            print_flush("  Context injection: Layer1=current (single layer)")
 
         # ContextBlock: 文脈処理専用
         self.context_block = ContextBlock(
@@ -117,8 +115,8 @@ class LLM(nn.Module):
         self.token_output = nn.Linear(embed_dim, vocab_size, bias=False)
         self.token_output.weight = self.token_embedding.weight
         saved_params = vocab_size * embed_dim
-        print("✓ Weight Tying: token_output shares weights with token_embedding")
-        print(f"  → Saved ~{saved_params / 1e6:.2f}M parameters")
+        print_flush("✓ Weight Tying: token_output shares weights with token_embedding")
+        print_flush(f"  → Saved ~{saved_params / 1e6:.2f}M parameters")
 
         # Initialize embeddings (if not pretrained)
         if not use_pretrained_embeddings:
@@ -128,7 +126,7 @@ class LLM(nn.Module):
         """Load GPT-2 pretrained embeddings"""
         try:
             from transformers import GPT2Model
-            print("Loading GPT-2 pretrained embeddings...")
+            print_flush("Loading GPT-2 pretrained embeddings...")
 
             gpt2 = GPT2Model.from_pretrained('gpt2')
             pretrained_embeddings = gpt2.wte.weight.data
@@ -137,11 +135,11 @@ class LLM(nn.Module):
             self.token_embedding.weight.data.copy_(pretrained_embeddings)
             self.token_embedding.weight.requires_grad = False
 
-            print(f"✓ Loaded GPT-2 embeddings: {pretrained_embeddings.shape}")
+            print_flush(f"✓ Loaded GPT-2 embeddings: {pretrained_embeddings.shape}")
 
         except Exception as e:
-            print(f"Warning: Failed to load GPT-2 embeddings: {e}")
-            print("Falling back to random initialization...")
+            print_flush(f"Warning: Failed to load GPT-2 embeddings: {e}")
+            print_flush("Falling back to random initialization...")
             self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
             nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
 
@@ -205,7 +203,7 @@ class LLM(nn.Module):
         """ContextBlockのパラメータをfreezeする（Phase 2用）"""
         for param in self.context_block.parameters():
             param.requires_grad = False
-        print("✓ ContextBlock frozen")
+        print_flush("✓ ContextBlock frozen")
 
     def unfreeze_token_output(self, freeze_embedding: bool = False) -> None:
         """
@@ -221,24 +219,24 @@ class LLM(nn.Module):
                 # Embedding凍結 → Weight TyingによりOutput Headも凍結
                 # TokenBlockのみ学習
                 self.token_embedding.weight.requires_grad = False
-                print("✓ Embedding frozen (Weight Tying: Output Head also frozen)")
-                print("  → Only TokenBlock will be trained")
+                print_flush("✓ Embedding frozen (Weight Tying: Output Head also frozen)")
+                print_flush("  → Only TokenBlock will be trained")
             else:
                 # Embedding学習 → Output Headも学習
                 self.token_embedding.weight.requires_grad = True
-                print("✓ token_output (weight-tied with embedding) unfrozen")
-                print("  Note: token_embedding will also be updated during Phase 2")
+                print_flush("✓ token_output (weight-tied with embedding) unfrozen")
+                print_flush("  Note: token_embedding will also be updated during Phase 2")
         else:
             if freeze_embedding:
                 # Weight Tyingなし: Output Headのみ学習、Embedding凍結
                 self.token_output.weight.requires_grad = True
                 self.token_output.bias.requires_grad = True
                 self.token_embedding.weight.requires_grad = False
-                print("✓ token_output unfrozen, Embedding frozen")
+                print_flush("✓ token_output unfrozen, Embedding frozen")
             else:
                 self.token_output.weight.requires_grad = True
                 self.token_output.bias.requires_grad = True
-                print("✓ token_output layer unfrozen")
+                print_flush("✓ token_output layer unfrozen")
 
     def _update_context_one_step(
         self, token_embeds: torch.Tensor, context: torch.Tensor
@@ -282,3 +280,18 @@ class LLM(nn.Module):
             'trainable_phase1': context_block_params,
             'trainable_phase2': token_block_params,  # Embedding凍結時
         }
+
+    @property
+    def num_layers(self) -> int:
+        """ContextBlockのレイヤー数を返す（互換性用プロパティ）"""
+        return self._context_layers
+
+    @property
+    def context_layers(self) -> int:
+        """ContextBlockのレイヤー数"""
+        return self._context_layers
+
+    @property
+    def token_layers(self) -> int:
+        """TokenBlockのレイヤー数"""
+        return self._token_layers
