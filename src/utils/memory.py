@@ -2,6 +2,9 @@
 Memory Management Utilities
 
 GPU/CPUメモリに基づく自動パラメータ調整
+
+1層固定アーキテクチャ（2025-12-02）:
+- カスケード連結方式によりnum_layersパラメータは不要
 """
 
 import torch
@@ -47,17 +50,15 @@ def get_gpu_memory_info() -> Dict[str, float]:
 
 def estimate_cache_size(
     num_tokens: int,
-    num_layers: int,
     context_dim: int,
     embed_dim: int,
     num_input_tokens: int = 1
 ) -> Dict[str, float]:
     """
-    キャッシュサイズを事前見積もり
+    キャッシュサイズを事前見積もり（1層固定アーキテクチャ）
 
     Args:
         num_tokens: トークン数
-        num_layers: レイヤー数
         context_dim: コンテキスト次元
         embed_dim: 埋め込み次元
         num_input_tokens: 入力トークン数
@@ -70,8 +71,9 @@ def estimate_cache_size(
             'total_gb': 合計 (GB)
         }
     """
-    # context_cache: [num_layers, num_tokens, context_dim] (float32 = 4 bytes)
-    context_cache_bytes = num_layers * num_tokens * context_dim * 4
+    # context_cache: [num_tokens, context_dim] (float32 = 4 bytes)
+    # 1層固定のため、レイヤー次元は不要
+    context_cache_bytes = num_tokens * context_dim * 4
 
     # token_embeds: [num_tokens, embed_dim * num_input_tokens] (float32)
     token_embeds_bytes = num_tokens * embed_dim * num_input_tokens * 4
@@ -92,17 +94,15 @@ def estimate_cache_size(
 def estimate_training_memory(
     batch_size: int,
     vocab_size: int = 50257,
-    embed_dim: int = 768,
-    num_layers: int = 6
+    embed_dim: int = 768
 ) -> Dict[str, float]:
     """
-    訓練時のメモリ使用量を見積もり
+    訓練時のメモリ使用量を見積もり（1層固定アーキテクチャ）
 
     Args:
         batch_size: バッチサイズ
         vocab_size: 語彙数
         embed_dim: 埋め込み次元
-        num_layers: レイヤー数
 
     Returns:
         dict: 各コンポーネントのメモリ使用量 (MB)
@@ -113,8 +113,8 @@ def estimate_training_memory(
     # gradients (roughly equal to logits + intermediate)
     gradients_mb = logits_mb * 2
 
-    # intermediate activations (rough estimate)
-    activations_mb = batch_size * embed_dim * num_layers * 4 / (1024**2) * 2
+    # intermediate activations (1層固定)
+    activations_mb = batch_size * embed_dim * 4 / (1024**2) * 2
 
     total_mb = logits_mb + gradients_mb + activations_mb
 
@@ -215,7 +215,6 @@ def calculate_optimal_batch_size(
 def can_fit_in_memory(
     train_tokens: int,
     val_tokens: int,
-    num_layers: int,
     context_dim: int,
     embed_dim: int,
     num_input_tokens: int = 1,
@@ -223,12 +222,11 @@ def can_fit_in_memory(
     required_batch_memory_gb: float = 1.0
 ) -> Dict[str, Any]:
     """
-    データがGPUメモリに収まるか確認
+    データがGPUメモリに収まるか確認（1層固定アーキテクチャ）
 
     Args:
         train_tokens: 訓練トークン数
         val_tokens: 検証トークン数
-        num_layers: レイヤー数
         context_dim: コンテキスト次元
         embed_dim: 埋め込み次元
         num_input_tokens: 入力トークン数
@@ -257,10 +255,10 @@ def can_fit_in_memory(
 
     # キャッシュサイズ計算
     train_cache = estimate_cache_size(
-        train_tokens, num_layers, context_dim, embed_dim, num_input_tokens
+        train_tokens, context_dim, embed_dim, num_input_tokens
     )
     val_cache = estimate_cache_size(
-        val_tokens, num_layers, context_dim, embed_dim, num_input_tokens
+        val_tokens, context_dim, embed_dim, num_input_tokens
     )
 
     train_cache_gb = train_cache['total_gb']
@@ -304,13 +302,12 @@ def can_fit_in_memory(
 def print_memory_report(
     train_tokens: int,
     val_tokens: int,
-    num_layers: int,
     context_dim: int,
     embed_dim: int,
     num_input_tokens: int = 1
-) -> dict[str, Any]:
+) -> Dict[str, Any]:
     """
-    メモリレポートを表示
+    メモリレポートを表示（1層固定アーキテクチャ）
     """
     print_flush("\n" + "="*60)
     print_flush("MEMORY REPORT")
@@ -329,10 +326,10 @@ def print_memory_report(
 
     # キャッシュ見積もり
     train_cache = estimate_cache_size(
-        train_tokens, num_layers, context_dim, embed_dim, num_input_tokens
+        train_tokens, context_dim, embed_dim, num_input_tokens
     )
     val_cache = estimate_cache_size(
-        val_tokens, num_layers, context_dim, embed_dim, num_input_tokens
+        val_tokens, context_dim, embed_dim, num_input_tokens
     )
 
     print_flush(f"Train tokens: {train_tokens:,}")
@@ -349,7 +346,7 @@ def print_memory_report(
 
     # 適合チェック
     check = can_fit_in_memory(
-        train_tokens, val_tokens, num_layers, context_dim, embed_dim, num_input_tokens
+        train_tokens, val_tokens, context_dim, embed_dim, num_input_tokens
     )
     print_flush(f"\n{check['recommendation']}")
     print_flush("="*60 + "\n")

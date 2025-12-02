@@ -27,7 +27,7 @@ class Phase1ConfigProtocol(Protocol):
     phase1_min_convergence_improvement: float
 
 # Phase 2キャッシュ用の型定義
-# G案: 最終レイヤー出力のみ [num_tokens, context_dim]
+# 1層固定: [num_tokens, context_dim]
 ContextCache = torch.Tensor
 
 
@@ -38,9 +38,9 @@ class Phase1Result:
 
     型安全なデータ受け渡しを保証し、条件付き戻り値の脆弱性を解消。
 
-    G案 (2025-12-02):
-    - cacheは最終レイヤー出力のみ [num_tokens, context_dim]
-    - メモリ効率向上（レイヤー数に依存しない）
+    1層固定アーキテクチャ（2025-12-02）:
+    - cacheはレイヤー出力 [num_tokens, context_dim]
+    - カスケード連結方式により複数レイヤーは不要
 
     Attributes:
         contexts: コンテキストベクトル [num_tokens, context_dim]
@@ -80,7 +80,7 @@ class Phase1Trainer(ABC):
         Args:
             token_ids: トークンID [num_tokens]
             label: ログ用ラベル
-            return_all_layers: Trueの場合、Phase 2用キャッシュも返す
+            return_all_layers: Trueの場合、Phase 2用キャッシュも返す（1層固定）
             val_token_ids: 検証用トークンID（早期停止用）
 
         Returns:
@@ -101,7 +101,7 @@ class Phase1Trainer(ABC):
         Args:
             token_ids: トークンID [num_tokens]
             label: ログ用ラベル
-            return_all_layers: 通常True（Phase 2キャッシュ用）
+            return_all_layers: 通常True（Phase 2キャッシュ用、1層固定）
 
         Returns:
             Phase1Result: contexts, cache, token_embedsすべて含む

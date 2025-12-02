@@ -3,6 +3,9 @@ Layer components for New-LLM architecture.
 
 ContextLayer: 文脈処理専用レイヤー
 TokenLayer: トークン処理専用レイヤー
+
+1層固定アーキテクチャ（2025-12-02）:
+- カスケード連結方式により複数レイヤーは不要
 """
 
 from typing import Optional
@@ -94,11 +97,11 @@ class TokenLayer(nn.Module):
     """
     Token Layer - トークン処理専用レイヤー
 
-    入力: [context, token_embeds] または token_embeds のみ（F案用）
+    入力: [context, token_embeds]
     出力: token_out（tokenのみ更新、contextは参照のみ）
 
     Args:
-        context_dim: Context vector dimension (0 for no context input)
+        context_dim: Context vector dimension
         token_input_dim: Input token dimension
         token_output_dim: Output token dimension
     """
@@ -136,7 +139,6 @@ class TokenLayer(nn.Module):
 
         Args:
             context: Context vector [batch, context_dim] (参照のみ)
-                     None if context_dim=0 (F案の2層目など)
             token_embeds: Token embeddings [batch, token_input_dim]
 
         Returns:
