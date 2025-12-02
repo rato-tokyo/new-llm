@@ -1,0 +1,121 @@
+remote: Enumerating objects: 9, done.
+remote: Counting objects: 100% (9/9), done.
+remote: Compressing objects: 100% (1/1), done.
+remote: Total 5 (delta 4), reused 5 (delta 4), pack-reused 0 (from 0)
+Unpacking objects: 100% (5/5), 648 bytes | 648.00 KiB/s, done.
+From https://github.com/rato-tokyo/new-llm
+ * branch            main       -> FETCH_HEAD
+   ea7d4c2..361fb9c  main       -> origin/main
+Updating ea7d4c2..361fb9c
+Fast-forward
+ src/models/llm.py | 8 ++++----
+ 1 file changed, 4 insertions(+), 4 deletions(-)
+======================================================================
+ASYMMETRIC LAYER EXPERIMENT
+======================================================================
+Device: cuda
+GPU: NVIDIA L4
+Memory: 22.2GB
+
+Mode: c2t1
+Samples: 2000
+Context dim: 500
+Output: importants/logs/20251202_072027_asymmetric_c2t1
+======================================================================
+
+============================================================
+Running C2T1: Context 2L, Token 1L
+============================================================
+Loading training data...
+  Loading from cache: ./cache/ultrachat_2000samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (22723 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 2403563 tokens (2000 samples)
+  Val:   22723 tokens
+Data: 2,403,563 train, 22,723 val tokens
+2025-12-02 07:20:29.687042: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-12-02 07:20:29.702981: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1764660029.723720    3473 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764660029.730242    3473 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764660029.746772    3473 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764660029.746809    3473 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764660029.746812    3473 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764660029.746815    3473 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-12-02 07:20:29.751671: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using G案 architecture: ContextBlock(2L) + TokenBlock(1L)
+  num_input_tokens: 1
+  Context injection: Layer1=current (single layer)
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+Parameters: 40,846,040 total
+  ContextBlock: 1,271,000
+  TokenBlock: 976,128
+
+[Phase 1] OACD: 2,403,563 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=10.9875 [13.7s]
+  Iter 3: conv=0% loss=7.7595 [13.2s]
+  Iter 4: conv=0% loss=3.4553 [11.0s]
+  Iter 5: conv=0% loss=1.9229 [11.0s]
+  Iter 6: conv=0% loss=1.8302 [11.0s]
+  Iter 7: conv=1% loss=1.7445 [10.9s]
+  Iter 8: conv=3% loss=1.4750 [10.9s]
+  Iter 9: conv=9% loss=1.2782 [10.9s]
+  Iter 10: conv=26% loss=1.2123 [10.9s]
+  Iter 11: conv=58% loss=1.1597 [10.9s]
+  Iter 12: conv=80% loss=1.0139 [10.9s]
+  Iter 13: conv=89% loss=0.8141 [11.0s]
+  Iter 14: conv=93% loss=0.6643 [10.9s]
+  → Early stop: conv 93% >= 90%
+  Done: 93% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [8.4s]
+Phase 1: 174.2s, 14 iter, conv=93%, ER=81.2%/79.6%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 977,664/40,846,040 parameters
+
+[Phase 2] 2,403,563 train / 22,723 val tokens, 20 epochs
+  Epoch 1: train_ppl=989.5 val_ppl=255.9 acc=19.8% [56.2s] ★
+  Epoch 2: train_ppl=224.2 val_ppl=189.9 acc=21.1% [56.2s] ★
+  Epoch 3: train_ppl=172.6 val_ppl=167.4 acc=21.7% [56.9s] ★
+  Epoch 4: train_ppl=148.6 val_ppl=156.7 acc=22.1% [56.5s] ★
+  Epoch 5: train_ppl=134.5 val_ppl=150.5 acc=22.3% [56.6s] ★
+  Epoch 6: train_ppl=125.1 val_ppl=146.6 acc=22.7% [56.6s] ★
+  Epoch 7: train_ppl=118.4 val_ppl=144.0 acc=22.8% [56.6s] ★
+  Epoch 8: train_ppl=113.4 val_ppl=142.3 acc=22.9% [56.6s] ★
+  Epoch 9: train_ppl=109.4 val_ppl=141.1 acc=22.9% [56.6s] ★
+  Epoch 10: train_ppl=106.3 val_ppl=140.3 acc=23.0% [56.6s] ★
+  Epoch 11: train_ppl=103.6 val_ppl=139.8 acc=23.0% [56.6s] ★
+  Epoch 12: train_ppl=101.4 val_ppl=139.3 acc=23.0% [56.6s] ★
+  Epoch 13: train_ppl=99.5 val_ppl=139.1 acc=23.1% [56.6s] ★
+  Epoch 14: train_ppl=97.9 val_ppl=138.9 acc=23.2% [56.6s] ★
+  Epoch 15: train_ppl=96.5 val_ppl=138.8 acc=23.2% [56.6s] ★
+  Epoch 16: train_ppl=95.2 val_ppl=138.7 acc=23.2% [56.5s] ★
+  Epoch 17: train_ppl=94.1 val_ppl=138.7 acc=23.2% [56.6s] ★
+  Epoch 18: train_ppl=93.1 val_ppl=138.7 acc=23.2% [56.6s] ★
+  Epoch 19: train_ppl=92.1 val_ppl=138.7 acc=23.2% [56.6s]
+  → Early stop at epoch 19
+  Best: epoch 18, ppl=138.7, acc=23.2%
+Phase 2: 1074.5s, Best epoch 18
+Result: PPL=138.7, Acc=23.2%
+Total time: 1248.7s
+
+======================================================================
+SUMMARY
+======================================================================
+
+Config     Context  Token    Params       Val PPL    Acc      ER%      Time    
+--------------------------------------------------------------------------------
+C2T1       2        1        40,846,040  138.7      23.2     79.6     1248.7  
+
+Results saved to: importants/logs/20251202_072027_asymmetric_c2t1/results_c2t1.txt
+
+======================================================================
+DONE
+======================================================================

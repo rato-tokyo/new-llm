@@ -1,0 +1,126 @@
+remote: Enumerating objects: 14, done.
+remote: Counting objects: 100% (14/14), done.
+remote: Compressing objects: 100% (6/6), done.
+remote: Total 10 (delta 8), reused 6 (delta 4), pack-reused 0 (from 0)
+Unpacking objects: 100% (10/10), 1.45 KiB | 742.00 KiB/s, done.
+From https://github.com/rato-tokyo/new-llm
+ * branch            main       -> FETCH_HEAD
+   3c53361..361fb9c  main       -> origin/main
+Updating 3c53361..361fb9c
+Fast-forward
+ output_c1t2.txt   |  0
+ output_c2t1.txt   |  0
+ src/models/llm.py | 23 ++++++++++++++++++++---
+ 3 files changed, 20 insertions(+), 3 deletions(-)
+ create mode 100644 output_c1t2.txt
+ create mode 100644 output_c2t1.txt
+======================================================================
+ASYMMETRIC LAYER EXPERIMENT
+======================================================================
+Device: cuda
+GPU: NVIDIA L4
+Memory: 22.2GB
+
+Mode: c1t2
+Samples: 2000
+Context dim: 500
+Output: importants/logs/20251202_072034_asymmetric_c1t2
+======================================================================
+
+============================================================
+Running C1T2: Context 1L, Token 2L
+============================================================
+Loading training data...
+  Loading from cache: ./cache/ultrachat_2000samples_full.pt
+Loading validation data...
+Token indices sequence length is longer than the specified maximum sequence length for this model (22723 > 1024). Running this sequence through the model will result in indexing errors
+  Train: 2403563 tokens (2000 samples)
+  Val:   22723 tokens
+Data: 2,403,563 train, 22,723 val tokens
+2025-12-02 07:20:36.925209: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-12-02 07:20:36.941507: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1764660036.963270    4216 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764660036.969832    4216 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764660036.986967    4216 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764660036.987022    4216 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764660036.987025    4216 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764660036.987028    4216 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-12-02 07:20:36.992040: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+Using G案 architecture: ContextBlock(1L) + TokenBlock(2L)
+  num_input_tokens: 1
+  Context injection: Layer1=prev, LayerN=current
+✓ Weight Tying: token_output shares weights with token_embedding
+  → Saved ~38.60M parameters
+Parameters: 41,186,668 total
+  ContextBlock: 635,500
+  TokenBlock: 1,952,256
+
+[Phase 1] OACD: 2,403,563 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=11.2665 [12.3s]
+  Iter 3: conv=0% loss=13.2733 [11.7s]
+  Iter 4: conv=0% loss=10.7668 [9.6s]
+  Iter 5: conv=0% loss=7.2952 [9.7s]
+  Iter 6: conv=0% loss=4.6405 [9.6s]
+  Iter 7: conv=0% loss=3.3883 [9.4s]
+  Iter 8: conv=0% loss=3.0642 [9.6s]
+  Iter 9: conv=0% loss=3.0015 [9.5s]
+  Iter 10: conv=0% loss=2.9395 [9.6s]
+  Iter 11: conv=1% loss=2.8767 [9.5s]
+  Iter 12: conv=1% loss=2.8108 [9.6s]
+  Iter 13: conv=2% loss=2.7114 [9.6s]
+  Iter 14: conv=3% loss=2.5484 [9.5s]
+  Iter 15: conv=4% loss=2.3245 [9.4s]
+  Iter 16: conv=7% loss=2.0891 [9.4s]
+  Iter 17: conv=11% loss=1.8960 [9.4s]
+  Iter 18: conv=17% loss=1.7510 [9.6s]
+  Iter 19: conv=24% loss=1.6313 [9.5s]
+  Iter 20: conv=33% loss=1.5257 [9.6s]
+  Iter 21: conv=43% loss=1.4323 [9.5s]
+  Iter 22: conv=53% loss=1.3443 [9.6s]
+  Iter 23: conv=62% loss=1.2557 [9.4s]
+  Iter 24: conv=69% loss=1.1714 [9.6s]
+  Iter 25: conv=75% loss=1.1000 [9.5s]
+  Iter 26: conv=80% loss=1.0439 [9.5s]
+  Iter 27: conv=84% loss=1.0018 [9.6s]
+  Iter 28: conv=87% loss=0.9747 [9.6s]
+  Iter 29: conv=90% loss=0.9633 [9.5s]
+  Iter 30: conv=92% loss=0.9592 [9.4s]
+  → Early stop: conv 92% >= 90%
+  Done: 92% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [6.7s]
+Phase 1: 309.7s, 30 iter, conv=92%, ER=79.7%/77.9%
+✓ ContextBlock frozen
+✓ Embedding frozen (Weight Tying: Output Head also frozen)
+  → Only TokenBlock will be trained
+✓ Training TokenBlock only: 1,953,792/41,186,668 parameters
+
+[Phase 2] 2,403,563 train / 22,723 val tokens, 20 epochs
+  Epoch 1: train_ppl=410.4 val_ppl=335.5 acc=16.6% [55.1s] ★
+  Epoch 2: train_ppl=176.1 val_ppl=304.8 acc=17.3% [54.7s] ★
+  Epoch 3: train_ppl=135.8 val_ppl=300.8 acc=17.4% [55.0s] ★
+  Epoch 4: train_ppl=115.1 val_ppl=304.4 acc=17.1% [55.0s]
+  → Early stop at epoch 4
+  Best: epoch 3, ppl=300.8, acc=17.4%
+Phase 2: 219.8s, Best epoch 3
+Result: PPL=300.8, Acc=17.4%
+Total time: 529.5s
+
+======================================================================
+SUMMARY
+======================================================================
+
+Config     Context  Token    Params       Val PPL    Acc      ER%      Time    
+--------------------------------------------------------------------------------
+C1T2       1        2        41,186,668  300.8      17.4     77.9     529.5   
+
+Results saved to: importants/logs/20251202_072034_asymmetric_c1t2/results_c1t2.txt
+
+======================================================================
+DONE
+======================================================================
