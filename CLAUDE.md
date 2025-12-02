@@ -96,6 +96,45 @@ def oacd_loss(contexts, centroid_weight=0.1):
 
 ---
 
+## 🔗 Context Continuity Loss - 削除厳禁 (2025-12-02)
+
+**⚠️ このセクションは重要な設計決定を記録しています。削除しないでください。**
+
+**block_idx > 0 のContextBlockでは、Context Continuity Lossを追加。**
+
+### 目的
+
+前のブロックの最終出力（`prev_context_final`）と、現在のブロックの**最初のトークンの出力**を近づける。
+
+```python
+# Context Continuity Loss（block_idx > 0の場合のみ）
+if block_idx > 0 and prev_context_final is not None:
+    if start_idx == 0:  # 最初のバッチの最初の出力
+        first_output = batch_output[:1]
+        continuity_loss = MSE(first_output, prev_context_final)
+        total_loss = diversity_loss + 0.1 * continuity_loss
+```
+
+### なぜ「最初の出力」を使うのか
+
+RNN収束後の理論的性質：
+- Phase 1のOACD学習が収束すると（conv=90%+）、RNNは**固定点に収束**
+- 収束後: `block_first ≈ block_final`（全トークンの出力が同じ値に収束）
+- したがって、「最初の出力を近づける」と「最終出力を近づける」は理論的に同等
+
+**「最初の出力」を選んだ理由**:
+1. `initial_context`として`prev_context_final`を入力しているため、入力→出力の因果関係が直接的
+2. Dual方式の成功（PPL=111.9）と同様の「文脈継続」イメージに合致
+3. 実装がシンプル（最初のバッチで計算）
+
+### 重要な注意
+
+- この損失は**全てのcontext出力ではなく、最初の1つだけ**に適用
+- OACDの多様性損失と併用（weight=0.1）
+- block_idx=0（最初のブロック）では使用しない
+
+---
+
 ## 🚨 1層固定アーキテクチャ (2025-12-02)
 
 **カスケード連結方式により、複数レイヤーは不要。**
@@ -366,4 +405,4 @@ def __init__(self, base: Config, context_dim: int):
 
 ---
 
-Last Updated: 2025-12-02 (順次処理禁止ルール追記、Initial Context Inheritance方式採用、可変ContextBlock数対応、1層固定アーキテクチャ)
+Last Updated: 2025-12-02 (Context Continuity Loss追加、順次処理禁止ルール追記、Initial Context Inheritance方式採用、可変ContextBlock数対応、1層固定アーキテクチャ)
