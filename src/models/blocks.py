@@ -65,6 +65,25 @@ class ContextBlock(nn.Module):
         """
         return self.layer(context, token_embeds)
 
+    def forward_batch(
+        self,
+        context: torch.Tensor,
+        token_embeds: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Batch forward pass（キャッシュ収集用）
+
+        forward() と同一だが、明示的なバッチ処理用メソッド。
+
+        Args:
+            context: [batch, context_dim]
+            token_embeds: [batch, embed_dim * num_input_tokens]
+
+        Returns:
+            context: [batch, context_dim]
+        """
+        return self.layer(context, token_embeds)
+
     def num_params(self) -> int:
         """パラメータ数を返す"""
         return sum(p.numel() for p in self.parameters())

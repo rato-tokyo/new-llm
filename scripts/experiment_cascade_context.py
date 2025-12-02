@@ -349,7 +349,7 @@ def collect_context_a_cache(
         all_embeds = model.embed_norm(all_embeds)
         all_embeds_cpu = all_embeds.cpu()
         del all_embeds
-        torch.cuda.empty_cache() if device.type == 'cuda' else None
+        clear_gpu_cache(device)
 
     input_embeds = all_embeds_cpu[:-1]
     del all_embeds_cpu
@@ -372,7 +372,7 @@ def collect_context_a_cache(
                 print_flush(f"      {i+1:,}/{num_tokens:,} tokens processed...")
 
     print_flush(f"    Context A cache collected [{time.time() - collect_start:.1f}s]")
-    torch.cuda.empty_cache() if device.type == 'cuda' else None
+    clear_gpu_cache(device)
 
     return context_a_cache, input_embeds
 
@@ -403,7 +403,7 @@ def collect_context_b_cache_with_fixed_a(
                 print_flush(f"      {i+1:,}/{num_tokens:,} tokens processed...")
 
     print_flush(f"    Context B cache collected [{time.time() - collect_start:.1f}s]")
-    torch.cuda.empty_cache() if device.type == 'cuda' else None
+    clear_gpu_cache(device)
 
     return context_b_cache
 
