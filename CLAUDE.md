@@ -15,20 +15,29 @@
 | C2T2-500 | 132.2 | 24.4% | 2層だが悪化 |
 | C1T1-1000 | 134.0 | 23.6% | context_dim増加は非効率 |
 
-### カスケード方式の特徴（Cache-Direct方式）
+### カスケード方式の特徴（Cache-Direct方式、可変ブロック数対応）
 
 **Cache-Direct方式**: Phase 1で得られたキャッシュをそのままPhase 2で使用。再計算不要。
 
-```
-Phase 1A: ContextBlock A を全データで学習
-  → context_a[i] キャッシュ取得（各トークン位置の出力を保存）
+**可変ブロック数対応**: ContextBlockの数は1, 2, 3, ... と柔軟に指定可能。
 
-Phase 1B: ContextBlock B を学習
-  → 入力: context_a[i-1]（前のトークン位置のcontext_a）
-  → context_b[i] キャッシュ取得
+```
+N個のContextBlockを順次学習:
+
+Phase 1[0]: ContextBlock[0] を全データで学習
+  → 入力: ゼロベクトル
+  → context[0][i] キャッシュ取得
+
+Phase 1[1]: ContextBlock[1] を学習
+  → 入力: context[0][i-1]（前のトークン位置のcontext[0]）
+  → context[1][i] キャッシュ取得
+
+Phase 1[N-1]: ContextBlock[N-1] を学習
+  → 入力: context[N-2][i-1]
+  → context[N-1][i] キャッシュ取得
 
 Phase 2: TokenBlock 学習（順伝搬なし）
-  → 入力: context_a[i-1], context_b[i-1]（両方とも前トークン位置）
+  → 入力: concat(context[0][i-1], ..., context[N-1][i-1])
   → 予測: token[i]
 ```
 
@@ -39,19 +48,25 @@ Phase 1で得たキャッシュを1つシフトして使用するだけで、順
 
 ### なぜカスケード方式が良いのか
 
-1. **データ活用効率**: 全データで両ContextBlockを学習
+1. **データ活用効率**: 全データで全ContextBlockを学習
 2. **cd=500の効率性維持**: 各ブロックで92%収束を達成
-3. **連結による表現力**: 1000次元の表現力を獲得しつつ、各ブロックの効率性を維持
-4. **コード簡素化**: 複数レイヤーロジック不要
+3. **連結による表現力**: N×500次元の表現力を獲得しつつ、各ブロックの効率性を維持
+4. **柔軟性**: ブロック数を増やすことで表現力を拡張可能
 
 ### 実験の実行
 
 ```bash
-# Colab（GPU）: 本格実験
+# Colab（GPU）: 本格実験（デフォルト: 2ブロック）
 python3 scripts/experiment_cascade_context.py -s 2000
 
+# ブロック数指定（1, 2, 3, ...）
+python3 scripts/experiment_cascade_context.py -s 2000 -n 1  # 1ブロック（カスケードなし）
+python3 scripts/experiment_cascade_context.py -s 2000 -n 2  # 2ブロック（デフォルト）
+python3 scripts/experiment_cascade_context.py -s 2000 -n 3  # 3ブロック
+
 # context_dim指定（各ContextBlockの次元）
-python3 scripts/experiment_cascade_context.py -s 2000 -c 500
+python3 scripts/experiment_cascade_context.py -s 2000 -c 500 -n 2  # 500×2=1000次元
+python3 scripts/experiment_cascade_context.py -s 2000 -c 300 -n 3  # 300×3=900次元
 ```
 
 ---
@@ -89,13 +104,14 @@ def oacd_loss(contexts, centroid_weight=0.1):
 ContextBlock: 1層
 TokenBlock: 1層
 
-# カスケード連結で表現力を確保
-combined_context = concat(context_a, context_b)  # cd=500×2=1000
+# カスケード連結で表現力を確保（可変ブロック数対応）
+combined_context = concat(context[0], context[1], ..., context[N-1])  # cd=context_dim×N
 ```
 
 **理由**:
 - C2T2（2層）がC1T1（1層）より**悪化**した実験結果
 - カスケード連結で十分な表現力を確保
+- ブロック数を増やすことで表現力を拡張可能
 - コードの大幅な簡素化
 
 ---
@@ -237,7 +253,7 @@ python3 -m mypy scripts/experiment_cascade_context.py --ignore-missing-imports
 - TokenBlock: 1層固定、Phase 2で学習
 
 **3. CascadeContextLLM（実験用モデル）**
-- ContextBlock A + ContextBlock B（カスケード連結）
+- ContextBlock[0..N-1]（カスケード連結、可変ブロック数対応）
 - TokenBlock（連結されたcontext入力）
 - Token Embedding: GPT-2 pretrained (768-dim, frozen)
 - Weight Tying: token_output shares weights with token_embedding
@@ -301,4 +317,4 @@ def __init__(self, base: Config, context_dim: int):
 
 ---
 
-Last Updated: 2025-12-02 (カスケード連結方式採用、1層固定アーキテクチャ、複数レイヤー削除)
+Last Updated: 2025-12-02 (可変ContextBlock数対応、カスケード連結方式採用、1層固定アーキテクチャ)

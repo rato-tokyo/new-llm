@@ -2,26 +2,28 @@
 """
 Cascade Context 実験スクリプト
 
-カスケード方式: ContextBlock A → B の順で学習し、
-B の学習時は A の出力を固定入力として使用。
+カスケード方式: N個のContextBlockを順次学習し、
+各ブロックは前のブロックの出力を固定入力として使用。
 
-アーキテクチャ（1層固定）:
-  Phase 1A:
-    - ContextBlock A を全データで学習
-    - 出力: context_a (キャッシュ)
+アーキテクチャ（1層固定、可変ブロック数）:
+  Phase 1[0]:
+    - ContextBlock[0] を全データで学習（入力: ゼロベクトル）
+    - 出力: context[0] (キャッシュ)
 
-  Phase 1B:
-    - ContextBlock B を全データで学習
-    - 入力: context_a (Phase 1Aの出力、固定)
-    - 出力: context_b (キャッシュ)
+  Phase 1[1..N-1]:
+    - ContextBlock[i] を学習
+    - 入力: context[i-1] (前のブロックの出力、固定)
+    - 出力: context[i] (キャッシュ)
 
   Phase 2:
-    - context_a と context_b を連結 → cd=1000
-    - TokenBlock (cd=1000入力) で学習
+    - 全context[0..N-1]を連結 → cd=context_dim*N
+    - TokenBlock で学習
 
 使用方法:
   python3 scripts/experiment_cascade_context.py
-  python3 scripts/experiment_cascade_context.py -s 2000
+  python3 scripts/experiment_cascade_context.py -s 2000 -n 2  # デフォルト: 2ブロック
+  python3 scripts/experiment_cascade_context.py -s 2000 -n 3  # 3ブロック
+  python3 scripts/experiment_cascade_context.py -s 2000 -n 1  # 1ブロック（カスケードなし）
 """
 
 import os
@@ -29,7 +31,7 @@ import sys
 import argparse
 import time
 from datetime import datetime
-from typing import Dict, Optional, Tuple, Any
+from typing import Dict, Optional, Tuple, Any, List
 
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -51,17 +53,18 @@ from config.experiment import DataConfig
 
 class CascadeContextLLM(nn.Module):
     """
-    Cascade Context LLM - 2つのContextBlockをカスケード接続（1層固定）
+    Cascade Context LLM - N個のContextBlockをカスケード接続（1層固定）
 
-    Phase 1A: ContextBlock A を学習（入力: ゼロ初期化context）
-    Phase 1B: ContextBlock B を学習（入力: A の出力、固定）
-    Phase 2: concat(context_a, context_b) で TokenBlock を学習
+    Phase 1[0]: ContextBlock[0] を学習（入力: ゼロ初期化context）
+    Phase 1[i]: ContextBlock[i] を学習（入力: [i-1] の出力、固定）
+    Phase 2: concat(context[0..N-1]) で TokenBlock を学習
 
     Args:
         vocab_size: 語彙サイズ
         embed_dim: トークン埋め込み次元
-        context_dim: 各ContextBlockの出力次元（連結後は2倍）
+        context_dim: 各ContextBlockの出力次元
         num_input_tokens: 入力トークン数
+        num_context_blocks: ContextBlockの数（デフォルト: 2）
     """
 
     def __init__(
@@ -70,32 +73,32 @@ class CascadeContextLLM(nn.Module):
         embed_dim: int,
         context_dim: int,
         num_input_tokens: int = 1,
+        num_context_blocks: int = 2,
     ) -> None:
         super().__init__()
 
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.context_dim = context_dim
-        self.combined_context_dim = context_dim * 2
+        self.num_context_blocks = num_context_blocks
+        self.combined_context_dim = context_dim * num_context_blocks
         self.num_input_tokens = num_input_tokens
 
         # Token Embeddings (GPT-2 pretrained)
         self._load_pretrained_embeddings()
         self.embed_norm = nn.LayerNorm(embed_dim)
 
-        # 2つのContextBlock（各1層）
-        self.context_block_a = ContextBlock(
-            context_dim=context_dim,
-            embed_dim=embed_dim,
-            num_input_tokens=num_input_tokens,
-        )
-        self.context_block_b = ContextBlock(
-            context_dim=context_dim,
-            embed_dim=embed_dim,
-            num_input_tokens=num_input_tokens,
-        )
+        # N個のContextBlock（各1層）
+        self.context_blocks = nn.ModuleList([
+            ContextBlock(
+                context_dim=context_dim,
+                embed_dim=embed_dim,
+                num_input_tokens=num_input_tokens,
+            )
+            for _ in range(num_context_blocks)
+        ])
 
-        # TokenBlock（連結されたcontext用、cd=1000、1層）
+        # TokenBlock（連結されたcontext用、cd=context_dim*N、1層）
         self.token_block = TokenBlock(
             context_dim=self.combined_context_dim,
             embed_dim=embed_dim,
@@ -124,44 +127,50 @@ class CascadeContextLLM(nn.Module):
             self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
             nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
 
-    def forward_context_a(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
-        """ContextBlock A の順伝搬"""
-        return self.context_block_a(context, token_embeds)
-
-    def forward_context_b(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
-        """ContextBlock B の順伝搬"""
-        return self.context_block_b(context, token_embeds)
+    def forward_context(self, block_idx: int, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
+        """指定されたContextBlockの順伝搬"""
+        return self.context_blocks[block_idx](context, token_embeds)
 
     def forward_token(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
         """TokenBlock の順伝搬（1層固定、contextは連結済み）"""
         return self.token_block(context, token_embeds)
 
-    def freeze_context_blocks(self) -> None:
-        """両方のContextBlockをfreeze"""
-        for param in self.context_block_a.parameters():
+    def freeze_context_block(self, block_idx: int) -> None:
+        """指定されたContextBlockをfreeze"""
+        for param in self.context_blocks[block_idx].parameters():
             param.requires_grad = False
-        for param in self.context_block_b.parameters():
-            param.requires_grad = False
-        print_flush("✓ Both ContextBlocks frozen")
+
+    def freeze_all_context_blocks(self) -> None:
+        """全ContextBlockをfreeze"""
+        for i in range(self.num_context_blocks):
+            self.freeze_context_block(i)
+        print_flush(f"✓ All {self.num_context_blocks} ContextBlocks frozen")
 
     def num_params(self) -> Dict[str, int]:
         """パラメータ数を返す"""
         embedding_params = self.token_embedding.weight.numel()
         embed_norm_params = count_parameters(self.embed_norm)
-        context_a_params = count_parameters(self.context_block_a)
-        context_b_params = count_parameters(self.context_block_b)
+
+        context_block_params = {}
+        total_context_params = 0
+        for i, block in enumerate(self.context_blocks):
+            params = count_parameters(block)
+            context_block_params[f'context_block_{i}'] = params
+            total_context_params += params
+
         token_block_params = count_parameters(self.token_block)
 
-        total = embedding_params + embed_norm_params + context_a_params + context_b_params + token_block_params
+        total = embedding_params + embed_norm_params + total_context_params + token_block_params
 
-        return {
+        result = {
             'embedding': embedding_params,
             'embed_norm': embed_norm_params,
-            'context_block_a': context_a_params,
-            'context_block_b': context_b_params,
             'token_block': token_block_params,
             'total': total,
+            'total_context_blocks': total_context_params,
         }
+        result.update(context_block_params)
+        return result
 
 
 class SingleContextWrapper(nn.Module):
@@ -170,9 +179,10 @@ class SingleContextWrapper(nn.Module):
     MemoryPhase1Trainer と互換性を持たせる。
     """
 
-    def __init__(self, cascade_model: CascadeContextLLM, block: str = 'a'):
+    def __init__(self, cascade_model: CascadeContextLLM, block_idx: int = 0):
         super().__init__()
         self.cascade_model = cascade_model
+        self.block_idx = block_idx
 
         # Phase1Trainerが期待するプロパティ
         self.token_embedding = cascade_model.token_embedding
@@ -182,10 +192,7 @@ class SingleContextWrapper(nn.Module):
         self.num_input_tokens = cascade_model.num_input_tokens
         self.vocab_size = cascade_model.vocab_size
 
-        if block == 'a':
-            self.context_block = cascade_model.context_block_a
-        else:
-            self.context_block = cascade_model.context_block_b
+        self.context_block = cascade_model.context_blocks[block_idx]
 
     def forward_context(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
         """ContextBlock の順伝搬"""
@@ -213,7 +220,7 @@ class CascadePhase2Trainer:
         from torch.optim import AdamW
 
         self.model.to(self.device)
-        self.model.freeze_context_blocks()
+        self.model.freeze_all_context_blocks()
         self.model.token_embedding.weight.requires_grad = False
         print_flush("✓ Embedding frozen")
 
@@ -340,20 +347,20 @@ def collect_context_cache_for_val(
     model: CascadeContextLLM,
     token_ids: torch.Tensor,
     device: torch.device,
-) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+) -> Tuple[List[torch.Tensor], torch.Tensor]:
     """
-    Validation用: ContextBlock A と B のキャッシュを収集
+    Validation用: 全ContextBlockのキャッシュを収集
 
     Cache-Direct方式: 順伝搬でキャッシュを収集し、Phase 2ではシフトして使用
 
     Returns:
-        (context_a_cache, context_b_cache, token_embeds)
-        - context_a_cache: [num_tokens, context_dim]
-        - context_b_cache: [num_tokens, context_dim]
+        (context_caches, token_embeds)
+        - context_caches: List of [num_tokens, context_dim] for each block
         - token_embeds: [num_tokens, embed_dim]
     """
     model.eval()
     num_tokens = len(token_ids) - 1
+    num_blocks = model.num_context_blocks
 
     with torch.no_grad():
         all_embeds = model.token_embedding(token_ids.to(device))
@@ -365,27 +372,35 @@ def collect_context_cache_for_val(
     input_embeds = all_embeds_cpu[:-1]
     del all_embeds_cpu
 
-    context_a_cache = torch.zeros(num_tokens, model.context_dim, device='cpu', dtype=torch.float32)
-    context_b_cache = torch.zeros(num_tokens, model.context_dim, device='cpu', dtype=torch.float32)
+    # 各ブロック用のキャッシュを準備
+    context_caches = [
+        torch.zeros(num_tokens, model.context_dim, device='cpu', dtype=torch.float32)
+        for _ in range(num_blocks)
+    ]
 
-    print_flush(f"    Collecting val cache ({num_tokens:,} tokens)...")
+    print_flush(f"    Collecting val cache ({num_tokens:,} tokens, {num_blocks} blocks)...")
     collect_start = time.time()
 
-    context_a = torch.zeros(1, model.context_dim, device=device)
+    # 最初のブロックの入力はゼロベクトル
+    prev_context = torch.zeros(1, model.context_dim, device=device)
 
     with torch.no_grad():
         for i in range(num_tokens):
             token_embed = input_embeds[i:i+1].to(device)
 
-            # ContextBlock A: 入力は前のcontext_a
-            new_context_a = model.forward_context_a(context_a, token_embed)
-            context_a_cache[i] = new_context_a.cpu()
+            # 各ブロックを順に処理
+            current_context = prev_context
+            for block_idx in range(num_blocks):
+                new_context = model.forward_context(block_idx, current_context, token_embed)
+                context_caches[block_idx][i] = new_context.cpu()
 
-            # ContextBlock B: 入力は前のcontext_a（Cache-Direct方式）
-            new_context_b = model.forward_context_b(context_a, token_embed)
-            context_b_cache[i] = new_context_b.cpu()
+                # 次のブロックへの入力は前のブロックの出力（ただしblock 0のみ更新用に保存）
+                if block_idx == 0:
+                    next_prev_context = new_context
+                # 後続ブロックは現在のprev_contextを使用（Cache-Direct方式）
+                # Note: block_idx > 0 では current_context = prev_context のまま
 
-            context_a = new_context_a
+            prev_context = next_prev_context
 
             if (i + 1) % 100000 == 0:
                 print_flush(f"      {i+1:,}/{num_tokens:,} tokens processed...")
@@ -393,15 +408,18 @@ def collect_context_cache_for_val(
     print_flush(f"    Val cache collected [{time.time() - collect_start:.1f}s]")
     clear_gpu_cache(device)
 
-    return context_a_cache, context_b_cache, input_embeds
+    return context_caches, input_embeds
 
 
-class CascadePhase1BTrainer:
+class CascadePhase1Trainer:
     """
-    Phase 1B用トレーナー: context_aを入力としてContextBlock Bを学習
+    Phase 1用トレーナー: 前のブロックのキャッシュを入力としてContextBlockを学習
 
-    Cache-Direct方式: context_a[i-1]を入力として学習し、得られたキャッシュを
+    Cache-Direct方式: prev_context[i-1]を入力として学習し、得られたキャッシュを
     そのままPhase 2で使用。順伝搬の再計算は不要。
+
+    block_idx=0の場合: ゼロベクトルを入力として使用
+    block_idx>0の場合: 前のブロックのキャッシュを入力として使用
     """
 
     def __init__(
@@ -409,41 +427,53 @@ class CascadePhase1BTrainer:
         model: CascadeContextLLM,
         config: Any,
         device: torch.device,
-        context_a_cache: torch.Tensor,
+        block_idx: int,
+        prev_context_cache: Optional[torch.Tensor],  # block_idx=0の場合はNone
         token_embeds: torch.Tensor
     ):
         self.model = model
         self.config = config
         self.device = device
-        self.context_a_cache = context_a_cache  # [num_tokens, context_dim]
+        self.block_idx = block_idx
+        self.prev_context_cache = prev_context_cache  # [num_tokens, context_dim] or None
         self.token_embeds = token_embeds  # [num_tokens, embed_dim]
         self._training_stats: Dict[str, Any] = {}
 
-    def train(self, label: str = "ContextB") -> torch.Tensor:
+    def train(self, label: str = "Context") -> torch.Tensor:
         """
-        ContextBlock Bを学習（context_aを入力として使用）
+        ContextBlockを学習
 
         Returns:
-            context_b_cache: [num_tokens, context_dim]
+            context_cache: [num_tokens, context_dim]
         """
         self.model.train()
         num_tokens = len(self.token_embeds)
 
-        # ContextBlock Bのパラメータのみ学習
-        context_b_params = list(self.model.context_block_b.parameters())
-        print_flush(f"\n[Phase 1B] {label}: {num_tokens:,} tokens, {self.config.phase1_max_iterations} iterations")
-        print_flush("  Input: context_a[i-1] (Cache-Direct method)")
-        optimizer = torch.optim.Adam(context_b_params, lr=self.config.phase1_learning_rate)
+        # このブロックのパラメータのみ学習
+        block_params = list(self.model.context_blocks[self.block_idx].parameters())
+        phase_label = f"Phase 1[{self.block_idx}]"
+        print_flush(f"\n[{phase_label}] {label}: {num_tokens:,} tokens, {self.config.phase1_max_iterations} iterations")
+
+        if self.block_idx == 0:
+            print_flush("  Input: zero vector")
+        else:
+            print_flush(f"  Input: context[{self.block_idx-1}][i-1] (Cache-Direct method)")
+
+        optimizer = torch.optim.Adam(block_params, lr=self.config.phase1_learning_rate)
 
         # 収束率Early Stoppingの設定
         early_stopping = getattr(self.config, 'phase1_early_stopping', True)
         early_stopping_threshold = getattr(self.config, 'phase1_early_stopping_threshold', 0.30)
         min_convergence_improvement = getattr(self.config, 'phase1_min_convergence_improvement', 0.01)
 
-        # Phase 2用: context_a[i-1]を入力として使用
-        # shifted_context_a: 位置iの予測には位置i-1のcontext_aを使用
-        initial_context = torch.zeros(1, self.model.context_dim, device='cpu')
-        shifted_context_a = torch.cat([initial_context, self.context_a_cache[:-1]], dim=0)
+        # 入力コンテキストの準備
+        if self.block_idx == 0 or self.prev_context_cache is None:
+            # block_idx=0: ゼロベクトルを入力として使用
+            shifted_prev_context = torch.zeros(num_tokens, self.model.context_dim, device='cpu')
+        else:
+            # block_idx>0: prev_context[i-1]を入力として使用
+            initial_context = torch.zeros(1, self.model.context_dim, device='cpu')
+            shifted_prev_context = torch.cat([initial_context, self.prev_context_cache[:-1]], dim=0)
 
         previous_contexts: Optional[torch.Tensor] = None
         final_convergence_rate = 0.0
@@ -474,17 +504,16 @@ class CascadePhase1BTrainer:
                 end_idx = min(start_idx + batch_size, num_tokens)
                 current_batch_size = end_idx - start_idx
 
-                # context_a[i-1]を入力として使用
-                batch_context_a = shifted_context_a[start_idx:end_idx].to(self.device)
+                batch_prev_context = shifted_prev_context[start_idx:end_idx].to(self.device)
                 batch_token_embeds = self.token_embeds[start_idx:end_idx].to(self.device)
 
                 # ノイズ追加
                 if self.config.phase1_context_noise > 0:
-                    noise = torch.randn_like(batch_context_a) * self.config.phase1_context_noise
-                    batch_context_a = batch_context_a + noise
+                    noise = torch.randn_like(batch_prev_context) * self.config.phase1_context_noise
+                    batch_prev_context = batch_prev_context + noise
 
                 # Forward pass
-                batch_output = self.model.forward_context_b(batch_context_a, batch_token_embeds)
+                batch_output = self.model.forward_context(self.block_idx, batch_prev_context, batch_token_embeds)
 
                 # 多様性損失
                 from src.losses.diversity import oacd_loss
@@ -497,12 +526,12 @@ class CascadePhase1BTrainer:
                 all_contexts.append(batch_output.detach().cpu())
                 total_loss += diversity_loss.item() * current_batch_size
 
-                del batch_context_a, batch_token_embeds, batch_output
+                del batch_prev_context, batch_token_embeds, batch_output
                 clear_gpu_cache(self.device)
 
             # パラメータ更新
             torch.nn.utils.clip_grad_norm_(
-                self.model.context_block_b.parameters(),
+                self.model.context_blocks[self.block_idx].parameters(),
                 max_norm=self.config.phase1_gradient_clip
             )
             optimizer.step()
@@ -553,40 +582,39 @@ class CascadePhase1BTrainer:
 
         print_flush(f"  Done: {final_convergence_rate*100:.0f}% converged")
 
-        # context_bキャッシュを収集（学習後の最終状態）
-        # Phase 2ではshifted_context_a[i]を入力としてcontext_b[i]を計算した結果を使用
-        context_b_cache = self._collect_cache(shifted_context_a)
+        # キャッシュを収集（学習後の最終状態）
+        context_cache = self._collect_cache(shifted_prev_context)
 
-        return context_b_cache
+        return context_cache
 
-    def _collect_cache(self, shifted_context_a: torch.Tensor) -> torch.Tensor:
-        """学習済みContextBlock Bでキャッシュを収集"""
+    def _collect_cache(self, shifted_prev_context: torch.Tensor) -> torch.Tensor:
+        """学習済みContextBlockでキャッシュを収集"""
         self.model.eval()
         num_tokens = len(self.token_embeds)
         batch_size = 50000
 
-        context_b_cache = torch.zeros(num_tokens, self.model.context_dim, device='cpu', dtype=torch.float32)
+        context_cache = torch.zeros(num_tokens, self.model.context_dim, device='cpu', dtype=torch.float32)
 
-        print_flush("  Collecting context_b cache...")
+        print_flush(f"  Collecting context[{self.block_idx}] cache...")
         collect_start = time.time()
 
         with torch.no_grad():
             for start_idx in range(0, num_tokens, batch_size):
                 end_idx = min(start_idx + batch_size, num_tokens)
 
-                batch_context_a = shifted_context_a[start_idx:end_idx].to(self.device)
+                batch_prev_context = shifted_prev_context[start_idx:end_idx].to(self.device)
                 batch_token_embeds = self.token_embeds[start_idx:end_idx].to(self.device)
 
-                batch_output = self.model.forward_context_b(batch_context_a, batch_token_embeds)
-                context_b_cache[start_idx:end_idx] = batch_output.cpu()
+                batch_output = self.model.forward_context(self.block_idx, batch_prev_context, batch_token_embeds)
+                context_cache[start_idx:end_idx] = batch_output.cpu()
 
-                del batch_context_a, batch_token_embeds, batch_output
+                del batch_prev_context, batch_token_embeds, batch_output
                 clear_gpu_cache(self.device)
 
         print_flush(f"  Cache collected [{time.time() - collect_start:.1f}s]")
         self.model.train()
 
-        return context_b_cache
+        return context_cache
 
 
 class Phase1ConfigWrapper:
@@ -623,10 +651,19 @@ class Phase2ConfigWrapper:
 def run_cascade_context_experiment(
     num_samples: int = 2000,
     context_dim: int = 500,
+    num_context_blocks: int = 2,
     seed: int = 42,
     output_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Cascade Context 実験を実行"""
+    """Cascade Context 実験を実行
+
+    Args:
+        num_samples: サンプル数
+        context_dim: 各ContextBlockの出力次元
+        num_context_blocks: ContextBlockの数（1以上）
+        seed: 乱数シード
+        output_dir: 出力ディレクトリ
+    """
 
     set_seed(seed)
 
@@ -653,76 +690,84 @@ def run_cascade_context_experiment(
     print_flush(f"Data: {num_train_tokens:,} train, {num_val_tokens:,} val tokens")
 
     # モデル作成
-    combined_dim = context_dim * 2
-    print_flush(f"\nCreating CascadeContextLLM (cd={context_dim}x2={combined_dim})...")
+    combined_dim = context_dim * num_context_blocks
+    print_flush(f"\nCreating CascadeContextLLM (cd={context_dim}x{num_context_blocks}={combined_dim})...")
     model = CascadeContextLLM(
         vocab_size=base_config.vocab_size,
         embed_dim=base_config.embed_dim,
         context_dim=context_dim,
         num_input_tokens=base_config.num_input_tokens,
+        num_context_blocks=num_context_blocks,
     )
     model.to(device)
 
     params = model.num_params()
     print_flush(f"Parameters: {params['total']:,} total")
-    print_flush(f"  ContextBlock A: {params['context_block_a']:,}")
-    print_flush(f"  ContextBlock B: {params['context_block_b']:,}")
+    print_flush(f"  ContextBlocks ({num_context_blocks}): {params['total_context_blocks']:,}")
+    for i in range(num_context_blocks):
+        print_flush(f"    Block {i}: {params[f'context_block_{i}']:,}")
     print_flush(f"  TokenBlock: {params['token_block']:,}")
 
-    # ========== Phase 1A: ContextBlock A の学習 ==========
-    print_flush("\n[Phase 1A] Training ContextBlock A on full data...")
-    wrapper_a = SingleContextWrapper(model, block='a')
-
     config_wrapper = Phase1ConfigWrapper(base_config, context_dim)
-    trainer_a = MemoryPhase1Trainer(wrapper_a, config_wrapper, device)
 
-    phase1a_start = time.time()
-    result_a = trainer_a.train(train_token_ids, label="ContextA", return_all_layers=True)
-    phase1a_time = time.time() - phase1a_start
+    # ========== Phase 1: 各ContextBlockを順次学習 ==========
+    train_context_caches: List[torch.Tensor] = []
+    phase1_times: List[float] = []
+    phase1_stats: List[Dict[str, Any]] = []
+    train_token_embeds: Optional[torch.Tensor] = None
 
-    stats_a = trainer_a._training_stats
-    print_flush(f"Phase 1A: {phase1a_time:.1f}s, {stats_a.get('iterations', 0)} iter, "
-                f"conv={stats_a.get('convergence_rate', 0)*100:.0f}%")
+    for block_idx in range(num_context_blocks):
+        if block_idx == 0:
+            # 最初のブロック: MemoryPhase1Trainerを使用（token_embedsも取得）
+            print_flush(f"\n[Phase 1[{block_idx}]] Training ContextBlock {block_idx} on full data...")
+            wrapper = SingleContextWrapper(model, block_idx=block_idx)
+            trainer = MemoryPhase1Trainer(wrapper, config_wrapper, device)
 
-    # Context A のキャッシュを取得
-    assert result_a.cache is not None
-    assert result_a.token_embeds is not None
-    train_context_a_cache = result_a.cache
-    train_token_embeds = result_a.token_embeds
+            phase_start = time.time()
+            result = trainer.train(train_token_ids, label=f"Context{block_idx}", return_all_layers=True)
+            phase_time = time.time() - phase_start
 
-    # ContextBlock A を freeze
-    for param in model.context_block_a.parameters():
-        param.requires_grad = False
-    print_flush("✓ ContextBlock A frozen")
+            assert result.cache is not None
+            assert result.token_embeds is not None
+            train_context_caches.append(result.cache)
+            train_token_embeds = result.token_embeds
 
-    # ========== Phase 1B: ContextBlock B の学習（Cache-Direct方式）==========
-    # context_a[i-1]を入力として学習し、キャッシュをそのままPhase 2で使用
-    trainer_b = CascadePhase1BTrainer(
-        model, config_wrapper, device,
-        context_a_cache=train_context_a_cache,
-        token_embeds=train_token_embeds
-    )
+            stats = trainer._training_stats
+        else:
+            # 後続ブロック: CascadePhase1Trainerを使用
+            assert train_token_embeds is not None
+            trainer_cascade = CascadePhase1Trainer(
+                model, config_wrapper, device,
+                block_idx=block_idx,
+                prev_context_cache=train_context_caches[block_idx - 1],
+                token_embeds=train_token_embeds
+            )
 
-    phase1b_start = time.time()
-    train_context_b_cache = trainer_b.train(label="ContextB")
-    phase1b_time = time.time() - phase1b_start
+            phase_start = time.time()
+            cache = trainer_cascade.train(label=f"Context{block_idx}")
+            phase_time = time.time() - phase_start
 
-    stats_b = trainer_b._training_stats
-    print_flush(f"Phase 1B: {phase1b_time:.1f}s, {stats_b.get('iterations', 0)} iter, "
-                f"conv={stats_b.get('convergence_rate', 0)*100:.0f}%")
+            train_context_caches.append(cache)
+            stats = trainer_cascade._training_stats
 
-    # ContextBlock B を freeze
-    for param in model.context_block_b.parameters():
-        param.requires_grad = False
-    print_flush("✓ ContextBlock B frozen")
+        phase1_times.append(phase_time)
+        phase1_stats.append(stats)
 
-    phase1_total_time = phase1a_time + phase1b_time
+        print_flush(f"Phase 1[{block_idx}]: {phase_time:.1f}s, {stats.get('iterations', 0)} iter, "
+                    f"conv={stats.get('convergence_rate', 0)*100:.0f}%")
+
+        # このブロックをfreeze
+        model.freeze_context_block(block_idx)
+        print_flush(f"✓ ContextBlock {block_idx} frozen")
+
+    phase1_total_time = sum(phase1_times)
+    assert train_token_embeds is not None
 
     # ========== Validation キャッシュ収集 ==========
     print_flush("\n[Val Cache] Collecting validation cache...")
     cache_start = time.time()
 
-    val_context_a_cache, val_context_b_cache, val_token_embeds = collect_context_cache_for_val(
+    val_context_caches, val_token_embeds = collect_context_cache_for_val(
         model, val_token_ids, device
     )
 
@@ -730,15 +775,14 @@ def run_cascade_context_experiment(
     print_flush(f"Val cache collection: {cache_time:.1f}s")
 
     # 連結
-    train_context_cache = torch.cat([train_context_a_cache, train_context_b_cache], dim=-1)
-    val_context_cache = torch.cat([val_context_a_cache, val_context_b_cache], dim=-1)
+    train_context_cache = torch.cat(train_context_caches, dim=-1)
+    val_context_cache = torch.cat(val_context_caches, dim=-1)
 
     print_flush(f"  Train cache: {train_context_cache.shape}")
     print_flush(f"  Val cache: {val_context_cache.shape}")
 
     # メモリ解放
-    del train_context_a_cache, train_context_b_cache
-    del val_context_a_cache, val_context_b_cache
+    del train_context_caches, val_context_caches
 
     # Effective Rank計算
     train_metrics = analyze_fixed_points(train_context_cache, label="Train", verbose=False)
@@ -780,13 +824,16 @@ def run_cascade_context_experiment(
     print_flush("\n" + "=" * 70)
     print_flush("SUMMARY - Cascade Context Experiment")
     print_flush("=" * 70)
-    print_flush("Architecture: CascadeContextLLM (A→B cascade, 1L each)")
-    print_flush(f"  ContextBlock A: cd={context_dim}, trained on full data")
-    print_flush(f"  ContextBlock B: cd={context_dim}, input=context_a (fixed)")
+    print_flush(f"Architecture: CascadeContextLLM ({num_context_blocks} blocks cascade, 1L each)")
+    for i in range(num_context_blocks):
+        if i == 0:
+            print_flush(f"  ContextBlock {i}: cd={context_dim}, input=zero vector")
+        else:
+            print_flush(f"  ContextBlock {i}: cd={context_dim}, input=context[{i-1}] (fixed)")
     print_flush(f"  TokenBlock: cd={combined_dim} (concatenated)")
     print_flush(f"Parameters: {params['total']:,}")
-    print_flush(f"Phase 1A: {phase1a_time:.1f}s, conv={stats_a.get('convergence_rate', 0)*100:.0f}%")
-    print_flush(f"Phase 1B: {phase1b_time:.1f}s, conv={stats_b.get('convergence_rate', 0)*100:.0f}%")
+    for i in range(num_context_blocks):
+        print_flush(f"Phase 1[{i}]: {phase1_times[i]:.1f}s, conv={phase1_stats[i].get('convergence_rate', 0)*100:.0f}%")
     print_flush(f"Cache collection: {cache_time:.1f}s")
     print_flush(f"Phase 2: {phase2_time:.1f}s, epoch {best_epoch}")
     print_flush(f"Effective Rank: {val_er_pct:.1f}% (of {combined_dim})")
@@ -804,13 +851,13 @@ def run_cascade_context_experiment(
             f.write("=" * 50 + "\n\n")
             f.write(f"Samples: {num_samples}\n")
             f.write(f"Context dim per block: {context_dim}\n")
+            f.write(f"Num context blocks: {num_context_blocks}\n")
             f.write(f"Combined context dim: {combined_dim}\n\n")
             f.write(f"Train tokens: {num_train_tokens:,}\n")
             f.write(f"Val tokens: {num_val_tokens:,}\n\n")
-            f.write(f"Phase 1A time: {phase1a_time:.1f}s\n")
-            f.write(f"Phase 1A conv: {stats_a.get('convergence_rate', 0)*100:.0f}%\n")
-            f.write(f"Phase 1B time: {phase1b_time:.1f}s\n")
-            f.write(f"Phase 1B conv: {stats_b.get('convergence_rate', 0)*100:.0f}%\n")
+            for i in range(num_context_blocks):
+                f.write(f"Phase 1[{i}] time: {phase1_times[i]:.1f}s\n")
+                f.write(f"Phase 1[{i}] conv: {phase1_stats[i].get('convergence_rate', 0)*100:.0f}%\n")
             f.write(f"Cache collection time: {cache_time:.1f}s\n")
             f.write(f"Phase 2 time: {phase2_time:.1f}s\n")
             f.write(f"Best epoch: {best_epoch}\n\n")
@@ -821,7 +868,7 @@ def run_cascade_context_experiment(
         print_flush(f"\nResults saved to: {result_file}")
 
     # メモリ解放
-    del model, trainer_a, trainer_b, phase2_trainer
+    del model, phase2_trainer
     del train_context_cache, val_context_cache
     data_provider.close()
     clear_gpu_cache(device)
@@ -838,6 +885,7 @@ def main():
     parser = argparse.ArgumentParser(description='Cascade Context Experiment')
     parser.add_argument('--samples', '-s', type=int, default=2000, help='Number of samples')
     parser.add_argument('--context-dim', '-c', type=int, default=500, help='Context dim per block')
+    parser.add_argument('--num-blocks', '-n', type=int, default=2, help='Number of context blocks (1, 2, 3, ...)')
     parser.add_argument('--output-dir', '-o', help='Output directory')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
 
@@ -847,18 +895,22 @@ def main():
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     output_dir = args.output_dir or f"importants/logs/{timestamp}_cascade_context"
 
+    combined_dim = args.context_dim * args.num_blocks
+
     print_flush("=" * 70)
     print_flush("CASCADE CONTEXT EXPERIMENT")
     print_flush("=" * 70)
     print_flush(f"Samples: {args.samples}")
     print_flush(f"Context dim per block: {args.context_dim}")
-    print_flush(f"Combined context dim: {args.context_dim * 2}")
+    print_flush(f"Num context blocks: {args.num_blocks}")
+    print_flush(f"Combined context dim: {combined_dim}")
     print_flush(f"Output: {output_dir}")
     print_flush("=" * 70)
 
     run_cascade_context_experiment(
         num_samples=args.samples,
         context_dim=args.context_dim,
+        num_context_blocks=args.num_blocks,
         seed=args.seed,
         output_dir=output_dir,
     )
