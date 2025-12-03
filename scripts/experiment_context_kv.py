@@ -21,8 +21,8 @@ import torch.optim as optim
 # プロジェクトルートをパスに追加
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config import Config
 from config.experiment import DataConfig
-from src.config.base import BaseConfig
 from src.config.wrappers import Phase1ConfigWrapper
 from src.data.memory import MemoryDataProvider
 from src.metrics.effective_rank import compute_effective_rank_percentage
@@ -301,7 +301,7 @@ def run_context_kv_experiment(
         print_flush(f"Device: {device}")
 
     # 設定
-    base_config = BaseConfig()
+    base_config = Config()
 
     # データロード
     print_flush("Loading data...")
