@@ -19,7 +19,6 @@ def compute_effective_rank(contexts: torch.Tensor, max_samples: int = 10000) -> 
     Effective Rank計算（SVDベース）
 
     コンテキストテンソルからEffective Rankを計算する共通関数。
-    analyze_fixed_points() と MemoryPhase1Trainer._compute_effective_rank() で使用。
 
     Args:
         contexts: コンテキストテンソル [num_tokens, context_dim]

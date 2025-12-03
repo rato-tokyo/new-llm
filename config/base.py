@@ -16,9 +16,14 @@ class BaseConfig:
 
     # ========== モデルアーキテクチャ（1層固定） ==========
     embed_dim = 768                 # トークン埋め込み次元数（GPT-2: 768固定）
-    context_dim = 500               # コンテキストベクトル次元数
+    context_dim = 256               # コンテキストベクトル次元数
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
+
+    # ========== Context-KV Attention ==========
+    context_interval = 100          # Contextを取得する間隔
+                                    # Position i から i, i-interval, i-2*interval, ... を使用
+    num_heads = 8                   # Attention head数
 
     # ========== データ ==========
     tokenizer_name = "gpt2"

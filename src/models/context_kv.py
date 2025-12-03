@@ -2,14 +2,14 @@
 Context-KV Attention LLM - ContextをKVキャッシュとして使用するモデル
 
 コンセプト:
-- 100トークンごとにContextBlockで圧縮したcontextをKVとして保持
-- 従来の全トークンKVキャッシュの代わりに、チャンク単位のcontextを使用
+- 等間隔（interval）でContextを取得してKVキャッシュとして使用
+- 常に「現在位置のcontext」を含める
 - KVキャッシュサイズを大幅に削減（~99%削減可能）
 
-動作イメージ:
+動作イメージ (interval=100):
   Position 350の場合:
-    KV = [context_0-99, context_100-199, context_200-299, context_300-350]
-         ↑ 各チャンクの最終contextをK,Vに変換
+    KV = [context[350], context[250], context[150], context[50]]
+         ↑現在          ↑100前        ↑200前        ↑300前
 """
 
 from typing import Dict, List
@@ -212,22 +212,6 @@ class ContextKVAttentionLLM(nn.Module):
         self.token_embedding = load_pretrained_gpt2_embeddings(
             self.vocab_size, self.embed_dim, freeze=True
         )
-
-    def forward_context(
-        self, block_idx: int, context: torch.Tensor, token_embeds: torch.Tensor
-    ) -> torch.Tensor:
-        """指定されたContextBlockの順伝搬"""
-        return self.context_blocks[block_idx](context, token_embeds)
-
-    def forward_all_contexts(
-        self, contexts: List[torch.Tensor], token_embeds: torch.Tensor
-    ) -> List[torch.Tensor]:
-        """全ContextBlockの順伝搬"""
-        new_contexts = []
-        for i, (ctx, block) in enumerate(zip(contexts, self.context_blocks)):
-            new_ctx = block(ctx, token_embeds)
-            new_contexts.append(new_ctx)
-        return new_contexts
 
     def forward_attention(
         self,

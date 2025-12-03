@@ -67,7 +67,6 @@ class Phase1TrainerConfig:
     # アーキテクチャ
     context_dim: int
     embed_dim: int
-    num_input_tokens: int
 
     # 学習パラメータ
     phase1_learning_rate: float
@@ -90,7 +89,6 @@ class Phase1TrainerConfig:
         base,
         device: Union[str, torch.device],
         context_dim: Optional[int] = None,
-        num_input_tokens: Optional[int] = None,
         phase1_learning_rate: Optional[float] = None,
         phase1_max_iterations: Optional[int] = None,
         phase1_early_stopping_threshold: Optional[float] = None,
@@ -99,7 +97,6 @@ class Phase1TrainerConfig:
         return cls(
             context_dim=context_dim if context_dim is not None else base.context_dim,
             embed_dim=base.embed_dim,
-            num_input_tokens=num_input_tokens if num_input_tokens is not None else base.num_input_tokens,
             phase1_learning_rate=phase1_learning_rate if phase1_learning_rate is not None else base.phase1_learning_rate,
             phase1_max_iterations=phase1_max_iterations if phase1_max_iterations is not None else base.phase1_max_iterations,
             phase1_convergence_threshold=base.phase1_convergence_threshold,
@@ -117,11 +114,12 @@ class Phase1TrainerConfig:
 
 @dataclass
 class Phase2TrainerConfig:
-    """Phase 2 Trainer用の設定（1層固定）"""
+    """Phase 2 Trainer用の設定（Context-KV Attention）"""
     # アーキテクチャ
     context_dim: int
     embed_dim: int
-    num_input_tokens: int
+    context_interval: int
+    num_heads: int
 
     # 学習パラメータ
     phase2_learning_rate: float
@@ -146,7 +144,8 @@ class Phase2TrainerConfig:
         base,
         device: Union[str, torch.device],
         context_dim: Optional[int] = None,
-        num_input_tokens: Optional[int] = None,
+        context_interval: Optional[int] = None,
+        num_heads: Optional[int] = None,
         phase2_learning_rate: Optional[float] = None,
         phase2_epochs: Optional[int] = None,
     ) -> "Phase2TrainerConfig":
@@ -154,7 +153,8 @@ class Phase2TrainerConfig:
         return cls(
             context_dim=context_dim if context_dim is not None else base.context_dim,
             embed_dim=base.embed_dim,
-            num_input_tokens=num_input_tokens if num_input_tokens is not None else base.num_input_tokens,
+            context_interval=context_interval if context_interval is not None else base.context_interval,
+            num_heads=num_heads if num_heads is not None else base.num_heads,
             phase2_learning_rate=phase2_learning_rate if phase2_learning_rate is not None else base.phase2_learning_rate,
             phase2_epochs=phase2_epochs if phase2_epochs is not None else base.phase2_epochs,
             phase2_patience=base.phase2_patience,
