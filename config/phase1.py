@@ -14,7 +14,6 @@ class Phase1Config:
     """
 
     # ========== イテレーション設定 ==========
-    min_iterations = 5              # 最小イテレーション数（Early Stopping無効期間）
     max_iterations = 60             # 最大イテレーション数
 
     # ========== 学習率 ==========
@@ -23,9 +22,6 @@ class Phase1Config:
     # ========== 収束判定 ==========
     convergence_threshold = 0.001   # 収束判定の閾値（context変化量）
     early_stopping_rate = 0.90      # 収束率がこの値以上でEarly Stop
-
-    # ========== Patience ==========
-    no_improvement_patience = 3     # N回改善なしで停止
 
     # ========== バッチ処理 ==========
     batches_per_iteration = 10      # イテレーションあたりのバッチ数（勾配累積）

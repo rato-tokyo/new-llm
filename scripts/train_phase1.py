@@ -8,9 +8,8 @@ ContextBlockの多様性学習を行い、チェックポイントを保存す�
 機能（削除禁止）:
 - 収束率表示: 各イテレーションでconv=XX%を表示
 - Early Stopping: 収束率が閾値以上で停止
-- No Improvement Patience: N回改善なしで停止
 - Validation: 検証データでの評価
-- min/max iteration: 最小・最大イテレーション数
+- max iteration: 最大イテレーション数
 
 Usage:
     python3 scripts/train_phase1.py --tokens 100000
@@ -218,9 +217,8 @@ def train_phase1(
     機能（削除禁止）:
     - 収束率表示
     - Early Stopping（収束率ベース）
-    - No Improvement Patience
     - Validation評価
-    - min/max iteration
+    - max iteration
 
     Returns:
         final_loss: 最終損失
@@ -235,18 +233,15 @@ def train_phase1(
     )
 
     print_flush(f"\nPhase 1 Training:")
-    print_flush(f"  Min iterations: {phase1_config.min_iterations}")
     print_flush(f"  Max iterations: {phase1_config.max_iterations}")
     print_flush(f"  Learning rate: {phase1_config.learning_rate}")
     print_flush(f"  Early stopping rate: {phase1_config.early_stopping_rate * 100:.0f}%")
-    print_flush(f"  No improvement patience: {phase1_config.no_improvement_patience}")
 
     start_time = time.time()
 
     # 前回のcontextを保存（収束率計算用）
     previous_contexts: Optional[torch.Tensor] = None
     best_val_loss = float('inf')
-    no_improvement_count = 0
     final_loss = 0.0
     final_conv_rate = 0.0
 
@@ -325,27 +320,14 @@ def train_phase1(
         # 改善チェック
         if val_loss < best_val_loss:
             best_val_loss = val_loss
-            no_improvement_count = 0
-        else:
-            no_improvement_count += 1
 
-        # Early Stopping判定（min_iterations後のみ）
-        if iteration >= phase1_config.min_iterations - 1:
-            # 収束率ベースのEarly Stopping
-            if conv_rate >= phase1_config.early_stopping_rate:
-                stats['early_stopped'] = True
-                stats['stop_reason'] = f'convergence_rate >= {phase1_config.early_stopping_rate*100:.0f}%'
-                print_flush(f"  → Early stop: conv {conv_rate*100:.0f}% >= {phase1_config.early_stopping_rate*100:.0f}%")
-                previous_contexts = current_contexts_cpu.clone()
-                break
-
-            # No Improvement Patience
-            if no_improvement_count >= phase1_config.no_improvement_patience:
-                stats['early_stopped'] = True
-                stats['stop_reason'] = f'no_improvement for {phase1_config.no_improvement_patience} iterations'
-                print_flush(f"  → Early stop: no improvement for {phase1_config.no_improvement_patience} iterations")
-                previous_contexts = current_contexts_cpu.clone()
-                break
+        # Early Stopping判定（収束率ベース）
+        if conv_rate >= phase1_config.early_stopping_rate:
+            stats['early_stopped'] = True
+            stats['stop_reason'] = f'convergence_rate >= {phase1_config.early_stopping_rate*100:.0f}%'
+            print_flush(f"  → Early stop: conv {conv_rate*100:.0f}% >= {phase1_config.early_stopping_rate*100:.0f}%")
+            previous_contexts = current_contexts_cpu.clone()
+            break
 
         previous_contexts = current_contexts_cpu.clone()
 
