@@ -21,9 +21,11 @@ class BaseConfig:
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
 
     # ========== Context-KV Attention ==========
-    context_interval = 32          # Contextを取得する間隔
+    context_interval = 32           # Contextを取得する間隔
                                     # Position i から i, i-interval, i-2*interval, ... を使用
     num_heads = 8                   # Attention head数
+    max_contexts = 32               # 使用するcontext数の上限（context window）
+                                    # OOM防止のため、通常LLMのcontext windowと同様の制限
 
     # ========== データ ==========
     tokenizer_name = "gpt2"

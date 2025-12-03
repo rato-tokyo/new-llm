@@ -52,7 +52,7 @@ def collect_val_cache_parallel(
     model: ContextKVWrapper,
     token_ids: torch.Tensor,
     device: torch.device,
-    batch_size: int = 50000,
+    batch_size: int,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Val dataのキャッシュを並列処理で収集
@@ -119,7 +119,7 @@ def build_batch_context_intervals(
     context_cache: torch.Tensor,
     interval: int,
     device: torch.device,
-    max_contexts: int = 32,
+    max_contexts: int,
 ) -> torch.Tensor:
     """
     バッチのcontext intervalsを構築（固定数方式）
@@ -350,14 +350,17 @@ def train_phase2(
 
 
 def run_context_kv_experiment(
-    num_samples: int = 200,
-    context_dim: int = 256,
-    chunk_size: int = 100,
-    num_heads: int = 8,
-    max_contexts: int = 32,
-    seed: int = 42,
+    num_samples: int,
+    context_dim: int,
+    chunk_size: int,
+    num_heads: int,
+    max_contexts: int,
+    seed: int,
 ) -> Dict[str, Any]:
     """Context-KV Attention 実験を実行（1ブロック版）"""
+
+    # 設定を最初に読み込む
+    base_config = Config()
 
     set_seed(seed)
 
@@ -368,9 +371,6 @@ def run_context_kv_experiment(
         print_flush(f"Device: {device} ({gpu_name}, {gpu_mem:.1f}GB)")
     else:
         print_flush(f"Device: {device}")
-
-    # 設定
-    base_config = Config()
 
     # データロード
     print_flush("Loading data...")
@@ -546,30 +546,33 @@ def run_context_kv_experiment(
 
 
 def main() -> None:
+    # configからデフォルト値を取得
+    default_config = Config()
+
     parser = argparse.ArgumentParser(
         description='Context-KV Attention Experiment',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  # 200サンプル、チャンクサイズ100
-  python3 scripts/experiment_context_kv.py -s 200 --chunk-size 100
+  # configのデフォルト値を使用
+  python3 scripts/experiment_context_kv.py
 
-  # 800サンプル、チャンクサイズ50
+  # サンプル数とチャンクサイズを指定
   python3 scripts/experiment_context_kv.py -s 800 --chunk-size 50
 '''
     )
-    parser.add_argument('-s', '--samples', type=int, default=200,
-                        help='Number of samples (default: 200)')
-    parser.add_argument('-c', '--context-dim', type=int, default=256,
-                        help='Context dimension (default: 256)')
-    parser.add_argument('--chunk-size', type=int, default=100,
-                        help='Chunk size for context KV (default: 100)')
-    parser.add_argument('--num-heads', type=int, default=8,
-                        help='Number of attention heads (default: 8)')
-    parser.add_argument('--max-contexts', type=int, default=32,
-                        help='Max number of contexts (context window, default: 32)')
-    parser.add_argument('--seed', type=int, default=42,
-                        help='Random seed (default: 42)')
+    parser.add_argument('-s', '--samples', type=int, default=default_config.num_samples,
+                        help=f'Number of samples (default: {default_config.num_samples})')
+    parser.add_argument('-c', '--context-dim', type=int, default=default_config.context_dim,
+                        help=f'Context dimension (default: {default_config.context_dim})')
+    parser.add_argument('--chunk-size', type=int, default=default_config.context_interval,
+                        help=f'Chunk size for context KV (default: {default_config.context_interval})')
+    parser.add_argument('--num-heads', type=int, default=default_config.num_heads,
+                        help=f'Number of attention heads (default: {default_config.num_heads})')
+    parser.add_argument('--max-contexts', type=int, default=default_config.max_contexts,
+                        help=f'Max number of contexts (context window, default: {default_config.max_contexts})')
+    parser.add_argument('--seed', type=int, default=default_config.random_seed,
+                        help=f'Random seed (default: {default_config.random_seed})')
 
     args = parser.parse_args()
 
