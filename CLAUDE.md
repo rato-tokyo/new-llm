@@ -20,31 +20,47 @@
 
 ---
 
-## 🎯 Context-KV Attention Architecture (2025-12-03)
+## 🎯 Context-Pythia Architecture (2025-12-04)
 
-**KVキャッシュを大幅に削減するContext-KV Attention方式を採用。**
+**Pythia-70MをベースにKVキャッシュを50%削減するContext-Pythia方式を採用。**
 
 ### アーキテクチャ概要
 
 ```
-Context-KV Attention:
-  - 100トークンごとにContextを圧縮
-  - 圧縮されたContextをKVキャッシュとして使用
-  - ~99% KVキャッシュ削減
+Context-Pythia:
+  Token Embedding (512-dim) ← Pythia-70M
+       ↓
+  ContextBlock: 512 → 256 (圧縮)
+       ↓
+  Layer 0-5: 全て context (256-dim) を入力
+       ↓
+  Output Head (vocab_size=50304)
 
-Position 350 の場合:
-  KV Cache = [context_0-99, context_100-199, context_200-299, context_300-350]
-           = 4 context vectors のみ
+KVキャッシュ削減: 50%
+  元: hidden_size (512) × seq_len × num_layers (6)
+  圧縮後: context_dim (256) × seq_len × num_layers (6)
 ```
+
+### Pythia-70M仕様
+
+| 項目 | 値 |
+|------|-----|
+| Hidden Size | 512 |
+| Layers | 6 |
+| Attention Heads | 8 |
+| Intermediate Size | 2048 |
+| Position Encoding | Rotary (RoPE, 25%) |
+| Vocab Size | 50,304 |
+| Training Data | Pile (~300B tokens) |
 
 ### 実験の実行
 
 ```bash
-# Colab（GPU）: 200サンプル
-python3 scripts/experiment_context_kv.py -s 200 --chunk-size 100
+# Phase 1: ContextBlock OACD学習
+python3 scripts/train_phase1_pythia.py --tokens 100000
 
-# カスタムcontext次元
-python3 scripts/experiment_context_kv.py -s 200 -c 256 128 --chunk-size 50
+# Phase 2: 比較実験（準備中）
+python3 scripts/experiment_pythia_comparison.py --samples 10000 --epochs 10
 ```
 
 ---
@@ -192,38 +208,9 @@ def compute_convergence_rate(current, previous, threshold=0.03):
 
 ---
 
-## 🎯 OACDアルゴリズム (Phase 1)
+## 🔧 開発環境
 
-**Phase 1ではOACD (Origin-Anchored Centroid Dispersion) アルゴリズムを採用。**
-
-```python
-def oacd_loss(contexts, centroid_weight=0.1):
-    # Term 1: 重心からの分散を最大化
-    dispersion_loss = -||X - mean(X)|| / n
-
-    # Term 2: 重心を原点に引き寄せる
-    centroid_loss = ||mean(X)||²
-
-    return dispersion_loss + centroid_weight * centroid_loss
-```
-
----
-
-## 🚨 CPU/GPUテンソル管理
-
-**大規模データでOOMを防ぐため、テンソルのデバイス管理を徹底。**
-
-```python
-# ❌ 修正前
-batch_contexts = previous_contexts[start_idx:end_idx].detach()
-
-# ✅ 修正後
-batch_contexts = previous_contexts[start_idx:end_idx].detach().to(self.device)
-```
-
----
-
-## 🔧 開発環境のLint/Type Check
+### Lint/Type Check
 
 ```bash
 # Lint (ruff)
@@ -231,17 +218,24 @@ python3 -m ruff check src/
 
 # Type check (mypy)
 python3 -m mypy src/ --ignore-missing-imports
-
-# 実験スクリプト
-python3 -m ruff check scripts/experiment_context_kv.py
-python3 -m mypy scripts/experiment_context_kv.py --ignore-missing-imports
 ```
 
 ---
 
-## 🚨 CRITICAL: 後方互換性コード禁止
+## 🚨 CRITICAL: コード品質
+
+### 後方互換性コード禁止
 
 **古い機能を残すことは厳禁。後方互換性を意識したコードは絶対に書かない。**
+
+### ハードコード厳禁
+
+**全ての値はconfigから読み込む。**
+
+### ランダムデータ使用禁止（厳禁）
+
+**実験でランダムデータ（torch.randint等）を使用することは絶対に禁止。**
+必ず実データ（Pile）を使用すること。
 
 ---
 
@@ -249,54 +243,63 @@ python3 -m mypy scripts/experiment_context_kv.py --ignore-missing-imports
 
 ### Core Components
 
-**1. ContextKVAttentionLLM**
-- 複数のContextBlock（各1層固定）
-- Context-KV Attention Layer
-- Token Embedding: GPT-2 pretrained (768-dim, frozen)
-- Weight Tying: token_output shares weights with token_embedding
+**1. ContextPythiaModel**
+- Token Embedding: Pythia-70M (512-dim)
+- ContextBlock: 512 → 256 (圧縮)
+- 6 Context-based Transformer Layers
+- Output Head: 512 → vocab_size
 
 **2. ContextBlock**
 - 1層固定、Phase 1で学習、Phase 2でfreeze
 - OACDアルゴリズムで多様性学習
+- 初期化: normal_(std=0.1)
 
-**3. Context-KV Attention**
-- ContextをK,Vに変換
-- チャンク単位のcontextでAttention
+**3. PythiaModel (Baseline)**
+- 標準のPythia-70M再実装
+- 比較用
 
-### Phase 1: 多様性学習（OACD）
+### 学習フロー
 
-- **学習対象**: ContextBlockのみ
-- **損失**: OACD（多様性損失）
-
-### Phase 2: トークン予測
-
-- **ContextBlock**: frozen（重み固定）
-- **Context-KV Attention + FFN**: 学習
-- **損失**: CrossEntropy（次トークン予測）
-
----
-
-## Code Quality Standards
-
-### Principles
-
-1. **No Hardcoding**: All hyperparameters in config.py
-2. **Single Responsibility**: Each module has one clear purpose
-3. **Type Hints Required**: 関数・メソッドのパラメータには型注釈を必須
+```
+Phase 1: OACD (ContextBlock多様性学習)
+  ├─ ContextBlockのみを学習
+  ├─ OACD損失で多様なcontext vectorを生成
+  └─ 収束まで実行（~60 iterations, 90%+収束）
+       ↓
+Phase 2: Full Training (ContextBlock frozen)
+  ├─ ContextBlockをfreeze
+  ├─ Transformer Layers + Output Headを学習
+  └─ Cross-entropy損失
+```
 
 ---
 
-## File Structure
+## 📁 File Structure
 
-**Main Scripts**:
-- `scripts/experiment_context_kv.py` - Context-KV Attention実験スクリプト
-
-**Core Implementation**:
-- `src/models/context_kv.py` - ContextKVAttentionLLM
-- `src/models/blocks.py` - ContextBlock（1層固定）
-- `src/models/layers.py` - ContextLayer
-- `src/trainers/phase1/memory.py` - Phase 1訓練ロジック
-- `src/losses/diversity.py` - OACDアルゴリズム
+```
+new-llm/
+├── checkpoints/
+│   └── context_block_pythia_phase1.pt  # Phase 1 checkpoint
+├── config/
+│   ├── __init__.py
+│   ├── phase1.py              # Phase 1設定
+│   └── pythia.py              # PythiaConfig, ContextPythiaConfig
+├── scripts/
+│   └── train_phase1_pythia.py # Phase 1: ContextBlock OACD学習
+├── src/
+│   ├── models/
+│   │   ├── pythia.py          # PythiaModel (baseline)
+│   │   ├── context_pythia.py  # ContextPythiaModel (ours)
+│   │   ├── blocks.py          # ContextBlock
+│   │   └── layers.py          # ContextLayer
+│   ├── losses/
+│   │   └── diversity.py       # OACD algorithm
+│   └── utils/
+│       ├── data_pythia.py     # Pileデータローダー
+│       └── initialization.py  # 重み初期化
+├── CLAUDE.md
+└── README.md
+```
 
 ---
 
@@ -304,8 +307,9 @@ python3 -m mypy scripts/experiment_context_kv.py --ignore-missing-imports
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-04 | Pythia-70M統合（Context-Pythia方式に完全移行） |
 | 2025-12-04 | Phase 1仕様の詳細を追記（Pythia統合失敗からの復旧後） |
-| 2025-12-03 | Context-KV Attention方式に完全移行 |
+| 2025-12-03 | Context-KV Attention方式（旧方式、削除済み） |
 
 ---
 
