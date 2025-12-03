@@ -3,7 +3,7 @@
 Context Dim 探索実験スクリプト
 
 サンプル数に対する適正 context_dim を探索する。
-context_dim を n 刻みで増加させ（10, 20, 30, ...）、
+context_dim を start_dim から n 刻みで増加させ、
 val PPL が2回連続で悪化した時点で停止する。
 
 特徴:
@@ -12,8 +12,8 @@ val PPL が2回連続で悪化した時点で停止する。
 - 早期停止: val PPL が2回連続悪化 or 上限到達
 
 使用方法:
-  python3 scripts/experiment_context_dim_search.py -s 2000 -n 10  # 10刻み
-  python3 scripts/experiment_context_dim_search.py -s 2000 -n 20 --max-dim 500
+  python3 scripts/experiment_context_dim_search.py -s 2000 -n 10  # 100から10刻み
+  python3 scripts/experiment_context_dim_search.py -s 1000 --start-dim 200 -n 20 -m 300
 """
 
 import os
@@ -516,6 +516,7 @@ def create_model(
 
 def run_context_dim_search(
     num_samples: int = 2000,
+    start_dim: int = 100,
     dim_step: int = 10,
     max_dim: int = 500,
     seed: int = 42,
@@ -526,6 +527,7 @@ def run_context_dim_search(
 
     Args:
         num_samples: サンプル数
+        start_dim: 開始 context_dim
         dim_step: dim の刻み幅（例: 10 なら 10, 20, 30...）
         max_dim: 最大 context_dim
         seed: ランダムシード
@@ -540,6 +542,7 @@ def run_context_dim_search(
     print_flush("CONTEXT DIM SEARCH EXPERIMENT")
     print_flush("=" * 70)
     print_flush(f"Samples: {num_samples}")
+    print_flush(f"Start dim: {start_dim}")
     print_flush(f"Dim step: {dim_step}")
     print_flush(f"Max dim: {max_dim}")
     if output_dir:
@@ -572,9 +575,9 @@ def run_context_dim_search(
     results: List[Dict[str, Any]] = []
     worse_count = 0
     best_ppl = float('inf')
-    best_dim = dim_step
+    best_dim = start_dim
 
-    current_dim = dim_step
+    current_dim = start_dim
 
     while current_dim <= max_dim:
         print_flush(f"\n{'='*70}")
@@ -695,6 +698,7 @@ def run_context_dim_search(
     print_flush("SUMMARY - Context Dim Search")
     print_flush("=" * 70)
     print_flush(f"Samples: {num_samples}")
+    print_flush(f"Start dim: {start_dim}")
     print_flush(f"Dim step: {dim_step}")
     print_flush(f"Max dim: {max_dim}")
     print_flush("\nResults:")
@@ -716,6 +720,7 @@ def run_context_dim_search(
             f.write("Context Dim Search Results\n")
             f.write("=" * 50 + "\n\n")
             f.write(f"Samples: {num_samples}\n")
+            f.write(f"Start dim: {start_dim}\n")
             f.write(f"Dim step: {dim_step}\n")
             f.write(f"Max dim: {max_dim}\n\n")
             f.write(f"{'dim':>6} | {'PPL':>8} | {'Acc':>6} | {'ER%':>6} | {'Time':>8}\n")
@@ -740,8 +745,10 @@ def main() -> None:
     parser = argparse.ArgumentParser(description='Context Dim Search Experiment')
     parser.add_argument('--samples', '-s', type=int, default=2000,
                         help='Number of training samples')
+    parser.add_argument('--start-dim', type=int, default=100,
+                        help='Starting context dim (default: 100)')
     parser.add_argument('--dim-step', '-n', type=int, default=10,
-                        help='Context dim step size (e.g., 10 means 10,20,30...)')
+                        help='Context dim step size (e.g., 10 means +10 each iteration)')
     parser.add_argument('--max-dim', '-m', type=int, default=500,
                         help='Maximum context dim to search')
     parser.add_argument('--seed', type=int, default=42,
@@ -760,6 +767,7 @@ def main() -> None:
 
     run_context_dim_search(
         num_samples=args.samples,
+        start_dim=args.start_dim,
         dim_step=args.dim_step,
         max_dim=args.max_dim,
         seed=args.seed,
