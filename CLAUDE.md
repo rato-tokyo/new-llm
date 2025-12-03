@@ -41,6 +41,34 @@ Position 50:
 - 過去のcontextは等間隔（interval）で取得
 - 古い「チャンク境界」方式ではなく、「現在位置基準」方式を使用
 
+### 🚨 max_contexts（Context Window）設計方針
+
+**通常LLMの「context window」と同様に、使用するcontext数に上限を設ける。**
+
+```
+通常LLM:
+  - max_length で入力シーケンス長を制限
+  - 古いトークンは切り捨て
+
+Context-KV方式:
+  - max_contexts で使用するcontext数を制限
+  - 古いcontextは切り捨て
+```
+
+**例: interval=100, max_contexts=32 の場合**
+```
+Position 3500:
+  理論上: [ctx[3500], ctx[3400], ..., ctx[0]] = 36個
+  実際:   [ctx[3500], ctx[3400], ..., ctx[300]] = 32個（最新の32個のみ）
+
+  → 古すぎるcontext（position 0〜200）は切り捨て
+  → これにより 32 × 100 = 3200 トークン分の履歴を参照
+```
+
+**OOM防止の重要性：**
+- max_contextsを設定しないと、長いシーケンスでAttention計算が爆発
+- 通常LLMと同じ設計思想を維持することで、メモリ管理が容易
+
 ### 実験の実行
 
 ```bash
