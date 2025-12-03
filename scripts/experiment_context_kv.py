@@ -218,6 +218,8 @@ def train_phase2(
 
     print_flush(f"\n[Phase 2] {num_train:,} train / {num_val:,} val tokens, {num_epochs} epochs")
 
+    num_batches = (num_train + batch_size - 1) // batch_size
+
     for epoch in range(1, num_epochs + 1):
         epoch_start = time.time()
 
@@ -228,9 +230,13 @@ def train_phase2(
 
         indices = torch.randperm(num_train)
 
-        for start in range(0, num_train, batch_size):
+        for batch_num, start in enumerate(range(0, num_train, batch_size)):
             end = min(start + batch_size, num_train)
             batch_idx = indices[start:end]
+
+            # 進捗表示（最初のエポックのみ詳細表示）
+            if epoch == 1 and (batch_num % 50 == 0 or batch_num == num_batches - 1):
+                print_flush(f"    Epoch 1: batch {batch_num+1}/{num_batches}...")
 
             # 動的にcontext chunksを構築
             batch_context_chunks = build_batch_context_chunks(
