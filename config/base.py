@@ -21,7 +21,7 @@ class BaseConfig:
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
 
     # ========== Context-KV Attention ==========
-    context_interval = 100          # Contextを取得する間隔
+    context_interval = 32          # Contextを取得する間隔
                                     # Position i から i, i-interval, i-2*interval, ... を使用
     num_heads = 8                   # Attention head数
 
@@ -29,7 +29,7 @@ class BaseConfig:
     tokenizer_name = "gpt2"
     val_data_source = "text_file"
     val_text_file = "./cache/example_val.txt"
-    num_samples = 500
+    num_samples = 1600
     dataset_name = "HuggingFaceH4/ultrachat_200k"
     dataset_split = "train_sft"
     cache_dir = "./cache"
