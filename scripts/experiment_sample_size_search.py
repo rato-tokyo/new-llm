@@ -87,6 +87,10 @@ class SimpleContextBlock(nn.Module):
         new_context = self.context_norm(context + delta_context)
         return new_context
 
+    def forward_batch(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
+        """Batch forward pass（キャッシュ収集用）"""
+        return self.forward(context, token_embeds)
+
 
 class SimpleTokenBlock(nn.Module):
     """シンプルな TokenBlock"""
