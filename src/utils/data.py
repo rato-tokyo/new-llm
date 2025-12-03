@@ -73,10 +73,10 @@ def load_pile_tokens_cached(
     )
 
     # Collect tokens with retry logic
-    all_tokens = []
+    all_tokens: list[int] = []
     retry_count = 0
 
-    print_flush(f"  Tokenizing...")
+    print_flush("  Tokenizing...")
 
     dataset_iter = iter(dataset)
     while len(all_tokens) < num_tokens:
