@@ -100,11 +100,34 @@ Context-Pythia:
 
 ---
 
-## 🎯 OACDアルゴリズム (Phase 1)
+## 🚨 CRITICAL: Phase 1学習は必須
 
-**ContextBlockの多様性学習に使用。**
+**Phase 1（OACD）学習はContext-Pythiaの核心であり、絶対にスキップしてはならない。**
+
+### 学習フロー（必須）
+
+```
+Phase 1: OACD (ContextBlock多様性学習)
+  ├─ ContextBlockのみを学習
+  ├─ OACD損失で多様なcontext vectorを生成
+  └─ 収束まで実行（~60 iterations）
+       ↓
+Phase 2: Full Training (ContextBlock frozen)
+  ├─ ContextBlockをfreeze
+  ├─ Layers + Output Headを学習
+  └─ Cross-entropy損失
+```
+
+### なぜPhase 1が必須か
+
+1. **多様性確保**: Phase 1なしではcontext vectorが縮退し、情報が失われる
+2. **学習安定性**: 多様なcontextがないとPhase 2の学習が不安定になる
+3. **性能**: Phase 1を経ることで、圧縮後も表現力を維持できる
+
+### Phase 1の実装（削除禁止）
 
 ```python
+# src/losses/diversity.py - 削除禁止
 def oacd_loss(contexts, centroid_weight=0.1):
     # Term 1: 重心からの分散を最大化
     dispersion_loss = -||X - mean(X)|| / n
@@ -113,6 +136,20 @@ def oacd_loss(contexts, centroid_weight=0.1):
     centroid_loss = ||mean(X)||²
 
     return dispersion_loss + centroid_weight * centroid_loss
+```
+
+### 実験スクリプトの必須構造
+
+```python
+# scripts/experiment_pythia_comparison.py
+# Phase 1は必ず実行すること
+
+# Phase 1: OACD
+phase1_loss = train_phase1_oacd(model, train_loader, device, config)
+
+# Phase 2: Full Training (ContextBlock frozen)
+model.freeze_context_block()
+# ... CE loss training
 ```
 
 ---
