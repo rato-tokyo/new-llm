@@ -333,6 +333,12 @@ def train_phase1(
         )
         final_conv_rate = conv_rate
 
+        # デバッグ: 変化量の統計を表示（最初の数イテレーションのみ）
+        if iteration < 5:
+            with torch.no_grad():
+                diff = ((current_contexts - previous_contexts) ** 2).mean(dim=1)
+                print_flush(f"    DEBUG: diff min={diff.min():.6f}, max={diff.max():.6f}, mean={diff.mean():.6f}, threshold={phase1_config.convergence_threshold}")
+
         # Validation評価
         assert val_previous_contexts is not None
         val_contexts, val_loss = forward_all_tokens(
