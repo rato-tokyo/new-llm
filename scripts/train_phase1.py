@@ -150,6 +150,8 @@ def train_iteration(
     device: torch.device,
     batch_size: int,
     num_batches_for_grad: int,
+    context_noise: float = 0.0,
+    gradient_clip: float = 2.0,
 ) -> Tuple[torch.Tensor, float]:
     """
     1イテレーションの学習
@@ -162,6 +164,8 @@ def train_iteration(
         device: デバイス
         batch_size: バッチサイズ
         num_batches_for_grad: 勾配累積するバッチ数
+        context_noise: ガウシアンノイズの標準偏差
+        gradient_clip: 勾配クリッピング値
 
     Returns:
         new_contexts: [num_tokens, context_dim] (CPU tensor)
@@ -189,15 +193,20 @@ def train_iteration(
         batch_contexts = shifted_prev_context[start_idx:end_idx].to(device)
         batch_embeds = token_embeds[start_idx:end_idx].to(device)
 
+        # ノイズ追加（汎化性能向上）
+        if context_noise > 0 and model.training:
+            noise = torch.randn_like(batch_contexts) * context_noise
+            batch_contexts = batch_contexts + noise
+
         # Forward pass
         batch_output = model.context_block(batch_contexts, batch_embeds)
 
         # OACD損失
         loss = oacd_loss(batch_output, centroid_weight=0.1)
 
-        # 勾配累積（最初のnum_batches_for_grad個のバッチのみ）
-        if batch_idx < num_batches_for_grad:
-            scaled_loss = loss / num_batches_for_grad
+        # 勾配累積（全バッチで累積）
+        scaled_loss = loss / num_batches
+        if not torch.isnan(scaled_loss) and not torch.isinf(scaled_loss):
             scaled_loss.backward()
 
         total_loss_sum += loss.item() * current_batch_size
@@ -208,7 +217,7 @@ def train_iteration(
         del batch_contexts, batch_embeds, batch_output
 
     # 勾配クリッピングとパラメータ更新
-    torch.nn.utils.clip_grad_norm_(model.context_block.parameters(), 1.0)
+    torch.nn.utils.clip_grad_norm_(model.context_block.parameters(), gradient_clip)
     optimizer.step()
 
     # GPUキャッシュクリア
@@ -294,7 +303,7 @@ def train_phase1(
         'final_conv_rate': 0.0,
     }
 
-    batch_size = 10000  # 1万トークンずつ処理
+    batch_size = phase1_config.batch_size
 
     for iteration in range(phase1_config.max_iterations):
         iter_start = time.time()
@@ -312,6 +321,8 @@ def train_phase1(
             model, train_token_embeds, previous_contexts, optimizer, device,
             batch_size=batch_size,
             num_batches_for_grad=phase1_config.batches_per_iteration,
+            context_noise=phase1_config.context_noise,
+            gradient_clip=phase1_config.gradient_clip,
         )
         final_loss = train_loss
 
