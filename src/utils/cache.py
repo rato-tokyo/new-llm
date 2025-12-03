@@ -265,6 +265,7 @@ def collect_multiblock_cache_to_files(
     chunk_size: int = DEFAULT_FILE_CHUNK_SIZE,
     embed_chunk_size: int = DEFAULT_CONTEXT_CHUNK_SIZE,
     progress_interval: int = 100000,
+    prev_context_steps: int = 0,
 ) -> Tuple[int, int, List[str]]:
     """
     N-block用: チャンク単位でファイル保存しながらコンテキストキャッシュを収集
@@ -281,6 +282,10 @@ def collect_multiblock_cache_to_files(
         chunk_size: ファイルに保存するチャンクサイズ（デフォルト100,000トークン）
         embed_chunk_size: GPUに転送するトークン数（デフォルト10,000）
         progress_interval: 進捗表示間隔
+        prev_context_steps: 前のトークン時のcontextも連結する数（0で無効）
+            例: prev_context_steps=1 の場合、出力は:
+            [context_0[i], context_1[i], context_0[i-1], context_1[i-1]]
+            combined_dim = context_dim * num_blocks * (1 + prev_context_steps)
 
     Returns:
         (num_tokens, combined_dim, chunk_files): トークン数、結合次元、チャンクファイルリスト
@@ -289,12 +294,14 @@ def collect_multiblock_cache_to_files(
     num_tokens = len(token_ids) - 1
     context_dim = model.context_dim
     num_blocks = model.num_context_blocks
-    combined_dim = context_dim * num_blocks
+    # prev_context_steps=0: 現在のみ、=1: 現在+1つ前、=2: 現在+1つ前+2つ前
+    combined_dim = context_dim * num_blocks * (1 + prev_context_steps)
 
     os.makedirs(cache_dir, exist_ok=True)
 
+    prev_info = f", prev_steps={prev_context_steps}" if prev_context_steps > 0 else ""
     print_flush(f"    Collecting {prefix} cache ({num_tokens:,} tokens, "
-                f"{num_blocks} blocks, chunk={chunk_size:,})...")
+                f"{num_blocks} blocks{prev_info}, chunk={chunk_size:,})...")
     collect_start = time.time()
 
     chunk_files: List[str] = []
@@ -305,6 +312,17 @@ def collect_multiblock_cache_to_files(
         torch.zeros(1, context_dim, device=device)
         for _ in range(num_blocks)
     ]
+
+    # prev_context_steps > 0 の場合、履歴を保持するリングバッファ
+    # context_history[step][block_idx] = context tensor (CPU)
+    # step=0 が最新、step=1 が1つ前、...
+    context_history: List[List[torch.Tensor]] = []
+    if prev_context_steps > 0:
+        for _ in range(prev_context_steps):
+            context_history.append([
+                torch.zeros(1, context_dim, device='cpu')
+                for _ in range(num_blocks)
+            ])
 
     with torch.no_grad():
         # ファイルチャンク単位で処理
@@ -342,21 +360,35 @@ def collect_multiblock_cache_to_files(
                     # token_embedsを保存
                     file_token_embeds[local_idx] = token_embed.cpu().squeeze(0)
 
-                    # 全ブロックを処理して結合
-                    contexts_list = []
+                    # 全ブロックを処理して現在のcontextを取得
+                    current_contexts: List[torch.Tensor] = []
                     for block_idx in range(num_blocks):
                         new_context = model.forward_context(
                             block_idx, prev_contexts[block_idx], token_embed
                         )
-                        contexts_list.append(new_context.cpu())
+                        current_contexts.append(new_context.cpu())
                         prev_contexts[block_idx] = new_context.detach()
+
+                    # 結合リスト: [現在のcontext] + [履歴context]
+                    all_contexts = current_contexts.copy()
+                    if prev_context_steps > 0:
+                        for step in range(prev_context_steps):
+                            all_contexts.extend(context_history[step])
 
                     # 結合してキャッシュに保存
                     file_context_cache[local_idx] = torch.cat(
-                        contexts_list, dim=-1
+                        all_contexts, dim=-1
                     ).squeeze(0)
 
-                    del contexts_list
+                    # 履歴を更新（シフト）
+                    if prev_context_steps > 0:
+                        # 古い履歴を1つずつ後ろにシフト
+                        for step in range(prev_context_steps - 1, 0, -1):
+                            context_history[step] = context_history[step - 1]
+                        # 最新の履歴を更新
+                        context_history[0] = current_contexts
+
+                    del current_contexts, all_contexts
 
                 # GPUメモリ解放
                 del chunk_token_ids, chunk_embeds
