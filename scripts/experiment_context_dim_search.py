@@ -38,6 +38,8 @@ from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
 from src.utils.initialization import count_parameters
 from src.utils.cache import collect_context_cache_sequential, collect_token_embeds_chunked
+from src.utils.embedding import load_pretrained_gpt2_embeddings
+from src.config.wrappers import Phase1ConfigWrapper, Phase2ConfigWrapper
 from config.experiment import DataConfig
 
 # ============================================================
@@ -234,21 +236,10 @@ class SimpleLLM(nn.Module):
         print_flush("✓ Weight Tying: token_output shares weights with token_embedding")
 
     def _load_pretrained_embeddings(self) -> None:
-        """GPT-2 embeddings をロード"""
-        try:
-            from transformers import GPT2Model
-            print_flush("Loading GPT-2 pretrained embeddings...")
-            gpt2 = GPT2Model.from_pretrained('gpt2')
-            pretrained_embeddings = gpt2.wte.weight.data
-
-            self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
-            self.token_embedding.weight.data.copy_(pretrained_embeddings)
-            self.token_embedding.weight.requires_grad = False
-            print_flush(f"✓ Loaded GPT-2 embeddings: {pretrained_embeddings.shape}")
-        except Exception as e:
-            print_flush(f"Warning: Failed to load GPT-2 embeddings: {e}")
-            self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
-            nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
+        """GPT-2 embeddings をロード（共通ユーティリティ使用）"""
+        self.token_embedding = load_pretrained_gpt2_embeddings(
+            self.vocab_size, self.embed_dim, freeze=True
+        )
 
     def forward_context(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
         """ContextBlock の順伝搬"""
@@ -307,40 +298,6 @@ class SingleContextWrapper(nn.Module):
     def forward_context(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
         """ContextBlock の順伝搬"""
         return self.context_block(context, token_embeds)
-
-
-class Phase1ConfigWrapper:
-    """Phase1Trainer用のConfig wrapper"""
-
-    def __init__(self, base: Config, context_dim: int, patience: int = 2):
-        self.phase1_max_iterations = base.phase1_max_iterations
-        self.phase1_convergence_threshold = base.phase1_convergence_threshold
-        self.phase1_learning_rate = base.phase1_learning_rate
-        self.phase1_batch_size = base.phase1_batch_size
-        self.phase1_gradient_clip = base.phase1_gradient_clip
-        self.phase1_context_noise = base.phase1_context_noise
-        self.phase1_early_stopping = base.phase1_early_stopping
-        self.phase1_early_stopping_threshold = base.phase1_early_stopping_threshold
-        # Early stopping patience: 2回待つ
-        self.phase1_min_convergence_improvement = base.phase1_min_convergence_improvement
-        self.phase1_no_improvement_patience = patience
-        self.context_dim = context_dim
-        self.embed_dim = base.embed_dim
-        self.vocab_size = base.vocab_size
-        self.num_input_tokens = base.num_input_tokens
-
-
-class Phase2ConfigWrapper:
-    """Phase2Trainer用のConfig wrapper"""
-
-    def __init__(self, base: Config):
-        self.phase2_learning_rate = base.phase2_learning_rate
-        self.phase2_epochs = base.phase2_epochs
-        self.phase2_patience = base.phase2_patience
-        # batch_sizeがNoneの場合はデフォルト値を使用
-        self.phase2_batch_size: int = base.effective_phase2_batch_size
-        self.phase2_gradient_clip = base.phase2_gradient_clip
-        self.phase2_min_ppl_improvement = base.phase2_min_ppl_improvement
 
 
 def train_phase2(

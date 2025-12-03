@@ -24,6 +24,7 @@ import torch.nn as nn
 from .blocks import ContextBlock, TokenBlock
 from src.utils.io import print_flush
 from src.utils.initialization import count_parameters
+from src.utils.embedding import load_pretrained_gpt2_embeddings
 
 
 class LLM(nn.Module):
@@ -101,25 +102,10 @@ class LLM(nn.Module):
             self._init_weights()
 
     def _load_pretrained_embeddings(self) -> None:
-        """Load GPT-2 pretrained embeddings"""
-        try:
-            from transformers import GPT2Model
-            print_flush("Loading GPT-2 pretrained embeddings...")
-
-            gpt2 = GPT2Model.from_pretrained('gpt2')
-            pretrained_embeddings = gpt2.wte.weight.data
-
-            self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
-            self.token_embedding.weight.data.copy_(pretrained_embeddings)
-            self.token_embedding.weight.requires_grad = False
-
-            print_flush(f"✓ Loaded GPT-2 embeddings: {pretrained_embeddings.shape}")
-
-        except Exception as e:
-            print_flush(f"Warning: Failed to load GPT-2 embeddings: {e}")
-            print_flush("Falling back to random initialization...")
-            self.token_embedding = nn.Embedding(self.vocab_size, self.embed_dim)
-            nn.init.normal_(self.token_embedding.weight, mean=0.0, std=0.02)
+        """Load GPT-2 pretrained embeddings（共通ユーティリティ使用）"""
+        self.token_embedding = load_pretrained_gpt2_embeddings(
+            self.vocab_size, self.embed_dim, freeze=True
+        )
 
     def _init_weights(self) -> None:
         """Initialize embedding weights"""

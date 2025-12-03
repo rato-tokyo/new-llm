@@ -20,6 +20,10 @@ from .cache import (
     collect_multiblock_cache_to_files,
     ChunkedCacheDataset,
 )
+from .embedding import (
+    load_pretrained_gpt2_embeddings,
+    create_random_embedding,
+)
 
 __all__ = [
     # Memory utilities
@@ -43,4 +47,7 @@ __all__ = [
     'collect_token_embeds_chunked',
     'collect_multiblock_cache_to_files',
     'ChunkedCacheDataset',
+    # Embedding utilities
+    'load_pretrained_gpt2_embeddings',
+    'create_random_embedding',
 ]
