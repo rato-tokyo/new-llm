@@ -473,8 +473,8 @@ def run_context_dim_search(
         output_dir: 出力ディレクトリ
 
     探索方向:
-        - start_dim < max_dim: 増加方向（start_dim → max_dim）
-        - start_dim > min_dim and max_dim <= start_dim: 減少方向（start_dim → min_dim）
+        - start_dim < max_dim かつ min_dim がデフォルト(10): 増加方向（start_dim → max_dim）
+        - min_dim > 10（明示的指定）: 減少方向（start_dim → min_dim）
 
     Returns:
         結果の辞書
@@ -482,7 +482,11 @@ def run_context_dim_search(
     set_seed(seed)
 
     # 探索方向を決定
-    if start_dim < max_dim:
+    # min_dim がデフォルト(10)より大きい場合は減少方向と判断
+    if min_dim > 10:
+        direction = "decrease"
+        end_dim = min_dim
+    elif start_dim < max_dim:
         direction = "increase"
         end_dim = max_dim
     else:
