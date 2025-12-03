@@ -31,7 +31,7 @@ from src.trainers.phase1.base import Phase1Result
 from src.trainers.phase1.memory import MemoryPhase1Trainer
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
-from src.utils.gpu import clear_gpu_cache
+from src.utils.device import clear_gpu_cache
 
 
 def collect_context_chunks(
