@@ -72,15 +72,17 @@ def collect_context_chunks(
         for i in range(num_blocks)
     ]
 
-    # チャンク境界のcontext（GPU上）
-    chunk_contexts_gpu: List[torch.Tensor] = []
-    # チャンク境界のcontext（返却用、CPU上）
+    # チャンク境界のcontext（CPU上）
     chunk_contexts_cpu: List[torch.Tensor] = []
 
-    print_flush(f"    Collecting context chunks ({num_tokens:,} tokens, chunk_size={chunk_size})...")
+    total_tokens = num_tokens - 1
+    log_interval = max(1000, total_tokens // 10)  # 10%ごと または 1000ごと
+    print_flush(f"    Collecting context chunks ({total_tokens:,} tokens, chunk_size={chunk_size})...")
+
+    start_time = time.time()
 
     with torch.no_grad():
-        for i in range(num_tokens - 1):
+        for i in range(total_tokens):
             # Token embedding
             token_id = token_ids[i:i+1].to(device)
             token_embed = model.token_embedding(token_id)
@@ -100,22 +102,26 @@ def collect_context_chunks(
 
             # チャンク境界の場合、chunk_contextsに追加
             if (i + 1) % chunk_size == 0:
-                chunk_contexts_gpu.append(current_combined.clone())
                 chunk_contexts_cpu.append(current_combined.cpu())
 
             # この位置で利用可能なチャンク数
-            num_available_chunks = len(chunk_contexts_gpu) + 1  # +1 for current
+            num_available_chunks = len(chunk_contexts_cpu) + 1  # +1 for current
 
             # context_chunksに保存（CPU上）
-            for j, ctx in enumerate(chunk_contexts_gpu):
-                context_chunks[i, j] = ctx.cpu()
+            # 過去のチャンクはすでにCPUにあるので再変換不要
+            for j, ctx in enumerate(chunk_contexts_cpu):
+                context_chunks[i, j] = ctx
             context_chunks[i, num_available_chunks - 1] = current_combined.cpu()
 
             # token_embedsに保存（CPU上）
             token_embeds_out[i] = token_embed.cpu()
 
-            if (i + 1) % 10000 == 0:
-                print_flush(f"      {i+1:,}/{num_tokens-1:,} tokens processed...")
+            if (i + 1) % log_interval == 0:
+                elapsed = time.time() - start_time
+                speed = (i + 1) / elapsed
+                eta = (total_tokens - i - 1) / speed if speed > 0 else 0
+                print_flush(f"      {i+1:,}/{total_tokens:,} ({(i+1)/total_tokens*100:.0f}%) "
+                           f"[{elapsed:.1f}s, {speed:.0f} tok/s, ETA {eta:.0f}s]")
                 # GPUメモリ解放
                 clear_gpu_cache(device)
 
