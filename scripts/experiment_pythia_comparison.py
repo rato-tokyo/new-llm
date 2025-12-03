@@ -245,9 +245,13 @@ def run_experiment(
     batch_size: int = 32,
     lr: float = 1e-4,
     patience: int = 3,
+    skip_baseline: bool = False,
 ) -> Dict[str, Any]:
     """
     比較実験を実行
+
+    Args:
+        skip_baseline: Trueの場合、Pythia-70M (baseline)をスキップ
 
     Returns:
         results: 両モデルの結果
@@ -286,40 +290,48 @@ def run_experiment(
 
     results = {}
 
-    # ===== 1. Pythia (Baseline) =====
-    print_flush("\n" + "=" * 70)
-    print_flush("1. PYTHIA-70M (Baseline)")
-    print_flush("=" * 70)
-
-    pythia_model = PythiaModel(
-        vocab_size=config.vocab_size,
-        hidden_size=config.hidden_size,
-        num_layers=config.num_layers,
-        num_heads=config.num_attention_heads,
-        intermediate_size=config.intermediate_size,
-        max_position_embeddings=config.max_position_embeddings,
-        rotary_pct=config.rotary_pct,
-    ).to(device)
-
-    pythia_results = train_model(
-        pythia_model,
-        train_inputs, train_targets,
-        val_inputs, val_targets,
-        device,
-        num_epochs=num_epochs,
-        batch_size=batch_size,
-        lr=lr,
-        patience=patience,
-        model_name="Pythia-70M",
-    )
-    results["pythia"] = pythia_results
-
-    # KV cache size
+    # KV cache sizes
     kv_size_pythia = config.hidden_size * seq_length * config.num_layers * 2 * 4
-    print_flush(f"  KV Cache: {kv_size_pythia / 1024:.1f} KB per sample")
+    kv_size_context = config.context_dim * seq_length * config.num_layers * 2 * 4
 
-    del pythia_model
-    clear_gpu_cache(device)
+    # ===== 1. Pythia (Baseline) =====
+    if skip_baseline:
+        print_flush("\n" + "=" * 70)
+        print_flush("1. PYTHIA-70M (Baseline) - SKIPPED")
+        print_flush("=" * 70)
+        results["pythia"] = None
+    else:
+        print_flush("\n" + "=" * 70)
+        print_flush("1. PYTHIA-70M (Baseline)")
+        print_flush("=" * 70)
+
+        pythia_model = PythiaModel(
+            vocab_size=config.vocab_size,
+            hidden_size=config.hidden_size,
+            num_layers=config.num_layers,
+            num_heads=config.num_attention_heads,
+            intermediate_size=config.intermediate_size,
+            max_position_embeddings=config.max_position_embeddings,
+            rotary_pct=config.rotary_pct,
+        ).to(device)
+
+        pythia_results = train_model(
+            pythia_model,
+            train_inputs, train_targets,
+            val_inputs, val_targets,
+            device,
+            num_epochs=num_epochs,
+            batch_size=batch_size,
+            lr=lr,
+            patience=patience,
+            model_name="Pythia-70M",
+        )
+        results["pythia"] = pythia_results
+
+        print_flush(f"  KV Cache: {kv_size_pythia / 1024:.1f} KB per sample")
+
+        del pythia_model
+        clear_gpu_cache(device)
 
     # ===== 2. Context-Pythia (Ours) =====
     print_flush("\n" + "=" * 70)
@@ -366,8 +378,6 @@ def run_experiment(
     )
     results["context_pythia"] = context_pythia_results
 
-    # KV cache size
-    kv_size_context = config.context_dim * seq_length * config.num_layers * 2 * 4
     print_flush(f"  KV Cache: {kv_size_context / 1024:.1f} KB per sample")
 
     del context_pythia_model
@@ -380,17 +390,23 @@ def run_experiment(
 
     print_flush("\n| Model | Best PPL | KV Cache | Reduction |")
     print_flush("|-------|----------|----------|-----------|")
-    print_flush(
-        f"| Pythia-70M | {results['pythia']['best_val_ppl']:.1f} | "
-        f"{kv_size_pythia / 1024:.1f} KB | - |"
-    )
+
+    if results["pythia"] is not None:
+        print_flush(
+            f"| Pythia-70M | {results['pythia']['best_val_ppl']:.1f} | "
+            f"{kv_size_pythia / 1024:.1f} KB | - |"
+        )
+    else:
+        print_flush(f"| Pythia-70M | (skipped) | {kv_size_pythia / 1024:.1f} KB | - |")
+
     print_flush(
         f"| Context-Pythia | {results['context_pythia']['best_val_ppl']:.1f} | "
         f"{kv_size_context / 1024:.1f} KB | 50% |"
     )
 
-    ppl_diff = results["context_pythia"]["best_val_ppl"] - results["pythia"]["best_val_ppl"]
-    print_flush(f"\nPPL difference: {ppl_diff:+.1f}")
+    if results["pythia"] is not None:
+        ppl_diff = results["context_pythia"]["best_val_ppl"] - results["pythia"]["best_val_ppl"]
+        print_flush(f"\nPPL difference: {ppl_diff:+.1f}")
 
     return results
 
@@ -403,6 +419,7 @@ def main():
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--patience", type=int, default=3, help="Early stopping patience")
+    parser.add_argument("--skip-baseline", action="store_true", help="Skip Pythia-70M baseline")
     args = parser.parse_args()
 
     run_experiment(
@@ -412,6 +429,7 @@ def main():
         batch_size=args.batch_size,
         lr=args.lr,
         patience=args.patience,
+        skip_baseline=args.skip_baseline,
     )
 
     print_flush("\nDONE")
