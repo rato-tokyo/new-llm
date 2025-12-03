@@ -5,8 +5,11 @@ Phase 1: ContextBlock OACD Training
 ContextBlockの多様性学習を行い、チェックポイントを保存する。
 このスクリプトで学習したパラメータは、experiment_pythia_comparison.pyで使用される。
 
+Note: Phase 1ではシーケンス長は本質的に関係ない（contextをflattenするため）。
+内部で固定長(128)のシーケンスを使用する。
+
 Usage:
-    python3 scripts/train_phase1.py --samples 10000 --seq-length 256
+    python3 scripts/train_phase1.py --samples 1000
 """
 
 import argparse
@@ -19,6 +22,7 @@ import torch
 from torch.utils.data import DataLoader, TensorDataset
 from datasets import load_dataset
 from transformers import AutoTokenizer
+from huggingface_hub.utils import HfHubHTTPError
 
 # Add project root to path
 sys.path.insert(0, ".")
@@ -36,14 +40,32 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-def load_pile_data(
+# Phase 1用の固定シーケンス長（任意の値でよい）
+PHASE1_SEQ_LENGTH = 128
+
+
+def load_pile_samples(
     num_samples: int,
-    seq_length: int,
     config: ContextPythiaConfig,
     device: torch.device,
+    max_retries: int = 5,
+    retry_delay: float = 30.0,
 ) -> torch.Tensor:
-    """Load real data from Pile dataset for Phase 1 training."""
-    print_flush(f"Loading Pile dataset: {num_samples} samples, seq_len={seq_length}")
+    """Load samples from Pile dataset for Phase 1 training.
+
+    Phase 1ではcontextをflattenするため、シーケンス長は本質的に関係ない。
+    内部で固定長(128)のシーケンスを使用する。
+
+    Args:
+        num_samples: シーケンス数（= サンプル数）
+        max_retries: 429エラー時の最大リトライ回数
+        retry_delay: リトライ間の待機時間（秒）
+
+    Returns:
+        input_ids: [num_samples, PHASE1_SEQ_LENGTH]
+    """
+    total_tokens_needed = num_samples * PHASE1_SEQ_LENGTH
+    print_flush(f"Loading Pile dataset: {num_samples:,} samples ({total_tokens_needed:,} tokens)")
 
     # Load tokenizer
     print_flush(f"  Loading tokenizer: {config.tokenizer_name}")
@@ -57,43 +79,61 @@ def load_pile_data(
         "monology/pile-uncopyrighted",
         split="train",
         streaming=True,
-        trust_remote_code=True,
     )
 
-    # Collect samples
-    all_input_ids = []
+    # Collect tokens with retry logic
+    all_tokens = []
+    retry_count = 0
 
     print_flush(f"  Tokenizing...")
 
-    for example in dataset:
-        text = example["text"]
-        if not text or len(text) < 100:
-            continue
+    dataset_iter = iter(dataset)
+    while len(all_tokens) < total_tokens_needed:
+        try:
+            example = next(dataset_iter)
+            text = example["text"]
+            if not text or len(text) < 100:
+                continue
 
-        tokens = tokenizer.encode(text, add_special_tokens=False)
+            tokens = tokenizer.encode(text, add_special_tokens=False)
+            all_tokens.extend(tokens)
 
-        if len(tokens) >= seq_length:
-            for i in range(0, len(tokens) - seq_length + 1, seq_length):
-                chunk = tokens[i:i + seq_length]
-                all_input_ids.append(chunk)
+            if len(all_tokens) % 100000 == 0 and len(all_tokens) > 0:
+                print_flush(f"    Collected {len(all_tokens):,} tokens...")
 
-                if len(all_input_ids) >= num_samples:
-                    break
+            retry_count = 0  # Reset on success
 
-        if len(all_input_ids) >= num_samples:
+        except StopIteration:
             break
+        except HfHubHTTPError as e:
+            if "429" in str(e) and retry_count < max_retries:
+                retry_count += 1
+                print_flush(f"    Rate limited (429). Retry {retry_count}/{max_retries} after {retry_delay}s...")
+                time.sleep(retry_delay)
+                # Recreate iterator
+                dataset = load_dataset(
+                    "monology/pile-uncopyrighted",
+                    split="train",
+                    streaming=True,
+                )
+                dataset_iter = iter(dataset)
+                # Skip already collected samples (approximate)
+                skip_count = len(all_tokens) // 500  # Rough estimate
+                for _ in range(skip_count):
+                    try:
+                        next(dataset_iter)
+                    except StopIteration:
+                        break
+            else:
+                raise
 
-        if len(all_input_ids) % 1000 == 0 and len(all_input_ids) > 0:
-            print_flush(f"    Collected {len(all_input_ids):,} samples...")
+    # Split into fixed-length sequences
+    all_tokens = all_tokens[:num_samples * PHASE1_SEQ_LENGTH]
 
-    if len(all_input_ids) < num_samples:
-        print_flush(f"  Warning: Only collected {len(all_input_ids)} samples")
-        num_samples = len(all_input_ids)
+    input_ids = torch.tensor(all_tokens, dtype=torch.long, device=device)
+    input_ids = input_ids.view(num_samples, PHASE1_SEQ_LENGTH)
 
-    all_input_ids = all_input_ids[:num_samples]
-    input_ids = torch.tensor(all_input_ids, dtype=torch.long, device=device)
-
-    print_flush(f"  Loaded {num_samples:,} samples, {input_ids.numel():,} tokens")
+    print_flush(f"  Loaded {num_samples:,} samples ({input_ids.numel():,} tokens)")
 
     return input_ids
 
@@ -215,10 +255,6 @@ def main() -> None:
         help='Number of samples (REQUIRED)'
     )
     parser.add_argument(
-        '--seq-length', type=int, required=True,
-        help='Sequence length (REQUIRED)'
-    )
-    parser.add_argument(
         '--batch-size', type=int, default=config.phase2_batch_size,
         help=f'Batch size (default: {config.phase2_batch_size})'
     )
@@ -243,16 +279,15 @@ def main() -> None:
     print_flush("=" * 70)
     print_flush("PHASE 1: CONTEXTBLOCK OACD TRAINING")
     print_flush("=" * 70)
-    print_flush(f"Samples: {args.samples}")
-    print_flush(f"Sequence length: {args.seq_length}")
+    print_flush(f"Samples: {args.samples:,}")
+    print_flush(f"Sequence length: {PHASE1_SEQ_LENGTH} (fixed)")
     print_flush(f"Batch size: {args.batch_size}")
     print_flush(f"Checkpoint: {config.phase1_checkpoint_path}")
     print_flush("=" * 70)
 
     # Load data
-    input_ids = load_pile_data(
+    input_ids = load_pile_samples(
         num_samples=args.samples,
-        seq_length=args.seq_length,
         config=config,
         device=device,
     )

@@ -170,7 +170,8 @@ python3 -m mypy src/ --ignore-missing-imports
 
 ```bash
 # Step 1: Phase 1 学習（ContextBlock OACD）- 初回のみ
-python3 scripts/train_phase1.py --samples 10000 --seq-length 256
+# Note: --seq-lengthは不要（内部で固定長128を使用）
+python3 scripts/train_phase1.py --samples 10000
 
 # Step 2: 比較実験（Phase 1 チェックポイントが必要）
 python3 scripts/experiment_pythia_comparison.py --samples 10000 --seq-length 256 --epochs 10

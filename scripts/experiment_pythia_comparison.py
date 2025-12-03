@@ -20,6 +20,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 from datasets import load_dataset
 from transformers import AutoTokenizer
+from huggingface_hub.utils import HfHubHTTPError
 
 # Add project root to path
 sys.path.insert(0, ".")
@@ -53,6 +54,8 @@ def load_pile_data(
     seq_length: int,
     config: PythiaConfig,
     device: torch.device,
+    max_retries: int = 5,
+    retry_delay: float = 30.0,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Load real data from Pile dataset using Pythia tokenizer.
@@ -62,6 +65,8 @@ def load_pile_data(
         seq_length: Sequence length (will load seq_length + 1 for target shift)
         config: PythiaConfig with tokenizer settings
         device: Device to load data to
+        max_retries: Maximum retries on 429 error
+        retry_delay: Delay between retries (seconds)
 
     Returns:
         inputs: [num_samples, seq_length]
@@ -81,37 +86,63 @@ def load_pile_data(
         "monology/pile-uncopyrighted",
         split="train",
         streaming=True,
-        trust_remote_code=True,
     )
 
-    # Collect samples
+    # Collect samples with retry logic
     all_input_ids = []
     total_tokens_needed = num_samples * (seq_length + 1)
+    retry_count = 0
 
     print_flush(f"  Tokenizing (need {total_tokens_needed:,} tokens)...")
 
-    for example in dataset:
-        text = example["text"]
-        if not text or len(text) < 100:  # Skip very short texts
-            continue
+    dataset_iter = iter(dataset)
+    while len(all_input_ids) < num_samples:
+        try:
+            example = next(dataset_iter)
+            text = example["text"]
+            if not text or len(text) < 100:  # Skip very short texts
+                continue
 
-        # Tokenize
-        tokens = tokenizer.encode(text, add_special_tokens=False)
+            # Tokenize
+            tokens = tokenizer.encode(text, add_special_tokens=False)
 
-        if len(tokens) >= seq_length + 1:
-            # Take chunks of seq_length + 1
-            for i in range(0, len(tokens) - seq_length, seq_length + 1):
-                chunk = tokens[i:i + seq_length + 1]
-                all_input_ids.append(chunk)
+            if len(tokens) >= seq_length + 1:
+                # Take chunks of seq_length + 1
+                for i in range(0, len(tokens) - seq_length, seq_length + 1):
+                    chunk = tokens[i:i + seq_length + 1]
+                    all_input_ids.append(chunk)
 
-                if len(all_input_ids) >= num_samples:
-                    break
+                    if len(all_input_ids) >= num_samples:
+                        break
 
-        if len(all_input_ids) >= num_samples:
+            if len(all_input_ids) % 1000 == 0 and len(all_input_ids) > 0:
+                print_flush(f"    Collected {len(all_input_ids):,} samples...")
+
+            retry_count = 0  # Reset on success
+
+        except StopIteration:
             break
-
-        if len(all_input_ids) % 1000 == 0 and len(all_input_ids) > 0:
-            print_flush(f"    Collected {len(all_input_ids):,} samples...")
+        except HfHubHTTPError as e:
+            if "429" in str(e) and retry_count < max_retries:
+                retry_count += 1
+                print_flush(f"    Rate limited (429). Retry {retry_count}/{max_retries} after {retry_delay}s...")
+                time.sleep(retry_delay)
+                # Recreate iterator
+                dataset = load_dataset(
+                    "monology/pile-uncopyrighted",
+                    split="train",
+                    streaming=True,
+                )
+                dataset_iter = iter(dataset)
+                # Skip already collected samples (approximate)
+                skip_count = len(all_input_ids)
+                for _ in range(skip_count):
+                    try:
+                        next(dataset_iter)
+                    except StopIteration:
+                        break
+            else:
+                raise
 
     if len(all_input_ids) < num_samples:
         print_flush(f"  Warning: Only collected {len(all_input_ids)} samples (requested {num_samples})")
