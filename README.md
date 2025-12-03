@@ -1,37 +1,132 @@
-# New-LLM: Cascade Context Architecture
+# New-LLM: Context-KV Attention for Efficient LLM Inference
 
-A novel language model architecture using OACD (Origin-Anchored Centroid Dispersion) algorithm with cascade context concatenation for learning diverse context representations.
+A research project to improve pretrained LLMs (Pythia-70M) with Context-KV Attention, achieving **50% KV cache memory reduction** while maintaining or improving performance.
 
-## Core Concept: Cascade Context
+## 🎯 Project Goal
 
-New-LLM uses a cascade context architecture where two ContextBlocks are trained sequentially, then their outputs are concatenated for token prediction. This provides the expressiveness of wider context dimensions while maintaining efficient training.
+**Replace early attention layers in Pythia-70M with Context-KV Attention to reduce KV cache memory usage by 50%.**
+
+### Target Model: Pythia-70M
+
+| Parameter | Value |
+|-----------|-------|
+| Layers | 6 |
+| Hidden Size | 512 |
+| Attention Heads | 8 |
+| Total Parameters | 70M |
+
+### Approach
+
+1. **Replace Layer 0** of Pythia with Context-KV Attention
+2. **Keep Layers 1-5** as original Pythia attention
+3. **Two-phase training**:
+   - Phase 1: Train ContextBlock (OACD algorithm for diversity)
+   - Phase 2: Fine-tune entire model
+
+### Expected Benefits
+
+- **50% KV cache reduction** (conservative target)
+- **Maintained or improved PPL** on evaluation benchmarks
+- **Minimal architectural changes** to pretrained model
+
+## Core Concept: Context-KV Attention
+
+Instead of storing all token KV pairs, we compress context into fixed-size vectors:
 
 ```
-Phase 1A: ContextBlock A (cd=500) → context_a cache
-Phase 1B: ContextBlock B (cd=500, input=context_a) → context_b cache
-Phase 2:  TokenBlock (input=concat(context_a, context_b)=1000) → predictions
+Standard Attention (Layer 0):
+  KV Cache = [kv₀, kv₁, kv₂, ..., kv₁₀₂₃]  // 1024 KV pairs
+
+Context-KV Attention (Layer 0):
+  KV Cache = [ctx₀, ctx₃₂, ctx₆₄, ...]      // ~32 context vectors
+  → 32x compression at interval=32
 ```
 
-## Key Results
+### How It Works
 
-| Configuration | Val PPL | Val Acc | Notes |
-|---------------|---------|---------|-------|
-| **Cascade (500×2=1000)** | **111.9** | **25.6%** | Best performance |
-| C1T1-500 | 127.2 | 24.7% | Standard single context |
-| C2T2-500 | 132.2 | 24.4% | 2-layer (worse than 1-layer) |
-| C1T1-1000 | 134.0 | 23.6% | Wide context (inefficient) |
+```
+Position 350, interval=32, max_contexts=32:
+  Context KV = [ctx[350], ctx[318], ctx[286], ..., ctx[30]]
+               ↑current   ↑-32      ↑-64
 
-**Key Discovery**: Cascade concatenation outperforms both multi-layer and wider single-context approaches.
+  Query: from current token embedding
+  Key/Value: projected from context vectors
+```
 
-## Features
+## Architecture
 
-- **Cascade Context Architecture**: Two ContextBlocks with cascade concatenation
-- **1-Layer Fixed**: Each block is single layer (no multi-layer complexity)
-- **OACD Algorithm**: Origin-Anchored Centroid Dispersion for diversity learning
-- **Two-Phase Training**: Separate diversity learning and token prediction
-- **GPT-2 Embeddings**: Frozen pretrained embeddings (768-dim)
-- **Weight Tying**: Output head shares weights with embedding layer
-- **GPU Optimized**: Efficient memory management for Colab (22GB VRAM)
+```
+┌────────────────────────────────────────────────────────────┐
+│                    Pythia-70M + Context-KV                  │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │  Token Embedding (Pythia pretrained, 512-dim)        │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                          ↓                                  │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │  Layer 0: Context-KV Attention (REPLACED)            │ │
+│  │  - ContextBlock: learns compressed representations    │ │
+│  │  - Context-KV Attention: uses context as KV cache    │ │
+│  │  - context_dim=256 (compression ratio ~2x)           │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                          ↓                                  │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │  Layers 1-5: Original Pythia Attention (PRESERVED)   │ │
+│  │  - Standard self-attention                           │ │
+│  │  - Pretrained weights maintained                     │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                          ↓                                  │
+│  ┌──────────────────────────────────────────────────────┐ │
+│  │  Output Head (Pythia pretrained)                     │ │
+│  └──────────────────────────────────────────────────────┘ │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+```
+
+## Training Pipeline
+
+### Phase 1: Context Diversity Learning (OACD)
+
+Train only the ContextBlock to produce diverse context representations:
+
+```python
+def oacd_loss(contexts, centroid_weight=0.1):
+    """Origin-Anchored Centroid Dispersion"""
+    centroid = contexts.mean(dim=0)
+    dispersion_loss = -torch.norm(contexts - centroid) / len(contexts)
+    centroid_loss = torch.norm(centroid) ** 2
+    return dispersion_loss + centroid_weight * centroid_loss
+```
+
+### Phase 2: Full Model Fine-tuning
+
+- Freeze ContextBlock
+- Fine-tune Context-KV Attention layer + remaining Pythia layers
+- Cross-entropy loss for next-token prediction
+
+## Evaluation
+
+### Primary Metrics
+
+| Metric | Purpose |
+|--------|---------|
+| **PPL (Perplexity)** | Language modeling quality |
+| **LAMBADA Accuracy** | Long-range dependency (final word prediction) |
+| **KV Cache Memory** | Actual memory usage measurement |
+
+### Comparison
+
+```
+Baseline: Pythia-70M (original)
+Ours:     Pythia-70M + Context-KV (Layer 0 replaced)
+
+Evaluate on:
+- WikiText-2 PPL
+- Pile test set PPL
+- LAMBADA accuracy
+- torch.cuda.max_memory_allocated()
+```
 
 ## Quick Start
 
@@ -41,126 +136,87 @@ Phase 2:  TokenBlock (input=concat(context_a, context_b)=1000) → predictions
 pip install -r requirements.txt
 ```
 
-### Running Experiments
+### Development Experiments (Limited Data)
 
 ```bash
-# Local test (CPU, minimal samples)
-python3 scripts/experiment_cascade_context.py -s 2
+# Quick test with minimal samples
+python3 scripts/experiment_context_kv.py -s 100
 
-# Full experiment (GPU/Colab)
-python3 scripts/experiment_cascade_context.py -s 2000
-
-# Custom context dimension
-python3 scripts/experiment_cascade_context.py -s 2000 -c 500
+# Medium-scale test
+python3 scripts/experiment_context_kv.py -s 1600
 ```
 
-## Architecture
+### Full Experiments (Pile Dataset)
 
-### 1-Layer Fixed Design (2025-12-02)
-
-Based on experiments showing that multi-layer architectures provide no benefit:
-
-- **ContextBlock**: 1 layer (Phase 1 training, Phase 2 frozen)
-- **TokenBlock**: 1 layer (Phase 2 training)
-- **Cascade Concatenation**: `concat(context_a, context_b)` for expressiveness
-
-### OACD Algorithm
-
-```python
-def oacd_loss(contexts, centroid_weight=0.1):
-    """Origin-Anchored Centroid Dispersion"""
-    centroid = contexts.mean(dim=0)
-    deviations = contexts - centroid
-    dispersion_loss = -torch.norm(deviations, p=2) / len(contexts)
-    centroid_loss = torch.norm(centroid) ** 2
-    return dispersion_loss + centroid_weight * centroid_loss
+```bash
+# Full training (requires significant compute)
+python3 scripts/experiment_pythia_context_kv.py  # TBD
 ```
-
-**Benefits**:
-- Stable convergence with origin anchoring
-- High Effective Rank (80%+)
-- Simple loss function
-
-### Training Pipeline
-
-**Phase 1A**: Train ContextBlock A on full data
-- Input: zero-initialized context + token embeddings
-- Output: context_a (cached for Phase 1B and Phase 2)
-
-**Phase 1B**: Train ContextBlock B on full data
-- Input: context_a (fixed) + token embeddings
-- Output: context_b (cached for Phase 2)
-
-**Phase 2**: Train TokenBlock
-- Input: `concat(context_a, context_b)` + token embeddings
-- Both ContextBlocks frozen
-- Cross-entropy loss for next-token prediction
 
 ## Project Structure
 
 ```
 new-llm/
 ├── scripts/
-│   └── experiment_cascade_context.py  # Main experiment script
+│   ├── experiment_context_kv.py      # Current Context-KV experiments
+│   └── experiment_pythia_context_kv.py  # Pythia integration (TBD)
 ├── src/
 │   ├── models/
-│   │   ├── llm.py                     # Base LLM model
-│   │   ├── blocks.py                  # ContextBlock, TokenBlock (1-layer)
-│   │   └── layers.py                  # ContextLayer, TokenLayer
+│   │   ├── context_kv.py             # ContextKVAttentionLLM
+│   │   ├── blocks.py                 # ContextBlock (1-layer)
+│   │   └── layers.py                 # ContextLayer
 │   ├── trainers/
 │   │   └── phase1/
-│   │       ├── base.py                # Phase 1 abstract base
-│   │       └── memory.py              # Memory-based Phase 1 trainer
+│   │       └── memory.py             # Phase 1 trainer (OACD)
 │   ├── losses/
-│   │   └── diversity.py               # OACD algorithm
-│   ├── providers/
-│   │   └── data/
-│   │       └── memory.py              # Data provider
+│   │   └── diversity.py              # OACD algorithm
 │   └── utils/
-│       ├── device.py                  # GPU utilities
-│       ├── initialization.py          # Weight init, parameter counting
-│       └── memory.py                  # Memory management
 ├── config/
-│   ├── base.py                        # Base configuration
-│   ├── phase1.py                      # Phase 1 config
-│   └── phase2.py                      # Phase 2 config
-├── CLAUDE.md                          # Development guidelines
-└── README.md                          # This file
+│   ├── base.py                       # Model architecture config
+│   ├── phase1.py                     # Phase 1 training config
+│   └── phase2.py                     # Phase 2 training config
+├── CLAUDE.md                         # Development guidelines
+└── README.md                         # This file
 ```
 
 ## Configuration
 
-Default configuration in `config/base.py`:
+Key parameters in `config/base.py`:
 
 ```python
-embed_dim = 768           # GPT-2 embedding dimension
-context_dim = 500         # Context dimension per block
-vocab_size = 50257        # GPT-2 vocabulary
-num_input_tokens = 1      # Input tokens per step
+# Context-KV Attention
+context_dim = 256           # Context vector dimension
+context_interval = 32       # Interval between contexts
+max_contexts = 32           # Maximum contexts (context window)
+num_heads = 8               # Attention heads
+
+# Data (development)
+num_samples = 1600          # Limited samples for development
 ```
 
-## Development Guidelines
+## Current Status (2025-12-03)
 
-See `CLAUDE.md` for:
-- Cascade context architecture details
-- OACD algorithm specification
-- 1-layer fixed architecture rationale
-- Code quality standards
-- GPU/CPU memory management
+### Completed
+- ✅ Context-KV Attention implementation
+- ✅ OACD algorithm for Phase 1
+- ✅ Two-phase training pipeline
+- ✅ Config-driven architecture (no hardcoding)
 
-## Current Status (2025-12-02)
+### In Progress
+- 🔄 Pythia-70M integration
+- 🔄 Pile dataset support
+- 🔄 LAMBADA evaluation
 
-**Working**:
-- Cascade context architecture (best performance)
-- 1-layer fixed design (simplified codebase)
-- OACD algorithm with high Effective Rank
-- GPU-optimized training pipeline
-- Type-safe configuration with Protocol
+### Planned
+- ⬚ Layer 0 replacement experiments
+- ⬚ Memory usage benchmarking
+- ⬚ Comparison with original Pythia-70M
 
-**Architecture Decision**:
-- Multi-layer logic removed (C2T2 performed worse than C1T1)
-- Cascade concatenation provides sufficient expressiveness
-- Code significantly simplified
+## References
+
+- [Pythia: A Suite for Analyzing Large Language Models](https://arxiv.org/abs/2304.01373)
+- [DeepSeek MLA (Multi-Head Latent Attention)](https://arxiv.org/abs/2401.02954)
+- [EleutherAI/pythia-70m](https://huggingface.co/EleutherAI/pythia-70m)
 
 ## License
 

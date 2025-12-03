@@ -1,6 +1,32 @@
 # New-LLM Project Guidelines
 
-## 🎯 Context-KV Attention Architecture (2025-12-03)
+## 🎯 Project Goal: Pythia-70M + Context-KV Attention (2025-12-03)
+
+**Pythia-70MのLayer 0をContext-KV Attentionに置き換え、KVキャッシュメモリを50%削減する。**
+
+### Target Architecture
+
+```
+Pythia-70M (6 layers, hidden_size=512, heads=8)
+  ↓
+Layer 0: Context-KV Attention（置き換え）
+Layer 1-5: Original Pythia Attention（維持）
+```
+
+### Key Decisions
+
+| 項目 | 決定 |
+|------|------|
+| **置き換え層** | Layer 0 のみから開始 |
+| **Context次元** | 256（積極的な圧縮） |
+| **学習データ** | Pile（Pythiaと同じ）、開発時は限定サンプル |
+| **学習方法** | Phase 1（OACD）→ Phase 2（全体ファインチューニング） |
+| **評価指標** | PPL + LAMBADA |
+| **メモリ削減目標** | 50% |
+
+---
+
+## 🎯 Context-KV Attention Architecture
 
 **KVキャッシュを大幅に削減するContext-KV Attention方式を採用。**
 
@@ -10,7 +36,7 @@
 Context-KV Attention:
   - 等間隔（interval）でContextを取得
   - 常に「現在位置」を含めたcontextでAttention
-  - ~99% KVキャッシュ削減
+  - ~50% KVキャッシュ削減（Layer 0のみ置き換え時）
 ```
 
 ### 🚨 Context Interval方式（重要）
@@ -18,28 +44,17 @@ Context-KV Attention:
 **Position i の予測には、現在位置から等間隔で過去のcontextを取得：**
 
 ```
-interval = 100 の場合:
+interval = 32 の場合:
 
 Position 350:
-  KV Cache = [context[350], context[250], context[150], context[50]]
-              ↑現在          ↑100前        ↑200前        ↑300前
-           = 4 context vectors
+  KV Cache = [context[350], context[318], context[286], ...]
+              ↑現在          ↑32前         ↑64前
+           = 11 context vectors + zero padding
 
-Position 150:
-  KV Cache = [context[150], context[50]]
-              ↑現在          ↑100前
-           = 2 context vectors
-
-Position 50:
-  KV Cache = [context[50]]
-              ↑現在
-           = 1 context vector
+Position 1000:
+  KV Cache = [context[1000], context[968], ..., context[8]]
+           = 32 context vectors (max_contexts)
 ```
-
-**ポイント：**
-- 常に「現在位置のcontext」を含める（最新情報）
-- 過去のcontextは等間隔（interval）で取得
-- 古い「チャンク境界」方式ではなく、「現在位置基準」方式を使用
 
 ### 🚨 max_contexts（Context Window）設計方針
 
@@ -53,30 +68,6 @@ Position 50:
 Context-KV方式:
   - max_contexts で使用するcontext数を制限
   - 古いcontextは切り捨て
-```
-
-**例: interval=100, max_contexts=32 の場合**
-```
-Position 3500:
-  理論上: [ctx[3500], ctx[3400], ..., ctx[0]] = 36個
-  実際:   [ctx[3500], ctx[3400], ..., ctx[300]] = 32個（最新の32個のみ）
-
-  → 古すぎるcontext（position 0〜200）は切り捨て
-  → これにより 32 × 100 = 3200 トークン分の履歴を参照
-```
-
-**OOM防止の重要性：**
-- max_contextsを設定しないと、長いシーケンスでAttention計算が爆発
-- 通常LLMと同じ設計思想を維持することで、メモリ管理が容易
-
-### 実験の実行
-
-```bash
-# Colab（GPU）: 200サンプル、interval=100
-python3 scripts/experiment_context_kv.py -s 200 --chunk-size 100
-
-# カスタムcontext次元
-python3 scripts/experiment_context_kv.py -s 200 -c 256 --chunk-size 50
 ```
 
 ---
@@ -155,32 +146,38 @@ python3 -m mypy scripts/experiment_context_kv.py --ignore-missing-imports
 
 ## 📐 アーキテクチャ仕様
 
-### Core Components
+### Pythia-70M Base Architecture
 
-**1. ContextKVAttentionLLM**
-- 複数のContextBlock（各1層固定）
-- Context-KV Attention Layer
-- Token Embedding: GPT-2 pretrained (768-dim, frozen)
-- Weight Tying: token_output shares weights with token_embedding
+| Parameter | Value |
+|-----------|-------|
+| Layers | 6 |
+| Hidden Size | 512 |
+| Attention Heads | 8 |
+| Total Parameters | 70M |
 
-**2. ContextBlock**
+### Context-KV Replacement (Layer 0)
+
+**1. ContextBlock**
 - 1層固定、Phase 1で学習、Phase 2でfreeze
 - OACDアルゴリズムで多様性学習
+- context_dim = 256
 
-**3. Context-KV Attention**
+**2. Context-KV Attention**
 - ContextをK,Vに変換
 - 等間隔（interval）でcontextを取得してAttention
 - 常に現在位置のcontextを含める
 
-### Phase 1: 多様性学習（OACD）
+### Training Pipeline
 
+**Phase 1: Context多様性学習（OACD）**
 - **学習対象**: ContextBlockのみ
 - **損失**: OACD（多様性損失）
+- **データ**: Pile（開発時は限定サンプル）
 
-### Phase 2: トークン予測
-
+**Phase 2: 全体ファインチューニング**
 - **ContextBlock**: frozen（重み固定）
-- **Context-KV Attention + FFN**: 学習
+- **Context-KV Attention**: 学習
+- **Pythia Layer 1-5**: ファインチューニング
 - **損失**: CrossEntropy（次トークン予測）
 
 ---
@@ -242,7 +239,8 @@ train_phase2(
 ## File Structure
 
 **Main Scripts**:
-- `scripts/experiment_context_kv.py` - Context-KV Attention実験スクリプト
+- `scripts/experiment_context_kv.py` - Context-KV Attention実験スクリプト（現行）
+- `scripts/experiment_pythia_context_kv.py` - Pythia統合実験スクリプト（予定）
 
 **Core Implementation**:
 - `src/models/context_kv.py` - ContextKVAttentionLLM
@@ -253,4 +251,36 @@ train_phase2(
 
 ---
 
-Last Updated: 2025-12-03 (Context-KV Attention方式に完全移行)
+## Evaluation Metrics
+
+### Primary
+
+| Metric | Purpose |
+|--------|---------|
+| **PPL (Perplexity)** | 言語モデリング品質 |
+| **LAMBADA Accuracy** | 長距離依存性（最終単語予測） |
+| **KV Cache Memory** | 実際のメモリ使用量 |
+
+### Comparison Plan
+
+```
+Baseline: Pythia-70M (original)
+Ours:     Pythia-70M + Context-KV (Layer 0 replaced)
+
+Evaluate on:
+- WikiText-2 PPL
+- Pile test set PPL
+- LAMBADA accuracy
+- torch.cuda.max_memory_allocated()
+```
+
+---
+
+## Related Work
+
+- **DeepSeek MLA**: Low-rank KV compression (トークンごと)
+- **本プロジェクト**: Context-based KV compression (interval間隔)
+
+---
+
+Last Updated: 2025-12-03 (Pythia-70M統合方針に移行)
