@@ -16,7 +16,6 @@ Training:
 - Phase 2: 全体をファインチューニング
 """
 
-import math
 from typing import Optional, Dict
 
 import torch
@@ -248,6 +247,10 @@ class ContextPythiaModel(nn.Module):
 
         # Embedding
         self.embed_in = nn.Embedding(vocab_size, hidden_size)
+
+        # ⚠️ 重要: 埋め込み後の正規化（Phase 1収束に必須）
+        # 以前のコードでは embed_norm が使われており、これがないと収束しない
+        self.embed_norm = nn.LayerNorm(hidden_size)
 
         # ContextBlock: hidden_size -> context_dim
         # ⚠️ 既存の動作確認済みContextBlockを使用

@@ -11,7 +11,6 @@ Architecture:
 - 6 layers, 512 hidden, 8 heads
 """
 
-import math
 from typing import Optional, Dict
 
 import torch

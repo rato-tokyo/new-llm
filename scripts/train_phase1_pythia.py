@@ -299,14 +299,17 @@ def main():
     print_flush(f"ContextBlock parameters: {context_params:,}")
 
     # Compute token embeddings (CPUに保存)
+    # ⚠️ 重要: embed_norm による正規化が必須（Phase 1収束に必要）
     print_flush("\n[Embeddings] Computing token embeddings...")
     with torch.no_grad():
         # Train
         train_embeds_gpu = model.embed_in(train_ids)
+        train_embeds_gpu = model.embed_norm(train_embeds_gpu)  # ⚠️ 正規化必須
         train_token_embeds = train_embeds_gpu.cpu()
         del train_embeds_gpu
         # Val
         val_embeds_gpu = model.embed_in(val_ids)
+        val_embeds_gpu = model.embed_norm(val_embeds_gpu)  # ⚠️ 正規化必須
         val_token_embeds = val_embeds_gpu.cpu()
         del val_embeds_gpu
 
