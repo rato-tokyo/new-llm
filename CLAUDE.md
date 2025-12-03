@@ -139,13 +139,26 @@ def oacd_loss(contexts, centroid_weight=0.1):
 
 | パラメータ | 値 | 説明 |
 |-----------|-----|------|
-| `max_iterations` | 60 | 最大イテレーション数 |
+| `max_iterations` | 100 | 最大イテレーション数 |
 | `convergence_threshold` | 0.03 | 収束判定のMSE閾値 |
-| `learning_rate` | 0.002 | 学習率 |
+| `learning_rate` | 0.003 | 学習率 |
 | `batch_size` | 5000 | バッチサイズ |
 | `gradient_clip` | 2.0 | 勾配クリッピング値 |
-| `context_noise` | 0.1 | ガウシアンノイズ（汎化性能向上） |
+| `context_noise` | 0.05 | ガウシアンノイズ（収束優先） |
 | `early_stopping_threshold` | 0.9 | 収束率90%で早期停止 |
+
+### embed_norm（埋め込み正規化）（削除禁止）
+
+```python
+# ⚠️ 重要: 埋め込み後の正規化が必須（Phase 1収束に必要）
+self.embed_norm = nn.LayerNorm(hidden_size)
+
+# 使用時
+token_embeds = model.embed_in(token_ids)
+token_embeds = model.embed_norm(token_embeds)  # ⚠️ 必須
+```
+
+**⚠️ 警告**: embed_normがないとPhase 1が収束しません。
 
 ### shifted_prev_context方式（並列処理）（削除禁止）
 
@@ -285,7 +298,8 @@ new-llm/
 │   ├── phase1.py              # Phase 1設定
 │   └── pythia.py              # PythiaConfig, ContextPythiaConfig
 ├── scripts/
-│   └── train_phase1_pythia.py # Phase 1: ContextBlock OACD学習
+│   ├── train_phase1_pythia.py         # Phase 1: ContextBlock OACD学習
+│   └── experiment_pythia_comparison.py # Phase 2: Pythia vs Context-Pythia比較
 ├── src/
 │   ├── models/
 │   │   ├── pythia.py          # PythiaModel (baseline)
@@ -307,6 +321,8 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-04 | Phase 2比較実験スクリプト追加、Phase 1パラメータ調整 |
+| 2025-12-04 | embed_norm追加（Phase 1収束に必須） |
 | 2025-12-04 | Pythia-70M統合（Context-Pythia方式に完全移行） |
 | 2025-12-04 | Phase 1仕様の詳細を追記（Pythia統合失敗からの復旧後） |
 | 2025-12-03 | Context-KV Attention方式（旧方式、削除済み） |

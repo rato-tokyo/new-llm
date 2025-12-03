@@ -49,10 +49,19 @@ Phase 1 Training:
   → Early stop: conv 92% >= 90%
 ```
 
-### Phase 2: Full Training (Coming Soon)
+### Phase 2: Comparison Experiment
 
 ```bash
+# Compare Pythia-70M (baseline) vs Context-Pythia (50% KV compression)
 python3 scripts/experiment_pythia_comparison.py --samples 10000 --epochs 10
+```
+
+Expected output:
+```
+| Model | Best PPL | KV Cache | Reduction |
+|-------|----------|----------|-----------|
+| Pythia-70M | XXX.X | 96.0 KB | - |
+| Context-Pythia | XXX.X | 48.0 KB | 50% |
 ```
 
 ## Architecture Details
@@ -116,7 +125,8 @@ new-llm/
 │   ├── phase1.py              # Phase 1 settings
 │   └── pythia.py              # Pythia model config
 ├── scripts/
-│   └── train_phase1_pythia.py # Phase 1 training
+│   ├── train_phase1_pythia.py         # Phase 1 training
+│   └── experiment_pythia_comparison.py # Phase 2 comparison
 ├── src/
 │   ├── models/
 │   │   ├── pythia.py          # Pythia-70M baseline
@@ -136,12 +146,12 @@ new-llm/
 ### Phase 1 Settings (config/phase1.py)
 
 ```python
-max_iterations = 60          # Max training iterations
+max_iterations = 100         # Max training iterations
 convergence_threshold = 0.03 # MSE threshold
-learning_rate = 0.002        # Learning rate
+learning_rate = 0.003        # Learning rate
 batch_size = 5000            # Batch size
 gradient_clip = 2.0          # Gradient clipping
-context_noise = 0.1          # Gaussian noise for generalization
+context_noise = 0.05         # Gaussian noise for convergence
 early_stopping_threshold = 0.9  # Stop at 90% convergence
 ```
 
