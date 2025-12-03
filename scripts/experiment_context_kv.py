@@ -119,7 +119,7 @@ def build_batch_context_chunks(
     chunk_size: int,
 ) -> torch.Tensor:
     """
-    バッチのcontext chunksを動的に構築（メモリ効率版）
+    バッチのcontext chunksを動的に構築（ベクトル化版）
 
     Args:
         batch_indices: バッチ内の位置インデックス [batch_size]
@@ -133,6 +133,7 @@ def build_batch_context_chunks(
     """
     batch_size = len(batch_indices)
     context_dim = context_cache.shape[1]
+    num_boundaries = len(chunk_boundaries)
 
     # バッチ内の最大位置から必要なチャンク数を計算
     max_pos = int(batch_indices.max().item())
@@ -141,17 +142,18 @@ def build_batch_context_chunks(
     # 出力テンソル（バッチに必要な分だけ確保）
     batch_chunks = torch.zeros(batch_size, batch_max_chunks, context_dim)
 
-    for b, pos in enumerate(batch_indices):
-        pos = pos.item()
-        # この位置で利用可能なチャンク数
-        num_past_chunks = (pos + 1) // chunk_size
+    # 各サンプルのチャンク数を計算（ベクトル化）
+    num_past_chunks = (batch_indices + 1) // chunk_size  # [batch_size]
 
-        # 過去のチャンク境界を設定
-        for c in range(num_past_chunks):
-            batch_chunks[b, c] = chunk_boundaries[c]
+    # チャンク境界をコピー（部分ベクトル化）
+    if num_boundaries > 0:
+        for c in range(min(batch_max_chunks, num_boundaries)):
+            # このチャンクが必要なサンプルのマスク
+            mask = num_past_chunks > c
+            batch_chunks[mask, c] = chunk_boundaries[c]
 
-        # 現在のcontextを最後のチャンクに
-        batch_chunks[b, num_past_chunks] = context_cache[pos]
+    # 現在のcontextを最後のチャンク位置に設定（ベクトル化）
+    batch_chunks[torch.arange(batch_size), num_past_chunks] = context_cache[batch_indices]
 
     return batch_chunks
 

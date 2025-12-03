@@ -12,7 +12,7 @@ Context-KV Attention LLM - ContextをKVキャッシュとして使用するモ�
          ↑ 各チャンクの最終contextをK,Vに変換
 """
 
-from typing import Dict, List, Tuple
+from typing import Dict, List
 
 import torch
 import torch.nn as nn
@@ -38,7 +38,7 @@ class ContextToKV(nn.Module):
         self.to_k = nn.Linear(context_dim, hidden_dim)
         self.to_v = nn.Linear(context_dim, hidden_dim)
 
-    def forward(self, context: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+    def forward(self, context: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Context を K, V に変換
 
