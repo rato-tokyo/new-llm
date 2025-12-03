@@ -23,9 +23,6 @@ from typing import Optional, Tuple
 
 import torch
 from torch.utils.data import DataLoader, TensorDataset
-from datasets import load_dataset
-from transformers import AutoTokenizer
-from huggingface_hub.utils import HfHubHTTPError
 
 # Add project root to path
 sys.path.insert(0, ".")
@@ -34,6 +31,7 @@ from config import Phase1Config, ContextPythiaConfig
 from src.models.context_pythia import ContextPythiaModel
 from src.losses.diversity import oacd_loss
 from src.utils.io import print_flush
+from src.utils.data import prepare_phase1_data
 
 
 def set_seed(seed: int) -> None:
@@ -41,111 +39,6 @@ def set_seed(seed: int) -> None:
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-
-
-def load_pile_tokens(
-    num_tokens: int,
-    model_config: ContextPythiaConfig,
-    phase1_config: Phase1Config,
-    device: torch.device,
-    max_retries: int = 5,
-    retry_delay: float = 30.0,
-) -> Tuple[torch.Tensor, torch.Tensor]:
-    """Load tokens from Pile dataset for Phase 1 training.
-
-    Args:
-        num_tokens: 必要なトークン数
-        max_retries: 429エラー時の最大リトライ回数
-        retry_delay: リトライ間の待機時間（秒）
-
-    Returns:
-        train_ids: [num_train_sequences, internal_seq_length]
-        val_ids: [num_val_sequences, internal_seq_length]
-    """
-    seq_length = phase1_config.internal_seq_length
-
-    # シーケンス長で割り切れるようにトークン数を調整
-    num_sequences = (num_tokens + seq_length - 1) // seq_length
-    actual_tokens = num_sequences * seq_length
-
-    # Train/Val分割
-    val_sequences = max(1, int(num_sequences * phase1_config.val_split))
-    train_sequences = num_sequences - val_sequences
-
-    print_flush(f"Loading Pile dataset: {num_tokens:,} tokens")
-    print_flush(f"  Train: {train_sequences:,} sequences ({train_sequences * seq_length:,} tokens)")
-    print_flush(f"  Val: {val_sequences:,} sequences ({val_sequences * seq_length:,} tokens)")
-
-    # Load tokenizer
-    print_flush(f"  Loading tokenizer: {model_config.tokenizer_name}")
-    tokenizer = AutoTokenizer.from_pretrained(model_config.tokenizer_name)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    # Load Pile dataset (streaming)
-    print_flush("  Loading dataset (streaming)...")
-    dataset = load_dataset(
-        "monology/pile-uncopyrighted",
-        split="train",
-        streaming=True,
-    )
-
-    # Collect tokens with retry logic
-    all_tokens = []
-    retry_count = 0
-
-    print_flush(f"  Tokenizing...")
-
-    dataset_iter = iter(dataset)
-    while len(all_tokens) < actual_tokens:
-        try:
-            example = next(dataset_iter)
-            text = example["text"]
-            if not text or len(text) < 100:
-                continue
-
-            tokens = tokenizer.encode(text, add_special_tokens=False)
-            all_tokens.extend(tokens)
-
-            if len(all_tokens) % 100000 == 0 and len(all_tokens) > 0:
-                print_flush(f"    Collected {len(all_tokens):,} tokens...")
-
-            retry_count = 0  # Reset on success
-
-        except StopIteration:
-            break
-        except HfHubHTTPError as e:
-            if "429" in str(e) and retry_count < max_retries:
-                retry_count += 1
-                print_flush(f"    Rate limited (429). Retry {retry_count}/{max_retries} after {retry_delay}s...")
-                time.sleep(retry_delay)
-                dataset = load_dataset(
-                    "monology/pile-uncopyrighted",
-                    split="train",
-                    streaming=True,
-                )
-                dataset_iter = iter(dataset)
-                skip_count = len(all_tokens) // 500
-                for _ in range(skip_count):
-                    try:
-                        next(dataset_iter)
-                    except StopIteration:
-                        break
-            else:
-                raise
-
-    # Truncate and reshape
-    all_tokens = all_tokens[:actual_tokens]
-    input_ids = torch.tensor(all_tokens, dtype=torch.long, device=device)
-    input_ids = input_ids.view(num_sequences, seq_length)
-
-    # Split into train/val
-    train_ids = input_ids[:train_sequences]
-    val_ids = input_ids[train_sequences:]
-
-    print_flush(f"  Loaded {input_ids.numel():,} tokens")
-
-    return train_ids, val_ids
 
 
 def compute_convergence_rate(
@@ -419,11 +312,12 @@ def main() -> None:
     print_flush(f"Checkpoint: {phase1_config.checkpoint_path}")
     print_flush("=" * 70)
 
-    # Load data (with train/val split)
-    train_ids, val_ids = load_pile_tokens(
+    # Load data (with train/val split) - キャッシュ付き
+    train_ids, val_ids = prepare_phase1_data(
         num_tokens=args.tokens,
-        model_config=model_config,
-        phase1_config=phase1_config,
+        seq_length=phase1_config.internal_seq_length,
+        val_split=phase1_config.val_split,
+        tokenizer_name=model_config.tokenizer_name,
         device=device,
     )
 
