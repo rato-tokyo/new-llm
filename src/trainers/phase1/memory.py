@@ -127,20 +127,26 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         print_flush(f"  Done: {final_convergence_rate*100:.0f}% converged")
 
-        # 最終結果をGPUに戻す
         assert previous_contexts is not None
-        final_contexts = previous_contexts.to(self.device)
 
         if not return_all_layers:
+            # 最終結果をGPUに戻す
+            final_contexts = previous_contexts.to(self.device)
             return Phase1Result(contexts=final_contexts)
 
         # G案: 最終レイヤー出力のみキャッシュ [num_tokens, context_dim]
+        # メモリ効率化: return_all_layers=True時はcacheのみを使用し、
+        # contextsにはcacheへの参照を返す（GPU転送を避ける）
         context_cache, token_embeds_combined = self._collect_layer_cache(
             token_embeds, previous_contexts
         )
 
+        # previous_contextsはもう不要なので解放
+        del previous_contexts
+        clear_gpu_cache(self.device)
+
         return Phase1Result(
-            contexts=final_contexts,
+            contexts=context_cache,  # cache と同じデータを参照（CPU tensor）
             cache=context_cache,
             token_embeds=token_embeds_combined
         )

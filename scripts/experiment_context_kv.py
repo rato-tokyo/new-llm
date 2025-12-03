@@ -9,6 +9,7 @@ Usage:
 """
 
 import argparse
+import gc
 import os
 import sys
 import time
@@ -66,7 +67,7 @@ def collect_val_cache_parallel(
     # 初期context（ゼロベクトル）
     init_ctx = torch.zeros(1, context_dim)
 
-    # 最初のパス: ランダム初期化
+    # 最初のパス: ランダム初期化 (小さいスケールで初期化)
     previous_contexts = torch.randn(num_tokens, context_dim) * 0.01
 
     # 数回iterationして収束させる（簡易版）
@@ -86,9 +87,13 @@ def collect_val_cache_parallel(
             del batch_contexts, batch_embeds, batch_output
             clear_gpu_cache(device)
 
-        # 次のiteration用に更新
-        previous_contexts = contexts.clone()
+        # 次のiteration用に更新 (最後のiterationではclone不要)
+        if iteration < 2:
+            previous_contexts = contexts.clone()
         del shifted_prev
+
+    # 不要な中間テンソルを解放
+    del previous_contexts, init_ctx
 
     return contexts, token_embeds
 
@@ -374,6 +379,11 @@ def run_context_kv_experiment(
     )
     phase1_time = time.time() - phase1_start
 
+    # Phase 1完了後、trainerを解放してメモリ節約
+    del trainer
+    gc.collect()
+    clear_gpu_cache(device)
+
     model.freeze_context_block(0)
     print_flush("✓ ContextBlock frozen")
 
@@ -385,9 +395,17 @@ def run_context_kv_experiment(
     assert train_result.cache is not None
     assert train_result.token_embeds is not None
 
+    # メモリ効率化: 必要なデータのみ取り出し、train_resultを早期解放
+    # Note: train_result.contextsは使用しない（cacheと重複するため）
     train_context_cache = train_result.cache
-    train_chunk_boundaries = get_chunk_boundaries(train_context_cache, chunk_size)
     train_token_embeds = train_result.token_embeds
+
+    # train_result全体を解放（contexts含む）
+    del train_result
+    gc.collect()
+    clear_gpu_cache(device)
+
+    train_chunk_boundaries = get_chunk_boundaries(train_context_cache, chunk_size)
     train_targets = train_token_ids[1:].clone()
 
     # Val dataはPhase 1と同じ並列方式でキャッシュ収集
@@ -395,8 +413,17 @@ def run_context_kv_experiment(
     val_context_cache, val_token_embeds = collect_val_cache_parallel(
         wrapper, val_token_ids, device, config_wrapper.phase1_batch_size
     )
+
+    # wrapperとconfig_wrapperを解放（Phase 2では使わない）
+    del wrapper, config_wrapper
+    gc.collect()
+
     val_chunk_boundaries = get_chunk_boundaries(val_context_cache, chunk_size)
     val_targets = val_token_ids[1:].clone()
+
+    # 元のtoken_idsはtargetsに変換済みなので解放
+    del train_token_ids, val_token_ids
+    gc.collect()
 
     cache_time = time.time() - cache_start
     print_flush(f"Cache preparation: {cache_time:.1f}s")
