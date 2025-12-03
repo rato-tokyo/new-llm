@@ -9,9 +9,9 @@ class Phase1Config:
     """Phase 1: 多様性学習（OACD）の設定"""
 
     # ========== 学習パラメータ ==========
-    max_iterations = 60              # 最大反復回数
+    max_iterations = 100             # 最大反復回数（増加: 60→100）
     convergence_threshold = 0.03     # 収束判定のMSE閾値（ログ表示用）
-    learning_rate = 0.002            # 学習率（0.001-0.004）
+    learning_rate = 0.003            # 学習率（増加: 0.002→0.003）
     batch_size = 5000                # 並列処理のバッチサイズ（L4 GPU 24GB対応）
     gradient_clip = 2.0              # 勾配クリッピング値
 
