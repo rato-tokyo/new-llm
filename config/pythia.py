@@ -46,7 +46,9 @@ class ContextPythiaConfig(PythiaConfig):
     embed_dim = 512                 # Token Embedding dimension (Pythiaと同じ)
 
     # ========== Context次元（圧縮後）==========
-    context_dim = 300               # 圧縮後の次元（PythiaLayerはこの次元で動作）
+    # ⚠️ 重要: context_dimはnum_attention_heads (8) で割り切れる値にすること
+    # 例: 256, 320, 384, 448, 512 など
+    context_dim = 256               # 圧縮後の次元（PythiaLayerはこの次元で動作）
 
     # ========== Transformer設定（context_dimに合わせてスケール）==========
     # intermediate_size: 2048 * (256/512) = 1024
