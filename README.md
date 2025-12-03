@@ -1,105 +1,166 @@
-# Context-Pythia: 50% KV Cache Reduction
+# New-LLM: Cascade Context Architecture
 
-A research project to reduce KV cache memory by 50% through context-based dimension compression, while maintaining model performance.
+A novel language model architecture using OACD (Origin-Anchored Centroid Dispersion) algorithm with cascade context concatenation for learning diverse context representations.
 
-## 🎯 Goal
+## Core Concept: Cascade Context
 
-Replace Pythia-70M's attention input with compressed context vectors (512→256 dim), achieving **50% KV cache reduction**.
-
-## Architecture
+New-LLM uses a cascade context architecture where two ContextBlocks are trained sequentially, then their outputs are concatenated for token prediction. This provides the expressiveness of wider context dimensions while maintaining efficient training.
 
 ```
-Context-Pythia:
-  Token Embedding (512-dim)
-       ↓
-  ContextBlock: 512 → 256 (compression)
-       ↓
-  Layer 0-5: All use context (256-dim) as input
-       ↓
-  Output Head (vocab_size)
-
-KV Cache: 256-dim × seq_len × 6 layers
-         (vs. 512-dim × seq_len × 6 in original)
+Phase 1A: ContextBlock A (cd=500) → context_a cache
+Phase 1B: ContextBlock B (cd=500, input=context_a) → context_b cache
+Phase 2:  TokenBlock (input=concat(context_a, context_b)=1000) → predictions
 ```
 
-## Key Innovation
+## Key Results
 
-Instead of storing full-dimensional KV pairs, we:
-1. Compress token embeddings to context vectors via ContextBlock
-2. Use compressed context as attention input for all layers
-3. Maintain model capacity while reducing memory
+| Configuration | Val PPL | Val Acc | Notes |
+|---------------|---------|---------|-------|
+| **Cascade (500×2=1000)** | **111.9** | **25.6%** | Best performance |
+| C1T1-500 | 127.2 | 24.7% | Standard single context |
+| C2T2-500 | 132.2 | 24.4% | 2-layer (worse than 1-layer) |
+| C1T1-1000 | 134.0 | 23.6% | Wide context (inefficient) |
+
+**Key Discovery**: Cascade concatenation outperforms both multi-layer and wider single-context approaches.
+
+## Features
+
+- **Cascade Context Architecture**: Two ContextBlocks with cascade concatenation
+- **1-Layer Fixed**: Each block is single layer (no multi-layer complexity)
+- **OACD Algorithm**: Origin-Anchored Centroid Dispersion for diversity learning
+- **Two-Phase Training**: Separate diversity learning and token prediction
+- **GPT-2 Embeddings**: Frozen pretrained embeddings (768-dim)
+- **Weight Tying**: Output head shares weights with embedding layer
+- **GPU Optimized**: Efficient memory management for Colab (22GB VRAM)
 
 ## Quick Start
 
+### Installation
+
 ```bash
-# Install dependencies
 pip install -r requirements.txt
-
-# Run comparison experiment (dev mode)
-python3 scripts/experiment_pythia_comparison.py --dev
-
-# Full experiment
-python3 scripts/experiment_pythia_comparison.py --samples 10000
 ```
 
-## Results
+### Running Experiments
 
-| Model | Params | KV Cache | Val PPL | Val Acc |
-|-------|--------|----------|---------|---------|
-| PythiaModel | 70M | 100% | TBD | TBD |
-| ContextPythiaModel | 67M | **50%** | TBD | TBD |
+```bash
+# Local test (CPU, minimal samples)
+python3 scripts/experiment_cascade_context.py -s 2
+
+# Full experiment (GPU/Colab)
+python3 scripts/experiment_cascade_context.py -s 2000
+
+# Custom context dimension
+python3 scripts/experiment_cascade_context.py -s 2000 -c 500
+```
+
+## Architecture
+
+### 1-Layer Fixed Design (2025-12-02)
+
+Based on experiments showing that multi-layer architectures provide no benefit:
+
+- **ContextBlock**: 1 layer (Phase 1 training, Phase 2 frozen)
+- **TokenBlock**: 1 layer (Phase 2 training)
+- **Cascade Concatenation**: `concat(context_a, context_b)` for expressiveness
+
+### OACD Algorithm
+
+```python
+def oacd_loss(contexts, centroid_weight=0.1):
+    """Origin-Anchored Centroid Dispersion"""
+    centroid = contexts.mean(dim=0)
+    deviations = contexts - centroid
+    dispersion_loss = -torch.norm(deviations, p=2) / len(contexts)
+    centroid_loss = torch.norm(centroid) ** 2
+    return dispersion_loss + centroid_weight * centroid_loss
+```
+
+**Benefits**:
+- Stable convergence with origin anchoring
+- High Effective Rank (80%+)
+- Simple loss function
+
+### Training Pipeline
+
+**Phase 1A**: Train ContextBlock A on full data
+- Input: zero-initialized context + token embeddings
+- Output: context_a (cached for Phase 1B and Phase 2)
+
+**Phase 1B**: Train ContextBlock B on full data
+- Input: context_a (fixed) + token embeddings
+- Output: context_b (cached for Phase 2)
+
+**Phase 2**: Train TokenBlock
+- Input: `concat(context_a, context_b)` + token embeddings
+- Both ContextBlocks frozen
+- Cross-entropy loss for next-token prediction
 
 ## Project Structure
 
 ```
 new-llm/
-├── config/
-│   └── pythia.py              # Configuration
 ├── scripts/
-│   └── experiment_pythia_comparison.py
+│   └── experiment_cascade_context.py  # Main experiment script
 ├── src/
 │   ├── models/
-│   │   ├── pythia.py          # Baseline (Pythia reproduction)
-│   │   └── context_pythia.py  # Ours (50% KV reduction)
-│   └── losses/
-│       └── diversity.py       # OACD algorithm
-└── CLAUDE.md                  # Development guidelines
+│   │   ├── llm.py                     # Base LLM model
+│   │   ├── blocks.py                  # ContextBlock, TokenBlock (1-layer)
+│   │   └── layers.py                  # ContextLayer, TokenLayer
+│   ├── trainers/
+│   │   └── phase1/
+│   │       ├── base.py                # Phase 1 abstract base
+│   │       └── memory.py              # Memory-based Phase 1 trainer
+│   ├── losses/
+│   │   └── diversity.py               # OACD algorithm
+│   ├── providers/
+│   │   └── data/
+│   │       └── memory.py              # Data provider
+│   └── utils/
+│       ├── device.py                  # GPU utilities
+│       ├── initialization.py          # Weight init, parameter counting
+│       └── memory.py                  # Memory management
+├── config/
+│   ├── base.py                        # Base configuration
+│   ├── phase1.py                      # Phase 1 config
+│   └── phase2.py                      # Phase 2 config
+├── CLAUDE.md                          # Development guidelines
+└── README.md                          # This file
 ```
 
-## Training Pipeline
+## Configuration
 
-### Phase 1: Context Diversity Learning (OACD)
-
-Train ContextBlock to produce diverse representations:
+Default configuration in `config/base.py`:
 
 ```python
-def oacd_loss(contexts, centroid_weight=0.1):
-    centroid = contexts.mean(dim=0)
-    dispersion_loss = -torch.norm(contexts - centroid) / len(contexts)
-    centroid_loss = torch.norm(centroid) ** 2
-    return dispersion_loss + centroid_weight * centroid_loss
+embed_dim = 768           # GPT-2 embedding dimension
+context_dim = 500         # Context dimension per block
+vocab_size = 50257        # GPT-2 vocabulary
+num_input_tokens = 1      # Input tokens per step
 ```
 
-### Phase 2: Full Model Training
+## Development Guidelines
 
-- Freeze ContextBlock
-- Train all layers with cross-entropy loss
+See `CLAUDE.md` for:
+- Cascade context architecture details
+- OACD algorithm specification
+- 1-layer fixed architecture rationale
+- Code quality standards
+- GPU/CPU memory management
 
-## Baseline: Pythia-70M
+## Current Status (2025-12-02)
 
-| Parameter | Value |
-|-----------|-------|
-| Layers | 6 |
-| Hidden Size | 512 |
-| Attention Heads | 8 |
-| Parameters | 70M |
-| Training Data | Pile (~300B tokens) |
+**Working**:
+- Cascade context architecture (best performance)
+- 1-layer fixed design (simplified codebase)
+- OACD algorithm with high Effective Rank
+- GPU-optimized training pipeline
+- Type-safe configuration with Protocol
 
-## References
-
-- [Pythia Paper](https://arxiv.org/abs/2304.01373)
-- [EleutherAI/pythia-70m](https://huggingface.co/EleutherAI/pythia-70m)
-- [DeepSeek MLA](https://arxiv.org/abs/2401.02954)
+**Architecture Decision**:
+- Multi-layer logic removed (C2T2 performed worse than C1T1)
+- Cascade concatenation provides sufficient expressiveness
+- Code significantly simplified
 
 ## License
 

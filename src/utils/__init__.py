@@ -13,6 +13,13 @@ from .memory import (
 )
 from .initialization import init_linear_weights, count_parameters
 from .device import is_cuda_device, clear_gpu_cache, synchronize_device
+from .cache import (
+    collect_context_cache_sequential,
+    collect_context_cache_sequential_multiblock,
+    collect_token_embeds_chunked,
+    collect_multiblock_cache_to_files,
+    ChunkedCacheDataset,
+)
 from .embedding import (
     load_pretrained_gpt2_embeddings,
     create_random_embedding,
@@ -34,6 +41,12 @@ __all__ = [
     'is_cuda_device',
     'clear_gpu_cache',
     'synchronize_device',
+    # Cache utilities
+    'collect_context_cache_sequential',
+    'collect_context_cache_sequential_multiblock',
+    'collect_token_embeds_chunked',
+    'collect_multiblock_cache_to_files',
+    'ChunkedCacheDataset',
     # Embedding utilities
     'load_pretrained_gpt2_embeddings',
     'create_random_embedding',

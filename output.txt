@@ -1,217 +1,203 @@
+From https://github.com/rato-tokyo/new-llm
+ * branch            main       -> FETCH_HEAD
 Already up to date.
 ======================================================================
-CONTEXT-KV ATTENTION EXPERIMENT
+CASCADE CONTEXT EXPERIMENT
 ======================================================================
-Samples: 400
-Context dim: 256
-Chunk size (interval): 20
-Num heads: 8
-Max contexts: 32
+Samples: 800
+Blocks: 2
+Context dims: [256, 256]
+Prev context: interval=8, count=2
+Combined context dim: 256+256x(1+2)=1536
 ======================================================================
 Device: cuda (NVIDIA L4, 22.2GB)
 Loading data...
+tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 168kB/s]
+config.json: 100% 665/665 [00:00<00:00, 5.33MB/s]
+vocab.json: 100% 1.04M/1.04M [00:00<00:00, 49.3MB/s]
+merges.txt: 100% 456k/456k [00:00<00:00, 2.05MB/s]
+tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 2.09MB/s]
 Loading training data...
-  Loading from cache: ./cache/ultrachat_400samples_full.pt
+  Loading 800 samples from UltraChat...
+README.md: 3.90kB [00:00, 14.9MB/s]
+data/train_sft-00000-of-00003-a3ecf92756(…): 100% 244M/244M [00:04<00:00, 53.9MB/s]
+data/train_sft-00001-of-00003-0a1804bcb6(…): 100% 244M/244M [00:03<00:00, 65.4MB/s]
+data/train_sft-00002-of-00003-ee46ed25cf(…): 100% 244M/244M [00:03<00:00, 69.6MB/s]
+data/test_sft-00000-of-00001-f7dfac4afe5(…): 100% 81.2M/81.2M [00:03<00:00, 21.2MB/s]
+data/train_gen-00000-of-00003-a6c9fb894b(…): 100% 244M/244M [00:03<00:00, 69.3MB/s]
+data/train_gen-00001-of-00003-d6a0402e41(…): 100% 243M/243M [00:03<00:00, 70.8MB/s]
+data/train_gen-00002-of-00003-c0db75b92a(…): 100% 243M/243M [00:01<00:00, 154MB/s]
+data/test_gen-00000-of-00001-3d4cd830914(…): 100% 80.4M/80.4M [00:02<00:00, 30.3MB/s]
+Generating train_sft split: 100% 207865/207865 [00:04<00:00, 50668.17 examples/s]
+Generating test_sft split: 100% 23110/23110 [00:00<00:00, 56707.41 examples/s]
+Generating train_gen split: 100% 256032/256032 [00:03<00:00, 73118.41 examples/s]
+Generating test_gen split: 100% 28304/28304 [00:00<00:00, 70487.48 examples/s]
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_800samples_full.pt
 Loading validation data...
-Token indices sequence length is longer than the specified maximum sequence length for this model (22723 > 1024). Running this sequence through the model will result in indexing errors
-  Train: 473429 tokens (400 samples)
+  Validation file not found, generating: ./cache/example_val.txt
+  Generated 20 validation samples (indices 50000-50019)
+  Train: 948524 tokens (800 samples)
   Val:   22723 tokens
-Data: 473,429 train, 22,723 val tokens
-Memory after data load: CPU: 0.8GB, GPU: 0.0GB
+Data: 948,524 train, 22,723 val tokens
+Split: Block0=474,262, Block1=474,261 tokens
 
-Creating ContextKVAttentionLLM (cd=256, heads=8, chunk=20)...
-2025-12-03 11:35:05.148602: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
-2025-12-03 11:35:05.164923: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+Creating CascadeContextLLM (cd=256+256=512, prev(i=8,c=2))...
+2025-12-03 09:14:24.743312: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-12-03 09:14:24.759047: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
 WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-E0000 00:00:1764761705.183501    5071 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
-E0000 00:00:1764761705.188882    5071 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
-W0000 00:00:1764761705.202964    5071 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764761705.202991    5071 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764761705.202994    5071 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764761705.202996    5071 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-2025-12-03 11:35:05.207529: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+E0000 00:00:1764753264.779568    1705 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764753264.786081    1705 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764753264.802877    1705 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764753264.802911    1705 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764753264.802915    1705 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764753264.802917    1705 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-12-03 09:14:24.807992: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
 To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
 Loading GPT-2 pretrained embeddings...
+config.json: 100% 665/665 [00:00<00:00, 5.86MB/s]
+model.safetensors: 100% 548M/548M [00:03<00:00, 172MB/s]
 ✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
 ✓ Weight Tying: token_output shares weights with token_embedding
-Parameters: 45,163,264 total
-Memory after model init: CPU: 1.5GB, GPU: 0.2GB
+Parameters: 40,896,512 total
+  ContextBlocks (2): 525,824
+    Block 0: 262,912
+    Block 1: 262,912
+  TokenBlock: 1,771,776
 
-[Phase 1] Training ContextBlock (cd=256)...
+[Phase 1-0] Training ContextBlock 0 (cd=256) on split 0...
 
-[Phase 1] Context: 473,429 tokens, 60 iterations
+[Phase 1] Context0: 474,263 tokens, 60 iterations
   Iter 1: random init
-  Iter 2: conv=0% loss=5.3976 [1.9s]
-  Iter 3: conv=0% loss=6.4529 [1.3s]
-  Iter 4: conv=0% loss=5.3798 [1.3s]
-  Iter 5: conv=0% loss=3.6661 [1.2s]
-  Iter 6: conv=0% loss=2.2661 [1.3s]
-  Iter 7: conv=1% loss=1.6417 [1.3s]
-  Iter 8: conv=1% loss=1.6784 [1.3s]
-  Iter 9: conv=3% loss=1.9345 [1.3s]
-  Iter 10: conv=7% loss=2.0713 [1.3s]
-  Iter 11: conv=14% loss=1.9719 [1.3s]
-  Iter 12: conv=22% loss=1.7204 [1.2s]
-  Iter 13: conv=28% loss=1.4871 [1.3s]
-  Iter 14: conv=37% loss=1.3792 [1.3s]
-  Iter 15: conv=54% loss=1.3748 [1.3s]
-  Iter 16: conv=73% loss=1.3912 [1.3s]
-  Iter 17: conv=85% loss=1.3718 [1.3s]
-  Iter 18: conv=91% loss=1.3056 [1.2s]
+  Iter 2: conv=0% loss=5.3980 [2.4s]
+  Iter 3: conv=0% loss=6.4524 [1.4s]
+  Iter 4: conv=0% loss=5.3793 [1.4s]
+  Iter 5: conv=0% loss=3.6652 [1.4s]
+  Iter 6: conv=0% loss=2.2646 [1.3s]
+  Iter 7: conv=1% loss=1.6396 [1.3s]
+  Iter 8: conv=1% loss=1.6776 [1.3s]
+  Iter 9: conv=3% loss=1.9359 [1.4s]
+  Iter 10: conv=7% loss=2.0737 [1.3s]
+  Iter 11: conv=14% loss=1.9738 [1.3s]
+  Iter 12: conv=22% loss=1.7211 [1.4s]
+  Iter 13: conv=27% loss=1.4861 [1.3s]
+  Iter 14: conv=37% loss=1.3768 [1.3s]
+  Iter 15: conv=54% loss=1.3722 [1.3s]
+  Iter 16: conv=73% loss=1.3893 [1.4s]
+  Iter 17: conv=85% loss=1.3709 [1.3s]
+  Iter 18: conv=91% loss=1.3056 [1.4s]
   → Early stop: conv 91% >= 90%
   Done: 91% converged
   Collecting cache (parallel)...
+  Cache collected (parallel) [0.9s]
+Phase 1-0: 27.1s, 18 iter, conv=91%
+✓ ContextBlock 0 frozen
+
+[Phase 1-1] Training ContextBlock 1 (cd=256) on split 1...
+
+[Phase 1] Context1: 474,262 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=6.6883 [1.3s]
+  Iter 3: conv=0% loss=8.0710 [1.4s]
+  Iter 4: conv=0% loss=7.0253 [1.4s]
+  Iter 5: conv=0% loss=5.2248 [1.3s]
+  Iter 6: conv=0% loss=3.5769 [1.4s]
+  Iter 7: conv=0% loss=2.5210 [1.4s]
+  Iter 8: conv=1% loss=2.0087 [1.4s]
+  Iter 9: conv=2% loss=1.7738 [1.4s]
+  Iter 10: conv=6% loss=1.6616 [1.4s]
+  Iter 11: conv=16% loss=1.5874 [1.4s]
+  Iter 12: conv=34% loss=1.4854 [1.4s]
+  Iter 13: conv=52% loss=1.3399 [1.4s]
+  Iter 14: conv=66% loss=1.2014 [1.4s]
+  Iter 15: conv=77% loss=1.1232 [1.4s]
+  Iter 16: conv=87% loss=1.1043 [1.4s]
+  Iter 17: conv=94% loss=1.1000 [1.4s]
+  → Early stop: conv 94% >= 90%
+  Done: 94% converged
+  Collecting cache (parallel)...
   Cache collected (parallel) [1.0s]
-✓ ContextBlock frozen
-Memory after Phase 1: CPU: 4.4GB, GPU: 0.2GB
+Phase 1-1: 25.5s, 17 iter, conv=94%
+✓ ContextBlock 1 frozen
 
-[Phase 2 Prep] Preparing context cache...
-Memory after train_result release: CPU: 4.4GB, GPU: 0.2GB
-Memory before val cache: CPU: 4.4GB, GPU: 0.2GB
-  Collecting val cache (parallel)...
-Memory after val cache: CPU: 4.4GB, GPU: 0.2GB
-Cache preparation: 1.7s
-  Train: torch.Size([473428, 256])
-  Val: torch.Size([22722, 256])
-  Context interval: 20 (theoretical max: 23672, using max: 32)
-  Cache sizes: train_ctx=462MB, train_emb=1387MB, val_ctx=22MB, val_emb=67MB (total=1938MB)
-Memory after Phase 2 Prep: CPU: 4.4GB, GPU: 0.2GB
-Effective Rank: Val=82.3%
+[Phase 2 Prep] Collecting multi context cache (chunked, 2 blocks)...
+    Collecting train cache (948,523 tokens, 2 blocks, prev(interval=8, count=2), chunk=100,000)...
+      100,000/948,523 tokens processed...
+      Chunk 1/10 saved (100,000/948,523 tokens)
+      200,000/948,523 tokens processed...
+      Chunk 2/10 saved (200,000/948,523 tokens)
+      300,000/948,523 tokens processed...
+      Chunk 3/10 saved (300,000/948,523 tokens)
+      400,000/948,523 tokens processed...
+      Chunk 4/10 saved (400,000/948,523 tokens)
+      500,000/948,523 tokens processed...
+      Chunk 5/10 saved (500,000/948,523 tokens)
+      600,000/948,523 tokens processed...
+      Chunk 6/10 saved (600,000/948,523 tokens)
+      700,000/948,523 tokens processed...
+      Chunk 7/10 saved (700,000/948,523 tokens)
+      800,000/948,523 tokens processed...
+      Chunk 8/10 saved (800,000/948,523 tokens)
+      900,000/948,523 tokens processed...
+      Chunk 9/10 saved (900,000/948,523 tokens)
+      948,523/948,523 tokens processed...
+      Chunk 10/10 saved (948,523/948,523 tokens)
+    Cache collected [455.0s] -> 10 chunks
+    Collecting val cache (22,722 tokens, 2 blocks, prev(interval=8, count=2), chunk=100,000)...
+      22,722/22,722 tokens processed...
+      Chunk 1/1 saved (22,722/22,722 tokens)
+    Cache collected [10.8s] -> 1 chunks
+Cache collection: 465.8s
+  Train: 948,523 tokens, 10 chunks
+  Val: 22,722 tokens, 1 chunks
+Effective Rank: Val=76.7%
 
-[Phase 2] Training Context-KV Attention...
-✓ All 1 ContextBlocks frozen
+[Phase 2] Training TokenBlock with concatenated context (cd=1536)...
+✓ All 2 ContextBlocks frozen
 ✓ Embedding frozen
-✓ Training 6,301,440/45,163,264 parameters
+✓ Training TokenBlock only: 1,771,776/40,896,512 parameters
 
-[Phase 2] 473,428 train / 22,722 val tokens, 40 epochs
-    Epoch 1: batch 1/925 (0.0s)...
-    Epoch 1: batch 51/925 (ppl=634374.9, acc=6.5%, 2.1s)
-    Epoch 1: batch 101/925 (ppl=24727.6, acc=8.4%, 4.2s)
-    Epoch 1: batch 151/925 (ppl=8014.8, acc=9.4%, 6.2s)
-    Epoch 1: batch 201/925 (ppl=4404.2, acc=10.0%, 8.3s)
-    Epoch 1: batch 251/925 (ppl=2973.3, acc=10.5%, 10.4s)
-    Epoch 1: batch 301/925 (ppl=2228.2, acc=11.0%, 12.4s)
-    Epoch 1: batch 351/925 (ppl=1792.5, acc=11.4%, 14.5s)
-    Epoch 1: batch 401/925 (ppl=1500.1, acc=11.7%, 16.6s)
-    Epoch 1: batch 451/925 (ppl=1302.4, acc=12.1%, 18.6s)
-    Epoch 1: batch 501/925 (ppl=1155.6, acc=12.4%, 20.7s)
-    Epoch 1: batch 551/925 (ppl=1041.2, acc=12.7%, 22.8s)
-    Epoch 1: batch 601/925 (ppl=957.1, acc=13.0%, 24.8s)
-    Epoch 1: batch 651/925 (ppl=886.8, acc=13.2%, 26.9s)
-    Epoch 1: batch 701/925 (ppl=825.6, acc=13.4%, 29.0s)
-    Epoch 1: batch 751/925 (ppl=776.3, acc=13.6%, 31.0s)
-    Epoch 1: batch 801/925 (ppl=736.2, acc=13.8%, 33.1s)
-    Epoch 1: batch 851/925 (ppl=699.8, acc=14.0%, 35.2s)
-    Epoch 1: batch 901/925 (ppl=669.8, acc=14.1%, 37.2s)
-    Epoch 1: batch 925/925 (ppl=654.7, acc=14.2%, 38.2s)
-    Epoch 1: train_ppl=654.4 val_ppl=316.4 acc=15.8% [39.3s] *
-    Epoch 2: batch 1/925 (0.0s)...
-    Epoch 2: batch 51/925 (ppl=280.0, acc=17.1%, 2.1s)
-    Epoch 2: batch 101/925 (ppl=275.2, acc=17.3%, 4.1s)
-    Epoch 2: batch 151/925 (ppl=271.1, acc=17.4%, 6.2s)
-    Epoch 2: batch 201/925 (ppl=272.9, acc=17.5%, 8.3s)
-    Epoch 2: batch 251/925 (ppl=270.4, acc=17.5%, 10.4s)
-    Epoch 2: batch 301/925 (ppl=266.7, acc=17.7%, 12.4s)
-    Epoch 2: batch 351/925 (ppl=264.6, acc=17.7%, 14.5s)
-    Epoch 2: batch 401/925 (ppl=262.8, acc=17.7%, 16.6s)
-    Epoch 2: batch 451/925 (ppl=261.1, acc=17.7%, 18.6s)
-    Epoch 2: batch 501/925 (ppl=258.0, acc=17.8%, 20.7s)
-    Epoch 2: batch 551/925 (ppl=255.4, acc=17.9%, 22.8s)
-    Epoch 2: batch 601/925 (ppl=253.0, acc=18.0%, 24.8s)
-    Epoch 2: batch 651/925 (ppl=251.3, acc=18.1%, 26.9s)
-    Epoch 2: batch 701/925 (ppl=249.1, acc=18.1%, 29.0s)
-    Epoch 2: batch 751/925 (ppl=247.3, acc=18.1%, 31.1s)
-    Epoch 2: batch 801/925 (ppl=244.6, acc=18.3%, 33.2s)
-    Epoch 2: batch 851/925 (ppl=242.6, acc=18.3%, 35.2s)
-    Epoch 2: batch 901/925 (ppl=240.7, acc=18.4%, 37.3s)
-    Epoch 2: batch 925/925 (ppl=239.9, acc=18.4%, 38.3s)
-    Epoch 2: train_ppl=239.9 val_ppl=248.2 acc=17.2% [39.4s] *
-    Epoch 3: batch 1/925 (0.0s)...
-    Epoch 3: batch 51/925 (ppl=173.8, acc=20.2%, 2.1s)
-    Epoch 3: batch 101/925 (ppl=176.7, acc=20.2%, 4.2s)
-    Epoch 3: batch 151/925 (ppl=177.0, acc=20.4%, 6.3s)
-    Epoch 3: batch 201/925 (ppl=174.9, acc=20.5%, 8.3s)
-    Epoch 3: batch 251/925 (ppl=175.0, acc=20.5%, 10.4s)
-    Epoch 3: batch 301/925 (ppl=173.8, acc=20.6%, 12.5s)
-    Epoch 3: batch 351/925 (ppl=173.9, acc=20.6%, 14.6s)
-    Epoch 3: batch 401/925 (ppl=174.1, acc=20.6%, 16.7s)
-    Epoch 3: batch 451/925 (ppl=172.7, acc=20.6%, 18.7s)
-    Epoch 3: batch 501/925 (ppl=171.0, acc=20.8%, 20.8s)
-    Epoch 3: batch 551/925 (ppl=170.2, acc=20.8%, 22.9s)
-    Epoch 3: batch 601/925 (ppl=169.8, acc=20.9%, 25.0s)
-    Epoch 3: batch 651/925 (ppl=169.1, acc=20.9%, 27.1s)
-    Epoch 3: batch 701/925 (ppl=168.4, acc=20.9%, 29.1s)
-    Epoch 3: batch 751/925 (ppl=167.3, acc=21.0%, 31.2s)
-    Epoch 3: batch 801/925 (ppl=166.6, acc=21.0%, 33.3s)
-    Epoch 3: batch 851/925 (ppl=165.7, acc=21.1%, 35.4s)
-    Epoch 3: batch 901/925 (ppl=164.9, acc=21.1%, 37.5s)
-    Epoch 3: batch 925/925 (ppl=164.4, acc=21.1%, 38.5s)
-    Epoch 3: train_ppl=164.4 val_ppl=212.5 acc=18.6% [39.6s] *
-    Epoch 4: batch 1/925 (0.0s)...
-    Epoch 4: batch 51/925 (ppl=114.5, acc=23.9%, 2.1s)
-    Epoch 4: batch 101/925 (ppl=115.3, acc=23.8%, 4.2s)
-    Epoch 4: batch 151/925 (ppl=116.8, acc=23.8%, 6.3s)
-    Epoch 4: batch 201/925 (ppl=116.8, acc=23.9%, 8.4s)
-    Epoch 4: batch 251/925 (ppl=117.6, acc=23.8%, 10.4s)
-    Epoch 4: batch 301/925 (ppl=118.3, acc=23.7%, 12.5s)
-    Epoch 4: batch 351/925 (ppl=118.7, acc=23.7%, 14.6s)
-    Epoch 4: batch 401/925 (ppl=118.5, acc=23.7%, 16.7s)
-    Epoch 4: batch 451/925 (ppl=117.9, acc=23.8%, 18.8s)
-    Epoch 4: batch 501/925 (ppl=117.8, acc=23.7%, 20.9s)
-    Epoch 4: batch 551/925 (ppl=118.0, acc=23.8%, 23.0s)
-    Epoch 4: batch 601/925 (ppl=118.0, acc=23.8%, 25.1s)
-    Epoch 4: batch 651/925 (ppl=117.7, acc=23.8%, 27.2s)
-    Epoch 4: batch 701/925 (ppl=117.4, acc=23.8%, 29.3s)
-    Epoch 4: batch 751/925 (ppl=116.9, acc=23.8%, 31.4s)
-    Epoch 4: batch 801/925 (ppl=116.8, acc=23.8%, 33.5s)
-    Epoch 4: batch 851/925 (ppl=116.3, acc=23.9%, 35.6s)
-    Epoch 4: batch 901/925 (ppl=115.9, acc=23.9%, 37.6s)
-    Epoch 4: batch 925/925 (ppl=115.8, acc=23.9%, 38.7s)
-    Epoch 4: train_ppl=115.9 val_ppl=201.1 acc=19.4% [39.7s] *
-    Epoch 5: batch 1/925 (0.0s)...
-    Epoch 5: batch 51/925 (ppl=78.1, acc=26.8%, 2.1s)
-    Epoch 5: batch 101/925 (ppl=79.4, acc=26.6%, 4.2s)
-    Epoch 5: batch 151/925 (ppl=79.9, acc=26.6%, 6.3s)
-    Epoch 5: batch 201/925 (ppl=80.2, acc=26.7%, 8.4s)
-    Epoch 5: batch 251/925 (ppl=80.6, acc=26.7%, 10.5s)
-    Epoch 5: batch 301/925 (ppl=81.0, acc=26.7%, 12.6s)
-    Epoch 5: batch 351/925 (ppl=81.8, acc=26.7%, 14.8s)
-    Epoch 5: batch 401/925 (ppl=82.3, acc=26.6%, 16.8s)
-    Epoch 5: batch 451/925 (ppl=82.5, acc=26.6%, 18.9s)
-    Epoch 5: batch 501/925 (ppl=82.8, acc=26.5%, 21.0s)
-    Epoch 5: batch 551/925 (ppl=83.2, acc=26.5%, 23.1s)
-    Epoch 5: batch 601/925 (ppl=83.4, acc=26.5%, 25.2s)
-    Epoch 5: batch 651/925 (ppl=83.4, acc=26.5%, 27.3s)
-    Epoch 5: batch 701/925 (ppl=83.7, acc=26.5%, 29.4s)
-    Epoch 5: batch 751/925 (ppl=83.7, acc=26.5%, 31.5s)
-    Epoch 5: batch 801/925 (ppl=84.0, acc=26.5%, 33.6s)
-    Epoch 5: batch 851/925 (ppl=84.0, acc=26.5%, 35.7s)
-    Epoch 5: batch 901/925 (ppl=84.1, acc=26.5%, 37.8s)
-    Epoch 5: batch 925/925 (ppl=84.0, acc=26.6%, 38.8s)
-    Epoch 5: train_ppl=84.0 val_ppl=194.9 acc=19.4% [39.9s] *
-    Epoch 6: batch 1/925 (0.0s)...
-    Epoch 6: batch 51/925 (ppl=53.6, acc=30.3%, 2.1s)
-    Epoch 6: batch 101/925 (ppl=54.8, acc=30.1%, 4.2s)
-    Epoch 6: batch 151/925 (ppl=55.8, acc=30.0%, 6.3s)
-    Epoch 6: batch 201/925 (ppl=56.6, acc=29.9%, 8.4s)
-    Epoch 6: batch 251/925 (ppl=57.4, acc=29.7%, 10.5s)
-    Epoch 6: batch 301/925 (ppl=57.7, acc=29.6%, 12.5s)
-    Epoch 6: batch 351/925 (ppl=58.5, acc=29.5%, 14.6s)
-    Epoch 6: batch 401/925 (ppl=59.3, acc=29.4%, 16.7s)
-    Epoch 6: batch 451/925 (ppl=59.9, acc=29.3%, 18.8s)
-    Epoch 6: batch 501/925 (ppl=60.0, acc=29.3%, 20.9s)
-    Epoch 6: batch 551/925 (ppl=60.2, acc=29.3%, 23.0s)
-    Epoch 6: batch 601/925 (ppl=60.5, acc=29.4%, 25.1s)
-    Epoch 6: batch 651/925 (ppl=60.9, acc=29.3%, 27.2s)
-    Epoch 6: batch 701/925 (ppl=61.3, acc=29.3%, 29.3s)
-    Epoch 6: batch 751/925 (ppl=61.6, acc=29.3%, 31.4s)
-    Epoch 6: batch 801/925 (ppl=61.7, acc=29.3%, 33.5s)
-    Epoch 6: batch 851/925 (ppl=61.8, acc=29.2%, 35.6s)
-    Epoch 6: batch 901/925 (ppl=62.1, acc=29.2%, 37.7s)
-    Epoch 6: batch 925/925 (ppl=62.1, acc=29.2%, 38.7s)
-    Epoch 6: train_ppl=62.1 val_ppl=204.6 acc=19.9% [39.8s]
-    Epoch 7: batch 1/925 (0.0s)...
-    Epoch 7: batch 51/925 (ppl=38.7, acc=34.0%, 2.1s)
-    Epoch 7: batch 101/925 (ppl=39.0, acc=33.7%, 4.2s)
-    Epoch 7: batch 151/925 (ppl=39.7, acc=33.5%, 6.3s)
-    Epoch 7: batch 201/925 (ppl=40.6, acc=33.2%, 8.4s)
+[Phase 2] 948,523 train / 22,722 val tokens, 40 epochs
+    Epoch 1: train_ppl=4583.1 val_ppl=615.0 acc=15.7% [22.7s] *
+    Epoch 2: train_ppl=477.9 val_ppl=348.4 acc=17.9% [23.2s] *
+    Epoch 3: train_ppl=305.1 val_ppl=272.0 acc=19.0% [23.5s] *
+    Epoch 4: train_ppl=236.1 val_ppl=235.0 acc=19.9% [23.2s] *
+    Epoch 5: train_ppl=196.0 val_ppl=212.2 acc=20.5% [23.1s] *
+    Epoch 6: train_ppl=168.9 val_ppl=196.9 acc=21.1% [23.2s] *
+    Epoch 7: train_ppl=149.3 val_ppl=186.2 acc=21.4% [23.2s] *
+    Epoch 8: train_ppl=134.3 val_ppl=178.5 acc=21.8% [23.2s] *
+    Epoch 9: train_ppl=122.4 val_ppl=173.0 acc=22.0% [23.2s] *
+    Epoch 10: train_ppl=112.8 val_ppl=169.1 acc=22.2% [23.2s] *
+    Epoch 11: train_ppl=104.7 val_ppl=166.4 acc=22.4% [23.2s] *
+    Epoch 12: train_ppl=98.0 val_ppl=164.5 acc=22.4% [23.3s] *
+    Epoch 13: train_ppl=92.2 val_ppl=163.3 acc=22.6% [23.2s] *
+    Epoch 14: train_ppl=87.2 val_ppl=162.5 acc=22.7% [23.2s] *
+    Epoch 15: train_ppl=82.8 val_ppl=162.1 acc=22.7% [23.2s] *
+    Epoch 16: train_ppl=78.9 val_ppl=161.9 acc=22.7% [23.2s]
+    → Early stop at epoch 16
+    Best: epoch 15, ppl=162.1, acc=22.7%
+
+Phase 2: 370.8s, Best epoch 15
+Result: PPL=162.1, Acc=22.7%
+Total time: 889.3s
+
+======================================================================
+SUMMARY - Multi Context Experiment (2 blocks)
+======================================================================
+Architecture: CascadeContextLLM (2 blocks, 1L each)
+  ContextBlock 0: cd=256, trained on 474,262 tokens
+  ContextBlock 1: cd=256, trained on 474,261 tokens
+  Prev context: interval=8, count=2
+  TokenBlock: cd=1536 (concatenated: 256+256, prev(i=8,c=2))
+Parameters: 40,896,512
+Phase 1-0: 27.1s, conv=91%
+Phase 1-1: 25.5s, conv=94%
+Cache collection: 465.8s
+Phase 2: 370.8s, epoch 15
+Effective Rank: 76.7% (of 1536)
+Val PPL: 162.1
+Val Acc: 22.7%
+Total time: 889.3s
+======================================================================
+
+DONE

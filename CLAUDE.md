@@ -1,133 +1,39 @@
 # New-LLM Project Guidelines
 
-## 🎯 Project Goal: Context-Pythia (2025-12-03)
+## 🎯 Context-KV Attention Architecture (2025-12-03)
 
-**Pythia-70Mの全LayerをContext-based Attentionに置き換え、KVキャッシュメモリを50%削減する。**
+**KVキャッシュを大幅に削減するContext-KV Attention方式を採用。**
 
-### Target Architecture
+### アーキテクチャ概要
 
 ```
-Context-Pythia:
-  Token Embedding (512-dim)
-       ↓
-  ContextBlock: 512 → 256 (圧縮)
-       ↓
-  Layer 0-5: 全て context (256-dim) を入力
-       ↓
-  Output Head (vocab_size)
+Context-KV Attention:
+  - 100トークンごとにContextを圧縮
+  - 圧縮されたContextをKVキャッシュとして使用
+  - ~99% KVキャッシュ削減
+
+Position 350 の場合:
+  KV Cache = [context_0-99, context_100-199, context_200-299, context_300-350]
+           = 4 context vectors のみ
 ```
 
-### Key Decisions
+### 実験の実行
 
-| 項目 | 決定 |
-|------|------|
-| **置き換え層** | 全6Layer |
-| **Context次元** | 256（50%圧縮） |
-| **学習データ** | Pile（Pythiaと同じ）、開発時は限定サンプル |
-| **学習方法** | Phase 1（OACD）→ Phase 2（全体学習） |
-| **評価指標** | PPL + LAMBADA |
-| **メモリ削減目標** | 50% |
+```bash
+# Colab（GPU）: 200サンプル
+python3 scripts/experiment_context_kv.py -s 200 --chunk-size 100
+
+# カスタムcontext次元
+python3 scripts/experiment_context_kv.py -s 200 -c 256 128 --chunk-size 50
+```
 
 ---
 
-## 🏆 Baseline: Pythia Scaling Suite
+## 🎯 OACDアルゴリズム (Phase 1)
 
-**我々のライバル。Pythiaモデルスイートの性能を上回ることが目標。**
-
-### Pythia Model Suite
-
-| Model | Params | Layers | Hidden | Heads | Training Data |
-|-------|--------|--------|--------|-------|---------------|
-| Pythia-70M | 70M | 6 | 512 | 8 | Pile (~300B tokens) |
-| Pythia-160M | 160M | 12 | 768 | 12 | Pile (~300B tokens) |
-| Pythia-410M | 410M | 24 | 1024 | 16 | Pile (~300B tokens) |
-| Pythia-1B | 1B | 16 | 2048 | 8 | Pile (~300B tokens) |
-| Pythia-1.4B | 1.4B | 24 | 2048 | 16 | Pile (~300B tokens) |
-
-### Pythia-70M Specifications
-
-- **Architecture**: GPT-NeoX (Transformer decoder)
-- **Layers**: 6
-- **Hidden Size**: 512
-- **Attention Heads**: 8
-- **Intermediate Size**: 2048
-- **Position Encoding**: Rotary (RoPE, 25%)
-- **Vocab Size**: 50,304
-- **Training**: ~300B tokens on the Pile
-- **Parallel Attention**: Yes (attention + MLP in parallel)
-
-### Evaluation Benchmarks (from Pythia paper)
-
-- **LAMBADA**: 長距離依存性（最終単語予測）
-- **WikiText**: Perplexity
-- **HellaSwag**: 常識推論
-- **PIQA**: 物理的直感
-- **ARC**: 推論
-
-参考: [Pythia Paper](https://arxiv.org/abs/2304.01373), [GitHub](https://github.com/EleutherAI/pythia)
-
----
-
-## 📐 Context-Pythia Architecture
-
-### 新方式: Context次元圧縮
-
-```
-通常Pythia:
-  KV Cache = hidden_size (512) × seq_len × num_layers (6)
-
-Context-Pythia:
-  KV Cache = context_dim (256) × seq_len × num_layers (6)
-
-削減率 = 1 - (256/512) = 50%
-```
-
-### Components
-
-**1. ContextBlock**
-- 入力: prev_context (256) + token_embed (512)
-- 出力: context (256)
-- Phase 1でOACD学習、Phase 2でfreeze
-
-**2. ContextPythiaLayer**
-- 入力: context (256-dim)
-- query_key_value: Linear(256 → 1536)
-- 出力: hidden_states (512-dim)
-- 6 Layers、全て同じ構造
-
-**3. Output Head**
-- Linear(512 → vocab_size)
-
----
-
-## 🚨 CRITICAL: Phase 1学習は必須
-
-**Phase 1（OACD）学習はContext-Pythiaの核心であり、絶対にスキップしてはならない。**
-
-### 学習フロー（必須）
-
-```
-Phase 1: OACD (ContextBlock多様性学習)
-  ├─ ContextBlockのみを学習
-  ├─ OACD損失で多様なcontext vectorを生成
-  └─ 収束まで実行（~60 iterations）
-       ↓
-Phase 2: Full Training (ContextBlock frozen)
-  ├─ ContextBlockをfreeze
-  ├─ Layers + Output Headを学習
-  └─ Cross-entropy損失
-```
-
-### なぜPhase 1が必須か
-
-1. **多様性確保**: Phase 1なしではcontext vectorが縮退し、情報が失われる
-2. **学習安定性**: 多様なcontextがないとPhase 2の学習が不安定になる
-3. **性能**: Phase 1を経ることで、圧縮後も表現力を維持できる
-
-### Phase 1の実装（削除禁止）
+**Phase 1ではOACD (Origin-Anchored Centroid Dispersion) アルゴリズムを採用。**
 
 ```python
-# src/losses/diversity.py - 削除禁止
 def oacd_loss(contexts, centroid_weight=0.1):
     # Term 1: 重心からの分散を最大化
     dispersion_loss = -||X - mean(X)|| / n
@@ -138,34 +44,42 @@ def oacd_loss(contexts, centroid_weight=0.1):
     return dispersion_loss + centroid_weight * centroid_loss
 ```
 
-### Phase 1の必須機能（削除禁止）
+---
 
-以下の機能は試行錯誤の末に必須と判明したもの。**絶対に削除しないこと。**
+## 🚨🚨 Phase 1学習では順次処理禁止 (CRITICAL) 🚨🚨
 
-| 機能 | 説明 | 設定値 |
-|------|------|--------|
-| **収束率表示** | 各イテレーションで`conv=XX%`を表示 | - |
-| **Early Stopping** | 収束率が閾値以上で停止 | `phase1_early_stopping_rate` |
-| **No Improvement Patience** | N回改善なしで停止 | `phase1_no_improvement_patience` |
-| **Validation** | 検証データでの評価 | `phase1_val_split` |
-| **min/max iteration** | 最小・最大イテレーション数 | `phase1_min_iterations`, `phase1_max_iterations` |
-| **勾配累積** | 複数バッチの勾配を累積してから1回更新 | `phase1_batches_per_iteration` |
-| **CPU/GPUメモリ分離** | contextをCPUに保存してOOM回避 | - |
+**Phase 1学習では、順次処理は厳禁。必ずshifted_prev_context方式で並列処理すること。**
 
 ```python
-# config/pythia.py - Phase 1設定
-phase1_min_iterations = 5           # 最小イテレーション数
-phase1_max_iterations = 60          # 最大イテレーション数
-phase1_early_stopping_rate = 0.90   # 収束率90%で停止
-phase1_no_improvement_patience = 3  # 3回改善なしで停止
-phase1_val_split = 0.1              # 10%を検証用に使用
+# ❌ 禁止: Phase 1学習で順次処理（非常に遅い）
+for i in range(num_tokens):
+    new_context = model.forward_context(prev_context, token_embed)
+    prev_context = new_context
+
+# ✅ 推奨: shifted_prev_context方式（並列処理）
+for iteration in range(max_iterations):
+    shifted_prev_context = torch.cat([zero_init, previous_contexts[:-1]], dim=0)
+    new_contexts = model.forward_context(shifted_prev_context, input_embeds)
+    previous_contexts = new_contexts
 ```
 
 ---
 
-## 🔧 開発環境
+## 🚨 CPU/GPUテンソル管理
 
-### Lint/Type Check
+**大規模データでOOMを防ぐため、テンソルのデバイス管理を徹底。**
+
+```python
+# ❌ 修正前
+batch_contexts = previous_contexts[start_idx:end_idx].detach()
+
+# ✅ 修正後
+batch_contexts = previous_contexts[start_idx:end_idx].detach().to(self.device)
+```
+
+---
+
+## 🔧 開発環境のLint/Type Check
 
 ```bash
 # Lint (ruff)
@@ -173,120 +87,73 @@ python3 -m ruff check src/
 
 # Type check (mypy)
 python3 -m mypy src/ --ignore-missing-imports
+
+# 実験スクリプト
+python3 -m ruff check scripts/experiment_context_kv.py
+python3 -m mypy scripts/experiment_context_kv.py --ignore-missing-imports
 ```
-
-### 実験の実行
-
-```bash
-# Step 1: Phase 1 学習（ContextBlock OACD）- 初回のみ
-# トークン数のみを指定（シーケンス長は内部で自動設定）
-python3 scripts/train_phase1.py --tokens 100000
-
-# Step 2: 比較実験（Phase 1 チェックポイントが必要）
-python3 scripts/experiment_pythia_comparison.py --samples 10000 --seq-length 256 --epochs 10
-```
-
-**注意**: Phase 1チェックポイント (`checkpoints/context_block_phase1.pt`) が存在しない場合、実験スクリプトはエラーで停止します。
 
 ---
 
-## 🚨 CRITICAL: コード品質
-
-### 後方互換性コード禁止
+## 🚨 CRITICAL: 後方互換性コード禁止
 
 **古い機能を残すことは厳禁。後方互換性を意識したコードは絶対に書かない。**
 
-### ハードコード厳禁
+---
 
-**全ての値はconfigから読み込む。**
+## 📐 アーキテクチャ仕様
 
-### デフォルト値禁止（重要パラメータ）
+### Core Components
 
-**サンプル数、シーケンス長、エポック数は必須引数とする。デフォルト値は予期せぬ問題を引き起こすため禁止。**
+**1. ContextKVAttentionLLM**
+- 複数のContextBlock（各1層固定）
+- Context-KV Attention Layer
+- Token Embedding: GPT-2 pretrained (768-dim, frozen)
+- Weight Tying: token_output shares weights with token_embedding
 
-### ランダムデータ使用禁止（厳禁）
+**2. ContextBlock**
+- 1層固定、Phase 1で学習、Phase 2でfreeze
+- OACDアルゴリズムで多様性学習
 
-**実験でランダムデータ（torch.randint等）を使用することは絶対に禁止。**
+**3. Context-KV Attention**
+- ContextをK,Vに変換
+- チャンク単位のcontextでAttention
 
-ランダムデータでは：
-- 言語パターンがないため学習不可能
-- PPLが理論値（log(vocab_size) ≈ 10.8）で収束し、改善しない
-- 実験として無意味
+### Phase 1: 多様性学習（OACD）
 
-```python
-# ❌ 禁止: ランダムデータ
-input_ids = torch.randint(0, vocab_size, (num_samples, seq_length))
+- **学習対象**: ContextBlockのみ
+- **損失**: OACD（多様性損失）
 
-# ✅ 必須: 実データ（Pile）を使用
-inputs, targets = load_pile_data(num_samples, seq_length, config, device)
-```
+### Phase 2: トークン予測
 
-```python
-# ❌ 禁止: デフォルト値あり
-parser.add_argument('--samples', type=int, default=200)
-
-# ✅ 必須: required=True
-parser.add_argument('--samples', type=int, required=True, help='(REQUIRED)')
-parser.add_argument('--seq-length', type=int, required=True, help='(REQUIRED)')
-parser.add_argument('--epochs', type=int, required=True, help='(REQUIRED)')
-```
+- **ContextBlock**: frozen（重み固定）
+- **Context-KV Attention + FFN**: 学習
+- **損失**: CrossEntropy（次トークン予測）
 
 ---
 
-## 📁 File Structure
+## Code Quality Standards
 
-```
-new-llm/
-├── checkpoints/
-│   └── context_block_phase1.pt  # Phase 1 checkpoint
-├── config/
-│   ├── __init__.py
-│   └── pythia.py              # PythiaConfig, ContextPythiaConfig
-├── scripts/
-│   ├── train_phase1.py        # Phase 1: ContextBlock OACD学習
-│   └── experiment_pythia_comparison.py  # 比較実験（Phase 2）
-├── src/
-│   ├── models/
-│   │   ├── pythia.py          # PythiaModel (baseline)
-│   │   └── context_pythia.py  # ContextPythiaModel (ours)
-│   ├── losses/
-│   │   └── diversity.py       # OACD algorithm
-│   └── utils/
-├── CLAUDE.md
-└── README.md
-```
+### Principles
+
+1. **No Hardcoding**: All hyperparameters in config.py
+2. **Single Responsibility**: Each module has one clear purpose
+3. **Type Hints Required**: 関数・メソッドのパラメータには型注釈を必須
 
 ---
 
-## Evaluation Metrics
+## File Structure
 
-### Primary
+**Main Scripts**:
+- `scripts/experiment_context_kv.py` - Context-KV Attention実験スクリプト
 
-| Metric | Purpose |
-|--------|---------|
-| **PPL (Perplexity)** | 言語モデリング品質 |
-| **LAMBADA Accuracy** | 長距離依存性（最終単語予測） |
-| **KV Cache Memory** | 実際のメモリ使用量 |
-
-### Comparison Plan
-
-```
-Baseline: PythiaModel (our reproduction)
-Ours:     ContextPythiaModel (50% KV reduction)
-
-Evaluate on:
-- WikiText-2 PPL
-- LAMBADA accuracy
-- torch.cuda.max_memory_allocated()
-```
+**Core Implementation**:
+- `src/models/context_kv.py` - ContextKVAttentionLLM
+- `src/models/blocks.py` - ContextBlock（1層固定）
+- `src/models/layers.py` - ContextLayer
+- `src/trainers/phase1/memory.py` - Phase 1訓練ロジック
+- `src/losses/diversity.py` - OACDアルゴリズム
 
 ---
 
-## Related Work
-
-- **DeepSeek MLA**: Low-rank KV compression (トークンごと)
-- **本プロジェクト**: Context-based dimension reduction (全Layer)
-
----
-
-Last Updated: 2025-12-03 (全Layer置き換え方式に移行)
+Last Updated: 2025-12-03 (Context-KV Attention方式に完全移行)

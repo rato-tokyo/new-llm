@@ -1,43 +1,31 @@
 """
-Phase 1 Configuration
+Phase 1 設定 (Phase 1 Configuration)
 
-ContextBlock OACD学習の設定。
-Phase 1の必須機能（削除禁止）の設定値を管理。
+多様性学習（OACDアルゴリズム）の設定。
 """
 
 
 class Phase1Config:
-    """Phase 1 (OACD) 学習設定
+    """Phase 1: 多様性学習（OACD）の設定"""
 
-    以下の機能は試行錯誤の末に必須と判明したもの。
-    絶対に削除しないこと。
-    """
+    # ========== 学習パラメータ ==========
+    max_iterations = 60              # 最大反復回数
+    convergence_threshold = 0.03     # 収束判定のMSE閾値（ログ表示用）
+    learning_rate = 0.002            # 学習率（0.001-0.004）
+    batch_size = 5000                # 並列処理のバッチサイズ（L4 GPU 24GB対応）
+    gradient_clip = 2.0              # 勾配クリッピング値
 
-    # ========== イテレーション設定 ==========
-    max_iterations = 60             # 最大イテレーション数
+    # ========== コンテキストノイズ（汎化性能向上） ==========
+    context_noise = 0.1              # ガウシアンノイズの標準偏差
+                                     # 0.0: ノイズなし
+                                     # 0.1: 推奨（軽いノイズ）
+                                     # 0.2: 強めのノイズ
 
-    # ========== 学習率 ==========
-    learning_rate = 0.002           # Phase 1 学習率
+    # ========== 収束率Early Stopping ==========
+    early_stopping = True            # 収束率による早期停止を有効化
+    early_stopping_threshold = 0.9   # 収束率がこの値以上で停止
 
-    # ========== 収束判定 ==========
-    convergence_threshold = 0.03    # 収束判定の閾値（context変化量MSE）
-    early_stopping_rate = 0.90      # 収束率がこの値以上でEarly Stop
-
-    # ========== バッチ処理 ==========
-    batch_size = 5000               # 並列処理のバッチサイズ
-    batches_per_iteration = 10      # イテレーションあたりのバッチ数（勾配累積）
-
-    # ========== コンテキストノイズ ==========
-    context_noise = 0.1             # ガウシアンノイズの標準偏差（汎化性能向上）
-
-    # ========== 勾配クリッピング ==========
-    gradient_clip = 2.0             # 勾配クリッピング値
-
-    # ========== Validation ==========
-    val_split = 0.1                 # 検証データの割合
-
-    # ========== チェックポイント ==========
-    checkpoint_path = "checkpoints/context_block_phase1.pt"
-
-    # ========== 内部設定 ==========
-    internal_seq_length = 64        # モデルforward用の内部シーケンス長
+    # ========== 収束率改善Early Stopping ==========
+    min_convergence_improvement = 0.01  # 収束率改善がこの値未満なら早期停止（1%）
+                                        # 例: 30% → 30.5% (0.5%改善) は停止
+                                        # 例: 30% → 32% (2%改善) は継続
