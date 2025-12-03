@@ -122,45 +122,46 @@ def build_batch_context_intervals(
     max_contexts: int = 32,
 ) -> torch.Tensor:
     """
-    バッチのcontext intervalsを動的に構築（新方式）
+    バッチのcontext intervalsを構築（固定数方式）
+
+    常にmax_contexts個のcontextを使用。存在しない位置はゼロパディング。
 
     Position i の予測には:
       [context[i], context[i-interval], context[i-2*interval], ...]
     を使用。常に「現在位置からの等間隔」でcontextを取得。
 
-    例: interval=100, position=350
-      → [context[350], context[250], context[150], context[50]]
+    例: interval=100, max_contexts=32, position=350
+      → [context[350], context[250], context[150], context[50], 0, 0, ..., 0]
+         (4個の実データ + 28個のゼロパディング)
 
     Args:
         batch_indices: バッチ内の位置インデックス [batch_size]
         context_cache: 全context [num_tokens, context_dim]
         interval: contextを取得する間隔
         device: 出力デバイス
-        max_contexts: 使用するcontext数の上限（メモリ効率のため）
+        max_contexts: 使用するcontext数（固定）
 
     Returns:
-        batch_contexts: [batch_size, max_num_contexts, context_dim] on device
+        batch_contexts: [batch_size, max_contexts, context_dim] on device
     """
     batch_size = len(batch_indices)
     context_dim = context_cache.shape[1]
 
-    # 各サンプルが必要とするcontext数を計算
+    # 出力テンソルを直接GPU上に作成（ゼロパディング）
+    batch_contexts = torch.zeros(batch_size, max_contexts, context_dim, device=device)
+
+    # 各サンプルが実際に持てるcontext数を計算
     # position i → (i // interval) + 1 個のcontext
     num_contexts_per_sample = (batch_indices // interval) + 1  # [batch_size]
-    # max_contextsで上限を設定（OOM防止）
-    num_contexts_per_sample = torch.clamp(num_contexts_per_sample, max=max_contexts)
-    max_num_contexts = int(num_contexts_per_sample.max().item())
-
-    # 出力テンソルを直接GPU上に作成（ゼロパディング）
-    batch_contexts = torch.zeros(batch_size, max_num_contexts, context_dim, device=device)
 
     # 各サンプルのcontext位置を計算
     # position i の k番目のcontext → context[i - k*interval]
-    for k in range(max_num_contexts):
-        # このkが有効なサンプルのマスク
+    for k in range(max_contexts):
+        # このkが有効なサンプルのマスク（実際にcontextが存在する）
         valid_mask = num_contexts_per_sample > k  # [batch_size]
 
         if not valid_mask.any():
+            # これ以降は全サンプルでゼロパディングのみ
             break
 
         # context位置を計算: i - k*interval
@@ -187,11 +188,11 @@ def train_phase2(
     val_targets: torch.Tensor,
     device: torch.device,
     context_interval: int,
-    max_contexts: int = 32,
-    num_epochs: int = 40,
-    batch_size: int = 512,
-    lr: float = 1e-3,
-    patience: int = 3,
+    max_contexts: int,
+    num_epochs: int,
+    batch_size: int,
+    lr: float,
+    patience: int,
 ) -> tuple[float, float, int]:
     """
     Phase 2: Context-KV Attention + FFN の学習（メモリ効率版）
@@ -500,6 +501,10 @@ def run_context_kv_experiment(
         device=device,
         context_interval=chunk_size,
         max_contexts=max_contexts,
+        num_epochs=base_config.phase2_epochs,
+        batch_size=base_config.effective_phase2_batch_size,
+        lr=base_config.phase2_learning_rate,
+        patience=base_config.phase2_patience,
     )
     phase2_time = time.time() - phase2_start
 
