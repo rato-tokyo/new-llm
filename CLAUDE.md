@@ -193,19 +193,32 @@ python3 -m mypy scripts/experiment_context_kv.py --ignore-missing-imports
 2. **Single Responsibility**: Each module has one clear purpose
 3. **Type Hints Required**: 関数・メソッドのパラメータには型注釈を必須
 
-### 🚨 実験スクリプトはconfigから値を読み込む（重要）
+### 🚨🚨 ハードコード厳禁 - 全ての値はconfigから読み込む (CRITICAL) 🚨🚨
 
-**実験スクリプトでパラメータをハードコードしない。必ずconfigから読み込む。**
+**実験スクリプトでパラメータをハードコードしない。全ての値はconfigから読み込む。**
+
+**禁止事項:**
+1. 関数のデフォルト引数に数値を直接書く
+2. argparseのdefaultに数値を直接書く
+3. コード内にマジックナンバーを書く
 
 ```python
-# ❌ 禁止: ハードコード
+# ❌ 禁止: 関数のデフォルト引数にハードコード
 def train_phase2(..., num_epochs: int = 40, patience: int = 3):
     ...
 
-# ✅ 推奨: configから読み込み
-from config import Config
-base_config = Config()
+# ❌ 禁止: argparseのdefaultにハードコード
+parser.add_argument('--samples', type=int, default=200)
 
+# ✅ 推奨: configから読み込み（関数）
+def train_phase2(..., num_epochs: int, patience: int):  # デフォルト値なし
+    ...
+
+# ✅ 推奨: configから読み込み（argparse）
+default_config = Config()
+parser.add_argument('--samples', type=int, default=default_config.num_samples)
+
+# ✅ 推奨: 呼び出し時にconfigから値を渡す
 train_phase2(
     ...,
     num_epochs=base_config.phase2_epochs,
@@ -214,10 +227,15 @@ train_phase2(
 ```
 
 **Config ファイル構成:**
-- `config/base.py` - モデルアーキテクチャ、データ設定
+- `config/base.py` - モデルアーキテクチャ、データ設定、max_contexts、context_interval
 - `config/phase1.py` - Phase 1学習パラメータ（max_iterations, early_stopping等）
 - `config/phase2.py` - Phase 2学習パラメータ（epochs, patience, lr等）
 - `config/__init__.py` - 統合Configクラス
+
+**この方針の理由:**
+- 設定変更はconfigファイルのみで完結
+- 実験の再現性を保証
+- パラメータの一元管理
 
 ---
 
