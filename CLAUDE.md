@@ -193,6 +193,32 @@ python3 -m mypy scripts/experiment_context_kv.py --ignore-missing-imports
 2. **Single Responsibility**: Each module has one clear purpose
 3. **Type Hints Required**: 関数・メソッドのパラメータには型注釈を必須
 
+### 🚨 実験スクリプトはconfigから値を読み込む（重要）
+
+**実験スクリプトでパラメータをハードコードしない。必ずconfigから読み込む。**
+
+```python
+# ❌ 禁止: ハードコード
+def train_phase2(..., num_epochs: int = 40, patience: int = 3):
+    ...
+
+# ✅ 推奨: configから読み込み
+from config import Config
+base_config = Config()
+
+train_phase2(
+    ...,
+    num_epochs=base_config.phase2_epochs,
+    patience=base_config.phase2_patience,
+)
+```
+
+**Config ファイル構成:**
+- `config/base.py` - モデルアーキテクチャ、データ設定
+- `config/phase1.py` - Phase 1学習パラメータ（max_iterations, early_stopping等）
+- `config/phase2.py` - Phase 2学習パラメータ（epochs, patience, lr等）
+- `config/__init__.py` - 統合Configクラス
+
 ---
 
 ## File Structure
