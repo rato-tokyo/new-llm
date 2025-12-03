@@ -37,6 +37,7 @@ def train_epoch(
     criterion: nn.Module,
     device: torch.device,
     batch_size: int = 32,
+    log_interval: int = 100,
 ) -> Tuple[float, float]:
     """
     1エポックの学習
@@ -50,9 +51,10 @@ def train_epoch(
     total_tokens = 0
 
     num_samples = len(train_inputs)
+    num_batches = (num_samples + batch_size - 1) // batch_size
     indices = torch.randperm(num_samples)
 
-    for start in range(0, num_samples, batch_size):
+    for batch_num, start in enumerate(range(0, num_samples, batch_size)):
         end = min(start + batch_size, num_samples)
         batch_idx = indices[start:end]
 
@@ -76,6 +78,12 @@ def train_epoch(
         total_loss += loss.item() * batch_size_actual * seq_len
         total_correct += (logits_flat.argmax(dim=-1) == targets_flat).sum().item()
         total_tokens += batch_size_actual * seq_len
+
+        # Progress log
+        if (batch_num + 1) % log_interval == 0 or (batch_num + 1) == num_batches:
+            current_loss = total_loss / total_tokens
+            current_acc = total_correct / total_tokens
+            print_flush(f"    batch {batch_num + 1}/{num_batches}: loss={current_loss:.4f} acc={current_acc*100:.2f}%")
 
         del batch_inputs, batch_targets, logits
         clear_gpu_cache(device)
@@ -107,6 +115,8 @@ def evaluate(
     total_tokens = 0
 
     num_samples = len(val_inputs)
+    num_batches = (num_samples + batch_size - 1) // batch_size
+    print_flush(f"    evaluating {num_batches} batches...")
 
     for start in range(0, num_samples, batch_size):
         end = min(start + batch_size, num_samples)
