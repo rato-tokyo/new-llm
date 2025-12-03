@@ -32,6 +32,7 @@ class PythiaConfig:
     phase1_max_iterations = 60      # Maximum iterations for OACD
     phase1_learning_rate = 0.002    # Phase 1 learning rate
     phase1_convergence_threshold = 0.9  # Early stopping threshold
+    phase1_batches_per_iteration = 10  # Batches per iteration
 
     # ========== Phase 2 (Fine-tuning) ==========
     phase2_epochs = 10              # Number of fine-tuning epochs

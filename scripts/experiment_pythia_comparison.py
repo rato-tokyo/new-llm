@@ -88,7 +88,6 @@ def load_pile_data(
     # Collect samples
     all_input_ids = []
     total_tokens_needed = num_samples * (seq_length + 1)
-    tokens_collected = 0
 
     print_flush(f"  Tokenizing (need {total_tokens_needed:,} tokens)...")
 
@@ -105,7 +104,6 @@ def load_pile_data(
             for i in range(0, len(tokens) - seq_length, seq_length + 1):
                 chunk = tokens[i:i + seq_length + 1]
                 all_input_ids.append(chunk)
-                tokens_collected += len(chunk)
 
                 if len(all_input_ids) >= num_samples:
                     break
@@ -245,7 +243,7 @@ def train_phase1_oacd(
         batch_count = 0
 
         for batch_idx, (inputs, _) in enumerate(train_loader):
-            if batch_idx >= 10:  # Limit batches per iteration
+            if batch_idx >= config.phase1_batches_per_iteration:
                 break
 
             inputs = inputs.to(device)
@@ -285,11 +283,10 @@ def train_phase1_oacd(
 
 def measure_memory(
     model: nn.Module,
-    seq_length: int,
-    batch_size: int,
+    sample_input: torch.Tensor,
     device: torch.device,
 ) -> Dict[str, float]:
-    """Measure peak memory usage during forward pass."""
+    """Measure peak memory usage during forward pass using real data."""
     if not torch.cuda.is_available():
         return {"peak_mb": 0, "model_mb": 0}
 
@@ -301,10 +298,9 @@ def measure_memory(
     # Measure model memory
     model_memory = torch.cuda.memory_allocated() / (1024 * 1024)
 
-    # Forward pass
-    dummy_input = torch.randint(0, 1000, (batch_size, seq_length), device=device)
+    # Forward pass with real data
     with torch.no_grad():
-        _ = model(dummy_input)
+        _ = model(sample_input.to(device))
 
     peak_memory = torch.cuda.max_memory_allocated() / (1024 * 1024)
 
@@ -381,8 +377,9 @@ def run_comparison(
     print_flush(f"Parameters: {pythia_params['total']:,}")
     print_flush(f"Memory: {get_memory_usage()}")
 
-    # Measure memory
-    pythia_memory = measure_memory(pythia, seq_length, batch_size, device)
+    # Measure memory using real data sample
+    sample_input = train_inputs[:batch_size]
+    pythia_memory = measure_memory(pythia, sample_input, device)
     print_flush(f"Peak memory: {pythia_memory['peak_mb']:.1f} MB")
 
     # Train
@@ -444,8 +441,8 @@ def run_comparison(
     print_flush(f"  Context:  {kv_comparison['context_mb']:.2f} MB")
     print_flush(f"  Reduction: {kv_comparison['reduction_pct']:.1f}%")
 
-    # Measure memory
-    context_memory = measure_memory(context_pythia, seq_length, batch_size, device)
+    # Measure memory using real data sample
+    context_memory = measure_memory(context_pythia, sample_input, device)
     print_flush(f"Peak memory: {context_memory['peak_mb']:.1f} MB")
 
     # ========== Phase 1: OACD Training ==========
