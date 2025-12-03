@@ -122,43 +122,56 @@ def build_batch_context_chunks(
     context_cache: torch.Tensor,
     chunk_boundaries: torch.Tensor,
     chunk_size: int,
+    device: torch.device,
 ) -> torch.Tensor:
     """
-    バッチのcontext chunksを動的に構築（ベクトル化版）
+    バッチのcontext chunksを動的に構築（GPU最適化版）
 
     Args:
         batch_indices: バッチ内の位置インデックス [batch_size]
         context_cache: 全context [num_tokens, context_dim]
         chunk_boundaries: チャンク境界のcontext [num_boundaries, context_dim]
         chunk_size: チャンクサイズ
+        device: 出力デバイス
 
     Returns:
-        batch_chunks: [batch_size, batch_max_chunks, context_dim]
-        batch_max_chunksはバッチ内の最大位置で決まる
+        batch_chunks: [batch_size, batch_max_chunks, context_dim] on device
     """
     batch_size = len(batch_indices)
     context_dim = context_cache.shape[1]
     num_boundaries = len(chunk_boundaries)
 
-    # バッチ内の最大位置から必要なチャンク数を計算
-    max_pos = int(batch_indices.max().item())
-    batch_max_chunks = (max_pos + 1) // chunk_size + 1
-
-    # 出力テンソル（バッチに必要な分だけ確保）
-    batch_chunks = torch.zeros(batch_size, batch_max_chunks, context_dim)
-
-    # 各サンプルのチャンク数を計算（ベクトル化）
+    # 各サンプルのチャンク数を計算
     num_past_chunks = (batch_indices + 1) // chunk_size  # [batch_size]
+    max_chunks_needed = int(num_past_chunks.max().item()) + 1
 
-    # チャンク境界をコピー（部分ベクトル化）
-    if num_boundaries > 0:
-        for c in range(min(batch_max_chunks, num_boundaries)):
-            # このチャンクが必要なサンプルのマスク
-            mask = num_past_chunks > c
-            batch_chunks[mask, c] = chunk_boundaries[c]
+    # 出力テンソルを直接GPU上に作成
+    batch_chunks = torch.zeros(batch_size, max_chunks_needed, context_dim, device=device)
 
-    # 現在のcontextを最後のチャンク位置に設定（ベクトル化）
-    batch_chunks[torch.arange(batch_size), num_past_chunks] = context_cache[batch_indices]
+    # チャンク境界を一括コピー（forループなし）
+    if num_boundaries > 0 and max_chunks_needed > 0:
+        # 使用するチャンク境界の数
+        chunks_to_use = min(max_chunks_needed, num_boundaries)
+
+        # chunk_boundaries[0:chunks_to_use]をGPUに転送
+        boundaries_gpu = chunk_boundaries[:chunks_to_use].to(device)
+
+        # 各サンプルが必要とするチャンク数に基づいてマスクを作成
+        # chunk_idx < num_past_chunks[sample] の場合にコピー
+        chunk_idx = torch.arange(chunks_to_use, device=device).unsqueeze(0)  # [1, chunks_to_use]
+        sample_chunks = num_past_chunks.to(device).unsqueeze(1)  # [batch_size, 1]
+        mask = chunk_idx < sample_chunks  # [batch_size, chunks_to_use]
+
+        # マスクを使って一括代入
+        # batch_chunks[:, :chunks_to_use]にbroadcastで代入
+        batch_chunks[:, :chunks_to_use] = boundaries_gpu.unsqueeze(0) * mask.unsqueeze(-1)
+
+    # 現在のcontextを最後のチャンク位置に設定
+    current_contexts = context_cache[batch_indices].to(device)
+    batch_chunks[
+        torch.arange(batch_size, device=device),
+        num_past_chunks.to(device)
+    ] = current_contexts
 
     return batch_chunks
 
@@ -245,11 +258,11 @@ def train_phase2(
                 else:
                     print_flush(f"    Epoch 1: batch {batch_num+1}/{num_batches}...")
 
-            # 動的にcontext chunksを構築
+            # 動的にcontext chunksを構築（GPU上で直接作成）
             batch_context_chunks = build_batch_context_chunks(
                 batch_idx, train_context_cache, train_chunk_boundaries,
-                chunk_size
-            ).to(device)
+                chunk_size, device
+            )
             batch_token_embeds = train_token_embeds[batch_idx].to(device)
             batch_targets = train_targets[batch_idx].to(device)
 
@@ -284,8 +297,8 @@ def train_phase2(
 
                 batch_context_chunks = build_batch_context_chunks(
                     batch_idx, val_context_cache, val_chunk_boundaries,
-                    chunk_size
-                ).to(device)
+                    chunk_size, device
+                )
                 batch_token_embeds = val_token_embeds[start:end].to(device)
                 batch_targets = val_targets[start:end].to(device)
 
