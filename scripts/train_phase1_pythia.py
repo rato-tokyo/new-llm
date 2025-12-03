@@ -280,6 +280,7 @@ def main():
     print_flush("PHASE 1: CONTEXTBLOCK OACD TRAINING (PYTHIA)")
     print_flush("=" * 70)
     print_flush(f"Tokens: {num_tokens:,}")
+    print_flush(f"Embed dim: {pythia_config.embed_dim}")
     print_flush(f"Context dim: {pythia_config.context_dim}")
     print_flush(f"Checkpoint: {pythia_config.phase1_checkpoint_path}")
     print_flush("=" * 70)
@@ -296,7 +297,7 @@ def main():
     print_flush("\n[Model] Creating Context-Pythia...")
     model = ContextPythiaModel(
         vocab_size=pythia_config.vocab_size,
-        hidden_size=pythia_config.hidden_size,
+        embed_dim=pythia_config.embed_dim,
         context_dim=pythia_config.context_dim,
         num_layers=pythia_config.num_layers,
         num_heads=pythia_config.num_attention_heads,
@@ -345,7 +346,7 @@ def main():
         "context_block_state_dict": model.context_block.state_dict(),
         "config": {
             "context_dim": pythia_config.context_dim,
-            "hidden_size": pythia_config.hidden_size,
+            "embed_dim": pythia_config.embed_dim,
             "num_tokens": num_tokens,
         },
         "stats": stats,

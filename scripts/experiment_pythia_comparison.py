@@ -21,7 +21,7 @@ import torch.optim as optim
 # Add project root to path
 sys.path.insert(0, ".")
 
-from config import ContextPythiaConfig, Phase1Config
+from config import ContextPythiaConfig, PythiaConfig
 from src.models.pythia import PythiaModel
 from src.models.context_pythia import ContextPythiaModel
 from src.utils.data_pythia import prepare_pythia_phase2_data
@@ -250,7 +250,8 @@ def run_experiment(
     else:
         print_flush(f"Device: {device}")
 
-    config = ContextPythiaConfig()
+    pythia_config = PythiaConfig()
+    context_config = ContextPythiaConfig()
 
     print_flush("=" * 70)
     print_flush("PYTHIA vs CONTEXT-PYTHIA COMPARISON")
@@ -261,6 +262,10 @@ def run_experiment(
     print_flush(f"Batch size: {batch_size}")
     print_flush(f"Learning rate: {lr}")
     print_flush("=" * 70)
+    print_flush("\nArchitecture comparison:")
+    print_flush(f"  Pythia:         hidden_size={pythia_config.hidden_size}, intermediate={pythia_config.intermediate_size}")
+    print_flush(f"  Context-Pythia: context_dim={context_config.context_dim}, intermediate={context_config.intermediate_size}")
+    print_flush("=" * 70)
 
     # Load data
     print_flush("\n[Data] Loading Pile data...")
@@ -268,7 +273,7 @@ def run_experiment(
         num_samples=num_samples,
         seq_length=seq_length,
         val_split=0.1,
-        tokenizer_name=config.tokenizer_name,
+        tokenizer_name=pythia_config.tokenizer_name,
         device=device,
     )
     print_flush(f"  Train: {len(train_inputs):,} samples")
@@ -276,9 +281,9 @@ def run_experiment(
 
     results = {}
 
-    # KV cache sizes
-    kv_size_pythia = config.hidden_size * seq_length * config.num_layers * 2 * 4
-    kv_size_context = config.context_dim * seq_length * config.num_layers * 2 * 4
+    # KV cache sizes (K + V, float32)
+    kv_size_pythia = pythia_config.hidden_size * seq_length * pythia_config.num_layers * 2 * 4
+    kv_size_context = context_config.context_dim * seq_length * context_config.num_layers * 2 * 4
 
     # ===== 1. Pythia (Baseline) =====
     if skip_baseline:
@@ -292,13 +297,13 @@ def run_experiment(
         print_flush("=" * 70)
 
         pythia_model = PythiaModel(
-            vocab_size=config.vocab_size,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            num_heads=config.num_attention_heads,
-            intermediate_size=config.intermediate_size,
-            max_position_embeddings=config.max_position_embeddings,
-            rotary_pct=config.rotary_pct,
+            vocab_size=pythia_config.vocab_size,
+            hidden_size=pythia_config.hidden_size,
+            num_layers=pythia_config.num_layers,
+            num_heads=pythia_config.num_attention_heads,
+            intermediate_size=pythia_config.intermediate_size,
+            max_position_embeddings=pythia_config.max_position_embeddings,
+            rotary_pct=pythia_config.rotary_pct,
         ).to(device)
 
         pythia_results = train_model(
@@ -324,18 +329,18 @@ def run_experiment(
     print_flush("=" * 70)
 
     context_pythia_model = ContextPythiaModel(
-        vocab_size=config.vocab_size,
-        hidden_size=config.hidden_size,
-        context_dim=config.context_dim,
-        num_layers=config.num_layers,
-        num_heads=config.num_attention_heads,
-        intermediate_size=config.intermediate_size,
-        max_position_embeddings=config.max_position_embeddings,
-        rotary_pct=config.rotary_pct,
+        vocab_size=context_config.vocab_size,
+        embed_dim=context_config.embed_dim,
+        context_dim=context_config.context_dim,
+        num_layers=context_config.num_layers,
+        num_heads=context_config.num_attention_heads,
+        intermediate_size=context_config.intermediate_size,
+        max_position_embeddings=context_config.max_position_embeddings,
+        rotary_pct=context_config.rotary_pct,
     ).to(device)
 
     # Load Phase 1 checkpoint
-    checkpoint_path = Path(config.phase1_checkpoint_path)
+    checkpoint_path = Path(context_config.phase1_checkpoint_path)
     if checkpoint_path.exists():
         print_flush(f"  Loading Phase 1 checkpoint: {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)

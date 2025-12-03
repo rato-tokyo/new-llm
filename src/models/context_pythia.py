@@ -1,23 +1,24 @@
 """
-Context-Pythia: Pythia with Context-based Input
+Context-Pythia: Pythia with Compressed Hidden Dimension
 
-ContextBlockで生成されたcontext (256-dim) をhidden_size (512-dim)に射影し、
-標準のPythia Transformer layersを使用する。
+Token Embeddingの後にContextBlockで圧縮し、
+圧縮された次元(context_dim)でTransformer Layersを動作させる。
 
 Architecture:
 1. Token Embedding (512-dim) + LayerNorm
-2. ContextBlock: prev_context + token_embed → context (256-dim)
-   ⚠️ 既存の動作確認済みContextBlockを再利用
-3. Context Projection: context (256-dim) → hidden_states (512-dim)
-4. 6 Standard Pythia Layers (hidden_size=512)
-5. Output Head: 512-dim → vocab_size
+2. ContextBlock: prev_context + token_embed → context (context_dim)
+3. PythiaLayer × 6 (context_dim, RoPE)  ← 圧縮されたまま処理
+4. Final LayerNorm
+5. Output Head: context_dim → vocab_size
 
 Training:
 - Phase 1: ContextBlock のみ学習 (OACD)
 - Phase 2: 全体をファインチューニング (ContextBlock frozen)
 
-Note: この実装ではKVキャッシュは圧縮されません。
-ContextBlockによる入力圧縮の効果を検証するための実装です。
+KV Cache削減:
+- Baseline: hidden_size (512) × seq_len × num_layers
+- Context-Pythia: context_dim (256) × seq_len × num_layers
+- 削減率: 1 - (context_dim / hidden_size) = 50%
 """
 
 from typing import Optional, Dict
@@ -34,55 +35,54 @@ class ContextPythiaModel(nn.Module):
     """
     Context-Pythia Language Model
 
+    Baselineとの違いは「Token Embedding → ContextBlock」の圧縮部分のみ。
+    PythiaLayer自体は同じ構造（RoPE含む）で、hidden_size=context_dimで動作。
+
     Architecture:
-    1. Embedding: vocab_size -> hidden_size (512)
+    1. Embedding: vocab_size → embed_dim (512)
     2. LayerNorm (embed_norm)
-    3. ContextBlock: prev_context + token_embed -> context (256-dim)
-    4. Context Projection: context (256) -> hidden_states (512)
-    5. 6 Standard Pythia Transformer layers
-    6. Final LayerNorm
-    7. LM Head: hidden_size -> vocab_size
+    3. ContextBlock: prev_context + token_embed → context (context_dim)
+    4. PythiaLayer × 6 (hidden_size=context_dim, RoPE)
+    5. Final LayerNorm
+    6. LM Head: context_dim → vocab_size
     """
 
     def __init__(
         self,
         vocab_size: int = 50304,
-        hidden_size: int = 512,
-        context_dim: int = 256,
+        embed_dim: int = 512,           # Token Embedding dimension
+        context_dim: int = 256,         # Compressed dimension (used for all layers)
         num_layers: int = 6,
         num_heads: int = 8,
-        intermediate_size: int = 2048,
+        intermediate_size: int = 1024,  # Scaled down: 2048 * (256/512) = 1024
         max_position_embeddings: int = 2048,
         rotary_pct: float = 0.25,
     ):
         super().__init__()
 
         self.vocab_size = vocab_size
-        self.hidden_size = hidden_size
+        self.embed_dim = embed_dim
         self.context_dim = context_dim
         self.num_layers = num_layers
 
-        # Embedding
-        self.embed_in = nn.Embedding(vocab_size, hidden_size)
+        # Token Embedding (vocab → embed_dim)
+        self.embed_in = nn.Embedding(vocab_size, embed_dim)
 
         # ⚠️ 重要: 埋め込み後の正規化（Phase 1収束に必須）
-        self.embed_norm = nn.LayerNorm(hidden_size)
+        self.embed_norm = nn.LayerNorm(embed_dim)
 
-        # ContextBlock: prev_context + token_embed -> context (256-dim)
-        # ⚠️ 既存の動作確認済みContextBlockを使用
-        # 初期化は normal_(std=0.1) で行われる（削除禁止）
+        # ContextBlock: prev_context + token_embed → context (context_dim)
+        # Phase 1でOACD学習済み
         self.context_block = ContextBlock(
             context_dim=context_dim,
-            embed_dim=hidden_size,
+            embed_dim=embed_dim,
         )
 
-        # Context -> Hidden projection
-        self.context_proj = nn.Linear(context_dim, hidden_size)
-
-        # Standard Pythia Transformer layers
+        # PythiaLayer × 6 (hidden_size=context_dim)
+        # Baselineと同じ構造（RoPE含む）、ただしhidden_sizeが小さい
         self.layers = nn.ModuleList([
             PythiaLayer(
-                hidden_size=hidden_size,
+                hidden_size=context_dim,  # ← ここがBaselineと違う
                 num_heads=num_heads,
                 intermediate_size=intermediate_size,
                 rotary_pct=rotary_pct,
@@ -92,10 +92,10 @@ class ContextPythiaModel(nn.Module):
         ])
 
         # Final layer norm
-        self.final_layer_norm = nn.LayerNorm(hidden_size)
+        self.final_layer_norm = nn.LayerNorm(context_dim)
 
-        # LM Head
-        self.embed_out = nn.Linear(hidden_size, vocab_size, bias=False)
+        # LM Head (context_dim → vocab)
+        self.embed_out = nn.Linear(context_dim, vocab_size, bias=False)
 
         # Initialize weights (ContextBlock以外)
         self._init_weights()
@@ -136,11 +136,11 @@ class ContextPythiaModel(nn.Module):
         """
         batch_size, seq_len = input_ids.shape
 
-        # Embedding + LayerNorm (⚠️ embed_norm必須)
-        token_embeds = self.embed_in(input_ids)  # [batch, seq, hidden_size]
-        token_embeds = self.embed_norm(token_embeds)  # ⚠️ Phase 1と同じ正規化を適用
+        # Token Embedding + LayerNorm (⚠️ embed_norm必須)
+        token_embeds = self.embed_in(input_ids)  # [batch, seq, embed_dim]
+        token_embeds = self.embed_norm(token_embeds)
 
-        # ContextBlock: prev_context + token_embed -> context
+        # ContextBlock: prev_context + token_embed → context
         if prev_context is None:
             prev_context = torch.zeros(batch_size, self.context_dim, device=input_ids.device)
 
@@ -154,12 +154,9 @@ class ContextPythiaModel(nn.Module):
             )
             contexts.append(current_context)
 
-        context = torch.stack(contexts, dim=1)  # [batch, seq, context_dim]
+        hidden_states = torch.stack(contexts, dim=1)  # [batch, seq, context_dim]
 
-        # Context -> Hidden projection
-        hidden_states = self.context_proj(context)  # [batch, seq, hidden_size]
-
-        # Standard Pythia Transformer layers
+        # PythiaLayer × 6 (context_dimのまま処理)
         for layer in self.layers:
             hidden_states = layer(hidden_states, attention_mask)
 
