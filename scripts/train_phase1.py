@@ -5,15 +5,14 @@ Phase 1: ContextBlock OACD Training
 ContextBlockの多様性学習を行い、チェックポイントを保存する。
 このスクリプトで学習したパラメータは、experiment_pythia_comparison.pyで使用される。
 
-Note: Phase 1ではシーケンス長は本質的に関係ない（contextをflattenするため）。
-内部で固定長(128)のシーケンスを使用する。
+Note: Phase 1ではcontextをflattenするため、シーケンス長は本質的に関係ない。
+トークン数のみを指定する。
 
 Usage:
-    python3 scripts/train_phase1.py --samples 1000
+    python3 scripts/train_phase1.py --tokens 100000
 """
 
 import argparse
-import os
 import sys
 import time
 from pathlib import Path
@@ -40,32 +39,32 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-# Phase 1用の固定シーケンス長（任意の値でよい）
-PHASE1_SEQ_LENGTH = 128
+# 内部で使用するシーケンス長（モデルのforward用、ユーザーには関係ない）
+INTERNAL_SEQ_LENGTH = 64
 
 
-def load_pile_samples(
-    num_samples: int,
+def load_pile_tokens(
+    num_tokens: int,
     config: ContextPythiaConfig,
     device: torch.device,
     max_retries: int = 5,
     retry_delay: float = 30.0,
 ) -> torch.Tensor:
-    """Load samples from Pile dataset for Phase 1 training.
-
-    Phase 1ではcontextをflattenするため、シーケンス長は本質的に関係ない。
-    内部で固定長(128)のシーケンスを使用する。
+    """Load tokens from Pile dataset for Phase 1 training.
 
     Args:
-        num_samples: シーケンス数（= サンプル数）
+        num_tokens: 必要なトークン数
         max_retries: 429エラー時の最大リトライ回数
         retry_delay: リトライ間の待機時間（秒）
 
     Returns:
-        input_ids: [num_samples, PHASE1_SEQ_LENGTH]
+        input_ids: [num_sequences, INTERNAL_SEQ_LENGTH]
     """
-    total_tokens_needed = num_samples * PHASE1_SEQ_LENGTH
-    print_flush(f"Loading Pile dataset: {num_samples:,} samples ({total_tokens_needed:,} tokens)")
+    # シーケンス長で割り切れるようにトークン数を調整
+    num_sequences = (num_tokens + INTERNAL_SEQ_LENGTH - 1) // INTERNAL_SEQ_LENGTH
+    actual_tokens = num_sequences * INTERNAL_SEQ_LENGTH
+
+    print_flush(f"Loading Pile dataset: {num_tokens:,} tokens -> {actual_tokens:,} tokens ({num_sequences:,} sequences)")
 
     # Load tokenizer
     print_flush(f"  Loading tokenizer: {config.tokenizer_name}")
@@ -88,7 +87,7 @@ def load_pile_samples(
     print_flush(f"  Tokenizing...")
 
     dataset_iter = iter(dataset)
-    while len(all_tokens) < total_tokens_needed:
+    while len(all_tokens) < actual_tokens:
         try:
             example = next(dataset_iter)
             text = example["text"]
@@ -127,13 +126,12 @@ def load_pile_samples(
             else:
                 raise
 
-    # Split into fixed-length sequences
-    all_tokens = all_tokens[:num_samples * PHASE1_SEQ_LENGTH]
-
+    # Truncate and reshape
+    all_tokens = all_tokens[:actual_tokens]
     input_ids = torch.tensor(all_tokens, dtype=torch.long, device=device)
-    input_ids = input_ids.view(num_samples, PHASE1_SEQ_LENGTH)
+    input_ids = input_ids.view(num_sequences, INTERNAL_SEQ_LENGTH)
 
-    print_flush(f"  Loaded {num_samples:,} samples ({input_ids.numel():,} tokens)")
+    print_flush(f"  Loaded {input_ids.numel():,} tokens")
 
     return input_ids
 
@@ -251,8 +249,8 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        '--samples', type=int, required=True,
-        help='Number of samples (REQUIRED)'
+        '--tokens', type=int, required=True,
+        help='Number of tokens (REQUIRED)'
     )
     parser.add_argument(
         '--batch-size', type=int, default=config.phase2_batch_size,
@@ -279,15 +277,14 @@ def main() -> None:
     print_flush("=" * 70)
     print_flush("PHASE 1: CONTEXTBLOCK OACD TRAINING")
     print_flush("=" * 70)
-    print_flush(f"Samples: {args.samples:,}")
-    print_flush(f"Sequence length: {PHASE1_SEQ_LENGTH} (fixed)")
+    print_flush(f"Tokens: {args.tokens:,}")
     print_flush(f"Batch size: {args.batch_size}")
     print_flush(f"Checkpoint: {config.phase1_checkpoint_path}")
     print_flush("=" * 70)
 
     # Load data
-    input_ids = load_pile_samples(
-        num_samples=args.samples,
+    input_ids = load_pile_tokens(
+        num_tokens=args.tokens,
         config=config,
         device=device,
     )
