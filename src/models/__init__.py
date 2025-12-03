@@ -3,8 +3,8 @@
 Context-KV Attention architecture for efficient KV cache compression.
 """
 
-from .layers import ContextLayer, TokenLayer
-from .blocks import ContextBlock, TokenBlock
+from .layers import ContextLayer
+from .blocks import ContextBlock
 from .context_kv import (
     ContextKVAttentionLLM,
     ContextKVWrapper,
@@ -14,9 +14,7 @@ from .context_kv import (
 
 __all__ = [
     'ContextLayer',
-    'TokenLayer',
     'ContextBlock',
-    'TokenBlock',
     'ContextKVAttentionLLM',
     'ContextKVWrapper',
     'ContextToKV',

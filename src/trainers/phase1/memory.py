@@ -329,8 +329,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 batch_contexts = shifted_contexts[batch_start:batch_end].to(self.device)
                 batch_embeds = token_embeds_for_cache[batch_start:batch_end].to(self.device)
 
-                # G案: forward_batchで最終レイヤー出力のみ取得
-                batch_results = self.model.context_block.forward_batch(
+                # 最終レイヤー出力のみ取得
+                batch_results = self.model.context_block(
                     batch_contexts, batch_embeds
                 )
 
