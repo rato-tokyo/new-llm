@@ -6,11 +6,7 @@ Pythia vs Context-Pythia 比較実験
 KVキャッシュ削減効果と性能を検証する。
 
 Usage:
-    # 開発モード（限定データ）
-    python3 scripts/experiment_pythia_comparison.py --dev
-
-    # フルモード
-    python3 scripts/experiment_pythia_comparison.py --samples 10000
+    python3 scripts/experiment_pythia_comparison.py --samples 10000 --seq-length 256 --epochs 10
 """
 
 import argparse
@@ -22,6 +18,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
+from datasets import load_dataset
+from transformers import AutoTokenizer
 
 # Add project root to path
 sys.path.insert(0, ".")
@@ -51,25 +49,86 @@ def get_memory_usage() -> str:
     return f"CPU: {cpu_gb:.1f}GB"
 
 
-def load_sample_data(
+def load_pile_data(
     num_samples: int,
     seq_length: int,
-    vocab_size: int,
+    config: PythiaConfig,
     device: torch.device,
 ) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    Load sample data for training/evaluation.
+    Load real data from Pile dataset using Pythia tokenizer.
 
-    For development, use random data. For production, load from Pile.
+    Args:
+        num_samples: Number of samples to load
+        seq_length: Sequence length (will load seq_length + 1 for target shift)
+        config: PythiaConfig with tokenizer settings
+        device: Device to load data to
+
+    Returns:
+        inputs: [num_samples, seq_length]
+        targets: [num_samples, seq_length]
     """
-    print_flush(f"Generating random data: {num_samples} samples, seq_len={seq_length}")
+    print_flush(f"Loading Pile dataset: {num_samples} samples, seq_len={seq_length}")
 
-    # Random token IDs
-    input_ids = torch.randint(0, vocab_size, (num_samples, seq_length), device=device)
+    # Load tokenizer
+    print_flush(f"  Loading tokenizer: {config.tokenizer_name}")
+    tokenizer = AutoTokenizer.from_pretrained(config.tokenizer_name)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
-    # Targets: shifted input_ids
-    targets = input_ids[:, 1:].contiguous()
+    # Load Pile dataset (streaming to avoid downloading full dataset)
+    print_flush("  Loading dataset (streaming)...")
+    dataset = load_dataset(
+        "monology/pile-uncopyrighted",
+        split="train",
+        streaming=True,
+        trust_remote_code=True,
+    )
+
+    # Collect samples
+    all_input_ids = []
+    total_tokens_needed = num_samples * (seq_length + 1)
+    tokens_collected = 0
+
+    print_flush(f"  Tokenizing (need {total_tokens_needed:,} tokens)...")
+
+    for example in dataset:
+        text = example["text"]
+        if not text or len(text) < 100:  # Skip very short texts
+            continue
+
+        # Tokenize
+        tokens = tokenizer.encode(text, add_special_tokens=False)
+
+        if len(tokens) >= seq_length + 1:
+            # Take chunks of seq_length + 1
+            for i in range(0, len(tokens) - seq_length, seq_length + 1):
+                chunk = tokens[i:i + seq_length + 1]
+                all_input_ids.append(chunk)
+                tokens_collected += len(chunk)
+
+                if len(all_input_ids) >= num_samples:
+                    break
+
+        if len(all_input_ids) >= num_samples:
+            break
+
+        if len(all_input_ids) % 1000 == 0 and len(all_input_ids) > 0:
+            print_flush(f"    Collected {len(all_input_ids):,} samples...")
+
+    if len(all_input_ids) < num_samples:
+        print_flush(f"  Warning: Only collected {len(all_input_ids)} samples (requested {num_samples})")
+        num_samples = len(all_input_ids)
+
+    # Convert to tensor
+    all_input_ids = all_input_ids[:num_samples]
+    input_ids = torch.tensor(all_input_ids, dtype=torch.long, device=device)
+
+    # Split into inputs and targets
     inputs = input_ids[:, :-1].contiguous()
+    targets = input_ids[:, 1:].contiguous()
+
+    print_flush(f"  Loaded {num_samples:,} samples, {inputs.numel():,} tokens")
 
     return inputs, targets
 
@@ -79,18 +138,15 @@ def train_epoch(
     train_loader: DataLoader,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    max_batches: int = None,
 ) -> Tuple[float, float]:
-    """Train for one epoch."""
+    """Train for one epoch (full data)."""
     model.train()
     total_loss = 0.0
     total_correct = 0
     total_tokens = 0
+    num_batches = len(train_loader)
 
     for batch_idx, (inputs, targets) in enumerate(train_loader):
-        if max_batches and batch_idx >= max_batches:
-            break
-
         inputs = inputs.to(device)
         targets = targets.to(device)
 
@@ -116,8 +172,8 @@ def train_epoch(
         total_correct += (predictions == targets).sum().item()
         total_tokens += targets.numel()
 
-        if (batch_idx + 1) % 10 == 0:
-            print_flush(f"  Batch {batch_idx + 1}: loss={loss.item():.4f}")
+        if (batch_idx + 1) % 100 == 0 or (batch_idx + 1) == num_batches:
+            print_flush(f"  Batch {batch_idx + 1}/{num_batches}: loss={loss.item():.4f}")
 
     avg_loss = total_loss / total_tokens
     accuracy = total_correct / total_tokens
@@ -282,12 +338,12 @@ def run_comparison(
     print_flush(f"Device: {device}")
     print_flush("=" * 70)
 
-    # Load data
-    print_flush("\n[Data] Loading...")
-    inputs, targets = load_sample_data(
+    # Load data from Pile
+    print_flush("\n[Data] Loading from Pile...")
+    inputs, targets = load_pile_data(
         num_samples=num_samples,
-        seq_length=seq_length + 1,  # +1 for target shift
-        vocab_size=config.vocab_size,
+        seq_length=seq_length,
+        config=config,
         device=device,
     )
 
@@ -336,9 +392,7 @@ def run_comparison(
     start_time = time.time()
 
     for epoch in range(num_epochs):
-        train_ppl, train_acc = train_epoch(
-            pythia, train_loader, optimizer, device, max_batches=50
-        )
+        train_ppl, train_acc = train_epoch(pythia, train_loader, optimizer, device)
         val_ppl, val_acc = evaluate(pythia, val_loader, device)
         print_flush(
             f"Epoch {epoch + 1}: train_ppl={train_ppl:.1f}, "
@@ -419,9 +473,7 @@ def run_comparison(
     start_time = time.time()
 
     for epoch in range(num_epochs):
-        train_ppl, train_acc = train_epoch(
-            context_pythia, train_loader, optimizer, device, max_batches=50
-        )
+        train_ppl, train_acc = train_epoch(context_pythia, train_loader, optimizer, device)
         val_ppl, val_acc = evaluate(context_pythia, val_loader, device)
         print_flush(
             f"Epoch {epoch + 1}: train_ppl={train_ppl:.1f}, "

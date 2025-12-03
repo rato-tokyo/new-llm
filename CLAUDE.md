@@ -188,6 +188,23 @@ python3 scripts/experiment_pythia_comparison.py --samples 10000 --seq-length 256
 
 **サンプル数、シーケンス長、エポック数は必須引数とする。デフォルト値は予期せぬ問題を引き起こすため禁止。**
 
+### ランダムデータ使用禁止（厳禁）
+
+**実験でランダムデータ（torch.randint等）を使用することは絶対に禁止。**
+
+ランダムデータでは：
+- 言語パターンがないため学習不可能
+- PPLが理論値（log(vocab_size) ≈ 10.8）で収束し、改善しない
+- 実験として無意味
+
+```python
+# ❌ 禁止: ランダムデータ
+input_ids = torch.randint(0, vocab_size, (num_samples, seq_length))
+
+# ✅ 必須: 実データ（Pile）を使用
+inputs, targets = load_pile_data(num_samples, seq_length, config, device)
+```
+
 ```python
 # ❌ 禁止: デフォルト値あり
 parser.add_argument('--samples', type=int, default=200)
