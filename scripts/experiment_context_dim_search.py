@@ -3,17 +3,24 @@
 Context Dim 探索実験スクリプト
 
 サンプル数に対する適正 context_dim を探索する。
-context_dim を start_dim から n 刻みで増加させ、
+context_dim を start_dim から n 刻みで増加/減少させ、
 val PPL が2回連続で悪化した時点で停止する。
 
 特徴:
 - 毎回新規モデル作成（シンプルで安定）
 - ContextBlock: 1つのみで実験
-- 早期停止: val PPL が2回連続悪化 or 上限到達
+- 早期停止: val PPL が2回連続悪化 or 上限/下限到達
+- 双方向探索対応: 増加（→max_dim）または減少（→min_dim）
 
 使用方法:
-  python3 scripts/experiment_context_dim_search.py -s 2000 -n 10  # 100から10刻み
+  # 増加方向: 100から10刻みで500まで
+  python3 scripts/experiment_context_dim_search.py -s 2000 -n 10
+
+  # 増加方向: 200から20刻みで300まで
   python3 scripts/experiment_context_dim_search.py -s 1000 --start-dim 200 -n 20 -m 300
+
+  # 減少方向: 200から20刻みで100まで
+  python3 scripts/experiment_context_dim_search.py -s 1000 --start-dim 200 -n 20 --min-dim 100
 """
 
 import os
@@ -476,6 +483,7 @@ def run_context_dim_search(
     start_dim: int = 100,
     dim_step: int = 10,
     max_dim: int = 500,
+    min_dim: int = 10,
     seed: int = 42,
     output_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -485,15 +493,28 @@ def run_context_dim_search(
     Args:
         num_samples: サンプル数
         start_dim: 開始 context_dim
-        dim_step: dim の刻み幅（例: 10 なら 10, 20, 30...）
-        max_dim: 最大 context_dim
+        dim_step: dim の刻み幅（例: 10 なら 10刻み）
+        max_dim: 最大 context_dim（増加方向探索時の上限）
+        min_dim: 最小 context_dim（減少方向探索時の下限）
         seed: ランダムシード
         output_dir: 出力ディレクトリ
+
+    探索方向:
+        - start_dim < max_dim: 増加方向（start_dim → max_dim）
+        - start_dim > min_dim and max_dim <= start_dim: 減少方向（start_dim → min_dim）
 
     Returns:
         結果の辞書
     """
     set_seed(seed)
+
+    # 探索方向を決定
+    if start_dim < max_dim:
+        direction = "increase"
+        end_dim = max_dim
+    else:
+        direction = "decrease"
+        end_dim = min_dim
 
     print_flush("=" * 70)
     print_flush("CONTEXT DIM SEARCH EXPERIMENT")
@@ -501,7 +522,7 @@ def run_context_dim_search(
     print_flush(f"Samples: {num_samples}")
     print_flush(f"Start dim: {start_dim}")
     print_flush(f"Dim step: {dim_step}")
-    print_flush(f"Max dim: {max_dim}")
+    print_flush(f"Direction: {direction} ({start_dim} → {end_dim})")
     if output_dir:
         print_flush(f"Output: {output_dir}")
     print_flush("=" * 70)
@@ -536,7 +557,13 @@ def run_context_dim_search(
 
     current_dim = start_dim
 
-    while current_dim <= max_dim:
+    def should_continue(dim: int) -> bool:
+        if direction == "increase":
+            return dim <= max_dim
+        else:
+            return dim >= min_dim
+
+    while should_continue(current_dim):
         print_flush(f"\n{'='*70}")
         print_flush(f"[DIM={current_dim}] Starting experiment...")
         print_flush("=" * 70)
@@ -642,8 +669,11 @@ def run_context_dim_search(
             print_flush(f"\n⛔ Stopping: PPL increased {SEARCH_PPL_WORSE_PATIENCE} times consecutively")
             break
 
-        # 次の dim
-        current_dim += dim_step
+        # 次の dim（増加または減少）
+        if direction == "increase":
+            current_dim += dim_step
+        else:
+            current_dim -= dim_step
 
         # メモリ解放
         del model, train_context_cache, val_context_cache
@@ -657,7 +687,7 @@ def run_context_dim_search(
     print_flush(f"Samples: {num_samples}")
     print_flush(f"Start dim: {start_dim}")
     print_flush(f"Dim step: {dim_step}")
-    print_flush(f"Max dim: {max_dim}")
+    print_flush(f"Direction: {direction} ({start_dim} → {end_dim})")
     print_flush("\nResults:")
     print_flush(f"{'dim':>6} | {'PPL':>8} | {'Acc':>6} | {'ER%':>6} | {'Time':>8}")
     print_flush("-" * 45)
@@ -679,7 +709,7 @@ def run_context_dim_search(
             f.write(f"Samples: {num_samples}\n")
             f.write(f"Start dim: {start_dim}\n")
             f.write(f"Dim step: {dim_step}\n")
-            f.write(f"Max dim: {max_dim}\n\n")
+            f.write(f"Direction: {direction} ({start_dim} -> {end_dim})\n\n")
             f.write(f"{'dim':>6} | {'PPL':>8} | {'Acc':>6} | {'ER%':>6} | {'Time':>8}\n")
             f.write("-" * 50 + "\n")
             for r in results:
@@ -707,7 +737,9 @@ def main() -> None:
     parser.add_argument('--dim-step', '-n', type=int, default=10,
                         help='Context dim step size (e.g., 10 means +10 each iteration)')
     parser.add_argument('--max-dim', '-m', type=int, default=500,
-                        help='Maximum context dim to search')
+                        help='Maximum context dim (for increasing search)')
+    parser.add_argument('--min-dim', type=int, default=10,
+                        help='Minimum context dim (for decreasing search)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed')
     parser.add_argument('--output', '-o', type=str, default=None,
@@ -727,6 +759,7 @@ def main() -> None:
         start_dim=args.start_dim,
         dim_step=args.dim_step,
         max_dim=args.max_dim,
+        min_dim=args.min_dim,
         seed=args.seed,
         output_dir=output_dir,
     )
