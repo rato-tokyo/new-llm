@@ -491,7 +491,7 @@ def run_sample_size_search(
         print_flush(f"Cache collection: {cache_time:.1f}s")
 
         # Effective Rank
-        er_analysis = analyze_fixed_points(val_context_cache, prefix="Val")
+        er_analysis = analyze_fixed_points(val_context_cache, label="Val")
         val_er = er_analysis.get('effective_rank', 0)
         val_er_pct = val_er / context_dim * 100
 
