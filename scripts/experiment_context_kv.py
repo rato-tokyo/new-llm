@@ -25,7 +25,7 @@ from config import Config
 from config.experiment import DataConfig
 from src.config.wrappers import Phase1ConfigWrapper
 from src.providers.data.memory import MemoryDataProvider
-from src.metrics.effective_rank import compute_effective_rank_percentage
+from src.evaluation.metrics import compute_effective_rank
 from src.models.context_kv import ContextKVAttentionLLM, ContextKVWrapper
 from src.trainers.phase1.base import Phase1Result
 from src.trainers.phase1.memory import MemoryPhase1Trainer
@@ -388,7 +388,8 @@ def run_context_kv_experiment(
     # Effective Rank
     # 最後のチャンクのcontextで計算
     val_last_context = val_context_chunks[:, -1, :]  # [num_val, combined_dim]
-    val_er_pct = compute_effective_rank_percentage(val_last_context.cpu())
+    val_er = compute_effective_rank(val_last_context.cpu())
+    val_er_pct = val_er / combined_dim * 100
     print_flush(f"Effective Rank: Val={val_er_pct:.1f}%")
 
     # CPUに移動（メモリ節約）
