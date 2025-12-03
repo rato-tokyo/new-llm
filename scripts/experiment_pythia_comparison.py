@@ -156,7 +156,6 @@ def train_model(
     num_epochs: int = 10,
     batch_size: int = 32,
     lr: float = 1e-4,
-    patience: int = 3,
     model_name: str = "Model",
 ) -> Dict[str, Any]:
     """
@@ -173,7 +172,6 @@ def train_model(
 
     best_val_ppl = float("inf")
     best_epoch = 0
-    no_improve = 0
 
     print_flush(f"\n[{model_name}] Training...")
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -197,15 +195,13 @@ def train_model(
 
         epoch_time = time.time() - epoch_start
 
-        # Early stopping
+        # Early stopping: stop immediately if val_ppl worsens
         improved = val_ppl < best_val_ppl
         if improved:
             best_val_ppl = val_ppl
             best_epoch = epoch
-            no_improve = 0
             marker = " *"
         else:
-            no_improve += 1
             marker = ""
 
         print_flush(
@@ -223,8 +219,9 @@ def train_model(
             "val_acc": val_acc,
         })
 
-        if no_improve >= patience:
-            print_flush(f"  → Early stop at epoch {epoch}")
+        # Stop immediately if val_ppl didn't improve
+        if not improved and epoch > 1:
+            print_flush(f"  → Early stop: val_ppl worsened ({val_ppl:.1f} > {best_val_ppl:.1f})")
             break
 
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
@@ -244,7 +241,6 @@ def run_experiment(
     num_epochs: int = 10,
     batch_size: int = 32,
     lr: float = 1e-4,
-    patience: int = 3,
     skip_baseline: bool = False,
 ) -> Dict[str, Any]:
     """
@@ -323,7 +319,6 @@ def run_experiment(
             num_epochs=num_epochs,
             batch_size=batch_size,
             lr=lr,
-            patience=patience,
             model_name="Pythia-70M",
         )
         results["pythia"] = pythia_results
@@ -373,7 +368,6 @@ def run_experiment(
         num_epochs=num_epochs,
         batch_size=batch_size,
         lr=lr,
-        patience=patience,
         model_name="Context-Pythia",
     )
     results["context_pythia"] = context_pythia_results
@@ -418,7 +412,6 @@ def main():
     parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
     parser.add_argument("--batch-size", type=int, default=32, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
-    parser.add_argument("--patience", type=int, default=3, help="Early stopping patience")
     parser.add_argument("--skip-baseline", action="store_true", help="Skip Pythia-70M baseline")
     args = parser.parse_args()
 
@@ -428,7 +421,6 @@ def main():
         num_epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
-        patience=args.patience,
         skip_baseline=args.skip_baseline,
     )
 
