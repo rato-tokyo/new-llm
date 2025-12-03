@@ -2,6 +2,9 @@
 
 **最終更新**: 2025-12-03
 
+> **Note**: この実験は1-block構成での結果です。現在は2-block構成（context_dim=256×2）が主流です。
+> 2-block構成については [CASCADE_CONTEXT_ARCHITECTURE.md](CASCADE_CONTEXT_ARCHITECTURE.md) を参照。
+
 ---
 
 ## 結論サマリー
