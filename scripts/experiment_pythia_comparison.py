@@ -472,24 +472,20 @@ def main() -> None:
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        '--dev', action='store_true',
-        help='Development mode (limited data)'
+        '--samples', type=int, required=True,
+        help='Number of samples (REQUIRED)'
     )
     parser.add_argument(
-        '--samples', type=int, default=config.dev_num_samples,
-        help=f'Number of samples (default: {config.dev_num_samples})'
+        '--seq-length', type=int, required=True,
+        help='Sequence length (REQUIRED)'
     )
     parser.add_argument(
-        '--seq-length', type=int, default=config.dev_max_seq_length,
-        help=f'Sequence length (default: {config.dev_max_seq_length})'
+        '--epochs', type=int, required=True,
+        help='Number of epochs (REQUIRED)'
     )
     parser.add_argument(
         '--batch-size', type=int, default=config.phase2_batch_size,
         help=f'Batch size (default: {config.phase2_batch_size})'
-    )
-    parser.add_argument(
-        '--epochs', type=int, default=3,
-        help='Number of epochs (default: 3)'
     )
     parser.add_argument(
         '--seed', type=int, default=config.random_seed,
@@ -497,13 +493,6 @@ def main() -> None:
     )
 
     args = parser.parse_args()
-
-    # Development mode overrides
-    if args.dev:
-        args.samples = 500
-        args.seq_length = 128
-        args.epochs = 2
-        print_flush("*** DEVELOPMENT MODE ***")
 
     device = torch.device(config.device)
     if device.type == "cuda":

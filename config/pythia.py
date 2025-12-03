@@ -44,10 +44,6 @@ class PythiaConfig:
     tokenizer_name = "EleutherAI/pythia-70m"  # Tokenizer
     max_seq_length = 512            # Maximum sequence length for training
 
-    # ========== 開発用（限定データ） ==========
-    dev_num_samples = 1000          # Number of samples for development
-    dev_max_seq_length = 256        # Shorter sequences for dev
-
     # ========== デバイス ==========
     device = "cuda" if torch.cuda.is_available() else "cpu"
     random_seed = 42

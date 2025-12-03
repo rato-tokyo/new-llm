@@ -169,11 +169,7 @@ python3 -m mypy src/ --ignore-missing-imports
 ### 実験の実行
 
 ```bash
-# 開発モード（限定データ）
-python3 scripts/experiment_pythia_comparison.py --dev
-
-# フルモード
-python3 scripts/experiment_pythia_comparison.py --samples 10000
+python3 scripts/experiment_pythia_comparison.py --samples 10000 --seq-length 256 --epochs 10
 ```
 
 ---
@@ -188,13 +184,18 @@ python3 scripts/experiment_pythia_comparison.py --samples 10000
 
 **全ての値はconfigから読み込む。**
 
+### デフォルト値禁止（重要パラメータ）
+
+**サンプル数、シーケンス長、エポック数は必須引数とする。デフォルト値は予期せぬ問題を引き起こすため禁止。**
+
 ```python
-# ❌ 禁止
+# ❌ 禁止: デフォルト値あり
 parser.add_argument('--samples', type=int, default=200)
 
-# ✅ 推奨
-config = PythiaConfig()
-parser.add_argument('--samples', type=int, default=config.dev_num_samples)
+# ✅ 必須: required=True
+parser.add_argument('--samples', type=int, required=True, help='(REQUIRED)')
+parser.add_argument('--seq-length', type=int, required=True, help='(REQUIRED)')
+parser.add_argument('--epochs', type=int, required=True, help='(REQUIRED)')
 ```
 
 ---
