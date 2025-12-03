@@ -33,75 +33,46 @@ from src.utils.seed import set_seed
 from src.utils.device import clear_gpu_cache
 
 
-def collect_context_chunks(
-    model: ContextKVAttentionLLM,
-    token_ids: torch.Tensor,
-    device: torch.device,
-    chunk_size: int = 100,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+def build_context_chunks_from_cache(
+    context_cache: torch.Tensor,
+    chunk_size: int,
+) -> torch.Tensor:
     """
-    チャンク単位でcontextを収集（シンプル版）
+    Phase 1キャッシュからチャンク形式に変換
+
+    Args:
+        context_cache: [num_tokens, context_dim] - Phase 1で収集したcontext
+        chunk_size: チャンクサイズ
 
     Returns:
-        context_chunks: [num_tokens-1, max_chunks, context_dim]
-        token_embeds: [num_tokens-1, embed_dim]
+        context_chunks: [num_tokens, max_chunks, context_dim]
     """
-    import sys
-    num_tokens = len(token_ids)
-    context_dim = model.context_dims[0]  # 1ブロックのみ
-    total_tokens = num_tokens - 1
-    max_chunks = total_tokens // chunk_size + 1
+    num_tokens = len(context_cache)
+    context_dim = context_cache.shape[1]
+    max_chunks = num_tokens // chunk_size + 1
 
-    print_flush(f"    Starting collection: {total_tokens:,} tokens, chunk_size={chunk_size}")
-    sys.stdout.flush()
+    # 出力テンソル
+    context_chunks = torch.zeros(num_tokens, max_chunks, context_dim)
 
-    # 出力テンソル（CPU）
-    context_chunks = torch.zeros(total_tokens, max_chunks, context_dim)
-    token_embeds_out = torch.zeros(total_tokens, model.embed_dim)
+    # チャンク境界のcontext
+    chunk_boundaries: List[torch.Tensor] = []
 
-    # 初期context
-    context = torch.zeros(context_dim, device=device)
-    chunk_contexts: List[torch.Tensor] = []
+    for i in range(num_tokens):
+        # チャンク境界の場合、保存
+        if (i + 1) % chunk_size == 0:
+            chunk_boundaries.append(context_cache[i])
 
-    start_time = time.time()
+        # この位置で利用可能なチャンク数
+        num_chunks = len(chunk_boundaries) + 1
 
-    with torch.no_grad():
-        for i in range(total_tokens):
-            # Token embedding
-            token_id = token_ids[i:i+1].to(device)
-            token_embed = model.token_embedding(token_id)
-            token_embed = model.embed_norm(token_embed).squeeze(0)
+        # 過去のチャンクを設定
+        for j, ctx in enumerate(chunk_boundaries):
+            context_chunks[i, j] = ctx
 
-            # Context更新
-            ctx = context.unsqueeze(0)
-            te = token_embed.unsqueeze(0)
-            context = model.forward_context(0, ctx, te).squeeze(0).detach()
+        # 現在のcontextを最後のチャンクに
+        context_chunks[i, num_chunks - 1] = context_cache[i]
 
-            # チャンク境界
-            if (i + 1) % chunk_size == 0:
-                chunk_contexts.append(context.cpu())
-
-            # 保存
-            num_chunks = len(chunk_contexts) + 1
-            for j, c in enumerate(chunk_contexts):
-                context_chunks[i, j] = c
-            context_chunks[i, num_chunks - 1] = context.cpu()
-            token_embeds_out[i] = token_embed.cpu()
-
-            # 進捗（100トークンごと）
-            if (i + 1) % 100 == 0:
-                elapsed = time.time() - start_time
-                speed = (i + 1) / elapsed if elapsed > 0 else 0
-                eta = (total_tokens - i - 1) / speed if speed > 0 else 0
-                print(f"\r      {i+1:,}/{total_tokens:,} ({(i+1)/total_tokens*100:.0f}%) "
-                      f"[{speed:.0f} tok/s, ETA {eta:.0f}s]", end="")
-                sys.stdout.flush()
-
-    print()  # 改行
-    elapsed = time.time() - start_time
-    print_flush(f"    Done: {elapsed:.1f}s ({total_tokens/elapsed:.0f} tok/s)")
-
-    return context_chunks, token_embeds_out
+    return context_chunks
 
 
 def train_phase2(
@@ -305,7 +276,7 @@ def run_context_kv_experiment(
     trainer = MemoryPhase1Trainer(wrapper, config_wrapper, device)
 
     phase1_start = time.time()
-    result = trainer.train(
+    train_result = trainer.train(
         train_token_ids,
         label="Context",
         return_all_layers=True,
@@ -315,22 +286,30 @@ def run_context_kv_experiment(
     model.freeze_context_block(0)
     print_flush(f"✓ ContextBlock frozen")
 
-    # ========== Phase 2 Prep: Context chunks収集 ==========
-    print_flush("\n[Phase 2 Prep] Collecting context chunks...")
+    # Val data のキャッシュも収集
+    print_flush("  Collecting val cache...")
+    val_result = trainer.evaluate(val_token_ids, label="Val")
+
+    # ========== Phase 2 Prep: Context chunks形式に変換 ==========
+    print_flush("\n[Phase 2 Prep] Building context chunks from cache...")
     cache_start = time.time()
 
-    train_context_chunks, train_token_embeds = collect_context_chunks(
-        model, train_token_ids, device, chunk_size
-    )
+    # Phase 1のキャッシュを使用
+    assert train_result.cache is not None
+    assert train_result.token_embeds is not None
+    assert val_result.cache is not None
+    assert val_result.token_embeds is not None
+
+    train_context_chunks = build_context_chunks_from_cache(train_result.cache, chunk_size)
+    train_token_embeds = train_result.token_embeds
     train_targets = train_token_ids[1:].clone()
 
-    val_context_chunks, val_token_embeds = collect_context_chunks(
-        model, val_token_ids, device, chunk_size
-    )
+    val_context_chunks = build_context_chunks_from_cache(val_result.cache, chunk_size)
+    val_token_embeds = val_result.token_embeds
     val_targets = val_token_ids[1:].clone()
 
     cache_time = time.time() - cache_start
-    print_flush(f"Cache collection: {cache_time:.1f}s")
+    print_flush(f"Cache conversion: {cache_time:.1f}s")
     print_flush(f"  Train: {train_context_chunks.shape}")
     print_flush(f"  Val: {val_context_chunks.shape}")
 
