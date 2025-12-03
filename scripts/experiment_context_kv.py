@@ -12,7 +12,7 @@ import argparse
 import os
 import sys
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 import torch
 import torch.nn as nn
@@ -50,6 +50,7 @@ def collect_val_cache_parallel(
     """
     model.eval()
     num_tokens = len(token_ids) - 1  # 最後のトークンを除く
+    context_dim = model.context_dim
 
     # Token embeddings計算
     with torch.no_grad():
@@ -59,20 +60,19 @@ def collect_val_cache_parallel(
         del token_embeds_gpu
         clear_gpu_cache(device)
 
-    # 並列forward（shifted_prev_context方式）
-    # まず1回だけforward passを実行してcontextを収集
-    context_dim = model.context_dim
+    # 結果テンソルを事前確保
+    contexts = torch.zeros(num_tokens, context_dim)
 
     # 初期context（ゼロベクトル）
-    init_ctx = torch.zeros(1, context_dim, device='cpu')
+    init_ctx = torch.zeros(1, context_dim)
 
-    # 最初のパス: 全トークンを並列処理
+    # 最初のパス: ランダム初期化
     previous_contexts = torch.randn(num_tokens, context_dim) * 0.01
 
     # 数回iterationして収束させる（簡易版）
-    for _ in range(3):
+    for iteration in range(3):
+        # shifted_prev: [zero, ctx[0], ctx[1], ..., ctx[n-2]]
         shifted_prev = torch.cat([init_ctx, previous_contexts[:-1]], dim=0)
-        new_contexts = []
 
         for start_idx in range(0, num_tokens, batch_size):
             end_idx = min(start_idx + batch_size, num_tokens)
@@ -81,14 +81,16 @@ def collect_val_cache_parallel(
 
             with torch.no_grad():
                 batch_output = model.context_block(batch_contexts, batch_embeds)
-            new_contexts.append(batch_output.cpu())
+            contexts[start_idx:end_idx] = batch_output.cpu()
 
             del batch_contexts, batch_embeds, batch_output
             clear_gpu_cache(device)
 
-        previous_contexts = torch.cat(new_contexts, dim=0)
+        # 次のiteration用に更新
+        previous_contexts = contexts.clone()
+        del shifted_prev
 
-    return previous_contexts, token_embeds
+    return contexts, token_embeds
 
 
 def get_chunk_boundaries(context_cache: torch.Tensor, chunk_size: int) -> torch.Tensor:
