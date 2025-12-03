@@ -138,18 +138,27 @@ def oacd_loss(contexts, centroid_weight=0.1):
     return dispersion_loss + centroid_weight * centroid_loss
 ```
 
-### 実験スクリプトの必須構造
+### Phase 1の必須機能（削除禁止）
+
+以下の機能は試行錯誤の末に必須と判明したもの。**絶対に削除しないこと。**
+
+| 機能 | 説明 | 設定値 |
+|------|------|--------|
+| **収束率表示** | 各イテレーションで`conv=XX%`を表示 | - |
+| **Early Stopping** | 収束率が閾値以上で停止 | `phase1_early_stopping_rate` |
+| **No Improvement Patience** | N回改善なしで停止 | `phase1_no_improvement_patience` |
+| **Validation** | 検証データでの評価 | `phase1_val_split` |
+| **min/max iteration** | 最小・最大イテレーション数 | `phase1_min_iterations`, `phase1_max_iterations` |
+| **勾配累積** | 複数バッチの勾配を累積してから1回更新 | `phase1_batches_per_iteration` |
+| **CPU/GPUメモリ分離** | contextをCPUに保存してOOM回避 | - |
 
 ```python
-# scripts/experiment_pythia_comparison.py
-# Phase 1は必ず実行すること
-
-# Phase 1: OACD
-phase1_loss = train_phase1_oacd(model, train_loader, device, config)
-
-# Phase 2: Full Training (ContextBlock frozen)
-model.freeze_context_block()
-# ... CE loss training
+# config/pythia.py - Phase 1設定
+phase1_min_iterations = 5           # 最小イテレーション数
+phase1_max_iterations = 60          # 最大イテレーション数
+phase1_early_stopping_rate = 0.90   # 収束率90%で停止
+phase1_no_improvement_patience = 3  # 3回改善なしで停止
+phase1_val_split = 0.1              # 10%を検証用に使用
 ```
 
 ---

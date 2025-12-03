@@ -5,8 +5,12 @@ Phase 1: ContextBlock OACD Training
 ContextBlockの多様性学習を行い、チェックポイントを保存する。
 このスクリプトで学習したパラメータは、experiment_pythia_comparison.pyで使用される。
 
-Note: Phase 1ではcontextをflattenするため、シーケンス長は本質的に関係ない。
-トークン数のみを指定する。
+機能（削除禁止）:
+- 収束率表示: 各イテレーションでconv=XX%を表示
+- Early Stopping: 収束率が閾値以上で停止
+- No Improvement Patience: N回改善なしで停止
+- Validation: 検証データでの評価
+- min/max iteration: 最小・最大イテレーション数
 
 Usage:
     python3 scripts/train_phase1.py --tokens 100000
@@ -16,6 +20,7 @@ import argparse
 import sys
 import time
 from pathlib import Path
+from typing import Optional, Tuple
 
 import torch
 from torch.utils.data import DataLoader, TensorDataset
@@ -39,7 +44,7 @@ def set_seed(seed: int) -> None:
         torch.cuda.manual_seed_all(seed)
 
 
-# 内部で使用するシーケンス長（モデルのforward用、ユーザーには関係ない）
+# 内部で使用するシーケンス長（モデルのforward用）
 INTERNAL_SEQ_LENGTH = 64
 
 
@@ -49,7 +54,7 @@ def load_pile_tokens(
     device: torch.device,
     max_retries: int = 5,
     retry_delay: float = 30.0,
-) -> torch.Tensor:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """Load tokens from Pile dataset for Phase 1 training.
 
     Args:
@@ -58,13 +63,20 @@ def load_pile_tokens(
         retry_delay: リトライ間の待機時間（秒）
 
     Returns:
-        input_ids: [num_sequences, INTERNAL_SEQ_LENGTH]
+        train_ids: [num_train_sequences, INTERNAL_SEQ_LENGTH]
+        val_ids: [num_val_sequences, INTERNAL_SEQ_LENGTH]
     """
     # シーケンス長で割り切れるようにトークン数を調整
     num_sequences = (num_tokens + INTERNAL_SEQ_LENGTH - 1) // INTERNAL_SEQ_LENGTH
     actual_tokens = num_sequences * INTERNAL_SEQ_LENGTH
 
-    print_flush(f"Loading Pile dataset: {num_tokens:,} tokens -> {actual_tokens:,} tokens ({num_sequences:,} sequences)")
+    # Train/Val分割
+    val_sequences = max(1, int(num_sequences * config.phase1_val_split))
+    train_sequences = num_sequences - val_sequences
+
+    print_flush(f"Loading Pile dataset: {num_tokens:,} tokens")
+    print_flush(f"  Train: {train_sequences:,} sequences ({train_sequences * INTERNAL_SEQ_LENGTH:,} tokens)")
+    print_flush(f"  Val: {val_sequences:,} sequences ({val_sequences * INTERNAL_SEQ_LENGTH:,} tokens)")
 
     # Load tokenizer
     print_flush(f"  Loading tokenizer: {config.tokenizer_name}")
@@ -109,15 +121,13 @@ def load_pile_tokens(
                 retry_count += 1
                 print_flush(f"    Rate limited (429). Retry {retry_count}/{max_retries} after {retry_delay}s...")
                 time.sleep(retry_delay)
-                # Recreate iterator
                 dataset = load_dataset(
                     "monology/pile-uncopyrighted",
                     split="train",
                     streaming=True,
                 )
                 dataset_iter = iter(dataset)
-                # Skip already collected samples (approximate)
-                skip_count = len(all_tokens) // 500  # Rough estimate
+                skip_count = len(all_tokens) // 500
                 for _ in range(skip_count):
                     try:
                         next(dataset_iter)
@@ -131,22 +141,91 @@ def load_pile_tokens(
     input_ids = torch.tensor(all_tokens, dtype=torch.long, device=device)
     input_ids = input_ids.view(num_sequences, INTERNAL_SEQ_LENGTH)
 
+    # Split into train/val
+    train_ids = input_ids[:train_sequences]
+    val_ids = input_ids[train_sequences:]
+
     print_flush(f"  Loaded {input_ids.numel():,} tokens")
 
-    return input_ids
+    return train_ids, val_ids
+
+
+def compute_convergence_rate(
+    current_contexts: torch.Tensor,
+    previous_contexts: torch.Tensor,
+    threshold: float,
+) -> float:
+    """
+    収束率を計算（CPUで計算してメモリ節約）
+
+    Args:
+        current_contexts: 現在のcontext [N, context_dim] (CPU tensor)
+        previous_contexts: 前回のcontext [N, context_dim] (CPU tensor)
+        threshold: 収束判定の閾値
+
+    Returns:
+        収束率 (0.0-1.0)
+    """
+    with torch.no_grad():
+        # CPUで計算
+        current = current_contexts.cpu() if current_contexts.is_cuda else current_contexts
+        previous = previous_contexts.cpu() if previous_contexts.is_cuda else previous_contexts
+
+        # 各トークンの変化量
+        diff = ((current - previous) ** 2).mean(dim=1)
+        # 閾値以下の割合
+        converged = (diff < threshold).float().mean().item()
+    return converged
+
+
+def evaluate_diversity(
+    model: ContextPythiaModel,
+    val_loader: DataLoader,
+    device: torch.device,
+) -> float:
+    """
+    検証データでの多様性損失を計算
+
+    Returns:
+        平均OACD損失
+    """
+    model.eval()
+    total_loss = 0.0
+    num_batches = 0
+
+    with torch.no_grad():
+        for (inputs,) in val_loader:
+            inputs = inputs.to(device)
+            _, context = model.forward_with_context_output(inputs)
+            context_flat = context.view(-1, context.size(-1))
+            loss = oacd_loss(context_flat, centroid_weight=0.1)
+            total_loss += loss.item()
+            num_batches += 1
+
+    model.train()
+    return total_loss / max(num_batches, 1)
 
 
 def train_phase1(
     model: ContextPythiaModel,
     train_loader: DataLoader,
+    val_loader: DataLoader,
     config: ContextPythiaConfig,
     device: torch.device,
-) -> float:
+) -> Tuple[float, dict]:
     """
     Phase 1: Train ContextBlock with OACD diversity loss.
 
+    機能（削除禁止）:
+    - 収束率表示
+    - Early Stopping（収束率ベース）
+    - No Improvement Patience
+    - Validation評価
+    - min/max iteration
+
     Returns:
-        Final average loss
+        final_loss: 最終損失
+        stats: 訓練統計
     """
     model.train()
 
@@ -156,19 +235,37 @@ def train_phase1(
         lr=config.phase1_learning_rate,
     )
 
-    total_loss = 0.0
-    num_iterations = 0
-
-    print_flush(f"\nPhase 1 Training: {config.phase1_max_iterations} iterations")
+    print_flush(f"\nPhase 1 Training:")
+    print_flush(f"  Min iterations: {config.phase1_min_iterations}")
+    print_flush(f"  Max iterations: {config.phase1_max_iterations}")
     print_flush(f"  Learning rate: {config.phase1_learning_rate}")
-    print_flush(f"  Batches per iteration: {config.phase1_batches_per_iteration}")
-    print_flush(f"  Convergence threshold: {config.phase1_convergence_threshold}")
+    print_flush(f"  Early stopping rate: {config.phase1_early_stopping_rate * 100:.0f}%")
+    print_flush(f"  No improvement patience: {config.phase1_no_improvement_patience}")
 
     start_time = time.time()
+
+    # 前回のcontextを保存（収束率計算用）
+    previous_contexts: Optional[torch.Tensor] = None
+    best_val_loss = float('inf')
+    no_improvement_count = 0
+    final_loss = 0.0
+    final_conv_rate = 0.0
+
+    stats = {
+        'iterations': 0,
+        'early_stopped': False,
+        'stop_reason': 'max_iterations',
+        'best_val_loss': float('inf'),
+        'final_conv_rate': 0.0,
+    }
 
     for iteration in range(config.phase1_max_iterations):
         epoch_loss = 0.0
         batch_count = 0
+        all_contexts_cpu = []  # CPUに保存してメモリ節約
+
+        # 勾配累積: 複数バッチの勾配を累積してから1回更新
+        optimizer.zero_grad()
 
         for batch_idx, (inputs,) in enumerate(train_loader):
             if batch_idx >= config.phase1_batches_per_iteration:
@@ -176,53 +273,104 @@ def train_phase1(
 
             inputs = inputs.to(device)
 
-            optimizer.zero_grad()
-
             # Forward to get context
             _, context = model.forward_with_context_output(inputs)
 
             # Flatten context: [batch*seq, context_dim]
             context_flat = context.view(-1, context.size(-1))
 
-            # OACD diversity loss
+            # OACD diversity loss（バッチ数で割って勾配累積）
             loss = oacd_loss(context_flat, centroid_weight=0.1)
+            scaled_loss = loss / config.phase1_batches_per_iteration
 
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.context_block.parameters(), 1.0)
-            optimizer.step()
+            scaled_loss.backward()
 
             epoch_loss += loss.item()
             batch_count += 1
+            all_contexts_cpu.append(context_flat.detach().cpu())  # CPUに保存
+
+            # メモリ解放
+            del context, context_flat
+
+        # 勾配クリッピングとパラメータ更新（イテレーションごとに1回）
+        torch.nn.utils.clip_grad_norm_(model.context_block.parameters(), 1.0)
+        optimizer.step()
+
+        # GPUキャッシュクリア
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
 
         avg_loss = epoch_loss / max(batch_count, 1)
-        total_loss += avg_loss
-        num_iterations += 1
+        final_loss = avg_loss
 
-        if (iteration + 1) % 10 == 0:
-            elapsed = time.time() - start_time
-            print_flush(f"  Iter {iteration + 1}/{config.phase1_max_iterations}: "
-                       f"loss={avg_loss:.4f}, time={elapsed:.1f}s")
+        # 収束率計算（CPUで計算してメモリ節約）
+        current_contexts_cpu = torch.cat(all_contexts_cpu, dim=0)
+        if previous_contexts is not None and len(previous_contexts) == len(current_contexts_cpu):
+            conv_rate = compute_convergence_rate(
+                current_contexts_cpu, previous_contexts, config.phase1_convergence_threshold
+            )
+        else:
+            conv_rate = 0.0
+        final_conv_rate = conv_rate
 
-        # Early stopping
-        if avg_loss < -config.phase1_convergence_threshold:
-            print_flush(f"  Converged at iteration {iteration + 1}")
-            break
+        # Validation評価
+        val_loss = evaluate_diversity(model, val_loader, device)
 
-    final_loss = total_loss / max(num_iterations, 1)
+        # ログ出力
+        elapsed = time.time() - start_time
+        print_flush(
+            f"  Iter {iteration + 1:2d}: loss={avg_loss:.4f}, "
+            f"val_loss={val_loss:.4f}, conv={conv_rate*100:.0f}% [{elapsed:.1f}s]"
+        )
+
+        # 改善チェック
+        if val_loss < best_val_loss:
+            best_val_loss = val_loss
+            no_improvement_count = 0
+        else:
+            no_improvement_count += 1
+
+        # Early Stopping判定（min_iterations後のみ）
+        if iteration >= config.phase1_min_iterations - 1:
+            # 収束率ベースのEarly Stopping
+            if conv_rate >= config.phase1_early_stopping_rate:
+                stats['early_stopped'] = True
+                stats['stop_reason'] = f'convergence_rate >= {config.phase1_early_stopping_rate*100:.0f}%'
+                print_flush(f"  → Early stop: conv {conv_rate*100:.0f}% >= {config.phase1_early_stopping_rate*100:.0f}%")
+                previous_contexts = current_contexts_cpu.clone()
+                break
+
+            # No Improvement Patience
+            if no_improvement_count >= config.phase1_no_improvement_patience:
+                stats['early_stopped'] = True
+                stats['stop_reason'] = f'no_improvement for {config.phase1_no_improvement_patience} iterations'
+                print_flush(f"  → Early stop: no improvement for {config.phase1_no_improvement_patience} iterations")
+                previous_contexts = current_contexts_cpu.clone()
+                break
+
+        previous_contexts = current_contexts_cpu.clone()
+
     total_time = time.time() - start_time
+    stats['iterations'] = iteration + 1
+    stats['best_val_loss'] = best_val_loss
+    stats['final_conv_rate'] = final_conv_rate
 
     print_flush(f"\nPhase 1 completed:")
-    print_flush(f"  Iterations: {num_iterations}")
+    print_flush(f"  Iterations: {stats['iterations']}")
     print_flush(f"  Final loss: {final_loss:.4f}")
+    print_flush(f"  Best val loss: {best_val_loss:.4f}")
+    print_flush(f"  Final conv rate: {final_conv_rate*100:.0f}%")
+    print_flush(f"  Stop reason: {stats['stop_reason']}")
     print_flush(f"  Total time: {total_time:.1f}s")
 
-    return final_loss
+    return final_loss, stats
 
 
 def save_checkpoint(
     model: ContextPythiaModel,
     config: ContextPythiaConfig,
     final_loss: float,
+    stats: dict,
 ) -> None:
     """Save ContextBlock checkpoint."""
     checkpoint_path = Path(config.phase1_checkpoint_path)
@@ -235,6 +383,7 @@ def save_checkpoint(
             "hidden_size": config.hidden_size,
         },
         "final_loss": final_loss,
+        "stats": stats,
     }
 
     torch.save(checkpoint, checkpoint_path)
@@ -282,16 +431,18 @@ def main() -> None:
     print_flush(f"Checkpoint: {config.phase1_checkpoint_path}")
     print_flush("=" * 70)
 
-    # Load data
-    input_ids = load_pile_tokens(
+    # Load data (with train/val split)
+    train_ids, val_ids = load_pile_tokens(
         num_tokens=args.tokens,
         config=config,
         device=device,
     )
 
-    # Create dataloader
-    dataset = TensorDataset(input_ids)
-    train_loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+    # Create dataloaders
+    train_dataset = TensorDataset(train_ids)
+    val_dataset = TensorDataset(val_ids)
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
     # Create model
     print_flush("\n[Model] Creating Context-Pythia...")
@@ -310,10 +461,10 @@ def main() -> None:
     print_flush(f"ContextBlock parameters: {context_params:,}")
 
     # Train Phase 1
-    final_loss = train_phase1(model, train_loader, config, device)
+    final_loss, stats = train_phase1(model, train_loader, val_loader, config, device)
 
     # Save checkpoint
-    save_checkpoint(model, config, final_loss)
+    save_checkpoint(model, config, final_loss, stats)
 
     print_flush("\nDONE")
 

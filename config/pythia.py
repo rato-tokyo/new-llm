@@ -29,11 +29,15 @@ class PythiaConfig:
     warmup_steps = 100              # Warmup steps
 
     # ========== Phase 1 (OACD) ==========
-    phase1_max_iterations = 60      # Maximum iterations for OACD
-    phase1_learning_rate = 0.002    # Phase 1 learning rate
-    phase1_convergence_threshold = 0.9  # Early stopping threshold
-    phase1_batches_per_iteration = 10  # Batches per iteration
+    phase1_min_iterations = 5           # Minimum iterations (skip early stopping)
+    phase1_max_iterations = 60          # Maximum iterations for OACD
+    phase1_learning_rate = 0.002        # Phase 1 learning rate
+    phase1_convergence_threshold = 0.001  # Convergence threshold (context change)
+    phase1_early_stopping_rate = 0.90   # Early stop when convergence rate >= this
+    phase1_no_improvement_patience = 3  # Stop if no improvement for N iterations
+    phase1_batches_per_iteration = 10   # Batches per iteration
     phase1_checkpoint_path = "checkpoints/context_block_phase1.pt"  # Phase 1 checkpoint
+    phase1_val_split = 0.1              # Validation split ratio
 
     # ========== Phase 2 (Fine-tuning) ==========
     phase2_epochs = 10              # Number of fine-tuning epochs
