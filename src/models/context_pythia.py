@@ -31,6 +31,8 @@ class ContextBlock(nn.Module):
 
     入力: prev_context (context_dim) + token_embed (embed_dim)
     出力: context (context_dim)
+
+    シンプルな1層FFN（昔の実装と同じ）
     """
 
     def __init__(
@@ -42,16 +44,25 @@ class ContextBlock(nn.Module):
         self.context_dim = context_dim
         self.embed_dim = embed_dim
 
-        # FFN: [context + token_embed] → context
+        # FFN: [context + token_embed] → context (シンプルな1層)
         input_dim = context_dim + embed_dim
-        hidden_dim = input_dim * 2
 
         self.ffn = nn.Sequential(
-            nn.Linear(input_dim, hidden_dim),
+            nn.Linear(input_dim, context_dim),
             nn.GELU(),
-            nn.Linear(hidden_dim, context_dim),
         )
         self.norm = nn.LayerNorm(context_dim)
+
+        # 重み初期化
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        """Xavier初期化"""
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.xavier_uniform_(m.weight)
+                if m.bias is not None:
+                    nn.init.zeros_(m.bias)
 
     def forward(
         self,
