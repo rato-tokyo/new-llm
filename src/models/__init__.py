@@ -1,16 +1,24 @@
 """New-LLM Models
 
-Model architecture with token継ぎ足し方式.
+Context-KV Attention architecture for efficient KV cache compression.
 """
 
-from .llm import LLM
 from .layers import ContextLayer, TokenLayer
 from .blocks import ContextBlock, TokenBlock
+from .context_kv import (
+    ContextKVAttentionLLM,
+    ContextKVWrapper,
+    ContextToKV,
+    ContextKVAttention,
+)
 
 __all__ = [
-    'LLM',
     'ContextLayer',
     'TokenLayer',
     'ContextBlock',
     'TokenBlock',
+    'ContextKVAttentionLLM',
+    'ContextKVWrapper',
+    'ContextToKV',
+    'ContextKVAttention',
 ]

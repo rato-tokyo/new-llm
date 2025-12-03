@@ -62,18 +62,20 @@ def collect_context_chunks(
     # 最大チャンク数を計算
     max_chunks = (num_tokens - 1) // chunk_size + 1
 
+    # 出力テンソル（CPU上に事前確保）
+    context_chunks = torch.zeros(num_tokens - 1, max_chunks, combined_dim)
+    token_embeds_out = torch.zeros(num_tokens - 1, model.embed_dim)
+
     # 順次処理でcontext収集
     contexts = [
         torch.zeros(model.context_dims[i], device=device)
         for i in range(num_blocks)
     ]
 
-    # 各位置でのチャンクリストを保存
-    all_chunk_contexts: List[List[torch.Tensor]] = []  # [position][chunk_idx]
-    all_token_embeds: List[torch.Tensor] = []
-
-    # チャンク境界のcontext
-    chunk_contexts: List[torch.Tensor] = []
+    # チャンク境界のcontext（GPU上）
+    chunk_contexts_gpu: List[torch.Tensor] = []
+    # チャンク境界のcontext（返却用、CPU上）
+    chunk_contexts_cpu: List[torch.Tensor] = []
 
     print_flush(f"    Collecting context chunks ({num_tokens:,} tokens, chunk_size={chunk_size})...")
 
@@ -90,7 +92,7 @@ def collect_context_chunks(
                 ctx = contexts[block_idx].unsqueeze(0)
                 te = token_embed.unsqueeze(0)
                 new_ctx = model.forward_context(block_idx, ctx, te).squeeze(0)
-                new_contexts.append(new_ctx)
+                new_contexts.append(new_ctx.detach())
             contexts = new_contexts
 
             # 現在のcontextを連結
@@ -98,37 +100,26 @@ def collect_context_chunks(
 
             # チャンク境界の場合、chunk_contextsに追加
             if (i + 1) % chunk_size == 0:
-                chunk_contexts.append(current_combined.clone())
+                chunk_contexts_gpu.append(current_combined.clone())
+                chunk_contexts_cpu.append(current_combined.cpu())
 
-            # この位置で利用可能なチャンクリスト
-            available_chunks = chunk_contexts.copy()
-            # 現在のチャンク（まだ確定していない）も追加
-            available_chunks.append(current_combined)
+            # この位置で利用可能なチャンク数
+            num_available_chunks = len(chunk_contexts_gpu) + 1  # +1 for current
 
-            all_chunk_contexts.append(available_chunks)
-            all_token_embeds.append(token_embed)
+            # context_chunksに保存（CPU上）
+            for j, ctx in enumerate(chunk_contexts_gpu):
+                context_chunks[i, j] = ctx.cpu()
+            context_chunks[i, num_available_chunks - 1] = current_combined.cpu()
+
+            # token_embedsに保存（CPU上）
+            token_embeds_out[i] = token_embed.cpu()
 
             if (i + 1) % 10000 == 0:
                 print_flush(f"      {i+1:,}/{num_tokens-1:,} tokens processed...")
+                # GPUメモリ解放
+                clear_gpu_cache(device)
 
-    # テンソルに変換
-    # 各位置でのチャンク数が異なるため、パディングが必要
-    token_embeds = torch.stack(all_token_embeds)  # [num_tokens-1, embed_dim]
-
-    # チャンクをパディングして統一
-    context_chunks_list = []
-    for chunks in all_chunk_contexts:
-        # パディング
-        num_chunks = len(chunks)
-        if num_chunks < max_chunks:
-            # ゼロパディング
-            padding = [torch.zeros(combined_dim, device=device)] * (max_chunks - num_chunks)
-            chunks = chunks + padding
-        context_chunks_list.append(torch.stack(chunks))
-
-    context_chunks = torch.stack(context_chunks_list)  # [num_tokens-1, max_chunks, combined_dim]
-
-    return context_chunks, token_embeds, chunk_contexts
+    return context_chunks, token_embeds_out, chunk_contexts_cpu
 
 
 def train_phase2(

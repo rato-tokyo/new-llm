@@ -24,10 +24,12 @@ importants/
 ├── SCALING_LAW_ANALYSIS.md          # スケーリング則分析
 ├── CONTEXT_DIM_SEARCH.md            # context_dim探索（1-block参考）
 ├── GUIDE_colab_setup.md             # Colabセットアップ
-├── logs/                            # 実験ログ（日付別）
-│   ├── 20251203_*.md               # 個別実験結果
-│   └── old/                        # 古い実験ログ
-└── old/                            # 古いドキュメント（アーカイブ）
+├── logs/                            # 実験ログ
+│   ├── 20251203_2block_p0_complete.md        # p=0完全結果（統合版）
+│   ├── 20251203_prev_context_comparison.md   # prev_context比較（統合版）
+│   ├── 20251203_prev_context_interval8_count2.md  # interval=8（失敗例）
+│   └── old/                         # 統合前の個別ログ
+└── old/                             # 古いドキュメント（アーカイブ）
 ```
 
 ---
@@ -36,7 +38,7 @@ importants/
 
 1. **CASCADE_CONTEXT_ARCHITECTURE.md** - まずアーキテクチャを理解
 2. **SCALING_LAW_ANALYSIS.md** - スケーリング則と理論限界値
-3. **logs/20251203_*.md** - 最新の実験結果
+3. **logs/** - 最新の実験結果
 
 ---
 
@@ -62,14 +64,13 @@ PPL = PPL_min + A × n^(-a)
 
 ---
 
-## logs/ の使い方
+## logs/ ファイル一覧
 
-個別実験の詳細結果は `logs/` に保存されます。
-ファイル名規則: `YYYYMMDD_構成_実験内容.md`
-
-例:
-- `20251203_2block_sample_search.md` - 2-block構成のサンプルサイズ探索
-- `20251203_2block_p2_sample_search.md` - 2-block + prev_context=2 の実験
+| ファイル | 内容 |
+|----------|------|
+| `20251203_2block_p0_complete.md` | p=0の完全結果（200-3200samples、飽和モデル判定含む） |
+| `20251203_prev_context_comparison.md` | p=0/p=1/p=2の比較まとめ |
+| `20251203_prev_context_interval8_count2.md` | interval=8の実験（効果なし、失敗例として保持） |
 
 ---
 
