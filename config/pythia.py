@@ -33,7 +33,7 @@ class ContextPythiaConfig(PythiaConfig):
     """Context-Pythia モデル設定（KVキャッシュ圧縮版）"""
 
     # ========== Context次元 ==========
-    context_dim = 256               # 圧縮後のcontext次元（50%削減）
+    context_dim = 300               # 圧縮後のcontext次元（50%削減）
 
     # ========== KVキャッシュ削減 ==========
     # 元: hidden_size (512) × seq_len × num_layers (6)
