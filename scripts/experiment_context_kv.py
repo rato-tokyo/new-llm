@@ -119,6 +119,7 @@ def build_batch_context_intervals(
     context_cache: torch.Tensor,
     interval: int,
     device: torch.device,
+    max_contexts: int = 32,
 ) -> torch.Tensor:
     """
     バッチのcontext intervalsを動的に構築（新方式）
@@ -135,6 +136,7 @@ def build_batch_context_intervals(
         context_cache: 全context [num_tokens, context_dim]
         interval: contextを取得する間隔
         device: 出力デバイス
+        max_contexts: 使用するcontext数の上限（メモリ効率のため）
 
     Returns:
         batch_contexts: [batch_size, max_num_contexts, context_dim] on device
@@ -145,6 +147,8 @@ def build_batch_context_intervals(
     # 各サンプルが必要とするcontext数を計算
     # position i → (i // interval) + 1 個のcontext
     num_contexts_per_sample = (batch_indices // interval) + 1  # [batch_size]
+    # max_contextsで上限を設定（OOM防止）
+    num_contexts_per_sample = torch.clamp(num_contexts_per_sample, max=max_contexts)
     max_num_contexts = int(num_contexts_per_sample.max().item())
 
     # 出力テンソルを直接GPU上に作成（ゼロパディング）
@@ -183,6 +187,7 @@ def train_phase2(
     val_targets: torch.Tensor,
     device: torch.device,
     context_interval: int,
+    max_contexts: int = 32,
     num_epochs: int = 40,
     batch_size: int = 512,
     lr: float = 1e-3,
@@ -193,6 +198,7 @@ def train_phase2(
 
     Args:
         context_interval: contextを取得する間隔（position i から i, i-interval, i-2*interval, ...）
+        max_contexts: 使用するcontext数の上限（通常LLMのcontext windowに相当）
 
     Returns:
         best_ppl, best_acc, best_epoch
@@ -259,7 +265,7 @@ def train_phase2(
 
             # 動的にcontext intervalsを構築（GPU上で直接作成）
             batch_context_chunks = build_batch_context_intervals(
-                batch_idx, train_context_cache, context_interval, device
+                batch_idx, train_context_cache, context_interval, device, max_contexts
             )
             batch_token_embeds = train_token_embeds[batch_idx].to(device)
             batch_targets = train_targets[batch_idx].to(device)
@@ -294,7 +300,7 @@ def train_phase2(
                 batch_idx = torch.arange(start, end)
 
                 batch_context_chunks = build_batch_context_intervals(
-                    batch_idx, val_context_cache, context_interval, device
+                    batch_idx, val_context_cache, context_interval, device, max_contexts
                 )
                 batch_token_embeds = val_token_embeds[start:end].to(device)
                 batch_targets = val_targets[start:end].to(device)
@@ -347,6 +353,7 @@ def run_context_kv_experiment(
     context_dim: int = 256,
     chunk_size: int = 100,
     num_heads: int = 8,
+    max_contexts: int = 32,
     seed: int = 42,
 ) -> Dict[str, Any]:
     """Context-KV Attention 実験を実行（1ブロック版）"""
@@ -458,7 +465,8 @@ def run_context_kv_experiment(
     print_flush(f"Cache preparation: {cache_time:.1f}s")
     print_flush(f"  Train: {train_context_cache.shape}")
     print_flush(f"  Val: {val_context_cache.shape}")
-    print_flush(f"  Context interval: {chunk_size} (max contexts: {len(train_context_cache) // chunk_size + 1})")
+    theoretical_max = len(train_context_cache) // chunk_size + 1
+    print_flush(f"  Context interval: {chunk_size} (theoretical max: {theoretical_max}, using max: {max_contexts})")
 
     # キャッシュサイズを表示
     train_ctx_mb = train_context_cache.numel() * 4 / (1024**2)
@@ -490,7 +498,8 @@ def run_context_kv_experiment(
         val_token_embeds=val_token_embeds,
         val_targets=val_targets,
         device=device,
-        context_interval=chunk_size,  # chunk_sizeをcontext_intervalとして使用
+        context_interval=chunk_size,
+        max_contexts=max_contexts,
     )
     phase2_time = time.time() - phase2_start
 
@@ -503,6 +512,7 @@ def run_context_kv_experiment(
     print_flush(f"  Context dim: {context_dim}")
     print_flush(f"  Num heads: {num_heads}")
     print_flush(f"  Context interval: {chunk_size}")
+    print_flush(f"  Max contexts: {max_contexts}")
     print_flush(f"Parameters: {params['total']:,}")
     print_flush(f"Phase 1: {phase1_time:.1f}s")
     print_flush(f"Cache collection: {cache_time:.1f}s")
@@ -518,6 +528,7 @@ def run_context_kv_experiment(
         'context_dim': context_dim,
         'chunk_size': chunk_size,
         'num_heads': num_heads,
+        'max_contexts': max_contexts,
         'val_ppl': best_ppl,
         'val_acc': best_acc,
         'val_er_pct': val_er_pct,
@@ -550,6 +561,8 @@ Examples:
                         help='Chunk size for context KV (default: 100)')
     parser.add_argument('--num-heads', type=int, default=8,
                         help='Number of attention heads (default: 8)')
+    parser.add_argument('--max-contexts', type=int, default=32,
+                        help='Max number of contexts (context window, default: 32)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed (default: 42)')
 
@@ -560,8 +573,9 @@ Examples:
     print_flush("=" * 70)
     print_flush(f"Samples: {args.samples}")
     print_flush(f"Context dim: {args.context_dim}")
-    print_flush(f"Chunk size: {args.chunk_size}")
+    print_flush(f"Chunk size (interval): {args.chunk_size}")
     print_flush(f"Num heads: {args.num_heads}")
+    print_flush(f"Max contexts: {args.max_contexts}")
     print_flush("=" * 70)
 
     run_context_kv_experiment(
@@ -569,6 +583,7 @@ Examples:
         context_dim=args.context_dim,
         chunk_size=args.chunk_size,
         num_heads=args.num_heads,
+        max_contexts=args.max_contexts,
         seed=args.seed,
     )
 
