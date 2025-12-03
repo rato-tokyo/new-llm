@@ -343,6 +343,25 @@ python3 -m mypy scripts/experiment_cascade_context.py --ignore-missing-imports
 
 ---
 
+## 📜 HISTORICAL: num_input_tokens オプション削除 (2025-12-03)
+
+**コードの簡素化のため `num_input_tokens` オプションを削除。現在は常に1（現在のトークンのみ使用）。**
+
+### 過去の実験結果（参考）
+
+過去に `num_input_tokens=2`（現在のトークン + 1つ前のトークン）でも実験を行い、
+**それなりに良い精度が得られていた**。
+
+将来的に複数トークン入力を再検討する際は、以下を参考にすること：
+- `token_input_dim = embed_dim * num_input_tokens` で入力次元を拡張
+- TokenCombiner クラスで履歴トークンを結合
+- 古いコードは git log で参照可能
+
+**削除理由**: 現時点では単一トークン入力で十分な性能を達成しており、
+コードの複雑性を減らしてメンテナンス性を向上させるため。
+
+---
+
 ## 🧊 EMBEDDING FREEZE ADOPTED - Embedding凍結採用 (2025-11-27)
 
 **Phase 2でEmbedding凍結を標準採用。**
@@ -454,4 +473,4 @@ def __init__(self, base: Config, context_dim: int):
 
 ---
 
-Last Updated: 2025-12-03 (GPUメモリリーク防止、collect_token_embeds_chunked追加、スクリプト固有実装禁止ポリシー追加)
+Last Updated: 2025-12-03 (num_input_tokens削除、TokenCombiner削除、コード簡素化)

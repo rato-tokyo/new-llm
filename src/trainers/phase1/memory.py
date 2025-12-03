@@ -12,7 +12,6 @@ from .base import Phase1Trainer, Phase1Result, ContextCache
 from src.losses.diversity import oacd_loss
 from src.utils.io import print_flush
 from src.utils.device import is_cuda_device, clear_gpu_cache
-from src.utils.token_combiner import TokenCombiner
 
 
 class MemoryPhase1Trainer(Phase1Trainer):
@@ -312,13 +311,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
             device='cpu', dtype=torch.float32
         )
 
-        # token_embeds_combined を準備（CPUで）
-        print_flush(f"    Preparing combined tokens ({num_input_tokens_total:,} tokens)...")
-        combine_start = time.time()
-        token_embeds_combined = self._prepare_combined_token_embeds(
-            input_token_embeds, num_input_tokens_total
-        )
-        print_flush(f"    Combined tokens ready [{time.time() - combine_start:.1f}s]")
+        # token_embeds（シンプルにそのまま使用）
+        token_embeds_for_cache = input_token_embeds
 
         # バッチ処理（バッチごとにGPU転送）
         with torch.no_grad():
@@ -327,7 +321,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
                 # バッチ分だけGPUに転送
                 batch_contexts = shifted_contexts[batch_start:batch_end].to(self.device)
-                batch_embeds = token_embeds_combined[batch_start:batch_end].to(self.device)
+                batch_embeds = token_embeds_for_cache[batch_start:batch_end].to(self.device)
 
                 # G案: forward_batchで最終レイヤー出力のみ取得
                 batch_results = self.model.context_block.forward_batch(
@@ -345,7 +339,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
         self.model.train()
         clear_gpu_cache(self.device)
 
-        return context_cache, token_embeds_combined
+        return context_cache, token_embeds_for_cache
 
     def _compute_cache_batch_size(self) -> int:
         """キャッシュ収集用のバッチサイズを計算"""
@@ -357,15 +351,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
             cache_batch_size = min(cache_batch_size, int(free_mem_gb * 1024 * 1024 / 30))
             cache_batch_size = max(cache_batch_size, 10000)
         return cache_batch_size
-
-    def _prepare_combined_token_embeds(
-        self,
-        input_token_embeds: torch.Tensor,
-        num_input_tokens_total: int
-    ) -> torch.Tensor:
-        """num_input_tokens対応のtoken_embeds_combinedを準備"""
-        combiner = TokenCombiner(self.config.num_input_tokens, self.model.embed_dim)
-        return combiner.combine_all(input_token_embeds, device=torch.device('cpu'))
 
     def evaluate(
         self,
@@ -429,12 +414,10 @@ class MemoryPhase1Trainer(Phase1Trainer):
 
         Returns:
             collect_all_layers=False: (contexts, None, None)
-            collect_all_layers=True: (contexts, context_cache, token_embeds_combined)
+            collect_all_layers=True: (contexts, context_cache, token_embeds)
                 - context_cache: [num_tokens, context_dim] (G案: 最終レイヤーのみ)
         """
         num_tokens = len(token_embeds)
-        num_input_tokens = self.config.num_input_tokens
-        combiner = TokenCombiner(num_input_tokens, self.model.embed_dim)
 
         # 結果を格納するテンソルを事前確保（メモリ効率）
         contexts = torch.zeros(num_tokens, self.model.context_dim, device=self.device)
@@ -444,12 +427,8 @@ class MemoryPhase1Trainer(Phase1Trainer):
         else:
             context = previous_contexts[-1].unsqueeze(0).detach()
 
-        # トークン履歴を初期化（空リスト）
-        token_history: list[torch.Tensor] = []
-
         # キャッシュ収集用の変数を初期化
         context_cache: Optional[ContextCache] = None
-        token_embeds_combined: Optional[torch.Tensor] = None
 
         if collect_all_layers:
             # G案: 最終レイヤー出力のみ [num_tokens, context_dim]
@@ -458,34 +437,19 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 device=self.device, dtype=torch.float32
             )
 
-            token_embeds_combined = torch.zeros(
-                num_tokens, combiner.combined_dim,
-                device=self.device, dtype=torch.float32
-            )
-
         # 勾配なしで処理
         with torch.no_grad():
             for i, token_embed in enumerate(token_embeds):
-                # TokenCombinerを使用してトークンを結合
-                combined_tokens = combiner.combine_single(token_history, token_embed)
-
-                # 履歴を更新（現在のトークンを追加し、古いものを削除）
-                token_history.append(token_embed)
-                if len(token_history) >= num_input_tokens:
-                    token_history = token_history[-(num_input_tokens - 1):]
-
-                # forward処理
-                context = self.model.context_block(context, combined_tokens.unsqueeze(0))
+                # forward処理（シンプルに現在のトークンのみ使用）
+                context = self.model.context_block(context, token_embed.unsqueeze(0))
                 contexts[i] = context.squeeze(0)
 
                 if collect_all_layers:
                     # G案: 最終レイヤー出力をキャッシュ
                     assert context_cache is not None
-                    assert token_embeds_combined is not None
                     context_cache[i] = context.squeeze(0)
-                    token_embeds_combined[i] = combined_tokens
 
-        return contexts, context_cache, token_embeds_combined
+        return contexts, context_cache, token_embeds if collect_all_layers else None
 
     def _forward_parallel_with_grad_accum(
         self,
@@ -504,7 +468,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         """
         num_tokens = len(token_embeds)
         batch_size = self.config.phase1_batch_size
-        num_input_tokens = self.config.num_input_tokens
         num_batches = (num_tokens + batch_size - 1) // batch_size
         context_noise = self.config.phase1_context_noise
 
@@ -534,13 +497,11 @@ class MemoryPhase1Trainer(Phase1Trainer):
                 noise = torch.randn_like(batch_contexts) * context_noise
                 batch_contexts = batch_contexts + noise
 
-            # バッチ分のcombined_tokensを作成（GPUに転送）
-            batch_combined = self._build_combined_tokens_batch(
-                token_embeds, num_input_tokens, start_idx, end_idx
-            ).to(self.device)
+            # バッチ分のtoken_embedsを取得（GPUに転送）
+            batch_embeds = token_embeds[start_idx:end_idx].to(self.device)
 
             # Forward pass
-            batch_output = self.model.context_block(batch_contexts, batch_combined)
+            batch_output = self.model.context_block(batch_contexts, batch_embeds)
 
             # バッチごとの損失計算（多様性損失のみ）
             diversity_loss = self._compute_diversity_loss(batch_output)
@@ -560,7 +521,7 @@ class MemoryPhase1Trainer(Phase1Trainer):
             total_loss_sum += diversity_loss.item() * current_batch_size
 
             # メモリ解放
-            del batch_combined, batch_output, scaled_loss, batch_contexts
+            del batch_embeds, batch_output, scaled_loss, batch_contexts
             clear_gpu_cache(self.device)
 
         # 勾配クリッピングとパラメータ更新
@@ -576,25 +537,6 @@ class MemoryPhase1Trainer(Phase1Trainer):
         avg_total_loss = total_loss_sum / num_tokens
 
         return contexts_cpu, avg_total_loss, avg_diversity_loss
-
-    def _build_combined_tokens_batch(
-        self, token_embeds: torch.Tensor, num_input_tokens: int,
-        start_idx: int, end_idx: int
-    ) -> torch.Tensor:
-        """
-        バッチ範囲のみの結合テンソルを作成（メモリ効率版）
-
-        Args:
-            token_embeds: [num_tokens, embed_dim] - 全トークン
-            num_input_tokens: 入力トークン数
-            start_idx: バッチ開始インデックス
-            end_idx: バッチ終了インデックス
-
-        Returns:
-            combined_tokens: [batch_size, embed_dim * num_input_tokens]
-        """
-        combiner = TokenCombiner(num_input_tokens, self.model.embed_dim)
-        return combiner.combine_batch(token_embeds, start_idx, end_idx, self.device)
 
     def _compute_diversity_loss(self, contexts: torch.Tensor) -> torch.Tensor:
         """多様性損失計算（デフォルト: OACD）"""

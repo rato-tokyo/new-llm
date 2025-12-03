@@ -43,7 +43,6 @@ class LLM(nn.Module):
         vocab_size: Vocabulary size
         embed_dim: Token embedding dimension
         context_dim: Context vector dimension
-        num_input_tokens: Number of input tokens (1 = current only)
         use_pretrained_embeddings: Whether to use GPT-2 pretrained embeddings
     """
 
@@ -52,7 +51,6 @@ class LLM(nn.Module):
         vocab_size: int,
         embed_dim: int,
         context_dim: int,
-        num_input_tokens: int = 1,
         use_pretrained_embeddings: bool = True,
     ) -> None:
         super().__init__()
@@ -61,7 +59,6 @@ class LLM(nn.Module):
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.context_dim = context_dim
-        self.num_input_tokens = num_input_tokens
 
         # ========== Token Embeddings ==========
         if use_pretrained_embeddings:
@@ -74,20 +71,17 @@ class LLM(nn.Module):
         # ========== Separated Architecture (1層固定) ==========
         print_flush("Architecture: ContextBlock(1L) + TokenBlock(1L)")
         print_flush(f"  context_dim: {context_dim}")
-        print_flush(f"  num_input_tokens: {num_input_tokens}")
 
         # ContextBlock: 文脈処理専用（1層）
         self.context_block = ContextBlock(
             context_dim=context_dim,
             embed_dim=embed_dim,
-            num_input_tokens=num_input_tokens,
         )
 
         # TokenBlock: トークン処理専用（1層）
         self.token_block = TokenBlock(
             context_dim=context_dim,
             embed_dim=embed_dim,
-            num_input_tokens=num_input_tokens,
         )
 
         # ========== Output Head (Weight Tying) ==========
@@ -117,7 +111,7 @@ class LLM(nn.Module):
 
         Args:
             context: [batch, context_dim]
-            token_embeds: [batch, embed_dim * num_input_tokens]
+            token_embeds: [batch, embed_dim]
 
         Returns:
             new_context: [batch, context_dim]
@@ -130,7 +124,7 @@ class LLM(nn.Module):
 
         Args:
             context: [batch, context_dim]
-            token_embeds: [batch, embed_dim * num_input_tokens]
+            token_embeds: [batch, embed_dim]
 
         Returns:
             token_out: [batch, embed_dim]

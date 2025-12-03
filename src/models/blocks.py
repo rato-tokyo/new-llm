@@ -25,28 +25,23 @@ class ContextBlock(nn.Module):
     Args:
         context_dim: Context vector dimension
         embed_dim: Token embedding dimension
-        num_input_tokens: Number of input tokens (1 = current only)
     """
 
     def __init__(
         self,
         context_dim: int,
         embed_dim: int,
-        num_input_tokens: int = 1
     ) -> None:
         super().__init__()
 
         self.context_dim = context_dim
         self.embed_dim = embed_dim
-        self.num_input_tokens = num_input_tokens
-
-        token_input_dim = embed_dim * num_input_tokens
 
         # 単一レイヤー
         self.layer = ContextLayer(
             context_input_dim=context_dim,
             context_output_dim=context_dim,
-            token_input_dim=token_input_dim,
+            token_input_dim=embed_dim,
         )
 
     def forward(
@@ -59,7 +54,7 @@ class ContextBlock(nn.Module):
 
         Args:
             context: [batch, context_dim]
-            token_embeds: [batch, embed_dim * num_input_tokens]
+            token_embeds: [batch, embed_dim]
 
         Returns:
             context: [batch, context_dim]
@@ -78,7 +73,7 @@ class ContextBlock(nn.Module):
 
         Args:
             context: [batch, context_dim]
-            token_embeds: [batch, embed_dim * num_input_tokens]
+            token_embeds: [batch, embed_dim]
 
         Returns:
             context: [batch, context_dim]
@@ -103,27 +98,22 @@ class TokenBlock(nn.Module):
     Args:
         context_dim: Context vector dimension (連結後の次元)
         embed_dim: Token embedding dimension
-        num_input_tokens: Number of input tokens (1 = current only)
     """
 
     def __init__(
         self,
         context_dim: int,
         embed_dim: int,
-        num_input_tokens: int = 1,
     ) -> None:
         super().__init__()
 
         self.context_dim = context_dim
         self.embed_dim = embed_dim
-        self.num_input_tokens = num_input_tokens
-
-        token_input_dim = embed_dim * num_input_tokens
 
         # 単一レイヤー
         self.layer = TokenLayer(
             context_dim=context_dim,
-            token_input_dim=token_input_dim,
+            token_input_dim=embed_dim,
             token_output_dim=embed_dim,
         )
 
@@ -137,7 +127,7 @@ class TokenBlock(nn.Module):
 
         Args:
             context: [batch, context_dim] - 連結されたcontext
-            token_embeds: [batch, embed_dim * num_input_tokens]
+            token_embeds: [batch, embed_dim]
 
         Returns:
             token: [batch, embed_dim]

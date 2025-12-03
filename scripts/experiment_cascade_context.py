@@ -58,7 +58,6 @@ class CascadeContextLLM(nn.Module):
         vocab_size: 語彙サイズ
         embed_dim: トークン埋め込み次元
         context_dim: 各ContextBlockの出力次元
-        num_input_tokens: 入力トークン数
         num_context_blocks: ContextBlockの数（デフォルト: 2）
     """
 
@@ -67,7 +66,6 @@ class CascadeContextLLM(nn.Module):
         vocab_size: int,
         embed_dim: int,
         context_dim: int,
-        num_input_tokens: int = 1,
         num_context_blocks: int = 2,
     ) -> None:
         super().__init__()
@@ -77,7 +75,6 @@ class CascadeContextLLM(nn.Module):
         self.context_dim = context_dim
         self.num_context_blocks = num_context_blocks
         self.combined_context_dim = context_dim * num_context_blocks
-        self.num_input_tokens = num_input_tokens
 
         # Token Embeddings (GPT-2 pretrained)
         self._load_pretrained_embeddings()
@@ -88,7 +85,6 @@ class CascadeContextLLM(nn.Module):
             ContextBlock(
                 context_dim=context_dim,
                 embed_dim=embed_dim,
-                num_input_tokens=num_input_tokens,
             )
             for _ in range(num_context_blocks)
         ])
@@ -97,7 +93,6 @@ class CascadeContextLLM(nn.Module):
         self.token_block = TokenBlock(
             context_dim=self.combined_context_dim,
             embed_dim=embed_dim,
-            num_input_tokens=num_input_tokens,
         )
 
         # Output Head (Weight Tying)
@@ -173,7 +168,6 @@ class SingleContextWrapper(nn.Module):
         self.embed_norm = cascade_model.embed_norm
         self.context_dim = cascade_model.context_dim
         self.embed_dim = cascade_model.embed_dim
-        self.num_input_tokens = cascade_model.num_input_tokens
         self.vocab_size = cascade_model.vocab_size
 
         self.context_block = cascade_model.context_blocks[block_idx]
@@ -390,7 +384,6 @@ def run_cascade_context_experiment(
         vocab_size=base_config.vocab_size,
         embed_dim=base_config.embed_dim,
         context_dim=context_dim,
-        num_input_tokens=base_config.num_input_tokens,
         num_context_blocks=num_context_blocks,
     )
     model.to(device)

@@ -64,19 +64,14 @@ class SimpleContextBlock(nn.Module):
         self,
         context_dim: int,
         embed_dim: int,
-        num_input_tokens: int = 1,
     ) -> None:
         super().__init__()
 
         self.context_dim = context_dim
         self.embed_dim = embed_dim
-        self.num_input_tokens = num_input_tokens
-
-        token_input_dim = embed_dim * num_input_tokens
-        self.token_input_dim = token_input_dim
 
         # FFN: [context + token_embeds] -> context_dim
-        input_dim = context_dim + token_input_dim
+        input_dim = context_dim + embed_dim
         self.fnn = nn.Sequential(
             nn.Linear(input_dim, context_dim),
             nn.GELU()
@@ -105,7 +100,7 @@ class SimpleContextBlock(nn.Module):
 
         Args:
             context: [batch, context_dim]
-            token_embeds: [batch, token_input_dim]
+            token_embeds: [batch, embed_dim]
 
         Returns:
             new_context: [batch, context_dim]
@@ -135,19 +130,14 @@ class SimpleTokenBlock(nn.Module):
         self,
         context_dim: int,
         embed_dim: int,
-        num_input_tokens: int = 1,
     ) -> None:
         super().__init__()
 
         self.context_dim = context_dim
         self.embed_dim = embed_dim
-        self.num_input_tokens = num_input_tokens
-
-        token_input_dim = embed_dim * num_input_tokens
-        self.token_input_dim = token_input_dim
 
         # FFN: [context + token_embeds] -> embed_dim
-        input_dim = context_dim + token_input_dim
+        input_dim = context_dim + embed_dim
         self.fnn = nn.Sequential(
             nn.Linear(input_dim, embed_dim),
             nn.GELU()
@@ -155,11 +145,6 @@ class SimpleTokenBlock(nn.Module):
 
         # LayerNorm
         self.token_norm = nn.LayerNorm(embed_dim)
-
-        # 残差射影（token_input_dim != embed_dim の場合）
-        self.residual_proj: Optional[nn.Linear] = None
-        if token_input_dim != embed_dim:
-            self.residual_proj = nn.Linear(token_input_dim, embed_dim)
 
         self._init_weights()
 
@@ -181,20 +166,14 @@ class SimpleTokenBlock(nn.Module):
 
         Args:
             context: [batch, context_dim]
-            token_embeds: [batch, token_input_dim]
+            token_embeds: [batch, embed_dim]
 
         Returns:
             new_token: [batch, embed_dim]
         """
         fnn_input = torch.cat([context, token_embeds], dim=-1)
         delta_token = self.fnn(fnn_input)
-
-        if self.residual_proj is not None:
-            residual = self.residual_proj(token_embeds)
-        else:
-            residual = token_embeds
-
-        new_token = self.token_norm(residual + delta_token)
+        new_token = self.token_norm(token_embeds + delta_token)
         return new_token
 
 
@@ -210,14 +189,12 @@ class SimpleLLM(nn.Module):
         vocab_size: int,
         embed_dim: int,
         context_dim: int,
-        num_input_tokens: int = 1,
     ) -> None:
         super().__init__()
 
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.context_dim = context_dim
-        self.num_input_tokens = num_input_tokens
 
         # Token Embeddings (GPT-2 pretrained)
         self._load_pretrained_embeddings()
@@ -227,14 +204,12 @@ class SimpleLLM(nn.Module):
         self.context_block = SimpleContextBlock(
             context_dim=context_dim,
             embed_dim=embed_dim,
-            num_input_tokens=num_input_tokens,
         )
 
         # TokenBlock
         self.token_block = SimpleTokenBlock(
             context_dim=context_dim,
             embed_dim=embed_dim,
-            num_input_tokens=num_input_tokens,
         )
 
         # Output Head (Weight Tying)
@@ -297,7 +272,6 @@ class SingleContextWrapper(nn.Module):
         self.embed_norm = model.embed_norm
         self.context_dim = model.context_dim
         self.embed_dim = model.embed_dim
-        self.num_input_tokens = model.num_input_tokens
         self.vocab_size = model.vocab_size
 
         self.context_block = model.context_block
@@ -472,7 +446,6 @@ def create_model(
         vocab_size=base_config.vocab_size,
         embed_dim=base_config.embed_dim,
         context_dim=context_dim,
-        num_input_tokens=base_config.num_input_tokens,
     )
     model.to(device)
     return model

@@ -54,7 +54,6 @@ class Phase1ConfigWrapper:
         self.context_dim = context_dim
         self.embed_dim = base.embed_dim
         self.vocab_size = base.vocab_size
-        self.num_input_tokens = base.num_input_tokens
 
 
 class Phase2ConfigWrapper:

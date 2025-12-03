@@ -55,18 +55,13 @@ class SimpleContextBlock(nn.Module):
         self,
         context_dim: int,
         embed_dim: int,
-        num_input_tokens: int = 1,
     ) -> None:
         super().__init__()
 
         self.context_dim = context_dim
         self.embed_dim = embed_dim
-        self.num_input_tokens = num_input_tokens
 
-        token_input_dim = embed_dim * num_input_tokens
-        self.token_input_dim = token_input_dim
-
-        input_dim = context_dim + token_input_dim
+        input_dim = context_dim + embed_dim
         self.fnn = nn.Sequential(
             nn.Linear(input_dim, context_dim),
             nn.GELU()
@@ -99,28 +94,18 @@ class SimpleTokenBlock(nn.Module):
         self,
         context_dim: int,
         embed_dim: int,
-        num_input_tokens: int = 1,
     ) -> None:
         super().__init__()
 
         self.context_dim = context_dim
         self.embed_dim = embed_dim
-        self.num_input_tokens = num_input_tokens
 
-        token_input_dim = embed_dim * num_input_tokens
-        self.token_input_dim = token_input_dim
-
-        input_dim = context_dim + token_input_dim
+        input_dim = context_dim + embed_dim
         self.fnn = nn.Sequential(
             nn.Linear(input_dim, embed_dim),
             nn.GELU()
         )
         self.token_norm = nn.LayerNorm(embed_dim)
-
-        self.residual_proj: Optional[nn.Linear] = None
-        if token_input_dim != embed_dim:
-            self.residual_proj = nn.Linear(token_input_dim, embed_dim)
-
         self._init_weights()
 
     def _init_weights(self) -> None:
@@ -133,13 +118,7 @@ class SimpleTokenBlock(nn.Module):
     def forward(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
         fnn_input = torch.cat([context, token_embeds], dim=-1)
         delta_token = self.fnn(fnn_input)
-
-        if self.residual_proj is not None:
-            residual = self.residual_proj(token_embeds)
-        else:
-            residual = token_embeds
-
-        new_token = self.token_norm(residual + delta_token)
+        new_token = self.token_norm(token_embeds + delta_token)
         return new_token
 
 
@@ -151,14 +130,12 @@ class SimpleLLM(nn.Module):
         vocab_size: int,
         embed_dim: int,
         context_dim: int,
-        num_input_tokens: int = 1,
     ) -> None:
         super().__init__()
 
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.context_dim = context_dim
-        self.num_input_tokens = num_input_tokens
 
         self._load_pretrained_embeddings()
         self.embed_norm = nn.LayerNorm(embed_dim)
@@ -166,13 +143,11 @@ class SimpleLLM(nn.Module):
         self.context_block = SimpleContextBlock(
             context_dim=context_dim,
             embed_dim=embed_dim,
-            num_input_tokens=num_input_tokens,
         )
 
         self.token_block = SimpleTokenBlock(
             context_dim=context_dim,
             embed_dim=embed_dim,
-            num_input_tokens=num_input_tokens,
         )
 
         self.token_output = nn.Linear(embed_dim, vocab_size, bias=False)
@@ -220,7 +195,6 @@ class SingleContextWrapper(nn.Module):
         self.embed_norm = model.embed_norm
         self.context_dim = model.context_dim
         self.embed_dim = model.embed_dim
-        self.num_input_tokens = model.num_input_tokens
         self.vocab_size = model.vocab_size
         self.context_block = model.context_block
 
@@ -370,7 +344,6 @@ def create_model(base_config: Config, context_dim: int, device: torch.device) ->
         vocab_size=base_config.vocab_size,
         embed_dim=base_config.embed_dim,
         context_dim=context_dim,
-        num_input_tokens=base_config.num_input_tokens,
     )
     model.to(device)
     return model

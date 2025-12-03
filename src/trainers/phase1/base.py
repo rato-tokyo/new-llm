@@ -15,7 +15,6 @@ class Phase1ConfigProtocol(Protocol):
     embed_dim: int
     context_dim: int
     vocab_size: int
-    num_input_tokens: int
     phase1_max_iterations: int
     phase1_convergence_threshold: float
     phase1_learning_rate: float
@@ -45,7 +44,7 @@ class Phase1Result:
     Attributes:
         contexts: コンテキストベクトル [num_tokens, context_dim]
         cache: コンテキストキャッシュ（Phase 2用）[num_tokens, context_dim]
-        token_embeds: トークン埋め込み（Phase 2用）[num_tokens, embed_dim * num_input_tokens]
+        token_embeds: トークン埋め込み（Phase 2用）[num_tokens, embed_dim]
     """
     contexts: torch.Tensor
     cache: Optional[ContextCache] = None

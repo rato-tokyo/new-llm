@@ -20,9 +20,6 @@ class BaseConfig:
     vocab_size = 50257              # GPT-2トークナイザーの語彙数
     use_pretrained_embeddings = True  # GPT-2事前学習済み埋め込みを使用
 
-    # ========== 複数トークン入力 ==========
-    num_input_tokens = 1            # 入力するトークン数
-
     # ========== データ ==========
     tokenizer_name = "gpt2"
     val_data_source = "text_file"
