@@ -24,34 +24,49 @@
 
 **Pythia-70MをベースにKVキャッシュを50%削減するContext-Pythia方式を採用。**
 
-### アーキテクチャ概要
+### ⚠️ 重要な設計方針（絶対に守ること）
+
+**Baselineとの違いは「Token Embedding → ContextBlock」の圧縮部分のみ。**
+**PythiaLayer自体は同じ構造（RoPE含む）で、hidden_size=context_dimで動作させる。**
 
 ```
-Context-Pythia:
-  Token Embedding (512-dim) ← Pythia-70M
-       ↓
-  ContextBlock: 512 → 256 (圧縮)
-       ↓
-  Layer 0-5: 全て context (256-dim) を入力
-       ↓
-  Output Head (vocab_size=50304)
+Pythia (Baseline):                    Context-Pythia (Ours):
+Token Embedding (512-dim)             Token Embedding (512-dim)
+       ↓                                     ↓
+       │                              ContextBlock (512 → 256)  ← ここだけ違う
+       ↓                                     ↓
+PythiaLayer × 6 (512-dim, RoPE)       PythiaLayer × 6 (256-dim, RoPE)
+       ↓                                     ↓
+Output Head (512 → vocab)             Output Head (256 → vocab)
 
-KVキャッシュ削減: 50%
-  元: hidden_size (512) × seq_len × num_layers (6)
-  圧縮後: context_dim (256) × seq_len × num_layers (6)
+KV Cache: 3072 KB                     KV Cache: 1536 KB (50%削減)
 ```
 
-### Pythia-70M仕様
+### 設定値
 
-| 項目 | 値 |
-|------|-----|
-| Hidden Size | 512 |
-| Layers | 6 |
-| Attention Heads | 8 |
-| Intermediate Size | 2048 |
-| Position Encoding | Rotary (RoPE, 25%) |
-| Vocab Size | 50,304 |
-| Training Data | Pile (~300B tokens) |
+| 項目 | Baseline (Pythia) | Context-Pythia |
+|------|-------------------|----------------|
+| embed_dim | 512 | 512 |
+| hidden_size / context_dim | 512 | 256 |
+| Layers | 6 | 6 |
+| Attention Heads | 8 | 8 |
+| intermediate_size | 2048 | 1024 |
+| Position Encoding | RoPE (25%) | RoPE (25%) |
+| Vocab Size | 50,304 | 50,304 |
+
+### 学習フロー
+
+```
+Phase 1: OACD (ContextBlock多様性学習)
+  ├─ ContextBlockのみを学習
+  ├─ OACD損失で多様なcontext vectorを生成
+  └─ 収束まで実行（~60 iterations, 90%+収束）
+       ↓
+Phase 2: Full Training (ContextBlock frozen)
+  ├─ ContextBlockをfreeze
+  ├─ PythiaLayer × 6 + Output Headを学習 (context_dim=256で動作)
+  └─ Cross-entropy損失
+```
 
 ### 実験の実行
 
@@ -256,11 +271,12 @@ python3 -m mypy src/ --ignore-missing-imports
 
 ### Core Components
 
-**1. ContextPythiaModel**
-- Token Embedding: Pythia-70M (512-dim)
-- ContextBlock: 512 → 256 (圧縮)
-- 6 Context-based Transformer Layers
-- Output Head: 512 → vocab_size
+**1. ContextPythiaModel (Ours)**
+- Token Embedding: vocab → embed_dim (512)
+- embed_norm: LayerNorm（Phase 1収束に必須）
+- ContextBlock: embed_dim (512) → context_dim (256)
+- PythiaLayer × 6: hidden_size=context_dim (256)、RoPE含む
+- Output Head: context_dim (256) → vocab_size
 
 **2. ContextBlock**
 - 1層固定、Phase 1で学習、Phase 2でfreeze
@@ -268,22 +284,9 @@ python3 -m mypy src/ --ignore-missing-imports
 - 初期化: normal_(std=0.1)
 
 **3. PythiaModel (Baseline)**
-- 標準のPythia-70M再実装
-- 比較用
-
-### 学習フロー
-
-```
-Phase 1: OACD (ContextBlock多様性学習)
-  ├─ ContextBlockのみを学習
-  ├─ OACD損失で多様なcontext vectorを生成
-  └─ 収束まで実行（~60 iterations, 90%+収束）
-       ↓
-Phase 2: Full Training (ContextBlock frozen)
-  ├─ ContextBlockをfreeze
-  ├─ Transformer Layers + Output Headを学習
-  └─ Cross-entropy損失
-```
+- Token Embedding: vocab → hidden_size (512)
+- PythiaLayer × 6: hidden_size (512)
+- Output Head: hidden_size (512) → vocab_size
 
 ---
 
@@ -321,6 +324,7 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-04 | **重要**: PythiaLayerをcontext_dim (256)で動作させる設計に変更 |
 | 2025-12-04 | Phase 2比較実験スクリプト追加、Phase 1パラメータ調整 |
 | 2025-12-04 | embed_norm追加（Phase 1収束に必須） |
 | 2025-12-04 | Pythia-70M統合（Context-Pythia方式に完全移行） |
