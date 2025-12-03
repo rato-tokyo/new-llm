@@ -80,8 +80,7 @@ def fit_exp_decay(samples: np.ndarray, ppls: np.ndarray) -> Dict[str, Any]:
 # ============================================================
 
 def run_multiblock_sample_search(
-    context_dim: int = 256,
-    num_blocks: int = 2,
+    context_dims: List[int] = [256, 256],
     start_samples: int = 200,
     end_samples: int = 1600,
     seed: int = 42,
@@ -91,6 +90,7 @@ def run_multiblock_sample_search(
     """Multi-block sample size search"""
 
     set_seed(seed)
+    num_blocks = len(context_dims)
 
     # サンプル数リスト（倍増）
     sample_sizes: List[int] = []
@@ -100,15 +100,16 @@ def run_multiblock_sample_search(
         current *= 2
 
     # prev_context_steps=0: 現在のみ, =1: 現在+1つ前, など
-    combined_dim = context_dim * num_blocks * (1 + prev_context_steps)
+    combined_dim = sum(context_dims) * (1 + prev_context_steps)
+    dims_str = '+'.join(map(str, context_dims))
 
     print_flush("=" * 70)
     print_flush("MULTI-BLOCK SAMPLE SIZE SEARCH")
     print_flush("=" * 70)
-    print_flush(f"Context dim per block: {context_dim}")
+    print_flush(f"Context dims: {context_dims}")
     print_flush(f"Num blocks: {num_blocks}")
     print_flush(f"Prev context steps: {prev_context_steps}")
-    print_flush(f"Combined context dim: {combined_dim}")
+    print_flush(f"Combined context dim: {dims_str}={combined_dim}")
     print_flush(f"Sample sizes: {sample_sizes}")
     if output_dir:
         print_flush(f"Output: {output_dir}")
@@ -156,7 +157,7 @@ def run_multiblock_sample_search(
             train_data_splits.append(train_token_ids[start_idx:end_idx])
 
         # モデル作成
-        dim_info = f"cd={context_dim}x{num_blocks}"
+        dim_info = f"cd={dims_str}"
         if prev_context_steps > 0:
             dim_info += f"x(1+{prev_context_steps})"
         dim_info += f"={combined_dim}"
@@ -164,21 +165,19 @@ def run_multiblock_sample_search(
         model = CascadeContextLLM(
             vocab_size=base_config.vocab_size,
             embed_dim=base_config.embed_dim,
-            context_dim=context_dim,
-            num_context_blocks=num_blocks,
+            context_dims=context_dims,
             prev_context_steps=prev_context_steps,
         )
         model.to(device)
-
-        config_wrapper = Phase1ConfigWrapper(base_config, context_dim, patience=2)
 
         # Phase 1: 各ブロック学習
         phase1_times = []
         phase1_convs = []
 
         for block_idx in range(num_blocks):
-            print_flush(f"\n[Phase 1-{block_idx}] Training ContextBlock {block_idx}...")
+            print_flush(f"\n[Phase 1-{block_idx}] Training ContextBlock {block_idx} (cd={context_dims[block_idx]})...")
             wrapper = SingleContextWrapper(model, block_idx=block_idx)
+            config_wrapper = Phase1ConfigWrapper(base_config, context_dims[block_idx], patience=2)
             trainer = MemoryPhase1Trainer(wrapper, config_wrapper, device)
 
             phase_start = time.time()
@@ -311,10 +310,10 @@ def run_multiblock_sample_search(
     print_flush("\n" + "=" * 70)
     print_flush(f"SUMMARY - Multi-Block Sample Size Search ({num_blocks} blocks)")
     print_flush("=" * 70)
-    print_flush(f"Context dim per block: {context_dim}")
+    print_flush(f"Context dims: {context_dims}")
     print_flush(f"Num blocks: {num_blocks}")
     print_flush(f"Prev context steps: {prev_context_steps}")
-    print_flush(f"Combined context dim: {combined_dim}")
+    print_flush(f"Combined context dim: {dims_str}={combined_dim}")
     print_flush(f"Sample sizes: {sample_sizes}")
     print_flush("\nResults:")
     print_flush(f"{'Samples':>8} | {'Tokens':>12} | {'PPL':>8} | {'Acc':>6} | {'ER%':>6} | {'Time':>8}")
@@ -338,8 +337,8 @@ def run_multiblock_sample_search(
         with open(result_file, 'w') as f:
             f.write(f"Multi-Block Sample Size Search Results ({num_blocks} blocks)\n")
             f.write("=" * 50 + "\n\n")
-            f.write(f"Context dim per block: {context_dim}\n")
-            f.write(f"Combined context dim: {combined_dim}\n")
+            f.write(f"Context dims: {context_dims}\n")
+            f.write(f"Combined context dim: {dims_str}={combined_dim}\n")
             f.write(f"Sample sizes: {sample_sizes}\n\n")
             f.write(f"{'Samples':>8} | {'Tokens':>12} | {'PPL':>8} | {'Acc':>6} | {'ER%':>6} | {'Time':>8}\n")
             f.write("-" * 60 + "\n")
@@ -369,12 +368,32 @@ def run_multiblock_sample_search(
     }
 
 
+def parse_context_dims(value: str) -> List[int]:
+    """context_dims引数をパース"""
+    parts = value.split(',')
+    return [int(p.strip()) for p in parts]
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Multi-Block Sample Size Search')
-    parser.add_argument('--context-dim', '-c', type=int, default=256,
-                        help='Context dimension per block (default: 256)')
-    parser.add_argument('--num-blocks', '-n', type=int, default=2,
-                        help='Number of context blocks (default: 2)')
+    parser = argparse.ArgumentParser(
+        description='Multi-Block Sample Size Search',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  # 2ブロック、各256次元（従来の使用法）
+  python3 scripts/experiment_multiblock_sample_search.py --start 200 --end 1600 -c 256 -n 2
+
+  # 2ブロック、異なる次元（256, 128）
+  python3 scripts/experiment_multiblock_sample_search.py --start 200 --end 1600 -c 256,128
+
+  # 3ブロック、異なる次元
+  python3 scripts/experiment_multiblock_sample_search.py --start 200 --end 1600 -c 256,128,64
+'''
+    )
+    parser.add_argument('--context-dims', '-c', type=str, default='256,256',
+                        help='Context dimensions: single int "256" or list "256,128" (default: 256,256)')
+    parser.add_argument('--num-blocks', '-n', type=int, default=None,
+                        help='Number of context blocks (ignored if -c is a list)')
     parser.add_argument('--start', type=int, default=200,
                         help='Starting sample size (default: 200)')
     parser.add_argument('--end', type=int, default=1600,
@@ -388,16 +407,24 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    # context_dimsのパース
+    context_dims = parse_context_dims(args.context_dims)
+
+    # -n が指定された場合、同じ次元をn個に拡張（後方互換性）
+    if args.num_blocks is not None and len(context_dims) == 1:
+        context_dims = context_dims * args.num_blocks
+
+    num_blocks = len(context_dims)
+
     # 出力ディレクトリ
     if args.output:
         output_dir = args.output
     else:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_dir = f"importants/logs/{timestamp}_multiblock_{args.num_blocks}b_sample_search"
+        output_dir = f"importants/logs/{timestamp}_multiblock_{num_blocks}b_sample_search"
 
     run_multiblock_sample_search(
-        context_dim=args.context_dim,
-        num_blocks=args.num_blocks,
+        context_dims=context_dims,
         start_samples=args.start,
         end_samples=args.end,
         seed=args.seed,

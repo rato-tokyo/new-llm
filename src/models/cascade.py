@@ -6,7 +6,7 @@ N分割方式:
 - Phase 2: concat(context[0], ..., context[N-1]) で TokenBlock を学習
 """
 
-from typing import Dict
+from typing import Dict, List, Union
 
 import torch
 import torch.nn as nn
@@ -28,8 +28,10 @@ class CascadeContextLLM(nn.Module):
     Args:
         vocab_size: 語彙サイズ
         embed_dim: トークン埋め込み次元
-        context_dim: 各ContextBlockの出力次元
-        num_context_blocks: ContextBlockの数（デフォルト: 2）
+        context_dims: 各ContextBlockの出力次元（intまたはList[int]）
+            - int: 全ブロックで同じ次元を使用
+            - List[int]: ブロックごとに異なる次元を指定（例: [256, 128]）
+        num_context_blocks: ContextBlockの数（context_dimsがintの場合に使用）
         prev_context_steps: 前のトークン時のcontextも連結する数（0で無効）
     """
 
@@ -37,7 +39,7 @@ class CascadeContextLLM(nn.Module):
         self,
         vocab_size: int,
         embed_dim: int,
-        context_dim: int,
+        context_dims: Union[int, List[int]],
         num_context_blocks: int = 2,
         prev_context_steps: int = 0,
     ) -> None:
@@ -45,20 +47,34 @@ class CascadeContextLLM(nn.Module):
 
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
-        self.context_dim = context_dim
-        self.num_context_blocks = num_context_blocks
         self.prev_context_steps = prev_context_steps
-        # TokenBlockへの入力次元: (現在 + 履歴) × ブロック数
-        self.combined_context_dim = context_dim * num_context_blocks * (1 + prev_context_steps)
+
+        # context_dimsの正規化: intの場合はリストに変換
+        if isinstance(context_dims, int):
+            self.context_dims = [context_dims] * num_context_blocks
+        else:
+            self.context_dims = list(context_dims)
+
+        self.num_context_blocks = len(self.context_dims)
+
+        # 後方互換性: 単一のcontext_dimプロパティ（全ブロック同じ次元の場合のみ有効）
+        if len(set(self.context_dims)) == 1:
+            self.context_dim = self.context_dims[0]
+        else:
+            # 異なる次元の場合は -1 を設定（使用すると警告になる）
+            self.context_dim = -1
+
+        # TokenBlockへの入力次元: sum(context_dims) × (1 + prev_context_steps)
+        self.combined_context_dim = sum(self.context_dims) * (1 + prev_context_steps)
 
         # Token Embeddings (GPT-2 pretrained)
         self._load_pretrained_embeddings()
         self.embed_norm = nn.LayerNorm(embed_dim)
 
-        # N個のContextBlock（各1層）
+        # N個のContextBlock（各1層、ブロックごとに異なる次元をサポート）
         self.context_blocks = nn.ModuleList([
-            ContextBlock(context_dim=context_dim, embed_dim=embed_dim)
-            for _ in range(num_context_blocks)
+            ContextBlock(context_dim=dim, embed_dim=embed_dim)
+            for dim in self.context_dims
         ])
 
         # TokenBlock（連結されたcontext用、1層）
@@ -143,7 +159,8 @@ class SingleContextWrapper(nn.Module):
         # Phase1Trainerが期待するプロパティ
         self.token_embedding = cascade_model.token_embedding
         self.embed_norm = cascade_model.embed_norm
-        self.context_dim = cascade_model.context_dim
+        # ブロックごとの次元を取得
+        self.context_dim = cascade_model.context_dims[block_idx]
         self.embed_dim = cascade_model.embed_dim
         self.vocab_size = cascade_model.vocab_size
 

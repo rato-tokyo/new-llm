@@ -46,8 +46,7 @@ from config.experiment import DataConfig
 
 def run_cascade_context_experiment(
     num_samples: int = 2000,
-    context_dim: int = 500,
-    num_context_blocks: int = 2,
+    context_dims: List[int] = [256, 256],
     seed: int = 42,
     output_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -55,13 +54,13 @@ def run_cascade_context_experiment(
 
     Args:
         num_samples: サンプル数
-        context_dim: 各ContextBlockの出力次元
-        num_context_blocks: ContextBlockの数
+        context_dims: 各ContextBlockの出力次元のリスト（例: [256, 128]）
         seed: 乱数シード
         output_dir: 出力ディレクトリ
     """
 
     set_seed(seed)
+    num_context_blocks = len(context_dims)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -100,13 +99,13 @@ def run_cascade_context_experiment(
     print_flush(f"Split: {', '.join(split_info)} tokens")
 
     # モデル作成
-    combined_dim = context_dim * num_context_blocks
-    print_flush(f"\nCreating CascadeContextLLM (cd={context_dim}x{num_context_blocks}={combined_dim})...")
+    combined_dim = sum(context_dims)
+    dims_str = '+'.join(map(str, context_dims))
+    print_flush(f"\nCreating CascadeContextLLM (cd={dims_str}={combined_dim})...")
     model = CascadeContextLLM(
         vocab_size=base_config.vocab_size,
         embed_dim=base_config.embed_dim,
-        context_dim=context_dim,
-        num_context_blocks=num_context_blocks,
+        context_dims=context_dims,
     )
     model.to(device)
 
@@ -117,16 +116,16 @@ def run_cascade_context_experiment(
         print_flush(f"    Block {i}: {params[f'context_block_{i}']:,}")
     print_flush(f"  TokenBlock: {params['token_block']:,}")
 
-    config_wrapper = Phase1ConfigWrapper(base_config, context_dim)
-
     # ========== Phase 1: N分割方式で各ブロックを学習 ==========
     train_context_caches: List[torch.Tensor] = []
     phase1_times: List[float] = []
     phase1_stats: List[Dict[str, Any]] = []
 
     for block_idx in range(num_context_blocks):
-        print_flush(f"\n[Phase 1-{block_idx}] Training ContextBlock {block_idx} on split {block_idx}...")
+        print_flush(f"\n[Phase 1-{block_idx}] Training ContextBlock {block_idx} (cd={context_dims[block_idx]}) on split {block_idx}...")
         wrapper = SingleContextWrapper(model, block_idx=block_idx)
+        # ブロックごとのcontext_dimでConfigWrapperを作成
+        config_wrapper = Phase1ConfigWrapper(base_config, context_dims[block_idx])
         trainer = MemoryPhase1Trainer(wrapper, config_wrapper, device)
 
         phase_start = time.time()
@@ -226,8 +225,8 @@ def run_cascade_context_experiment(
     print_flush(f"Architecture: CascadeContextLLM ({num_context_blocks} blocks, 1L each)")
     for i in range(num_context_blocks):
         block_tokens = len(train_data_splits[i]) - 1
-        print_flush(f"  ContextBlock {i}: cd={context_dim}, trained on {block_tokens:,} tokens")
-    print_flush(f"  TokenBlock: cd={combined_dim} (concatenated)")
+        print_flush(f"  ContextBlock {i}: cd={context_dims[i]}, trained on {block_tokens:,} tokens")
+    print_flush(f"  TokenBlock: cd={combined_dim} (concatenated: {dims_str})")
     print_flush(f"Parameters: {params['total']:,}")
     for i in range(num_context_blocks):
         print_flush(f"Phase 1-{i}: {phase1_times[i]:.1f}s, conv={phase1_stats[i].get('convergence_rate', 0)*100:.0f}%")
@@ -257,14 +256,41 @@ def run_cascade_context_experiment(
     }
 
 
+def parse_context_dims(value: str) -> List[int]:
+    """context_dims引数をパース
+
+    Args:
+        value: カンマ区切りの整数リスト (例: "256,128") または単一整数 (例: "256")
+
+    Returns:
+        整数のリスト
+    """
+    parts = value.split(',')
+    return [int(p.strip()) for p in parts]
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description='Cascade Context Experiment')
+    parser = argparse.ArgumentParser(
+        description='Cascade Context Experiment',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog='''
+Examples:
+  # 2ブロック、各256次元（従来の使用法）
+  python3 scripts/experiment_cascade_context.py -s 2000 -c 256 -n 2
+
+  # 2ブロック、異なる次元（256, 128）
+  python3 scripts/experiment_cascade_context.py -s 2000 -c 256,128
+
+  # 3ブロック、異なる次元（256, 128, 64）
+  python3 scripts/experiment_cascade_context.py -s 2000 -c 256,128,64
+'''
+    )
     parser.add_argument('-s', '--samples', type=int, default=2000,
                         help='Number of samples (default: 2000)')
-    parser.add_argument('-n', '--num-blocks', type=int, default=2,
-                        help='Number of context blocks (default: 2)')
-    parser.add_argument('-c', '--context-dim', type=int, default=256,
-                        help='Context dimension per block (default: 256)')
+    parser.add_argument('-n', '--num-blocks', type=int, default=None,
+                        help='Number of context blocks (ignored if -c is a list)')
+    parser.add_argument('-c', '--context-dims', type=str, default='256,256',
+                        help='Context dimensions: single int "256" or list "256,128" (default: 256,256)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed (default: 42)')
     parser.add_argument('-o', '--output', type=str, default=None,
@@ -272,19 +298,29 @@ def main() -> None:
 
     args = parser.parse_args()
 
+    # context_dimsのパース
+    context_dims = parse_context_dims(args.context_dims)
+
+    # -n が指定された場合、同じ次元をn個に拡張（後方互換性）
+    if args.num_blocks is not None and len(context_dims) == 1:
+        context_dims = context_dims * args.num_blocks
+
+    num_blocks = len(context_dims)
+    combined_dim = sum(context_dims)
+    dims_str = '+'.join(map(str, context_dims))
+
     print_flush("=" * 70)
     print_flush("CASCADE CONTEXT EXPERIMENT")
     print_flush("=" * 70)
     print_flush(f"Samples: {args.samples}")
-    print_flush(f"Blocks: {args.num_blocks}")
-    print_flush(f"Context dim per block: {args.context_dim}")
-    print_flush(f"Combined context dim: {args.context_dim * args.num_blocks}")
+    print_flush(f"Blocks: {num_blocks}")
+    print_flush(f"Context dims: {context_dims}")
+    print_flush(f"Combined context dim: {dims_str}={combined_dim}")
     print_flush("=" * 70)
 
     run_cascade_context_experiment(
         num_samples=args.samples,
-        context_dim=args.context_dim,
-        num_context_blocks=args.num_blocks,
+        context_dims=context_dims,
         seed=args.seed,
         output_dir=args.output,
     )

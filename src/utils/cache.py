@@ -245,7 +245,7 @@ DEFAULT_FILE_CHUNK_SIZE = 100000  # ファイル保存用チャンクサイズ
 
 class MultiBlockModel(Protocol):
     """複数ContextBlockを持つモデルのインターフェース"""
-    context_dim: int
+    context_dims: List[int]  # 各ブロックのcontext_dim
     num_context_blocks: int
     token_embedding: nn.Embedding
     embed_norm: nn.LayerNorm
@@ -285,17 +285,17 @@ def collect_multiblock_cache_to_files(
         prev_context_steps: 前のトークン時のcontextも連結する数（0で無効）
             例: prev_context_steps=1 の場合、出力は:
             [context_0[i], context_1[i], context_0[i-1], context_1[i-1]]
-            combined_dim = context_dim * num_blocks * (1 + prev_context_steps)
+            combined_dim = sum(context_dims) * (1 + prev_context_steps)
 
     Returns:
         (num_tokens, combined_dim, chunk_files): トークン数、結合次元、チャンクファイルリスト
     """
     model.eval()  # type: ignore
     num_tokens = len(token_ids) - 1
-    context_dim = model.context_dim
+    context_dims = model.context_dims  # List[int]
     num_blocks = model.num_context_blocks
     # prev_context_steps=0: 現在のみ、=1: 現在+1つ前、=2: 現在+1つ前+2つ前
-    combined_dim = context_dim * num_blocks * (1 + prev_context_steps)
+    combined_dim = sum(context_dims) * (1 + prev_context_steps)
 
     os.makedirs(cache_dir, exist_ok=True)
 
@@ -307,10 +307,10 @@ def collect_multiblock_cache_to_files(
     chunk_files: List[str] = []
     num_file_chunks = (num_tokens + chunk_size - 1) // chunk_size
 
-    # 初期context（各ブロック用）
+    # 初期context（各ブロック用、ブロックごとに異なる次元）
     prev_contexts = [
-        torch.zeros(1, context_dim, device=device)
-        for _ in range(num_blocks)
+        torch.zeros(1, context_dims[block_idx], device=device)
+        for block_idx in range(num_blocks)
     ]
 
     # prev_context_steps > 0 の場合、履歴を保持するリングバッファ
@@ -320,8 +320,8 @@ def collect_multiblock_cache_to_files(
     if prev_context_steps > 0:
         for _ in range(prev_context_steps):
             context_history.append([
-                torch.zeros(1, context_dim, device='cpu')
-                for _ in range(num_blocks)
+                torch.zeros(1, context_dims[block_idx], device='cpu')
+                for block_idx in range(num_blocks)
             ])
 
     with torch.no_grad():

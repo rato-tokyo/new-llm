@@ -1,0 +1,309 @@
+remote: Enumerating objects: 42, done.
+remote: Counting objects: 100% (42/42), done.
+remote: Compressing objects: 100% (10/10), done.
+remote: Total 27 (delta 17), reused 27 (delta 17), pack-reused 0 (from 0)
+Unpacking objects: 100% (27/27), 10.93 KiB | 1.37 MiB/s, done.
+From https://github.com/rato-tokyo/new-llm
+ * branch            main       -> FETCH_HEAD
+   0286d88..4f0d2ba  main       -> origin/main
+Updating 0286d88..4f0d2ba
+Fast-forward
+ importants/CASCADE_CONTEXT_ARCHITECTURE.md         |  33 +-
+ importants/CONTEXT_DIM_SEARCH.md                   | 159 +++++
+ importants/SCALING_LAW_ANALYSIS.md                 | 206 ++++++
+ .../{ => old}/20251203_context_dim_comparison.md   |   0
+ .../20251203_final_scaling_model_analysis.md       |   0
+ .../20251203_sample_size_scaling_analysis.md       |   0
+ .../{ => old}/20251203_scaling_model_analysis.md   |   0
+ .../{ => old}/context_dim_search_2000samples.md    |   0
+ .../{ => old}/context_dim_search_analysis.md       |   0
+ scripts/README.md                                  |  94 +--
+ scripts/analyze_context_dim_comparison.py          | 261 -------
+ scripts/analyze_final_scaling_model.py             | 195 ------
+ scripts/analyze_sample_size_scaling.py             | 160 -----
+ scripts/analyze_scaling_models.py                  | 341 ----------
+ scripts/experiment_cascade_context.py              | 381 +----------
+ scripts/experiment_context_dim_search.py           | 750 ---------------------
+ scripts/experiment_multiblock_sample_search.py     | 270 +-------
+ scripts/experiment_sample_size_search.py           | 604 -----------------
+ src/models/cascade.py                              | 156 +++++
+ src/trainers/phase2/__init__.py                    |   5 +
+ src/trainers/phase2/cascade.py                     | 171 +++++
+ src/utils/cache.py                                 |  46 +-
+ 22 files changed, 848 insertions(+), 2984 deletions(-)
+ create mode 100644 importants/CONTEXT_DIM_SEARCH.md
+ create mode 100644 importants/SCALING_LAW_ANALYSIS.md
+ rename importants/logs/{ => old}/20251203_context_dim_comparison.md (100%)
+ rename importants/logs/{ => old}/20251203_final_scaling_model_analysis.md (100%)
+ rename importants/logs/{ => old}/20251203_sample_size_scaling_analysis.md (100%)
+ rename importants/logs/{ => old}/20251203_scaling_model_analysis.md (100%)
+ rename importants/{ => old}/context_dim_search_2000samples.md (100%)
+ rename importants/{ => old}/context_dim_search_analysis.md (100%)
+ delete mode 100644 scripts/analyze_context_dim_comparison.py
+ delete mode 100644 scripts/analyze_final_scaling_model.py
+ delete mode 100644 scripts/analyze_sample_size_scaling.py
+ delete mode 100644 scripts/analyze_scaling_models.py
+ delete mode 100644 scripts/experiment_context_dim_search.py
+ delete mode 100644 scripts/experiment_sample_size_search.py
+ create mode 100644 src/models/cascade.py
+ create mode 100644 src/trainers/phase2/__init__.py
+ create mode 100644 src/trainers/phase2/cascade.py
+======================================================================
+MULTI-BLOCK SAMPLE SIZE SEARCH
+======================================================================
+Context dim per block: 256
+Num blocks: 2
+Prev context steps: 0
+Combined context dim: 512
+Sample sizes: [3200]
+Output: importants/logs/20251203_072710_multiblock_2b_sample_search
+======================================================================
+Device: cuda (NVIDIA L4, 22.2GB)
+
+======================================================================
+[SAMPLES=3200] Starting experiment (2 blocks)...
+======================================================================
+
+Loading data (3200 samples)...
+Loading training data...
+  Loading 3200 samples from UltraChat...
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_3200samples_full.pt
+Loading validation data...
+  Train: 3864746 tokens (3200 samples)
+  Val:   22723 tokens
+Data: 3,864,746 train, 22,723 val tokens
+
+Creating CascadeContextLLM (cd=256x2=512)...
+2025-12-03 07:27:31.168437: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-12-03 07:27:31.184195: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1764746851.202922   43891 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764746851.208415   43891 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764746851.222700   43891 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764746851.222733   43891 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764746851.222736   43891 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764746851.222739   43891 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-12-03 07:27:31.226977: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+✓ Weight Tying: token_output shares weights with token_embedding
+
+[Phase 1-0] Training ContextBlock 0...
+
+[Phase 1] Context0: 1,932,374 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=5.4291 [6.3s]
+  Iter 3: conv=0% loss=6.5230 [5.3s]
+  Iter 4: conv=0% loss=5.4489 [5.4s]
+  Iter 5: conv=0% loss=3.7118 [5.2s]
+  Iter 6: conv=0% loss=2.2795 [5.1s]
+  Iter 7: conv=0% loss=1.6319 [5.3s]
+  Iter 8: conv=1% loss=1.6628 [5.2s]
+  Iter 9: conv=1% loss=1.9247 [5.3s]
+  Iter 10: conv=5% loss=2.0669 [5.1s]
+  Iter 11: conv=13% loss=1.9681 [5.2s]
+  Iter 12: conv=21% loss=1.7167 [5.3s]
+  Iter 13: conv=27% loss=1.4856 [5.2s]
+  Iter 14: conv=37% loss=1.3785 [5.1s]
+  Iter 15: conv=55% loss=1.3723 [5.2s]
+  Iter 16: conv=74% loss=1.3838 [5.2s]
+  Iter 17: conv=86% loss=1.3569 [5.3s]
+  Iter 18: conv=92% loss=1.2832 [5.3s]
+  → Early stop: conv 92% >= 90%
+  Done: 92% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [3.2s]
+Phase 1-0: 103.0s, 18 iter, conv=92%
+
+[Phase 1-1] Training ContextBlock 1...
+
+[Phase 1] Context1: 1,932,373 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=6.6843 [5.4s]
+  Iter 3: conv=0% loss=8.0951 [5.4s]
+  Iter 4: conv=0% loss=7.0490 [5.4s]
+  Iter 5: conv=0% loss=5.2413 [5.4s]
+  Iter 6: conv=0% loss=3.5931 [5.4s]
+  Iter 7: conv=0% loss=2.5371 [5.4s]
+  Iter 8: conv=1% loss=2.0219 [5.4s]
+  Iter 9: conv=2% loss=1.7835 [5.5s]
+  Iter 10: conv=6% loss=1.6683 [5.4s]
+  Iter 11: conv=16% loss=1.5914 [5.4s]
+  Iter 12: conv=34% loss=1.4862 [5.4s]
+  Iter 13: conv=52% loss=1.3394 [5.4s]
+  Iter 14: conv=65% loss=1.2050 [5.3s]
+  Iter 15: conv=77% loss=1.1328 [5.4s]
+  Iter 16: conv=87% loss=1.1178 [5.3s]
+  Iter 17: conv=94% loss=1.1129 [5.3s]
+  → Early stop: conv 94% >= 90%
+  Done: 94% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [3.5s]
+Phase 1-1: 99.8s, 17 iter, conv=94%
+
+[Phase 2 Prep] Collecting context cache...
+    Collecting train cache (3,864,745 tokens, 2 blocks, chunk=100,000)...
+      100,000/3,864,745 tokens processed...
+      Chunk 1/39 saved (100,000/3,864,745 tokens)
+      200,000/3,864,745 tokens processed...
+      Chunk 2/39 saved (200,000/3,864,745 tokens)
+      300,000/3,864,745 tokens processed...
+      Chunk 3/39 saved (300,000/3,864,745 tokens)
+      400,000/3,864,745 tokens processed...
+      Chunk 4/39 saved (400,000/3,864,745 tokens)
+      500,000/3,864,745 tokens processed...
+      Chunk 5/39 saved (500,000/3,864,745 tokens)
+      600,000/3,864,745 tokens processed...
+      Chunk 6/39 saved (600,000/3,864,745 tokens)
+      700,000/3,864,745 tokens processed...
+      Chunk 7/39 saved (700,000/3,864,745 tokens)
+      800,000/3,864,745 tokens processed...
+      Chunk 8/39 saved (800,000/3,864,745 tokens)
+      900,000/3,864,745 tokens processed...
+      Chunk 9/39 saved (900,000/3,864,745 tokens)
+      1,000,000/3,864,745 tokens processed...
+      Chunk 10/39 saved (1,000,000/3,864,745 tokens)
+      1,100,000/3,864,745 tokens processed...
+      Chunk 11/39 saved (1,100,000/3,864,745 tokens)
+      1,200,000/3,864,745 tokens processed...
+      Chunk 12/39 saved (1,200,000/3,864,745 tokens)
+      1,300,000/3,864,745 tokens processed...
+      Chunk 13/39 saved (1,300,000/3,864,745 tokens)
+      1,400,000/3,864,745 tokens processed...
+      Chunk 14/39 saved (1,400,000/3,864,745 tokens)
+      1,500,000/3,864,745 tokens processed...
+      Chunk 15/39 saved (1,500,000/3,864,745 tokens)
+      1,600,000/3,864,745 tokens processed...
+      Chunk 16/39 saved (1,600,000/3,864,745 tokens)
+      1,700,000/3,864,745 tokens processed...
+      Chunk 17/39 saved (1,700,000/3,864,745 tokens)
+      1,800,000/3,864,745 tokens processed...
+      Chunk 18/39 saved (1,800,000/3,864,745 tokens)
+      1,900,000/3,864,745 tokens processed...
+      Chunk 19/39 saved (1,900,000/3,864,745 tokens)
+      2,000,000/3,864,745 tokens processed...
+      Chunk 20/39 saved (2,000,000/3,864,745 tokens)
+      2,100,000/3,864,745 tokens processed...
+      Chunk 21/39 saved (2,100,000/3,864,745 tokens)
+      2,200,000/3,864,745 tokens processed...
+      Chunk 22/39 saved (2,200,000/3,864,745 tokens)
+      2,300,000/3,864,745 tokens processed...
+      Chunk 23/39 saved (2,300,000/3,864,745 tokens)
+      2,400,000/3,864,745 tokens processed...
+      Chunk 24/39 saved (2,400,000/3,864,745 tokens)
+      2,500,000/3,864,745 tokens processed...
+      Chunk 25/39 saved (2,500,000/3,864,745 tokens)
+      2,600,000/3,864,745 tokens processed...
+      Chunk 26/39 saved (2,600,000/3,864,745 tokens)
+      2,700,000/3,864,745 tokens processed...
+      Chunk 27/39 saved (2,700,000/3,864,745 tokens)
+      2,800,000/3,864,745 tokens processed...
+      Chunk 28/39 saved (2,800,000/3,864,745 tokens)
+      2,900,000/3,864,745 tokens processed...
+      Chunk 29/39 saved (2,900,000/3,864,745 tokens)
+      3,000,000/3,864,745 tokens processed...
+      Chunk 30/39 saved (3,000,000/3,864,745 tokens)
+      3,100,000/3,864,745 tokens processed...
+      Chunk 31/39 saved (3,100,000/3,864,745 tokens)
+      3,200,000/3,864,745 tokens processed...
+      Chunk 32/39 saved (3,200,000/3,864,745 tokens)
+      3,300,000/3,864,745 tokens processed...
+      Chunk 33/39 saved (3,300,000/3,864,745 tokens)
+      3,400,000/3,864,745 tokens processed...
+      Chunk 34/39 saved (3,400,000/3,864,745 tokens)
+      3,500,000/3,864,745 tokens processed...
+      Chunk 35/39 saved (3,500,000/3,864,745 tokens)
+      3,600,000/3,864,745 tokens processed...
+      Chunk 36/39 saved (3,600,000/3,864,745 tokens)
+      3,700,000/3,864,745 tokens processed...
+      Chunk 37/39 saved (3,700,000/3,864,745 tokens)
+      3,800,000/3,864,745 tokens processed...
+      Chunk 38/39 saved (3,800,000/3,864,745 tokens)
+      3,864,745/3,864,745 tokens processed...
+      Chunk 39/39 saved (3,864,745/3,864,745 tokens)
+    Cache collected [1772.2s] -> 39 chunks
+    Collecting val cache (22,722 tokens, 2 blocks, chunk=100,000)...
+      22,722/22,722 tokens processed...
+      Chunk 1/1 saved (22,722/22,722 tokens)
+    Cache collected [10.4s] -> 1 chunks
+Cache collection: 1855.1s
+Effective Rank: Val=77.9% (398.8/512)
+
+[Phase 2] Training TokenBlock...
+✓ All 2 ContextBlocks frozen
+✓ Embedding frozen
+✓ Training TokenBlock only: 985,344/40,110,080 parameters
+
+[Phase 2] 3,864,745 train / 22,722 val tokens, 40 epochs
+    Epoch 1: train_ppl=900.7 val_ppl=241.0 acc=20.0% [84.6s] *
+    Epoch 2: train_ppl=227.3 val_ppl=177.8 acc=21.6% [86.7s] *
+    Epoch 3: train_ppl=179.0 val_ppl=154.8 acc=22.5% [88.3s] *
+    Epoch 4: train_ppl=156.2 val_ppl=142.9 acc=23.2% [88.9s] *
+    Epoch 5: train_ppl=142.6 val_ppl=135.7 acc=23.5% [89.1s] *
+    Epoch 6: train_ppl=133.5 val_ppl=130.9 acc=23.8% [89.1s] *
+    Epoch 7: train_ppl=126.9 val_ppl=127.5 acc=24.0% [89.1s] *
+    Epoch 8: train_ppl=121.9 val_ppl=124.9 acc=24.2% [89.2s] *
+    Epoch 9: train_ppl=118.0 val_ppl=122.8 acc=24.3% [89.1s] *
+    Epoch 10: train_ppl=114.8 val_ppl=121.2 acc=24.4% [89.1s] *
+    Epoch 11: train_ppl=112.1 val_ppl=119.9 acc=24.5% [89.1s] *
+    Epoch 12: train_ppl=109.8 val_ppl=118.8 acc=24.6% [89.1s] *
+    Epoch 13: train_ppl=107.9 val_ppl=117.8 acc=24.6% [89.3s] *
+    Epoch 14: train_ppl=106.2 val_ppl=117.1 acc=24.8% [89.0s] *
+    Epoch 15: train_ppl=104.7 val_ppl=116.4 acc=24.8% [89.1s] *
+    Epoch 16: train_ppl=103.4 val_ppl=115.8 acc=24.9% [89.1s] *
+    Epoch 17: train_ppl=102.2 val_ppl=115.3 acc=25.0% [89.1s] *
+    Epoch 18: train_ppl=101.1 val_ppl=114.8 acc=25.0% [89.1s] *
+    Epoch 19: train_ppl=100.1 val_ppl=114.5 acc=25.0% [89.1s]
+    → Early stop at epoch 19
+    Best: epoch 18, ppl=114.8, acc=25.0%
+
+[Result] samples=3200: PPL=114.8, Acc=25.0%, ER=77.9%, Time=3771.5s
+  ★ New best! samples=3200, PPL=114.8
+
+======================================================================
+EXPONENTIAL DECAY MODEL FITTING
+======================================================================
+/content/new-llm/scripts/experiment_multiblock_sample_search.py:52: OptimizeWarning: Covariance of the parameters could not be estimated
+  popt, _ = curve_fit(
+/content/new-llm/scripts/experiment_multiblock_sample_search.py:63: RuntimeWarning: divide by zero encountered in scalar divide
+  r2 = 1 - ss_res / ss_tot
+
+Model: PPL = PPL_min + A × exp(-b × n^c)
+  PPL_min = 99.23
+  A = 1239.84
+  b = 0.153901
+  c = 0.4147
+  R² = -inf
+
+Prediction vs Actual:
+    3200 samples: actual=114.8, pred=114.8 (-0.0%)
+
+★ Theoretical limit (PPL_min): 99.2
+
+======================================================================
+SUMMARY - Multi-Block Sample Size Search (2 blocks)
+======================================================================
+Context dim per block: 256
+Num blocks: 2
+Prev context steps: 0
+Combined context dim: 512
+Sample sizes: [3200]
+
+Results:
+ Samples |       Tokens |      PPL |    Acc |    ER% |     Time
+------------------------------------------------------------
+    3200 |    3,864,746 |    114.8 |  25.0% |  77.9% |  3771.5s ★
+------------------------------------------------------------
+
+★ Best: samples=3200, PPL=114.8
+
+★ Exp Decay PPL_min: 99.2 (R²=-inf)
+======================================================================
+
+Results saved to: importants/logs/20251203_072710_multiblock_2b_sample_search/results.txt
+
+======================================================================
+DONE
+======================================================================
