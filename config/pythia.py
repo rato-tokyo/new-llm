@@ -33,6 +33,7 @@ class PythiaConfig:
     phase1_learning_rate = 0.002    # Phase 1 learning rate
     phase1_convergence_threshold = 0.9  # Early stopping threshold
     phase1_batches_per_iteration = 10  # Batches per iteration
+    phase1_checkpoint_path = "checkpoints/context_block_phase1.pt"  # Phase 1 checkpoint
 
     # ========== Phase 2 (Fine-tuning) ==========
     phase2_epochs = 10              # Number of fine-tuning epochs

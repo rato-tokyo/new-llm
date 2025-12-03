@@ -27,7 +27,6 @@ sys.path.insert(0, ".")
 from config.pythia import PythiaConfig, ContextPythiaConfig
 from src.models.pythia import PythiaModel
 from src.models.context_pythia import ContextPythiaModel
-from src.losses.diversity import oacd_loss
 from src.utils.io import print_flush
 
 
@@ -216,69 +215,36 @@ def evaluate(
     return ppl, accuracy
 
 
-def train_phase1_oacd(
+def load_phase1_checkpoint(
     model: nn.Module,
-    train_loader: DataLoader,
-    device: torch.device,
     config: PythiaConfig,
 ) -> float:
     """
-    Phase 1: Train ContextBlock with OACD diversity loss.
+    Load Phase 1 checkpoint (ContextBlock parameters).
 
-    Only trains the context_block parameters.
+    Raises:
+        FileNotFoundError: If checkpoint file does not exist
     """
-    model.train()
+    from pathlib import Path
 
-    # Only optimize context_block
-    optimizer = torch.optim.AdamW(
-        model.context_block.parameters(),
-        lr=config.phase1_learning_rate,
-    )
+    checkpoint_path = Path(config.phase1_checkpoint_path)
 
-    total_loss = 0.0
-    num_batches = 0
+    if not checkpoint_path.exists():
+        raise FileNotFoundError(
+            f"Phase 1 checkpoint not found: {checkpoint_path}\n"
+            f"Run 'python3 scripts/train_phase1.py --samples N --seq-length M' first."
+        )
 
-    for iteration in range(config.phase1_max_iterations):
-        epoch_loss = 0.0
-        batch_count = 0
+    print_flush(f"Loading Phase 1 checkpoint: {checkpoint_path}")
+    checkpoint = torch.load(checkpoint_path, weights_only=True)
 
-        for batch_idx, (inputs, _) in enumerate(train_loader):
-            if batch_idx >= config.phase1_batches_per_iteration:
-                break
+    # Load ContextBlock state dict
+    model.context_block.load_state_dict(checkpoint["context_block_state_dict"])
 
-            inputs = inputs.to(device)
+    final_loss = checkpoint.get("final_loss", 0.0)
+    print_flush(f"  Phase 1 loss: {final_loss:.4f}")
 
-            optimizer.zero_grad()
-
-            # Forward to get context
-            _, context = model.forward_with_context_output(inputs)
-
-            # Flatten context for OACD loss: [batch*seq, context_dim]
-            context_flat = context.view(-1, context.size(-1))
-
-            # OACD diversity loss
-            loss = oacd_loss(context_flat, centroid_weight=0.1)
-
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.context_block.parameters(), 1.0)
-            optimizer.step()
-
-            epoch_loss += loss.item()
-            batch_count += 1
-
-        avg_loss = epoch_loss / max(batch_count, 1)
-        total_loss += avg_loss
-        num_batches += 1
-
-        if (iteration + 1) % 10 == 0:
-            print_flush(f"  Phase 1 Iter {iteration + 1}: OACD loss={avg_loss:.4f}")
-
-        # Early stopping check
-        if avg_loss < -config.phase1_convergence_threshold:
-            print_flush(f"  Phase 1 converged at iteration {iteration + 1}")
-            break
-
-    return total_loss / max(num_batches, 1)
+    return final_loss
 
 
 def measure_memory(
@@ -445,15 +411,10 @@ def run_comparison(
     context_memory = measure_memory(context_pythia, sample_input, device)
     print_flush(f"Peak memory: {context_memory['peak_mb']:.1f} MB")
 
-    # ========== Phase 1: OACD Training ==========
-    print_flush("\n--- Phase 1: OACD (ContextBlock diversity) ---")
-    start_time = time.time()
+    # ========== Phase 1: Load Checkpoint ==========
+    print_flush("\n--- Phase 1: Loading ContextBlock checkpoint ---")
 
-    phase1_loss = train_phase1_oacd(
-        context_pythia, train_loader, device, context_config
-    )
-    phase1_time = time.time() - start_time
-    print_flush(f"Phase 1 completed: avg_loss={phase1_loss:.4f}, time={phase1_time:.1f}s")
+    phase1_loss = load_phase1_checkpoint(context_pythia, context_config)
 
     # ========== Phase 2: Full Training (ContextBlock frozen) ==========
     print_flush("\n--- Phase 2: Full Training (ContextBlock frozen) ---")
@@ -478,15 +439,15 @@ def run_comparison(
         )
 
     phase2_time = time.time() - start_time
-    context_time = phase1_time + phase2_time
 
     results["context_pythia"] = {
         "params": context_params["total"],
         "val_ppl": val_ppl,
         "val_acc": val_acc,
         "peak_memory_mb": context_memory["peak_mb"],
-        "train_time": context_time,
+        "train_time": phase2_time,
         "kv_reduction_pct": kv_comparison["reduction_pct"],
+        "phase1_loss": phase1_loss,
     }
 
     # ========== Summary ==========

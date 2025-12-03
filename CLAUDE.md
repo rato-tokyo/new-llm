@@ -169,8 +169,14 @@ python3 -m mypy src/ --ignore-missing-imports
 ### 実験の実行
 
 ```bash
+# Step 1: Phase 1 学習（ContextBlock OACD）- 初回のみ
+python3 scripts/train_phase1.py --samples 10000 --seq-length 256
+
+# Step 2: 比較実験（Phase 1 チェックポイントが必要）
 python3 scripts/experiment_pythia_comparison.py --samples 10000 --seq-length 256 --epochs 10
 ```
+
+**注意**: Phase 1チェックポイント (`checkpoints/context_block_phase1.pt`) が存在しない場合、実験スクリプトはエラーで停止します。
 
 ---
 
@@ -221,11 +227,14 @@ parser.add_argument('--epochs', type=int, required=True, help='(REQUIRED)')
 
 ```
 new-llm/
+├── checkpoints/
+│   └── context_block_phase1.pt  # Phase 1 checkpoint
 ├── config/
 │   ├── __init__.py
 │   └── pythia.py              # PythiaConfig, ContextPythiaConfig
 ├── scripts/
-│   └── experiment_pythia_comparison.py  # 比較実験
+│   ├── train_phase1.py        # Phase 1: ContextBlock OACD学習
+│   └── experiment_pythia_comparison.py  # 比較実験（Phase 2）
 ├── src/
 │   ├── models/
 │   │   ├── pythia.py          # PythiaModel (baseline)
