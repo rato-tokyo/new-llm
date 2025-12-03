@@ -66,8 +66,8 @@ def train_epoch(
 
         # Reshape for loss
         batch_size_actual, seq_len, vocab_size = logits.shape
-        logits_flat = logits.view(-1, vocab_size)
-        targets_flat = batch_targets.view(-1)
+        logits_flat = logits.reshape(-1, vocab_size)
+        targets_flat = batch_targets.reshape(-1)
 
         loss = criterion(logits_flat, targets_flat)
         loss.backward()
@@ -117,8 +117,8 @@ def evaluate(
         logits = model(batch_inputs)
 
         batch_size_actual, seq_len, vocab_size = logits.shape
-        logits_flat = logits.view(-1, vocab_size)
-        targets_flat = batch_targets.view(-1)
+        logits_flat = logits.reshape(-1, vocab_size)
+        targets_flat = batch_targets.reshape(-1)
 
         loss = criterion(logits_flat, targets_flat)
 
