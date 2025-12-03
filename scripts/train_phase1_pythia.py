@@ -6,7 +6,7 @@ ContextBlockのOACD学習を行う。
 Pythia-70Mのtoken embeddingsを使用。
 
 Usage:
-    python3 scripts/train_phase1_pythia.py --tokens 100000
+    python3 scripts/train_phase1_pythia.py --samples 1000
 """
 
 import argparse
@@ -249,19 +249,14 @@ def train_phase1(
 
 def main():
     parser = argparse.ArgumentParser(description="Phase 1 Training for Context-Pythia")
-    group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--tokens", type=int, help="Number of tokens")
-    group.add_argument("--samples", type=int, help="Number of samples (converted to tokens)")
-    parser.add_argument("--seq-length", type=int, default=128, help="Sequence length (for --samples)")
+    parser.add_argument("--samples", type=int, required=True, help="Number of samples")
+    parser.add_argument("--seq-length", type=int, default=128, help="Sequence length")
     parser.add_argument("--val-split", type=float, default=0.1, help="Validation split ratio")
     args = parser.parse_args()
 
-    # Calculate tokens from samples if needed
-    if args.samples is not None:
-        num_tokens = args.samples * args.seq_length
-        print_flush(f"Converting: {args.samples:,} samples × {args.seq_length} seq_len = {num_tokens:,} tokens")
-    else:
-        num_tokens = args.tokens
+    # Calculate tokens from samples
+    num_tokens = args.samples * args.seq_length
+    print_flush(f"Samples: {args.samples:,} × seq_len {args.seq_length} = {num_tokens:,} tokens")
 
     # Device
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -279,7 +274,9 @@ def main():
     print_flush("=" * 70)
     print_flush("PHASE 1: CONTEXTBLOCK OACD TRAINING (PYTHIA)")
     print_flush("=" * 70)
-    print_flush(f"Tokens: {num_tokens:,}")
+    print_flush(f"Samples: {args.samples:,}")
+    print_flush(f"Seq length: {args.seq_length}")
+    print_flush(f"Total tokens: {num_tokens:,}")
     print_flush(f"Embed dim: {pythia_config.embed_dim}")
     print_flush(f"Context dim: {pythia_config.context_dim}")
     print_flush(f"Checkpoint: {pythia_config.phase1_checkpoint_path}")
@@ -347,7 +344,8 @@ def main():
         "config": {
             "context_dim": pythia_config.context_dim,
             "embed_dim": pythia_config.embed_dim,
-            "num_tokens": num_tokens,
+            "num_samples": args.samples,
+            "seq_length": args.seq_length,
         },
         "stats": stats,
         "final_loss": stats.get('final_conv_rate', 0.0),

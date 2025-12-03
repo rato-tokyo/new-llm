@@ -72,11 +72,17 @@ Phase 2: Full Training (ContextBlock frozen)
 
 ```bash
 # Phase 1: ContextBlock OACD学習
-python3 scripts/train_phase1_pythia.py --tokens 100000
+python3 scripts/train_phase1_pythia.py --samples 1000
 
-# Phase 2: 比較実験（準備中）
+# Phase 2: 比較実験
 python3 scripts/experiment_pythia_comparison.py --samples 10000 --epochs 10
 ```
+
+### ⚠️ Phase 1 コマンドラインオプションの制約
+
+**Phase 1は`--samples`のみ使用可能。`--tokens`オプションは禁止。**
+
+理由: サンプル数で指定することで、データサイズが直感的に理解しやすくなる。
 
 ---
 
