@@ -8,23 +8,47 @@
 
 ```
 Context-KV Attention:
-  - 100トークンごとにContextを圧縮
-  - 圧縮されたContextをKVキャッシュとして使用
+  - 等間隔（interval）でContextを取得
+  - 常に「現在位置」を含めたcontextでAttention
   - ~99% KVキャッシュ削減
-
-Position 350 の場合:
-  KV Cache = [context_0-99, context_100-199, context_200-299, context_300-350]
-           = 4 context vectors のみ
 ```
+
+### 🚨 Context Interval方式（重要）
+
+**Position i の予測には、現在位置から等間隔で過去のcontextを取得：**
+
+```
+interval = 100 の場合:
+
+Position 350:
+  KV Cache = [context[350], context[250], context[150], context[50]]
+              ↑現在          ↑100前        ↑200前        ↑300前
+           = 4 context vectors
+
+Position 150:
+  KV Cache = [context[150], context[50]]
+              ↑現在          ↑100前
+           = 2 context vectors
+
+Position 50:
+  KV Cache = [context[50]]
+              ↑現在
+           = 1 context vector
+```
+
+**ポイント：**
+- 常に「現在位置のcontext」を含める（最新情報）
+- 過去のcontextは等間隔（interval）で取得
+- 古い「チャンク境界」方式ではなく、「現在位置基準」方式を使用
 
 ### 実験の実行
 
 ```bash
-# Colab（GPU）: 200サンプル
+# Colab（GPU）: 200サンプル、interval=100
 python3 scripts/experiment_context_kv.py -s 200 --chunk-size 100
 
 # カスタムcontext次元
-python3 scripts/experiment_context_kv.py -s 200 -c 256 128 --chunk-size 50
+python3 scripts/experiment_context_kv.py -s 200 -c 256 --chunk-size 50
 ```
 
 ---
@@ -117,7 +141,8 @@ python3 -m mypy scripts/experiment_context_kv.py --ignore-missing-imports
 
 **3. Context-KV Attention**
 - ContextをK,Vに変換
-- チャンク単位のcontextでAttention
+- 等間隔（interval）でcontextを取得してAttention
+- 常に現在位置のcontextを含める
 
 ### Phase 1: 多様性学習（OACD）
 
