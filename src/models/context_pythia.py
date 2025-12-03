@@ -60,6 +60,13 @@ class ContextPythiaModel(nn.Module):
     ):
         super().__init__()
 
+        # context_dimがnum_headsで割り切れない場合は自動調整
+        if context_dim % num_heads != 0:
+            original_context_dim = context_dim
+            # 切り上げて割り切れる値にする
+            context_dim = ((context_dim + num_heads - 1) // num_heads) * num_heads
+            print_flush(f"⚠️ context_dim adjusted: {original_context_dim} → {context_dim} (divisible by num_heads={num_heads})")
+
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
         self.context_dim = context_dim

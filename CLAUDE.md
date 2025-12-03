@@ -86,15 +86,16 @@ python3 scripts/experiment_pythia_comparison.py --samples 10000 --epochs 10
 
 ### ⚠️ context_dim の制約
 
-**`context_dim`は`num_attention_heads` (8) で割り切れる値にすること。**
+**`context_dim`は`num_attention_heads` (8) で割り切れる値が推奨。**
+
+割り切れない場合は自動的に切り上げて調整される:
+- 300 → 304 (304 / 8 = 38)
+- 250 → 256 (256 / 8 = 32)
 
 有効な値の例:
 - 256 (256 / 8 = 32) ← デフォルト、50%圧縮
 - 320 (320 / 8 = 40) ← 37.5%圧縮
 - 384 (384 / 8 = 48) ← 25%圧縮
-
-無効な値の例:
-- 300 (300 / 8 = 37.5) ❌ → RuntimeError発生
 
 ---
 
