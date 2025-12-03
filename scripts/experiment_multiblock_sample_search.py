@@ -2,12 +2,12 @@
 """
 Multi-Block Sample Size Search Experiment
 
-2ブロック（カスケード連結）でのサンプル数探索実験。
+複数ブロック（カスケード連結）でのサンプル数探索実験。
 最後に指数減衰モデルでのフィッティングも自動実行。
 
 使用方法:
   python3 scripts/experiment_multiblock_sample_search.py --start 200 --end 1600 -c 256
-  python3 scripts/experiment_multiblock_sample_search.py --start 200 --end 3200 -c 256
+  python3 scripts/experiment_multiblock_sample_search.py --start 200 --end 3200 -c 256 -p 1
 """
 
 import os
@@ -22,247 +22,20 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 import torch
-import torch.nn as nn
 from scipy.optimize import curve_fit
 
 from config import Config
-from src.models.blocks import ContextBlock, TokenBlock
+from src.models.cascade import CascadeContextLLM, SingleContextWrapper
 from src.trainers.phase1.memory import MemoryPhase1Trainer
+from src.trainers.phase2.cascade import CascadePhase2Trainer
 from src.evaluation.metrics import analyze_fixed_points
 from src.providers.data import MemoryDataProvider
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
 from src.utils.seed import set_seed
-from src.utils.initialization import count_parameters
 from src.utils.cache import collect_multiblock_cache_to_files, ChunkedCacheDataset
-from src.utils.embedding import load_pretrained_gpt2_embeddings
 from src.config.wrappers import Phase1ConfigWrapper, Phase2ConfigWrapper
 from config.experiment import DataConfig
-
-
-# ============================================================
-# Model Classes (from experiment_cascade_context.py)
-# ============================================================
-
-class CascadeContextLLM(nn.Module):
-    """Cascade Context LLM - 複数ブロック版"""
-
-    def __init__(
-        self,
-        vocab_size: int,
-        embed_dim: int,
-        context_dim: int,
-        num_context_blocks: int = 2,
-        prev_context_steps: int = 0,
-    ) -> None:
-        super().__init__()
-
-        self.vocab_size = vocab_size
-        self.embed_dim = embed_dim
-        self.context_dim = context_dim
-        self.num_context_blocks = num_context_blocks
-        self.prev_context_steps = prev_context_steps
-        # TokenBlockへの入力次元: (現在 + 履歴) × ブロック数
-        self.combined_context_dim = context_dim * num_context_blocks * (1 + prev_context_steps)
-
-        self._load_pretrained_embeddings()
-        self.embed_norm = nn.LayerNorm(embed_dim)
-
-        self.context_blocks = nn.ModuleList([
-            ContextBlock(context_dim=context_dim, embed_dim=embed_dim)
-            for _ in range(num_context_blocks)
-        ])
-
-        self.token_block = TokenBlock(
-            context_dim=self.combined_context_dim,
-            embed_dim=embed_dim,
-        )
-
-        self.token_output = nn.Linear(embed_dim, vocab_size, bias=False)
-        self.token_output.weight = self.token_embedding.weight
-        print_flush("✓ Weight Tying: token_output shares weights with token_embedding")
-
-    def _load_pretrained_embeddings(self) -> None:
-        self.token_embedding = load_pretrained_gpt2_embeddings(
-            self.vocab_size, self.embed_dim, freeze=True
-        )
-
-    def forward_context(self, block_idx: int, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
-        return self.context_blocks[block_idx](context, token_embeds)
-
-    def forward_token(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
-        return self.token_block(context, token_embeds)
-
-    def freeze_context_block(self, block_idx: int) -> None:
-        for param in self.context_blocks[block_idx].parameters():
-            param.requires_grad = False
-
-    def freeze_all_context_blocks(self) -> None:
-        for i in range(self.num_context_blocks):
-            self.freeze_context_block(i)
-        print_flush(f"✓ All {self.num_context_blocks} ContextBlocks frozen")
-
-    def num_params(self) -> Dict[str, int]:
-        embedding_params = self.token_embedding.weight.numel()
-        embed_norm_params = count_parameters(self.embed_norm)
-        total_context_params = sum(count_parameters(block) for block in self.context_blocks)
-        token_block_params = count_parameters(self.token_block)
-        total = embedding_params + embed_norm_params + total_context_params + token_block_params
-        return {
-            'embedding': embedding_params,
-            'embed_norm': embed_norm_params,
-            'token_block': token_block_params,
-            'total': total,
-            'total_context_blocks': total_context_params,
-        }
-
-
-class SingleContextWrapper(nn.Module):
-    """Phase 1 用ラッパー"""
-
-    def __init__(self, cascade_model: CascadeContextLLM, block_idx: int = 0):
-        super().__init__()
-        self.cascade_model = cascade_model
-        self.block_idx = block_idx
-        self.token_embedding = cascade_model.token_embedding
-        self.embed_norm = cascade_model.embed_norm
-        self.context_dim = cascade_model.context_dim
-        self.embed_dim = cascade_model.embed_dim
-        self.vocab_size = cascade_model.vocab_size
-        self.context_block = cascade_model.context_blocks[block_idx]
-
-    def forward_context(self, context: torch.Tensor, token_embeds: torch.Tensor) -> torch.Tensor:
-        return self.context_block(context, token_embeds)
-
-
-# ============================================================
-# Phase 2 Training
-# ============================================================
-
-def train_phase2(
-    model: CascadeContextLLM,
-    train_token_ids: torch.Tensor,
-    val_token_ids: torch.Tensor,
-    train_context_cache: torch.Tensor,
-    train_token_embeds: torch.Tensor,
-    val_context_cache: torch.Tensor,
-    val_token_embeds: torch.Tensor,
-    config: Phase2ConfigWrapper,
-    device: torch.device,
-) -> Dict[str, Any]:
-    """Phase 2: TokenBlock 学習"""
-    model.freeze_all_context_blocks()
-    model.token_embedding.weight.requires_grad = False
-    print_flush("✓ Embedding frozen")
-
-    trainable_params = [p for p in model.token_block.parameters() if p.requires_grad]
-    total_params = sum(p.numel() for p in model.parameters())
-    trainable_count = sum(p.numel() for p in trainable_params)
-    print_flush(f"✓ Training TokenBlock only: {trainable_count:,}/{total_params:,} parameters")
-
-    optimizer = torch.optim.Adam(trainable_params, lr=config.phase2_learning_rate)
-    criterion = nn.CrossEntropyLoss()
-
-    num_train = len(train_context_cache)
-    num_val = len(val_context_cache)
-    batch_size = config.phase2_batch_size
-
-    train_labels = train_token_ids[1:].to(device)
-    val_labels = val_token_ids[1:].to(device)
-
-    print_flush(f"\n[Phase 2] {num_train:,} train / {num_val:,} val tokens, {config.phase2_epochs} epochs")
-
-    history: Dict[str, Any] = {
-        'train_loss': [], 'train_ppl': [],
-        'val_loss': [], 'val_ppl': [], 'val_acc': [],
-    }
-    best_val_ppl = float('inf')
-    best_epoch = 0
-    patience_counter = 0
-
-    for epoch in range(1, config.phase2_epochs + 1):
-        epoch_start = time.time()
-
-        # Training
-        model.train()
-        train_loss_sum = 0.0
-
-        for start_idx in range(0, num_train, batch_size):
-            end_idx = min(start_idx + batch_size, num_train)
-
-            batch_context = train_context_cache[start_idx:end_idx].to(device)
-            batch_token = train_token_embeds[start_idx:end_idx].to(device)
-            batch_labels = train_labels[start_idx:end_idx]
-
-            optimizer.zero_grad()
-            token_out = model.forward_token(batch_context, batch_token)
-            logits = model.token_output(token_out)
-            loss = criterion(logits, batch_labels)
-            loss.backward()
-
-            if config.phase2_gradient_clip > 0:
-                torch.nn.utils.clip_grad_norm_(trainable_params, config.phase2_gradient_clip)
-            optimizer.step()
-
-            train_loss_sum += loss.item() * (end_idx - start_idx)
-
-        train_loss = train_loss_sum / num_train
-        train_ppl = min(torch.exp(torch.tensor(train_loss)).item(), 1e7)
-
-        # Validation
-        model.eval()
-        val_loss_sum = 0.0
-        val_correct = 0
-
-        with torch.no_grad():
-            for start_idx in range(0, num_val, batch_size):
-                end_idx = min(start_idx + batch_size, num_val)
-
-                batch_context = val_context_cache[start_idx:end_idx].to(device)
-                batch_token = val_token_embeds[start_idx:end_idx].to(device)
-                batch_labels = val_labels[start_idx:end_idx]
-
-                token_out = model.forward_token(batch_context, batch_token)
-                logits = model.token_output(token_out)
-                loss = criterion(logits, batch_labels)
-
-                val_loss_sum += loss.item() * (end_idx - start_idx)
-                val_correct += (logits.argmax(dim=-1) == batch_labels).sum().item()
-
-        val_loss = val_loss_sum / num_val
-        val_ppl = min(torch.exp(torch.tensor(val_loss)).item(), 1e7)
-        val_acc = val_correct / num_val
-
-        epoch_time = time.time() - epoch_start
-
-        history['train_loss'].append(train_loss)
-        history['train_ppl'].append(train_ppl)
-        history['val_loss'].append(val_loss)
-        history['val_ppl'].append(val_ppl)
-        history['val_acc'].append(val_acc)
-
-        improved = ""
-        if val_ppl < best_val_ppl - config.phase2_min_ppl_improvement:
-            best_val_ppl = val_ppl
-            best_epoch = epoch
-            patience_counter = 0
-            improved = " *"
-        else:
-            patience_counter += 1
-
-        print_flush(f"    Epoch {epoch}: train_ppl={train_ppl:.1f} val_ppl={val_ppl:.1f} "
-                    f"acc={val_acc*100:.1f}% [{epoch_time:.1f}s]{improved}")
-
-        if patience_counter >= config.phase2_patience:
-            print_flush(f"    → Early stop at epoch {epoch}")
-            break
-
-    print_flush(f"    Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}, acc={history['val_acc'][best_epoch-1]*100:.1f}%")
-
-    history['best_epoch'] = best_epoch
-    history['best_val_ppl'] = best_val_ppl
-
-    return history
 
 
 # ============================================================
@@ -272,11 +45,11 @@ def train_phase2(
 def fit_exp_decay(samples: np.ndarray, ppls: np.ndarray) -> Dict[str, Any]:
     """指数減衰モデルでフィッティング"""
 
-    def exp_decay(n, ppl_min, A, b, c):
+    def exp_decay(n: np.ndarray, ppl_min: float, A: float, b: float, c: float) -> np.ndarray:
         return ppl_min + A * np.exp(-b * (n ** c))
 
     try:
-        popt, pcov = curve_fit(
+        popt, _ = curve_fit(
             exp_decay, samples, ppls,
             p0=[100, 300, 0.01, 0.5],
             bounds=([0, 0, 0, 0], [200, 2000, 1, 1]),
@@ -459,14 +232,13 @@ def run_multiblock_sample_search(
         # Phase 2
         print_flush("\n[Phase 2] Training TokenBlock...")
         phase2_config = Phase2ConfigWrapper(base_config)
+        phase2_trainer = CascadePhase2Trainer(model, phase2_config, device)
 
         phase2_start = time.time()
-        history = train_phase2(
-            model,
+        history = phase2_trainer.train(
             train_token_ids, val_token_ids,
             train_context_cache, train_token_embeds,
             val_context_cache, val_token_embeds,
-            phase2_config, device,
         )
         phase2_time = time.time() - phase2_start
 
@@ -519,7 +291,7 @@ def run_multiblock_sample_search(
     fit_result = fit_exp_decay(samples_arr, ppls_arr)
 
     if fit_result['success']:
-        print_flush(f"\nModel: PPL = PPL_min + A × exp(-b × n^c)")
+        print_flush("\nModel: PPL = PPL_min + A × exp(-b × n^c)")
         print_flush(f"  PPL_min = {fit_result['ppl_min']:.2f}")
         print_flush(f"  A = {fit_result['A']:.2f}")
         print_flush(f"  b = {fit_result['b']:.6f}")
@@ -579,8 +351,8 @@ def run_multiblock_sample_search(
             f.write(f"\nBest: samples={best_samples}, PPL={best_ppl:.1f}\n")
 
             if fit_result['success']:
-                f.write(f"\n\nExponential Decay Fitting:\n")
-                f.write(f"  PPL = PPL_min + A × exp(-b × n^c)\n")
+                f.write("\n\nExponential Decay Fitting:\n")
+                f.write("  PPL = PPL_min + A × exp(-b × n^c)\n")
                 f.write(f"  PPL_min = {fit_result['ppl_min']:.2f}\n")
                 f.write(f"  A = {fit_result['A']:.2f}\n")
                 f.write(f"  b = {fit_result['b']:.6f}\n")

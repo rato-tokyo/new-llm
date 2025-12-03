@@ -1,85 +1,51 @@
 # Scripts Directory
 
-実験・ユーティリティスクリプト。
+実験スクリプト。
 
-## 多様性アルゴリズム実験（2025-12-01追加）
+## メイン実験スクリプト
 
-### diversity_algorithm_experiment.py
-Phase 1のみで多様性アルゴリズムを比較。Effective Rank (ER) を測定。
+### experiment_cascade_context.py
+
+カスケード連結（N分割方式）での実験。複数のContextBlockを異なるデータで学習。
 
 ```bash
-# 全4アルゴリズムを比較
-python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM SDL NUC -s 50 100
+# 基本: 2000サンプル、2ブロック
+python3 scripts/experiment_cascade_context.py -s 2000 -n 2
 
-# 特定のアルゴリズムのみ
-python3 scripts/diversity_algorithm_experiment.py -a MCDL ODCM -s 50
+# 4ブロック
+python3 scripts/experiment_cascade_context.py -s 2000 -n 4
 
 # context_dim指定
-python3 scripts/diversity_algorithm_experiment.py -a MCDL -s 50 --context-dim 1000
+python3 scripts/experiment_cascade_context.py -s 2000 -n 2 -c 256
 ```
 
-### diversity_full_experiment.py
-Phase 1 + Phase 2を実行し、α値（スケーリング指数）を比較。
+### experiment_multiblock_sample_search.py
+
+サンプル数を変化させてPPLの変化を観察。指数減衰モデルでPPL_minを自動推定。
 
 ```bash
-# デフォルト設定（4アルゴリズム, samples=[50,100,200], context_dim=1000）
-python3 scripts/diversity_full_experiment.py
+# 基本: 200-1600サンプル、2ブロック
+python3 scripts/experiment_multiblock_sample_search.py --start 200 --end 1600 -c 256
+
+# 前のcontextも連結（prev_context_steps=1）
+python3 scripts/experiment_multiblock_sample_search.py --start 200 --end 1600 -c 256 -p 1
+
+# 4ブロック
+python3 scripts/experiment_multiblock_sample_search.py --start 200 --end 1600 -c 256 -n 4
 ```
 
-**出力**:
-- 各アルゴリズムの Effective Rank
-- Val PPL, Val Acc
-- α値（PPL = A × tokens^α）
-- R²値
+**オプション**:
+- `-c, --context-dim`: 各ブロックのcontext次元（デフォルト: 256）
+- `-n, --num-blocks`: ContextBlock数（デフォルト: 2）
+- `--start`: 開始サンプル数（デフォルト: 200）
+- `--end`: 終了サンプル数（デフォルト: 1600）
+- `-p, --prev-context`: 前のcontextを連結する数（0で無効、デフォルト: 0）
+- `-o, --output`: 出力ディレクトリ
 
-## スケーリング実験
+## 共通モジュール
 
-### scaling_experiment.py
-スケーリング則の実験。α値の推移分析機能あり。
+スクリプトで使用する共通コードは `src/` に移動済み:
 
-```bash
-# 標準実験
-python3 scripts/scaling_experiment.py --input-tokens 1 --layers 1 --context-dim 768
-
-# α値推移分析
-python3 scripts/scaling_experiment.py --alpha-scaling \
-  --init-samples 50 --multiplier 2 --window-size 4 --num-windows 2
-```
-
-## ユーティリティ
-
-### check_val_convergence.py
-学習済みモデルで検証データの収束性をチェック。
-
-```bash
-python3 scripts/check_val_convergence.py --num_trials 10
-python3 scripts/check_val_convergence.py --checkpoint_path ./checkpoints/my_model.pt
-```
-
-### check_token_overlap.py
-訓練データと検証データのトークン重複率を分析。
-
-```bash
-python3 scripts/check_token_overlap.py
-```
-
-### create_val_from_train.py
-訓練データから検証データを生成。
-
-```bash
-python3 scripts/create_val_from_train.py
-```
-
-### prepare_disk_offload.py
-大規模データ用のディスクオフロード準備。
-
-```bash
-python3 scripts/prepare_disk_offload.py --output_dir /path/to/nvme --num_samples 200000
-```
-
-### train_full_ultrachat.py
-UltraChat全データでの訓練。
-
-```bash
-python3 scripts/train_full_ultrachat.py
-```
+- `src/models/cascade.py` - CascadeContextLLM, SingleContextWrapper
+- `src/trainers/phase2/cascade.py` - CascadePhase2Trainer
+- `src/utils/cache.py` - キャッシュ収集ユーティリティ
