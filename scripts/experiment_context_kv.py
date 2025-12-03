@@ -245,17 +245,17 @@ def train_phase2(
             end = min(start + batch_size, num_train)
             batch_idx = indices[start:end]
 
-            # 進捗表示（最初のエポックのみ詳細表示、中間成績付き）
-            if epoch == 1 and (batch_num % 50 == 0 or batch_num == num_batches - 1):
+            # 進捗表示（全エポックで詳細表示）
+            if batch_num % 50 == 0 or batch_num == num_batches - 1:
                 processed = batch_num * batch_size
                 elapsed = time.time() - epoch_start
                 if processed > 0:
                     interim_ppl = torch.exp(torch.tensor(train_loss / processed)).item()
                     interim_acc = train_correct / processed * 100
-                    print_flush(f"    Epoch 1: batch {batch_num+1}/{num_batches} "
+                    print_flush(f"    Epoch {epoch}: batch {batch_num+1}/{num_batches} "
                                 f"(ppl={interim_ppl:.1f}, acc={interim_acc:.1f}%, {elapsed:.1f}s)")
                 else:
-                    print_flush(f"    Epoch 1: batch {batch_num+1}/{num_batches} ({elapsed:.1f}s)...")
+                    print_flush(f"    Epoch {epoch}: batch {batch_num+1}/{num_batches} ({elapsed:.1f}s)...")
 
             # 動的にcontext intervalsを構築（GPU上で直接作成）
             batch_context_chunks = build_batch_context_intervals(
