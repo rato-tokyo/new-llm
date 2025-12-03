@@ -32,7 +32,9 @@ class CascadeContextLLM(nn.Module):
             - int: 全ブロックで同じ次元を使用
             - List[int]: ブロックごとに異なる次元を指定（例: [256, 128]）
         num_context_blocks: ContextBlockの数（context_dimsがintの場合に使用）
-        prev_context_steps: 前のトークン時のcontextも連結する数（0で無効）
+        prev_context_interval: 過去contextを取得する間隔（デフォルト1=連続）
+        prev_context_count: 過去contextの取得個数（0で無効）
+            例: interval=3, count=2 → 3つ前と6つ前のcontextを使用
     """
 
     def __init__(
@@ -41,13 +43,15 @@ class CascadeContextLLM(nn.Module):
         embed_dim: int,
         context_dims: Union[int, List[int]],
         num_context_blocks: int = 2,
-        prev_context_steps: int = 0,
+        prev_context_interval: int = 1,
+        prev_context_count: int = 0,
     ) -> None:
         super().__init__()
 
         self.vocab_size = vocab_size
         self.embed_dim = embed_dim
-        self.prev_context_steps = prev_context_steps
+        self.prev_context_interval = prev_context_interval
+        self.prev_context_count = prev_context_count
 
         # context_dimsの正規化: intの場合はリストに変換
         if isinstance(context_dims, int):
@@ -64,8 +68,8 @@ class CascadeContextLLM(nn.Module):
             # 異なる次元の場合は -1 を設定（使用すると警告になる）
             self.context_dim = -1
 
-        # TokenBlockへの入力次元: sum(context_dims) × (1 + prev_context_steps)
-        self.combined_context_dim = sum(self.context_dims) * (1 + prev_context_steps)
+        # TokenBlockへの入力次元: sum(context_dims) × (1 + prev_context_count)
+        self.combined_context_dim = sum(self.context_dims) * (1 + prev_context_count)
 
         # Token Embeddings (GPT-2 pretrained)
         self._load_pretrained_embeddings()

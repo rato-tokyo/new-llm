@@ -47,6 +47,8 @@ from config.experiment import DataConfig
 def run_cascade_context_experiment(
     num_samples: int = 2000,
     context_dims: List[int] = [256, 256],
+    prev_context_interval: int = 1,
+    prev_context_count: int = 0,
     seed: int = 42,
     output_dir: Optional[str] = None,
 ) -> Dict[str, Any]:
@@ -55,6 +57,8 @@ def run_cascade_context_experiment(
     Args:
         num_samples: サンプル数
         context_dims: 各ContextBlockの出力次元のリスト（例: [256, 128]）
+        prev_context_interval: 過去context取得間隔（デフォルト1=連続）
+        prev_context_count: 過去context取得個数（0で無効）
         seed: 乱数シード
         output_dir: 出力ディレクトリ
     """
@@ -99,13 +103,20 @@ def run_cascade_context_experiment(
     print_flush(f"Split: {', '.join(split_info)} tokens")
 
     # モデル作成
-    combined_dim = sum(context_dims)
+    base_combined_dim = sum(context_dims)
+    combined_dim = base_combined_dim * (1 + prev_context_count)
     dims_str = '+'.join(map(str, context_dims))
-    print_flush(f"\nCreating CascadeContextLLM (cd={dims_str}={combined_dim})...")
+    if prev_context_count > 0:
+        prev_info = f", prev(i={prev_context_interval},c={prev_context_count})"
+    else:
+        prev_info = ""
+    print_flush(f"\nCreating CascadeContextLLM (cd={dims_str}={base_combined_dim}{prev_info})...")
     model = CascadeContextLLM(
         vocab_size=base_config.vocab_size,
         embed_dim=base_config.embed_dim,
         context_dims=context_dims,
+        prev_context_interval=prev_context_interval,
+        prev_context_count=prev_context_count,
     )
     model.to(device)
 
@@ -226,7 +237,9 @@ def run_cascade_context_experiment(
     for i in range(num_context_blocks):
         block_tokens = len(train_data_splits[i]) - 1
         print_flush(f"  ContextBlock {i}: cd={context_dims[i]}, trained on {block_tokens:,} tokens")
-    print_flush(f"  TokenBlock: cd={combined_dim} (concatenated: {dims_str})")
+    if prev_context_count > 0:
+        print_flush(f"  Prev context: interval={prev_context_interval}, count={prev_context_count}")
+    print_flush(f"  TokenBlock: cd={combined_dim} (concatenated: {dims_str}{prev_info})")
     print_flush(f"Parameters: {params['total']:,}")
     for i in range(num_context_blocks):
         print_flush(f"Phase 1-{i}: {phase1_times[i]:.1f}s, conv={phase1_stats[i].get('convergence_rate', 0)*100:.0f}%")
@@ -283,6 +296,12 @@ Examples:
 
   # 3ブロック、異なる次元（256, 128, 64）
   python3 scripts/experiment_cascade_context.py -s 2000 -c 256,128,64
+
+  # 過去context使用（1つ前のcontextを連結）
+  python3 scripts/experiment_cascade_context.py -s 2000 -c 256,256 --prev-count 1
+
+  # 過去context使用（3つ前と6つ前のcontextを連結）
+  python3 scripts/experiment_cascade_context.py -s 2000 -c 256,256 --prev-interval 3 --prev-count 2
 '''
     )
     parser.add_argument('-s', '--samples', type=int, default=2000,
@@ -291,6 +310,10 @@ Examples:
                         help='Number of context blocks (ignored if -c is a list)')
     parser.add_argument('-c', '--context-dims', type=str, default='256,256',
                         help='Context dimensions: single int "256" or list "256,128" (default: 256,256)')
+    parser.add_argument('--prev-interval', '-pi', type=int, default=1,
+                        help='Interval for past context (default: 1=consecutive)')
+    parser.add_argument('--prev-count', '-pc', type=int, default=0,
+                        help='Number of past contexts to use (0=disabled, 1=1 prev, 2=2 prev)')
     parser.add_argument('--seed', type=int, default=42,
                         help='Random seed (default: 42)')
     parser.add_argument('-o', '--output', type=str, default=None,
@@ -306,7 +329,8 @@ Examples:
         context_dims = context_dims * args.num_blocks
 
     num_blocks = len(context_dims)
-    combined_dim = sum(context_dims)
+    base_combined_dim = sum(context_dims)
+    combined_dim = base_combined_dim * (1 + args.prev_count)
     dims_str = '+'.join(map(str, context_dims))
 
     print_flush("=" * 70)
@@ -315,12 +339,16 @@ Examples:
     print_flush(f"Samples: {args.samples}")
     print_flush(f"Blocks: {num_blocks}")
     print_flush(f"Context dims: {context_dims}")
-    print_flush(f"Combined context dim: {dims_str}={combined_dim}")
+    if args.prev_count > 0:
+        print_flush(f"Prev context: interval={args.prev_interval}, count={args.prev_count}")
+    print_flush(f"Combined context dim: {dims_str}x(1+{args.prev_count})={combined_dim}")
     print_flush("=" * 70)
 
     run_cascade_context_experiment(
         num_samples=args.samples,
         context_dims=context_dims,
+        prev_context_interval=args.prev_interval,
+        prev_context_count=args.prev_count,
         seed=args.seed,
         output_dir=args.output,
     )

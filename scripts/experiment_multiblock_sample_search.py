@@ -85,7 +85,8 @@ def run_multiblock_sample_search(
     end_samples: int = 1600,
     seed: int = 42,
     output_dir: Optional[str] = None,
-    prev_context_steps: int = 0,
+    prev_context_interval: int = 1,
+    prev_context_count: int = 0,
 ) -> Dict[str, Any]:
     """Multi-block sample size search"""
 
@@ -99,8 +100,8 @@ def run_multiblock_sample_search(
         sample_sizes.append(current)
         current *= 2
 
-    # prev_context_steps=0: 現在のみ, =1: 現在+1つ前, など
-    combined_dim = sum(context_dims) * (1 + prev_context_steps)
+    # prev_context_count=0: 現在のみ, =1: 現在+1つ前(間隔分離れた), など
+    combined_dim = sum(context_dims) * (1 + prev_context_count)
     dims_str = '+'.join(map(str, context_dims))
 
     print_flush("=" * 70)
@@ -108,8 +109,9 @@ def run_multiblock_sample_search(
     print_flush("=" * 70)
     print_flush(f"Context dims: {context_dims}")
     print_flush(f"Num blocks: {num_blocks}")
-    print_flush(f"Prev context steps: {prev_context_steps}")
-    print_flush(f"Combined context dim: {dims_str}={combined_dim}")
+    if prev_context_count > 0:
+        print_flush(f"Prev context: interval={prev_context_interval}, count={prev_context_count}")
+    print_flush(f"Combined context dim: {dims_str}x(1+{prev_context_count})={combined_dim}")
     print_flush(f"Sample sizes: {sample_sizes}")
     if output_dir:
         print_flush(f"Output: {output_dir}")
@@ -158,15 +160,16 @@ def run_multiblock_sample_search(
 
         # モデル作成
         dim_info = f"cd={dims_str}"
-        if prev_context_steps > 0:
-            dim_info += f"x(1+{prev_context_steps})"
+        if prev_context_count > 0:
+            dim_info += f"x(1+{prev_context_count})"
         dim_info += f"={combined_dim}"
         print_flush(f"\nCreating CascadeContextLLM ({dim_info})...")
         model = CascadeContextLLM(
             vocab_size=base_config.vocab_size,
             embed_dim=base_config.embed_dim,
             context_dims=context_dims,
-            prev_context_steps=prev_context_steps,
+            prev_context_interval=prev_context_interval,
+            prev_context_count=prev_context_count,
         )
         model.to(device)
 
@@ -207,11 +210,9 @@ def run_multiblock_sample_search(
         cache_dir = f"/tmp/multiblock_cache_{num_samples}_{datetime.now().strftime('%H%M%S')}"
         train_num, _, train_chunks = collect_multiblock_cache_to_files(
             model, train_token_ids, device, cache_dir, prefix="train",
-            prev_context_steps=prev_context_steps,
         )
         val_num, _, val_chunks = collect_multiblock_cache_to_files(
             model, val_token_ids, device, cache_dir, prefix="val",
-            prev_context_steps=prev_context_steps,
         )
 
         train_dataset = ChunkedCacheDataset(train_chunks)
@@ -312,8 +313,9 @@ def run_multiblock_sample_search(
     print_flush("=" * 70)
     print_flush(f"Context dims: {context_dims}")
     print_flush(f"Num blocks: {num_blocks}")
-    print_flush(f"Prev context steps: {prev_context_steps}")
-    print_flush(f"Combined context dim: {dims_str}={combined_dim}")
+    if prev_context_count > 0:
+        print_flush(f"Prev context: interval={prev_context_interval}, count={prev_context_count}")
+    print_flush(f"Combined context dim: {dims_str}x(1+{prev_context_count})={combined_dim}")
     print_flush(f"Sample sizes: {sample_sizes}")
     print_flush("\nResults:")
     print_flush(f"{'Samples':>8} | {'Tokens':>12} | {'PPL':>8} | {'Acc':>6} | {'ER%':>6} | {'Time':>8}")
@@ -388,6 +390,12 @@ Examples:
 
   # 3ブロック、異なる次元
   python3 scripts/experiment_multiblock_sample_search.py --start 200 --end 1600 -c 256,128,64
+
+  # 過去context使用（1つ前のcontextを連結）
+  python3 scripts/experiment_multiblock_sample_search.py --start 200 --end 1600 -c 256,256 --prev-count 1
+
+  # 過去context使用（3つ前と6つ前のcontextを連結）
+  python3 scripts/experiment_multiblock_sample_search.py --start 200 --end 1600 -c 256,256 --prev-interval 3 --prev-count 2
 '''
     )
     parser.add_argument('--context-dims', '-c', type=str, default='256,256',
@@ -402,8 +410,10 @@ Examples:
                         help='Random seed')
     parser.add_argument('--output', '-o', type=str, default=None,
                         help='Output directory for results')
-    parser.add_argument('--prev-context', '-p', type=int, default=0,
-                        help='Number of previous context steps to concatenate (0=disabled)')
+    parser.add_argument('--prev-interval', '-pi', type=int, default=1,
+                        help='Interval for past context (default: 1=consecutive)')
+    parser.add_argument('--prev-count', '-pc', type=int, default=0,
+                        help='Number of past contexts to use (0=disabled)')
 
     args = parser.parse_args()
 
@@ -429,7 +439,8 @@ Examples:
         end_samples=args.end,
         seed=args.seed,
         output_dir=output_dir,
-        prev_context_steps=args.prev_context,
+        prev_context_interval=args.prev_interval,
+        prev_context_count=args.prev_count,
     )
 
     print_flush("\n" + "=" * 70)

@@ -247,6 +247,8 @@ class MultiBlockModel(Protocol):
     """複数ContextBlockを持つモデルのインターフェース"""
     context_dims: List[int]  # 各ブロックのcontext_dim
     num_context_blocks: int
+    prev_context_interval: int  # 過去context取得間隔
+    prev_context_count: int  # 過去context取得個数
     token_embedding: nn.Embedding
     embed_norm: nn.LayerNorm
 
@@ -265,13 +267,17 @@ def collect_multiblock_cache_to_files(
     chunk_size: int = DEFAULT_FILE_CHUNK_SIZE,
     embed_chunk_size: int = DEFAULT_CONTEXT_CHUNK_SIZE,
     progress_interval: int = 100000,
-    prev_context_steps: int = 0,
 ) -> Tuple[int, int, List[str]]:
     """
     N-block用: チャンク単位でファイル保存しながらコンテキストキャッシュを収集
 
     GPUメモリ効率が良い（~17GB → ~2GB）。
     token_embedsもチャンク単位で処理し、全データをGPUにロードしない。
+
+    過去contextの設定はモデルから取得:
+    - prev_context_interval: 過去contextを取得する間隔
+    - prev_context_count: 過去contextの取得個数
+    例: interval=3, count=2 → 3つ前と6つ前のcontextを使用
 
     Args:
         model: MultiBlockModel プロトコルを満たすモデル
@@ -282,10 +288,6 @@ def collect_multiblock_cache_to_files(
         chunk_size: ファイルに保存するチャンクサイズ（デフォルト100,000トークン）
         embed_chunk_size: GPUに転送するトークン数（デフォルト10,000）
         progress_interval: 進捗表示間隔
-        prev_context_steps: 前のトークン時のcontextも連結する数（0で無効）
-            例: prev_context_steps=1 の場合、出力は:
-            [context_0[i], context_1[i], context_0[i-1], context_1[i-1]]
-            combined_dim = sum(context_dims) * (1 + prev_context_steps)
 
     Returns:
         (num_tokens, combined_dim, chunk_files): トークン数、結合次元、チャンクファイルリスト
@@ -294,12 +296,18 @@ def collect_multiblock_cache_to_files(
     num_tokens = len(token_ids) - 1
     context_dims = model.context_dims  # List[int]
     num_blocks = model.num_context_blocks
-    # prev_context_steps=0: 現在のみ、=1: 現在+1つ前、=2: 現在+1つ前+2つ前
-    combined_dim = sum(context_dims) * (1 + prev_context_steps)
+    prev_context_interval = model.prev_context_interval
+    prev_context_count = model.prev_context_count
+    # 必要な履歴の深さ: interval * count (例: interval=3, count=2 → 6ステップ分の履歴が必要)
+    history_depth = prev_context_interval * prev_context_count
+    combined_dim = sum(context_dims) * (1 + prev_context_count)
 
     os.makedirs(cache_dir, exist_ok=True)
 
-    prev_info = f", prev_steps={prev_context_steps}" if prev_context_steps > 0 else ""
+    if prev_context_count > 0:
+        prev_info = f", prev(interval={prev_context_interval}, count={prev_context_count})"
+    else:
+        prev_info = ""
     print_flush(f"    Collecting {prefix} cache ({num_tokens:,} tokens, "
                 f"{num_blocks} blocks{prev_info}, chunk={chunk_size:,})...")
     collect_start = time.time()
@@ -313,12 +321,12 @@ def collect_multiblock_cache_to_files(
         for block_idx in range(num_blocks)
     ]
 
-    # prev_context_steps > 0 の場合、履歴を保持するリングバッファ
+    # prev_context_count > 0 の場合、履歴を保持するリングバッファ
     # context_history[step][block_idx] = context tensor (CPU)
-    # step=0 が最新、step=1 が1つ前、...
+    # step=0 が最新(1つ前)、step=history_depth-1 が最も古い
     context_history: List[List[torch.Tensor]] = []
-    if prev_context_steps > 0:
-        for _ in range(prev_context_steps):
+    if history_depth > 0:
+        for _ in range(history_depth):
             context_history.append([
                 torch.zeros(1, context_dims[block_idx], device='cpu')
                 for block_idx in range(num_blocks)
@@ -369,11 +377,21 @@ def collect_multiblock_cache_to_files(
                         current_contexts.append(new_context.cpu())
                         prev_contexts[block_idx] = new_context.detach()
 
-                    # 結合リスト: [現在のcontext] + [履歴context]
+                    # 結合リスト: [現在のcontext] + [履歴context(間隔指定)]
                     all_contexts = current_contexts.copy()
-                    if prev_context_steps > 0:
-                        for step in range(prev_context_steps):
-                            all_contexts.extend(context_history[step])
+                    if prev_context_count > 0:
+                        # interval間隔でcount個の過去contextを取得
+                        # 例: interval=3, count=2 → history[2], history[5] (3つ前、6つ前)
+                        for c in range(prev_context_count):
+                            history_idx = (c + 1) * prev_context_interval - 1
+                            if history_idx < len(context_history):
+                                all_contexts.extend(context_history[history_idx])
+                            else:
+                                # 履歴が足りない場合はゼロベクトル
+                                for block_idx in range(num_blocks):
+                                    all_contexts.append(
+                                        torch.zeros(1, context_dims[block_idx], device='cpu')
+                                    )
 
                     # 結合してキャッシュに保存
                     file_context_cache[local_idx] = torch.cat(
@@ -381,11 +399,11 @@ def collect_multiblock_cache_to_files(
                     ).squeeze(0)
 
                     # 履歴を更新（シフト）
-                    if prev_context_steps > 0:
+                    if history_depth > 0:
                         # 古い履歴を1つずつ後ろにシフト
-                        for step in range(prev_context_steps - 1, 0, -1):
+                        for step in range(history_depth - 1, 0, -1):
                             context_history[step] = context_history[step - 1]
-                        # 最新の履歴を更新
+                        # 最新の履歴を更新（現在のcontextが1つ前になる）
                         context_history[0] = current_contexts
 
                     del current_contexts, all_contexts
