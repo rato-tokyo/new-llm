@@ -284,7 +284,7 @@ def run_context_kv_experiment(
     phase1_time = time.time() - phase1_start
 
     model.freeze_context_block(0)
-    print_flush(f"✓ ContextBlock frozen")
+    print_flush("✓ ContextBlock frozen")
 
     # Val data のキャッシュも収集
     print_flush("  Collecting val cache...")
