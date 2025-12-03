@@ -1,22 +1,13 @@
 """New-LLM Models
 
-Context-KV Attention architecture for efficient KV cache compression.
+Pythia and Context-Pythia models for KV cache compression experiments.
 """
 
-from .layers import ContextLayer
-from .blocks import ContextBlock
-from .context_kv import (
-    ContextKVAttentionLLM,
-    ContextKVWrapper,
-    ContextToKV,
-    ContextKVAttention,
-)
+from .pythia import PythiaModel
+from .context_pythia import ContextPythiaModel, ContextBlock
 
 __all__ = [
-    'ContextLayer',
+    'PythiaModel',
+    'ContextPythiaModel',
     'ContextBlock',
-    'ContextKVAttentionLLM',
-    'ContextKVWrapper',
-    'ContextToKV',
-    'ContextKVAttention',
 ]

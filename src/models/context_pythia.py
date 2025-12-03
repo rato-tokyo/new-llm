@@ -22,7 +22,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from src.models.pythia import RotaryEmbedding, apply_rotary_pos_emb, PythiaMLP
+from src.models.pythia import RotaryEmbedding, apply_rotary_pos_emb
 
 
 class ContextBlock(nn.Module):
