@@ -1,218 +1,579 @@
-remote: Enumerating objects: 28, done.
-remote: Counting objects: 100% (28/28), done.
-remote: Compressing objects: 100% (9/9), done.
-remote: Total 19 (delta 15), reused 14 (delta 10), pack-reused 0 (from 0)
-Unpacking objects: 100% (19/19), 4.41 KiB | 282.00 KiB/s, done.
 From https://github.com/rato-tokyo/new-llm
  * branch            main       -> FETCH_HEAD
-   3c1d295..52874c0  main       -> origin/main
-Updating 3c1d295..52874c0
-Fast-forward
- CLAUDE.md                             | 100 +++++-----------
- output.txt                            | 216 +++++++++++++++++++---------------
- scripts/experiment_cascade_context.py |  27 +----
- src/trainers/phase1/memory.py         |  75 ++----------
- 4 files changed, 163 insertions(+), 255 deletions(-)
+Already up to date.
 ======================================================================
-DUAL CONTEXT EXPERIMENT
+SAMPLE SIZE SEARCH EXPERIMENT
 ======================================================================
-Samples: 2000
-Context dim per block: 500
-Combined context dim: 1000
-Output: importants/logs/20251202_135540_dual_context
+Context dim: 320 (fixed)
+Sample sizes: [100, 200, 400, 800, 1600]
+Output: importants/logs/20251203_045635_sample_size_search
 ======================================================================
 Device: cuda (NVIDIA L4, 22.2GB)
-Loading data...
-Loading training data...
-  Loading from cache: ./cache/ultrachat_2000samples_full.pt
-Loading validation data...
-Token indices sequence length is longer than the specified maximum sequence length for this model (22723 > 1024). Running this sequence through the model will result in indexing errors
-  Train: 2403563 tokens (2000 samples)
-  Val:   22723 tokens
-Data: 2,403,563 train, 22,723 val tokens
-Split: A=1,201,781, B=1,201,781 tokens
 
-Creating CascadeContextLLM (cd=500x2=1000)...
-2025-12-02 13:55:43.392771: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
-2025-12-02 13:55:43.407992: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+======================================================================
+[SAMPLES=100] Starting experiment...
+======================================================================
+
+Loading data (100 samples)...
+tokenizer_config.json: 100% 26.0/26.0 [00:00<00:00, 157kB/s]
+config.json: 100% 665/665 [00:00<00:00, 3.84MB/s]
+vocab.json: 100% 1.04M/1.04M [00:00<00:00, 1.60MB/s]
+merges.txt: 100% 456k/456k [00:00<00:00, 1.01MB/s]
+tokenizer.json: 100% 1.36M/1.36M [00:00<00:00, 5.56MB/s]
+Loading training data...
+  Loading 100 samples from UltraChat...
+README.md: 3.90kB [00:00, 21.1MB/s]
+data/train_sft-00000-of-00003-a3ecf92756(…): 100% 244M/244M [00:04<00:00, 54.7MB/s]
+data/train_sft-00001-of-00003-0a1804bcb6(…): 100% 244M/244M [00:05<00:00, 48.6MB/s]
+data/train_sft-00002-of-00003-ee46ed25cf(…): 100% 244M/244M [00:03<00:00, 67.5MB/s]
+data/test_sft-00000-of-00001-f7dfac4afe5(…): 100% 81.2M/81.2M [00:03<00:00, 24.5MB/s]
+data/train_gen-00000-of-00003-a6c9fb894b(…): 100% 244M/244M [00:01<00:00, 173MB/s]
+data/train_gen-00001-of-00003-d6a0402e41(…): 100% 243M/243M [00:03<00:00, 76.1MB/s]
+data/train_gen-00002-of-00003-c0db75b92a(…): 100% 243M/243M [00:01<00:00, 198MB/s]
+data/test_gen-00000-of-00001-3d4cd830914(…): 100% 80.4M/80.4M [00:03<00:00, 26.2MB/s]
+Generating train_sft split: 100% 207865/207865 [00:04<00:00, 50053.78 examples/s]
+Generating test_sft split: 100% 23110/23110 [00:00<00:00, 52757.11 examples/s]
+Generating train_gen split: 100% 256032/256032 [00:03<00:00, 69069.66 examples/s]
+Generating test_gen split: 100% 28304/28304 [00:00<00:00, 65773.68 examples/s]
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_100samples_full.pt
+Loading validation data...
+  Validation file not found, generating: ./cache/example_val.txt
+  Generated 20 validation samples (indices 50000-50019)
+  Train: 122795 tokens (100 samples)
+  Val:   22723 tokens
+Data: 122,795 train, 22,723 val tokens
+
+Creating SimpleLLM (context_dim=320)...
+2025-12-03 04:57:30.179736: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-12-03 04:57:30.195446: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
 WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-E0000 00:00:1764683743.428770   93972 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
-E0000 00:00:1764683743.435177   93972 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
-W0000 00:00:1764683743.451243   93972 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764683743.451273   93972 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764683743.451276   93972 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764683743.451279   93972 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-2025-12-02 13:55:43.456315: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+E0000 00:00:1764737850.216740    6311 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764737850.223210    6311 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764737850.239765    6311 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764737850.239799    6311 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764737850.239802    6311 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764737850.239805    6311 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-12-03 04:57:30.244823: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
 To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Loading GPT-2 pretrained embeddings...
+config.json: 100% 665/665 [00:00<00:00, 4.10MB/s]
+model.safetensors: 100% 548M/548M [00:02<00:00, 187MB/s]
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+✓ Weight Tying: token_output shares weights with token_embedding
+
+[Phase 1] Training ContextBlock...
+
+[Phase 1] Context: 122,795 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=6.7026 [1.3s]
+  Iter 3: conv=0% loss=7.3438 [0.4s]
+  Iter 4: conv=0% loss=4.8846 [0.4s]
+  Iter 5: conv=0% loss=3.4123 [0.4s]
+  Iter 6: conv=0% loss=3.6206 [0.4s]
+  Iter 7: conv=1% loss=4.0551 [0.4s]
+  Iter 8: conv=1% loss=4.1687 [0.4s]
+  Iter 9: conv=1% loss=4.2203 [0.4s]
+  Iter 10: conv=1% loss=4.3807 [0.4s]
+  Iter 11: conv=2% loss=4.4935 [0.4s]
+  Iter 12: conv=2% loss=4.4257 [0.4s]
+  Iter 13: conv=4% loss=4.2312 [0.4s]
+  Iter 14: conv=6% loss=3.9858 [0.4s]
+  Iter 15: conv=8% loss=3.6942 [0.4s]
+  Iter 16: conv=12% loss=3.3634 [0.4s]
+  Iter 17: conv=17% loss=3.0382 [0.4s]
+  Iter 18: conv=25% loss=2.7660 [0.4s]
+  Iter 19: conv=34% loss=2.5375 [0.5s]
+  Iter 20: conv=46% loss=2.2957 [0.4s]
+  Iter 21: conv=55% loss=2.0235 [0.4s]
+  Iter 22: conv=62% loss=1.7612 [0.4s]
+  Iter 23: conv=69% loss=1.5525 [0.4s]
+  Iter 24: conv=75% loss=1.4030 [0.4s]
+  Iter 25: conv=80% loss=1.3003 [0.4s]
+  Iter 26: conv=84% loss=1.2355 [0.5s]
+  Iter 27: conv=87% loss=1.2008 [0.4s]
+  Iter 28: conv=90% loss=1.1794 [0.4s]
+  → Early stop: conv 90% >= 90%
+  Done: 90% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [0.3s]
+Phase 1: 13.0s, 28 iter, conv=90%
+
+[Phase 2 Prep] Collecting context cache...
+      100,000/122,794 tokens processed...
+      122,794/122,794 tokens processed...
+      22,722/22,722 tokens processed...
+    Collecting token embeddings (chunked)...
+Cache collection: 29.9s
+  Val Effective Rank: 203.59/320 (63.6%)
+Effective Rank: Val=63.6% (203.6/320)
+
+[Phase 2] Training TokenBlock...
+✓ ContextBlock frozen
+✓ Embedding frozen
+✓ Training TokenBlock only: 837,888/39,785,920 parameters
+
+[Phase 2] 122,794 train / 22,722 val tokens, 40 epochs
+    Epoch 1: train_ppl=10000000.0 val_ppl=10000000.0 acc=1.1% [2.9s] *
+    Epoch 2: train_ppl=1153005.9 val_ppl=30201.9 acc=8.5% [2.9s] *
+    Epoch 3: train_ppl=10138.2 val_ppl=3605.8 acc=9.9% [2.9s] *
+    Epoch 4: train_ppl=2303.7 val_ppl=1617.8 acc=13.1% [2.9s] *
+    Epoch 5: train_ppl=1206.3 val_ppl=1119.0 acc=14.2% [2.9s] *
+    Epoch 6: train_ppl=827.6 val_ppl=877.2 acc=15.0% [2.9s] *
+    Epoch 7: train_ppl=616.6 val_ppl=738.6 acc=15.5% [2.9s] *
+    Epoch 8: train_ppl=495.3 val_ppl=640.0 acc=16.1% [2.9s] *
+    Epoch 9: train_ppl=398.5 val_ppl=571.0 acc=16.5% [2.9s] *
+    Epoch 10: train_ppl=337.3 val_ppl=519.3 acc=16.9% [3.0s] *
+    Epoch 11: train_ppl=288.9 val_ppl=478.4 acc=17.3% [3.0s] *
+    Epoch 12: train_ppl=252.8 val_ppl=446.9 acc=17.5% [3.0s] *
+    Epoch 13: train_ppl=223.0 val_ppl=421.0 acc=17.7% [3.0s] *
+    Epoch 14: train_ppl=199.1 val_ppl=399.9 acc=17.9% [3.0s] *
+    Epoch 15: train_ppl=179.4 val_ppl=382.5 acc=18.2% [3.0s] *
+    Epoch 16: train_ppl=162.9 val_ppl=368.1 acc=18.3% [3.0s] *
+    Epoch 17: train_ppl=149.0 val_ppl=356.4 acc=18.3% [3.0s] *
+    Epoch 18: train_ppl=137.0 val_ppl=346.9 acc=18.4% [3.0s] *
+    Epoch 19: train_ppl=126.8 val_ppl=339.2 acc=18.6% [3.0s] *
+    Epoch 20: train_ppl=117.8 val_ppl=333.0 acc=18.7% [3.1s] *
+    Epoch 21: train_ppl=109.9 val_ppl=328.1 acc=18.7% [3.1s] *
+    Epoch 22: train_ppl=102.9 val_ppl=324.3 acc=18.8% [3.0s] *
+    Epoch 23: train_ppl=96.6 val_ppl=321.8 acc=18.9% [3.1s] *
+    Epoch 24: train_ppl=91.0 val_ppl=320.4 acc=18.9% [3.1s] *
+    Epoch 25: train_ppl=85.9 val_ppl=319.9 acc=18.9% [3.1s] *
+    Epoch 26: train_ppl=81.3 val_ppl=320.3 acc=19.0% [3.1s]
+    → Early stop at epoch 26
+    Best: epoch 25, ppl=319.9, acc=18.9%
+
+[Result] samples=100: PPL=319.9, Acc=18.9%, ER=63.6%, Time=186.9s
+  ★ New best! samples=100, PPL=319.9
+
+======================================================================
+[SAMPLES=200] Starting experiment...
+======================================================================
+
+Loading data (200 samples)...
+Loading training data...
+  Loading 200 samples from UltraChat...
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_200samples_full.pt
+Loading validation data...
+  Train: 240132 tokens (200 samples)
+  Val:   22723 tokens
+Data: 240,132 train, 22,723 val tokens
+
+Creating SimpleLLM (context_dim=320)...
 Loading GPT-2 pretrained embeddings...
 ✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
 ✓ Weight Tying: token_output shares weights with token_embedding
-Parameters: 41,230,040 total
-  ContextBlocks (2): 1,271,000
-    Block 0: 635,500
-    Block 1: 635,500
-  TokenBlock: 1,360,128
 
-[Phase 1A] Training ContextBlock A on first half...
+[Phase 1] Training ContextBlock...
 
-[Phase 1] ContextA: 1,201,782 tokens, 60 iterations
+[Phase 1] Context: 240,132 tokens, 60 iterations
   Iter 1: random init
-  Iter 2: conv=0% loss=11.2763 [6.6s]
-  Iter 3: conv=0% loss=13.1935 [6.1s]
-  Iter 4: conv=0% loss=10.6984 [5.0s]
-  Iter 5: conv=0% loss=7.2667 [5.1s]
-  Iter 6: conv=0% loss=4.6423 [5.1s]
-  Iter 7: conv=0% loss=3.4091 [5.1s]
-  Iter 8: conv=0% loss=3.0891 [5.1s]
-  Iter 9: conv=0% loss=3.0212 [5.1s]
-  Iter 10: conv=1% loss=2.9584 [5.1s]
-  Iter 11: conv=1% loss=2.8995 [5.2s]
-  Iter 12: conv=1% loss=2.8369 [5.1s]
-  Iter 13: conv=2% loss=2.7363 [5.1s]
-  Iter 14: conv=3% loss=2.5687 [5.0s]
-  Iter 15: conv=5% loss=2.3403 [5.1s]
-  Iter 16: conv=8% loss=2.1033 [5.1s]
-  Iter 17: conv=11% loss=1.9120 [5.0s]
-  Iter 18: conv=17% loss=1.7692 [5.1s]
-  Iter 19: conv=25% loss=1.6510 [5.0s]
-  Iter 20: conv=33% loss=1.5469 [5.1s]
-  Iter 21: conv=43% loss=1.4549 [5.0s]
-  Iter 22: conv=53% loss=1.3674 [5.2s]
-  Iter 23: conv=62% loss=1.2780 [5.1s]
-  Iter 24: conv=69% loss=1.1922 [5.1s]
-  Iter 25: conv=74% loss=1.1194 [5.1s]
-  Iter 26: conv=79% loss=1.0628 [5.0s]
-  Iter 27: conv=84% loss=1.0208 [5.1s]
-  Iter 28: conv=87% loss=0.9951 [5.1s]
-  Iter 29: conv=90% loss=0.9862 [5.1s]
-  Iter 30: conv=92% loss=0.9849 [5.1s]
-  → Early stop: conv 92% >= 90%
-  Done: 92% converged
+  Iter 2: conv=0% loss=6.5985 [0.9s]
+  Iter 3: conv=0% loss=6.9584 [0.8s]
+  Iter 4: conv=0% loss=4.5786 [0.7s]
+  Iter 5: conv=0% loss=3.4412 [0.7s]
+  Iter 6: conv=0% loss=3.7247 [0.7s]
+  Iter 7: conv=0% loss=4.1442 [0.8s]
+  Iter 8: conv=1% loss=4.3839 [0.8s]
+  Iter 9: conv=1% loss=4.5554 [0.7s]
+  Iter 10: conv=1% loss=4.6222 [0.8s]
+  Iter 11: conv=1% loss=4.5150 [0.8s]
+  Iter 12: conv=2% loss=4.3269 [0.8s]
+  Iter 13: conv=3% loss=4.1559 [0.7s]
+  Iter 14: conv=5% loss=3.9670 [0.7s]
+  Iter 15: conv=8% loss=3.7158 [0.7s]
+  Iter 16: conv=11% loss=3.4529 [0.7s]
+  Iter 17: conv=15% loss=3.2349 [0.7s]
+  Iter 18: conv=22% loss=3.0262 [0.7s]
+  Iter 19: conv=30% loss=2.7705 [0.7s]
+  Iter 20: conv=40% loss=2.4770 [0.7s]
+  Iter 21: conv=49% loss=2.1955 [0.7s]
+  Iter 22: conv=58% loss=1.9573 [0.7s]
+  Iter 23: conv=67% loss=1.7664 [0.7s]
+  Iter 24: conv=74% loss=1.6172 [0.7s]
+  Iter 25: conv=81% loss=1.5036 [0.8s]
+  Iter 26: conv=87% loss=1.4114 [0.8s]
+  Iter 27: conv=91% loss=1.3218 [0.8s]
+  → Early stop: conv 91% >= 90%
+  Done: 91% converged
   Collecting cache (parallel)...
-    Preparing combined tokens (1,201,781 tokens)...
-    Combined tokens ready [0.0s]
-  Cache collected (parallel) [2.9s]
-Phase 1A: 163.4s, 30 iter, conv=92%
-✓ ContextBlock A frozen
+  Cache collected (parallel) [0.6s]
+Phase 1: 21.8s, 27 iter, conv=91%
 
-[Phase 1B] Training ContextBlock B on second half...
+[Phase 2 Prep] Collecting context cache...
+      100,000/240,131 tokens processed...
+      200,000/240,131 tokens processed...
+      240,131/240,131 tokens processed...
+      22,722/22,722 tokens processed...
+    Collecting token embeddings (chunked)...
+Cache collection: 54.7s
+  Val Effective Rank: 209.45/320 (65.5%)
+Effective Rank: Val=65.5% (209.5/320)
 
-[Phase 1] ContextB: 1,201,782 tokens, 60 iterations
-  Iter 1: random init
-  Iter 2: conv=0% loss=11.2812 [5.2s]
-  Iter 3: conv=0% loss=12.4629 [5.1s]
-  Iter 4: conv=0% loss=9.7826 [5.1s]
-  Iter 5: conv=0% loss=6.4455 [5.2s]
-  Iter 6: conv=0% loss=4.2491 [5.0s]
-  Iter 7: conv=0% loss=3.1795 [5.1s]
-  Iter 8: conv=0% loss=2.7425 [5.0s]
-  Iter 9: conv=0% loss=2.6633 [5.1s]
-  Iter 10: conv=0% loss=2.7222 [5.1s]
-  Iter 11: conv=0% loss=2.6922 [5.1s]
-  Iter 12: conv=0% loss=2.4701 [5.1s]
-  Iter 13: conv=1% loss=2.1442 [5.1s]
-  Iter 14: conv=2% loss=1.8758 [5.1s]
-  Iter 15: conv=3% loss=1.7583 [5.1s]
-  Iter 16: conv=6% loss=1.7727 [5.1s]
-  Iter 17: conv=10% loss=1.8318 [5.1s]
-  Iter 18: conv=16% loss=1.8458 [5.1s]
-  Iter 19: conv=25% loss=1.7847 [5.1s]
-  Iter 20: conv=34% loss=1.6816 [5.1s]
-  Iter 21: conv=43% loss=1.5835 [5.1s]
-  Iter 22: conv=53% loss=1.5084 [5.2s]
-  Iter 23: conv=63% loss=1.4408 [5.1s]
-  Iter 24: conv=72% loss=1.3518 [5.1s]
-  Iter 25: conv=79% loss=1.2282 [5.1s]
-  Iter 26: conv=83% loss=1.0915 [5.1s]
-  Iter 27: conv=86% loss=0.9869 [5.2s]
-  Iter 28: conv=89% loss=0.9370 [5.0s]
-  Iter 29: conv=92% loss=0.9240 [5.1s]
-  → Early stop: conv 92% >= 90%
-  Done: 92% converged
-  Collecting cache (parallel)...
-    Preparing combined tokens (1,201,781 tokens)...
-    Combined tokens ready [0.0s]
-  Cache collected (parallel) [2.9s]
-Phase 1B: 156.2s, 29 iter, conv=92%
-✓ ContextBlock B frozen
-
-[Phase 2 Prep] Collecting dual context cache on full data...
-    Collecting dual context cache (2,403,562 tokens)...
-      100,000/2,403,562 tokens processed...
-      200,000/2,403,562 tokens processed...
-      300,000/2,403,562 tokens processed...
-      400,000/2,403,562 tokens processed...
-      500,000/2,403,562 tokens processed...
-      600,000/2,403,562 tokens processed...
-      700,000/2,403,562 tokens processed...
-      800,000/2,403,562 tokens processed...
-      900,000/2,403,562 tokens processed...
-      1,000,000/2,403,562 tokens processed...
-      1,100,000/2,403,562 tokens processed...
-      1,200,000/2,403,562 tokens processed...
-      1,300,000/2,403,562 tokens processed...
-      1,400,000/2,403,562 tokens processed...
-      1,500,000/2,403,562 tokens processed...
-      1,600,000/2,403,562 tokens processed...
-      1,700,000/2,403,562 tokens processed...
-      1,800,000/2,403,562 tokens processed...
-      1,900,000/2,403,562 tokens processed...
-      2,000,000/2,403,562 tokens processed...
-      2,100,000/2,403,562 tokens processed...
-      2,200,000/2,403,562 tokens processed...
-      2,300,000/2,403,562 tokens processed...
-      2,400,000/2,403,562 tokens processed...
-    Dual context cache collected [1057.7s]
-    Collecting dual context cache (22,722 tokens)...
-    Dual context cache collected [10.0s]
-Cache collection: 1068.1s
-  Train cache: torch.Size([2403562, 1000])
-  Val cache: torch.Size([22722, 1000])
-Effective Rank: Train=75.3%, Val=73.6%
-
-[Phase 2] Training TokenBlock with concatenated context (cd=1000)...
-✓ All 2 ContextBlocks frozen
+[Phase 2] Training TokenBlock...
+✓ ContextBlock frozen
 ✓ Embedding frozen
-✓ Training TokenBlock only: 1,360,128/41,230,040 parameters
+✓ Training TokenBlock only: 837,888/39,785,920 parameters
 
-[Phase 2] 2,403,562 train / 22,722 val tokens, 20 epochs
-  Epoch 1: train_ppl=332.6 val_ppl=170.9 acc=22.1% [56.3s] ★
-  Epoch 2: train_ppl=163.5 val_ppl=143.1 acc=23.4% [56.1s] ★
-  Epoch 3: train_ppl=135.3 val_ppl=133.0 acc=24.1% [56.3s] ★
-  Epoch 4: train_ppl=121.2 val_ppl=128.0 acc=24.4% [56.2s] ★
-  Epoch 5: train_ppl=112.6 val_ppl=125.1 acc=24.6% [56.4s] ★
-  Epoch 6: train_ppl=106.6 val_ppl=123.2 acc=24.7% [56.3s] ★
-  Epoch 7: train_ppl=102.2 val_ppl=121.9 acc=24.8% [56.4s] ★
-  Epoch 8: train_ppl=98.7 val_ppl=121.0 acc=25.0% [56.4s] ★
-  Epoch 9: train_ppl=95.9 val_ppl=120.3 acc=25.2% [56.4s] ★
-  Epoch 10: train_ppl=93.6 val_ppl=119.8 acc=25.3% [56.3s] ★
-  Epoch 11: train_ppl=91.6 val_ppl=119.5 acc=25.4% [56.1s] ★
-  → Early stop at epoch 11 (PPL improvement 0.33 < 0.4)
-  Best: epoch 11, ppl=119.5, acc=25.4%
+[Phase 2] 240,131 train / 22,722 val tokens, 40 epochs
+    Epoch 1: train_ppl=10000000.0 val_ppl=34285.2 acc=7.6% [5.7s] *
+    Epoch 2: train_ppl=6726.9 val_ppl=1750.8 acc=12.7% [5.7s] *
+    Epoch 3: train_ppl=1314.5 val_ppl=895.4 acc=14.8% [5.8s] *
+    Epoch 4: train_ppl=757.7 val_ppl=644.7 acc=15.8% [5.8s] *
+    Epoch 5: train_ppl=526.0 val_ppl=517.2 acc=16.5% [5.8s] *
+    Epoch 6: train_ppl=405.5 val_ppl=440.9 acc=17.2% [5.8s] *
+    Epoch 7: train_ppl=331.4 val_ppl=388.2 acc=17.6% [5.7s] *
+    Epoch 8: train_ppl=274.4 val_ppl=352.5 acc=18.1% [5.7s] *
+    Epoch 9: train_ppl=236.3 val_ppl=326.3 acc=18.4% [5.7s] *
+    Epoch 10: train_ppl=208.0 val_ppl=306.9 acc=18.7% [5.7s] *
+    Epoch 11: train_ppl=185.8 val_ppl=292.1 acc=19.0% [5.7s] *
+    Epoch 12: train_ppl=168.5 val_ppl=280.7 acc=19.2% [5.7s] *
+    Epoch 13: train_ppl=154.3 val_ppl=272.1 acc=19.3% [5.7s] *
+    Epoch 14: train_ppl=142.8 val_ppl=265.2 acc=19.5% [5.7s] *
+    Epoch 15: train_ppl=132.8 val_ppl=260.2 acc=19.7% [5.7s] *
+    Epoch 16: train_ppl=124.4 val_ppl=256.3 acc=19.8% [5.7s] *
+    Epoch 17: train_ppl=116.9 val_ppl=253.7 acc=19.8% [5.7s] *
+    Epoch 18: train_ppl=110.5 val_ppl=251.7 acc=19.9% [5.8s] *
+    Epoch 19: train_ppl=104.7 val_ppl=250.8 acc=19.9% [5.8s] *
+    Epoch 20: train_ppl=99.7 val_ppl=250.1 acc=20.1% [5.8s] *
+    Epoch 21: train_ppl=95.1 val_ppl=250.3 acc=20.1% [5.8s]
+    → Early stop at epoch 21
+    Best: epoch 20, ppl=250.1, acc=20.1%
 
-Phase 2: 619.4s, Best epoch 11
-Result: PPL=119.5, Acc=25.4%
-Total time: 2007.1s
+[Result] samples=200: PPL=250.1, Acc=20.1%, ER=65.5%, Time=203.9s
+  ★ New best! samples=200, PPL=250.1
 
 ======================================================================
-SUMMARY - Dual Context Experiment
-======================================================================
-Architecture: DualContextLLM (A+B, 1L each)
-  ContextBlock A: cd=500, trained on first 1,201,781 tokens
-  ContextBlock B: cd=500, trained on last 1,201,782 tokens
-  TokenBlock: cd=1000 (concatenated)
-Parameters: 41,230,040
-Phase 1A: 163.4s, conv=92%
-Phase 1B: 156.2s, conv=92%
-Cache collection: 1068.1s
-Phase 2: 619.4s, epoch 11
-Effective Rank: 73.6% (of 1000)
-Val PPL: 119.5
-Val Acc: 25.4%
-Total time: 2007.1s
+[SAMPLES=400] Starting experiment...
 ======================================================================
 
-Results saved to: importants/logs/20251202_135540_dual_context/results.txt
+Loading data (400 samples)...
+Loading training data...
+  Loading 400 samples from UltraChat...
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_400samples_full.pt
+Loading validation data...
+  Train: 473429 tokens (400 samples)
+  Val:   22723 tokens
+Data: 473,429 train, 22,723 val tokens
+
+Creating SimpleLLM (context_dim=320)...
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+✓ Weight Tying: token_output shares weights with token_embedding
+
+[Phase 1] Training ContextBlock...
+
+[Phase 1] Context: 473,429 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=7.9687 [1.7s]
+  Iter 3: conv=0% loss=8.5517 [1.5s]
+  Iter 4: conv=0% loss=5.7641 [1.4s]
+  Iter 5: conv=0% loss=3.6912 [1.4s]
+  Iter 6: conv=0% loss=3.4390 [1.5s]
+  Iter 7: conv=0% loss=3.9484 [1.5s]
+  Iter 8: conv=1% loss=4.3725 [1.4s]
+  Iter 9: conv=1% loss=4.5241 [1.4s]
+  Iter 10: conv=2% loss=4.4856 [1.4s]
+  Iter 11: conv=2% loss=4.3592 [1.5s]
+  Iter 12: conv=3% loss=4.1728 [1.4s]
+  Iter 13: conv=5% loss=3.9254 [1.4s]
+  Iter 14: conv=7% loss=3.6633 [1.4s]
+  Iter 15: conv=9% loss=3.4263 [1.5s]
+  Iter 16: conv=14% loss=3.1934 [1.4s]
+  Iter 17: conv=21% loss=2.9274 [1.4s]
+  Iter 18: conv=30% loss=2.6259 [1.4s]
+  Iter 19: conv=41% loss=2.3087 [1.5s]
+  Iter 20: conv=51% loss=2.0036 [1.4s]
+  Iter 21: conv=59% loss=1.7537 [1.4s]
+  Iter 22: conv=68% loss=1.5885 [1.5s]
+  Iter 23: conv=78% loss=1.4913 [1.5s]
+  Iter 24: conv=86% loss=1.4187 [1.4s]
+  Iter 25: conv=91% loss=1.3349 [1.4s]
+  → Early stop: conv 91% >= 90%
+  Done: 91% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [1.2s]
+Phase 1: 39.3s, 25 iter, conv=91%
+
+[Phase 2 Prep] Collecting context cache...
+      100,000/473,428 tokens processed...
+      200,000/473,428 tokens processed...
+      300,000/473,428 tokens processed...
+      400,000/473,428 tokens processed...
+      473,428/473,428 tokens processed...
+      22,722/22,722 tokens processed...
+    Collecting token embeddings (chunked)...
+Cache collection: 103.1s
+  Val Effective Rank: 210.56/320 (65.8%)
+Effective Rank: Val=65.8% (210.6/320)
+
+[Phase 2] Training TokenBlock...
+✓ ContextBlock frozen
+✓ Embedding frozen
+✓ Training TokenBlock only: 837,888/39,785,920 parameters
+
+[Phase 2] 473,428 train / 22,722 val tokens, 40 epochs
+    Epoch 1: train_ppl=10000000.0 val_ppl=1945.4 acc=12.5% [11.0s] *
+    Epoch 2: train_ppl=1184.1 val_ppl=653.7 acc=15.8% [11.1s] *
+    Epoch 3: train_ppl=568.9 val_ppl=439.2 acc=17.1% [11.2s] *
+    Epoch 4: train_ppl=389.1 val_ppl=350.0 acc=17.9% [11.0s] *
+    Epoch 5: train_ppl=299.2 val_ppl=295.3 acc=18.7% [11.0s] *
+    Epoch 6: train_ppl=244.7 val_ppl=263.9 acc=19.1% [11.0s] *
+    Epoch 7: train_ppl=211.1 val_ppl=244.2 acc=19.6% [11.0s] *
+    Epoch 8: train_ppl=187.6 val_ppl=227.8 acc=20.0% [11.0s] *
+    Epoch 9: train_ppl=168.7 val_ppl=217.3 acc=20.2% [11.0s] *
+    Epoch 10: train_ppl=155.0 val_ppl=210.5 acc=20.5% [11.0s] *
+    Epoch 11: train_ppl=143.9 val_ppl=203.6 acc=20.7% [11.1s] *
+    Epoch 12: train_ppl=134.3 val_ppl=199.4 acc=20.8% [11.1s] *
+    Epoch 13: train_ppl=127.6 val_ppl=197.5 acc=21.0% [11.1s] *
+    Epoch 14: train_ppl=121.4 val_ppl=193.3 acc=21.3% [11.0s] *
+    Epoch 15: train_ppl=114.9 val_ppl=191.5 acc=21.3% [11.0s] *
+    Epoch 16: train_ppl=109.9 val_ppl=190.7 acc=21.4% [11.0s] *
+    Epoch 17: train_ppl=105.6 val_ppl=189.0 acc=21.5% [11.0s] *
+    Epoch 18: train_ppl=101.7 val_ppl=188.9 acc=21.6% [11.0s]
+    → Early stop at epoch 18
+    Best: epoch 17, ppl=189.0, acc=21.5%
+
+[Result] samples=400: PPL=189.0, Acc=21.5%, ER=65.8%, Time=348.0s
+  ★ New best! samples=400, PPL=189.0
+
+======================================================================
+[SAMPLES=800] Starting experiment...
+======================================================================
+
+Loading data (800 samples)...
+Loading training data...
+  Loading 800 samples from UltraChat...
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_800samples_full.pt
+Loading validation data...
+  Train: 948524 tokens (800 samples)
+  Val:   22723 tokens
+Data: 948,524 train, 22,723 val tokens
+
+Creating SimpleLLM (context_dim=320)...
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+✓ Weight Tying: token_output shares weights with token_embedding
+
+[Phase 1] Training ContextBlock...
+
+[Phase 1] Context: 948,524 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=7.2934 [3.3s]
+  Iter 3: conv=0% loss=8.3167 [2.9s]
+  Iter 4: conv=0% loss=5.5603 [2.9s]
+  Iter 5: conv=0% loss=3.6765 [2.9s]
+  Iter 6: conv=0% loss=3.7617 [2.9s]
+  Iter 7: conv=1% loss=4.2901 [2.9s]
+  Iter 8: conv=1% loss=4.6207 [2.9s]
+  Iter 9: conv=1% loss=4.7262 [2.9s]
+  Iter 10: conv=1% loss=4.7361 [2.9s]
+  Iter 11: conv=1% loss=4.7449 [2.9s]
+  Iter 12: conv=3% loss=4.7114 [2.9s]
+  Iter 13: conv=5% loss=4.5625 [2.9s]
+  Iter 14: conv=7% loss=4.2652 [2.9s]
+  Iter 15: conv=10% loss=3.8537 [2.9s]
+  Iter 16: conv=14% loss=3.4014 [2.9s]
+  Iter 17: conv=21% loss=2.9739 [2.9s]
+  Iter 18: conv=32% loss=2.6018 [2.9s]
+  Iter 19: conv=45% loss=2.2893 [2.9s]
+  Iter 20: conv=58% loss=2.0276 [2.9s]
+  Iter 21: conv=69% loss=1.8057 [2.9s]
+  Iter 22: conv=78% loss=1.6157 [2.9s]
+  Iter 23: conv=84% loss=1.4438 [2.9s]
+  Iter 24: conv=89% loss=1.2819 [2.9s]
+  Iter 25: conv=91% loss=1.1394 [2.9s]
+  → Early stop: conv 91% >= 90%
+  Done: 91% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [1.8s]
+Phase 1: 77.4s, 25 iter, conv=91%
+
+[Phase 2 Prep] Collecting context cache...
+      100,000/948,523 tokens processed...
+      200,000/948,523 tokens processed...
+      300,000/948,523 tokens processed...
+      400,000/948,523 tokens processed...
+      500,000/948,523 tokens processed...
+      600,000/948,523 tokens processed...
+      700,000/948,523 tokens processed...
+      800,000/948,523 tokens processed...
+      900,000/948,523 tokens processed...
+      948,523/948,523 tokens processed...
+      22,722/22,722 tokens processed...
+    Collecting token embeddings (chunked)...
+Cache collection: 200.5s
+  Val Effective Rank: 208.70/320 (65.2%)
+Effective Rank: Val=65.2% (208.7/320)
+
+[Phase 2] Training TokenBlock...
+✓ ContextBlock frozen
+✓ Embedding frozen
+✓ Training TokenBlock only: 837,888/39,785,920 parameters
+
+[Phase 2] 948,523 train / 22,722 val tokens, 40 epochs
+    Epoch 1: train_ppl=155117.4 val_ppl=628.1 acc=16.2% [22.1s] *
+    Epoch 2: train_ppl=521.6 val_ppl=341.7 acc=18.4% [21.8s] *
+    Epoch 3: train_ppl=316.6 val_ppl=258.4 acc=19.7% [21.7s] *
+    Epoch 4: train_ppl=241.2 val_ppl=221.8 acc=20.5% [21.7s] *
+    Epoch 5: train_ppl=203.1 val_ppl=201.5 acc=21.1% [21.7s] *
+    Epoch 6: train_ppl=179.5 val_ppl=189.2 acc=21.4% [22.0s] *
+    Epoch 7: train_ppl=163.2 val_ppl=181.1 acc=21.7% [21.8s] *
+    Epoch 8: train_ppl=151.3 val_ppl=175.5 acc=21.9% [21.7s] *
+    Epoch 9: train_ppl=142.0 val_ppl=171.1 acc=22.1% [21.7s] *
+    Epoch 10: train_ppl=134.5 val_ppl=167.8 acc=22.2% [21.7s] *
+    Epoch 11: train_ppl=128.4 val_ppl=164.9 acc=22.3% [21.7s] *
+    Epoch 12: train_ppl=123.2 val_ppl=162.9 acc=22.3% [21.7s] *
+    Epoch 13: train_ppl=118.8 val_ppl=161.1 acc=22.4% [21.7s] *
+    Epoch 14: train_ppl=115.0 val_ppl=159.9 acc=22.4% [21.8s] *
+    Epoch 15: train_ppl=111.7 val_ppl=158.6 acc=22.5% [22.0s] *
+    Epoch 16: train_ppl=108.7 val_ppl=157.9 acc=22.6% [21.9s] *
+    Epoch 17: train_ppl=106.1 val_ppl=157.1 acc=22.6% [21.7s] *
+    Epoch 18: train_ppl=103.8 val_ppl=156.7 acc=22.7% [21.7s] *
+    Epoch 19: train_ppl=101.7 val_ppl=156.0 acc=22.6% [21.7s] *
+    Epoch 20: train_ppl=99.7 val_ppl=155.8 acc=22.7% [21.8s]
+    → Early stop at epoch 20
+    Best: epoch 19, ppl=156.0, acc=22.6%
+
+[Result] samples=800: PPL=156.0, Acc=22.6%, ER=65.2%, Time=721.5s
+  ★ New best! samples=800, PPL=156.0
+
+======================================================================
+[SAMPLES=1600] Starting experiment...
+======================================================================
+
+Loading data (1600 samples)...
+Loading training data...
+  Loading 1600 samples from UltraChat...
+Token indices sequence length is longer than the specified maximum sequence length for this model (1464 > 1024). Running this sequence through the model will result in indexing errors
+  Cached to: ./cache/ultrachat_1600samples_full.pt
+Loading validation data...
+  Train: 1920992 tokens (1600 samples)
+  Val:   22723 tokens
+Data: 1,920,992 train, 22,723 val tokens
+
+Creating SimpleLLM (context_dim=320)...
+Loading GPT-2 pretrained embeddings...
+✓ Loaded GPT-2 embeddings: torch.Size([50257, 768])
+✓ Weight Tying: token_output shares weights with token_embedding
+
+[Phase 1] Training ContextBlock...
+
+[Phase 1] Context: 1,920,992 tokens, 60 iterations
+  Iter 1: random init
+  Iter 2: conv=0% loss=6.9764 [6.3s]
+  Iter 3: conv=0% loss=7.9437 [6.0s]
+  Iter 4: conv=0% loss=5.5750 [5.9s]
+  Iter 5: conv=0% loss=3.9512 [6.0s]
+  Iter 6: conv=0% loss=3.8356 [5.9s]
+  Iter 7: conv=0% loss=4.0684 [6.0s]
+  Iter 8: conv=0% loss=4.1990 [5.9s]
+  Iter 9: conv=0% loss=4.4075 [6.0s]
+  Iter 10: conv=1% loss=4.7562 [5.9s]
+  Iter 11: conv=1% loss=5.0623 [6.0s]
+  Iter 12: conv=2% loss=5.0934 [6.0s]
+  Iter 13: conv=4% loss=4.8101 [5.9s]
+  Iter 14: conv=5% loss=4.3351 [6.0s]
+  Iter 15: conv=7% loss=3.8248 [6.0s]
+  Iter 16: conv=11% loss=3.3865 [6.0s]
+  Iter 17: conv=16% loss=3.0370 [5.9s]
+  Iter 18: conv=25% loss=2.7339 [6.0s]
+  Iter 19: conv=36% loss=2.4248 [5.9s]
+  Iter 20: conv=48% loss=2.0984 [6.0s]
+  Iter 21: conv=57% loss=1.8031 [5.9s]
+  Iter 22: conv=65% loss=1.5937 [5.9s]
+  Iter 23: conv=74% loss=1.4770 [5.9s]
+  Iter 24: conv=82% loss=1.4164 [5.9s]
+  Iter 25: conv=89% loss=1.3661 [5.9s]
+  Iter 26: conv=93% loss=1.2986 [5.9s]
+  → Early stop: conv 93% >= 90%
+  Done: 93% converged
+  Collecting cache (parallel)...
+  Cache collected (parallel) [3.6s]
+Phase 1: 165.0s, 26 iter, conv=93%
+
+[Phase 2 Prep] Collecting context cache...
+      100,000/1,920,991 tokens processed...
+      200,000/1,920,991 tokens processed...
+      300,000/1,920,991 tokens processed...
+      400,000/1,920,991 tokens processed...
+      500,000/1,920,991 tokens processed...
+      600,000/1,920,991 tokens processed...
+      700,000/1,920,991 tokens processed...
+      800,000/1,920,991 tokens processed...
+      900,000/1,920,991 tokens processed...
+      1,000,000/1,920,991 tokens processed...
+      1,100,000/1,920,991 tokens processed...
+      1,200,000/1,920,991 tokens processed...
+      1,300,000/1,920,991 tokens processed...
+      1,400,000/1,920,991 tokens processed...
+      1,500,000/1,920,991 tokens processed...
+      1,600,000/1,920,991 tokens processed...
+      1,700,000/1,920,991 tokens processed...
+      1,800,000/1,920,991 tokens processed...
+      1,900,000/1,920,991 tokens processed...
+      1,920,991/1,920,991 tokens processed...
+      22,722/22,722 tokens processed...
+    Collecting token embeddings (chunked)...
+Cache collection: 398.8s
+  Val Effective Rank: 210.59/320 (65.8%)
+Effective Rank: Val=65.8% (210.6/320)
+
+[Phase 2] Training TokenBlock...
+✓ ContextBlock frozen
+✓ Embedding frozen
+✓ Training TokenBlock only: 837,888/39,785,920 parameters
+
+[Phase 2] 1,920,991 train / 22,722 val tokens, 40 epochs
+    Epoch 1: train_ppl=9329.8 val_ppl=334.7 acc=18.2% [44.5s] *
+    Epoch 2: train_ppl=297.7 val_ppl=215.8 acc=20.2% [43.6s] *
+    Epoch 3: train_ppl=214.2 val_ppl=181.7 acc=21.6% [44.2s] *
+    Epoch 4: train_ppl=181.5 val_ppl=166.3 acc=21.9% [43.7s] *
+    Epoch 5: train_ppl=163.2 val_ppl=157.5 acc=22.2% [43.7s] *
+    Epoch 6: train_ppl=151.1 val_ppl=151.6 acc=22.5% [43.8s] *
+    Epoch 7: train_ppl=142.4 val_ppl=147.4 acc=22.6% [43.7s] *
+    Epoch 8: train_ppl=135.8 val_ppl=144.2 acc=22.7% [43.9s] *
+    Epoch 9: train_ppl=130.6 val_ppl=141.8 acc=22.8% [43.7s] *
+    Epoch 10: train_ppl=126.4 val_ppl=140.0 acc=22.9% [43.8s] *
+    Epoch 11: train_ppl=122.9 val_ppl=138.5 acc=22.9% [43.9s] *
+    Epoch 12: train_ppl=120.0 val_ppl=137.3 acc=23.0% [43.8s] *
+    Epoch 13: train_ppl=117.4 val_ppl=136.3 acc=23.1% [43.9s] *
+    Epoch 14: train_ppl=115.3 val_ppl=135.4 acc=23.2% [43.8s] *
+    Epoch 15: train_ppl=113.3 val_ppl=134.7 acc=23.2% [43.7s] *
+    Epoch 16: train_ppl=111.7 val_ppl=134.1 acc=23.3% [43.9s] *
+    Epoch 17: train_ppl=110.1 val_ppl=133.5 acc=23.3% [43.7s] *
+    Epoch 18: train_ppl=108.8 val_ppl=133.1 acc=23.4% [43.8s] *
+    Epoch 19: train_ppl=107.5 val_ppl=132.6 acc=23.4% [44.0s] *
+    Epoch 20: train_ppl=106.4 val_ppl=132.3 acc=23.5% [43.7s]
+    → Early stop at epoch 20
+    Best: epoch 19, ppl=132.6, acc=23.4%
+
+[Result] samples=1600: PPL=132.6, Acc=23.4%, ER=65.8%, Time=1452.4s
+  ★ New best! samples=1600, PPL=132.6
+
+======================================================================
+SUMMARY - Sample Size Search
+======================================================================
+Context dim: 320
+Sample sizes: [100, 200, 400, 800, 1600]
+
+Results:
+ Samples |       Tokens |      PPL |    Acc |    ER% |     Time
+------------------------------------------------------------
+     100 |      122,795 |    319.9 |  18.9% |  63.6% |   186.9s
+     200 |      240,132 |    250.1 |  20.1% |  65.5% |   203.9s
+     400 |      473,429 |    189.0 |  21.5% |  65.8% |   348.0s
+     800 |      948,524 |    156.0 |  22.6% |  65.2% |   721.5s
+    1600 |    1,920,992 |    132.6 |  23.4% |  65.8% |  1452.4s ★
+------------------------------------------------------------
+
+★ Best: samples=1600, PPL=132.6
+======================================================================
+
+Results saved to: importants/logs/20251203_045635_sample_size_search/results.txt
 
 ======================================================================
 DONE
