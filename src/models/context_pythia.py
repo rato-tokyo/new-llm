@@ -57,12 +57,12 @@ class ContextBlock(nn.Module):
         self._init_weights()
 
     def _init_weights(self) -> None:
-        """Xavier初期化"""
+        """Normal初期化（昔の実装と同じ）"""
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                nn.init.xavier_uniform_(m.weight)
+                nn.init.normal_(m.weight, mean=0.0, std=0.1)
                 if m.bias is not None:
-                    nn.init.zeros_(m.bias)
+                    nn.init.normal_(m.bias, mean=0.0, std=0.01)
 
     def forward(
         self,
