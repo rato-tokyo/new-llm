@@ -117,7 +117,6 @@ def build_batch_context_chunks(
     context_cache: torch.Tensor,
     chunk_boundaries: torch.Tensor,
     chunk_size: int,
-    max_chunks: int,
 ) -> torch.Tensor:
     """
     バッチのcontext chunksを動的に構築（メモリ効率版）
@@ -127,16 +126,20 @@ def build_batch_context_chunks(
         context_cache: 全context [num_tokens, context_dim]
         chunk_boundaries: チャンク境界のcontext [num_boundaries, context_dim]
         chunk_size: チャンクサイズ
-        max_chunks: 最大チャンク数
 
     Returns:
-        batch_chunks: [batch_size, max_chunks, context_dim]
+        batch_chunks: [batch_size, batch_max_chunks, context_dim]
+        batch_max_chunksはバッチ内の最大位置で決まる
     """
     batch_size = len(batch_indices)
     context_dim = context_cache.shape[1]
 
-    # 出力テンソル
-    batch_chunks = torch.zeros(batch_size, max_chunks, context_dim)
+    # バッチ内の最大位置から必要なチャンク数を計算
+    max_pos = batch_indices.max().item()
+    batch_max_chunks = (max_pos + 1) // chunk_size + 1
+
+    # 出力テンソル（バッチに必要な分だけ確保）
+    batch_chunks = torch.zeros(batch_size, batch_max_chunks, context_dim)
 
     for b, pos in enumerate(batch_indices):
         pos = pos.item()
@@ -201,10 +204,6 @@ def train_phase2(
     num_train = len(train_targets)
     num_val = len(val_targets)
 
-    # 最大チャンク数
-    train_max_chunks = len(train_chunk_boundaries) + 1
-    val_max_chunks = len(val_chunk_boundaries) + 1
-
     best_val_ppl = float('inf')
     best_val_acc = 0.0
     best_epoch = 0
@@ -229,7 +228,7 @@ def train_phase2(
             # 動的にcontext chunksを構築
             batch_context_chunks = build_batch_context_chunks(
                 batch_idx, train_context_cache, train_chunk_boundaries,
-                chunk_size, train_max_chunks
+                chunk_size
             ).to(device)
             batch_token_embeds = train_token_embeds[batch_idx].to(device)
             batch_targets = train_targets[batch_idx].to(device)
@@ -265,7 +264,7 @@ def train_phase2(
 
                 batch_context_chunks = build_batch_context_chunks(
                     batch_idx, val_context_cache, val_chunk_boundaries,
-                    chunk_size, val_max_chunks
+                    chunk_size
                 ).to(device)
                 batch_token_embeds = val_token_embeds[start:end].to(device)
                 batch_targets = val_targets[start:end].to(device)
