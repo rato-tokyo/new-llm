@@ -208,6 +208,7 @@ def train_phase1(
     model: ContextPythiaModel,
     train_loader: DataLoader,
     val_loader: DataLoader,
+    conv_sample: torch.Tensor,
     phase1_config: Phase1Config,
     device: torch.device,
 ) -> Tuple[float, dict]:
@@ -219,6 +220,9 @@ def train_phase1(
     - Early Stopping（収束率ベース）
     - Validation評価
     - max iteration
+
+    Args:
+        conv_sample: 収束率計算用の固定サンプル [batch, seq_length]
 
     Returns:
         final_loss: 最終損失
@@ -239,7 +243,7 @@ def train_phase1(
 
     start_time = time.time()
 
-    # 前回のcontextを保存（収束率計算用）
+    # 前回のcontextを保存（収束率計算用）- 固定サンプルを使用
     previous_contexts: Optional[torch.Tensor] = None
     best_val_loss = float('inf')
     final_loss = 0.0
@@ -256,7 +260,6 @@ def train_phase1(
     for iteration in range(phase1_config.max_iterations):
         epoch_loss = 0.0
         batch_count = 0
-        all_contexts_cpu = []  # CPUに保存してメモリ節約
 
         # 勾配累積: 複数バッチの勾配を累積してから1回更新
         optimizer.zero_grad()
@@ -281,7 +284,6 @@ def train_phase1(
 
             epoch_loss += loss.item()
             batch_count += 1
-            all_contexts_cpu.append(context_flat.detach().cpu())  # CPUに保存
 
             # メモリ解放
             del context, context_flat
@@ -297,9 +299,12 @@ def train_phase1(
         avg_loss = epoch_loss / max(batch_count, 1)
         final_loss = avg_loss
 
-        # 収束率計算（CPUで計算してメモリ節約）
-        current_contexts_cpu = torch.cat(all_contexts_cpu, dim=0)
-        if previous_contexts is not None and len(previous_contexts) == len(current_contexts_cpu):
+        # 収束率計算（固定サンプルを使用）
+        with torch.no_grad():
+            _, current_context = model.forward_with_context_output(conv_sample)
+            current_contexts_cpu = current_context.view(-1, current_context.size(-1)).cpu()
+
+        if previous_contexts is not None:
             conv_rate = compute_convergence_rate(
                 current_contexts_cpu, previous_contexts, phase1_config.convergence_threshold
             )
@@ -428,6 +433,9 @@ def main() -> None:
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
 
+    # 収束率計算用の固定サンプル（val_idsの最初のバッチを使用）
+    conv_sample = val_ids[:args.batch_size]
+
     # Create model
     print_flush("\n[Model] Creating Context-Pythia...")
     model = ContextPythiaModel(
@@ -445,7 +453,7 @@ def main() -> None:
     print_flush(f"ContextBlock parameters: {context_params:,}")
 
     # Train Phase 1
-    final_loss, stats = train_phase1(model, train_loader, val_loader, phase1_config, device)
+    final_loss, stats = train_phase1(model, train_loader, val_loader, conv_sample, phase1_config, device)
 
     # Save checkpoint
     save_checkpoint(model, model_config, phase1_config, final_loss, stats)
