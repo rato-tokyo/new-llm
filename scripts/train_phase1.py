@@ -459,11 +459,11 @@ def main() -> None:
     print_flush("\n[Embeddings] Computing token embeddings...")
     with torch.no_grad():
         # Train
-        train_embeds_gpu = model.embed_tokens(train_ids.view(-1).to(device))
+        train_embeds_gpu = model.embed_in(train_ids.view(-1).to(device))
         train_token_embeds = train_embeds_gpu.cpu()
         del train_embeds_gpu
         # Val
-        val_embeds_gpu = model.embed_tokens(val_ids.view(-1).to(device))
+        val_embeds_gpu = model.embed_in(val_ids.view(-1).to(device))
         val_token_embeds = val_embeds_gpu.cpu()
         del val_embeds_gpu
 
