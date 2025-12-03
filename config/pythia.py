@@ -6,6 +6,8 @@ Pythia-70M および Context-Pythia の設定。
 
 import torch
 
+from .phase1 import Phase1Config
+
 
 class PythiaConfig:
     """Pythia-70M アーキテクチャ設定"""
@@ -27,17 +29,6 @@ class PythiaConfig:
     learning_rate = 1e-4            # Learning rate
     weight_decay = 0.01             # Weight decay
     warmup_steps = 100              # Warmup steps
-
-    # ========== Phase 1 (OACD) ==========
-    phase1_min_iterations = 5           # Minimum iterations (skip early stopping)
-    phase1_max_iterations = 60          # Maximum iterations for OACD
-    phase1_learning_rate = 0.002        # Phase 1 learning rate
-    phase1_convergence_threshold = 0.001  # Convergence threshold (context change)
-    phase1_early_stopping_rate = 0.90   # Early stop when convergence rate >= this
-    phase1_no_improvement_patience = 3  # Stop if no improvement for N iterations
-    phase1_batches_per_iteration = 10   # Batches per iteration
-    phase1_checkpoint_path = "checkpoints/context_block_phase1.pt"  # Phase 1 checkpoint
-    phase1_val_split = 0.1              # Validation split ratio
 
     # ========== Phase 2 (Fine-tuning) ==========
     phase2_epochs = 10              # Number of fine-tuning epochs
@@ -63,6 +54,9 @@ class ContextPythiaConfig(PythiaConfig):
 
     # KV cache reduction target
     kv_reduction_target = 0.5       # 50% reduction
+
+    # Phase 1 config
+    phase1 = Phase1Config
 
     @classmethod
     def kv_cache_reduction(cls) -> float:
