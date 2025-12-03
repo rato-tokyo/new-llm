@@ -32,6 +32,20 @@ from src.trainers.phase1.memory import MemoryPhase1Trainer
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
 from src.utils.device import clear_gpu_cache
+from src.utils.memory import get_gpu_memory_info
+import psutil
+
+
+def get_memory_usage() -> str:
+    """CPUとGPUのメモリ使用量を取得"""
+    process = psutil.Process()
+    cpu_gb = process.memory_info().rss / (1024**3)
+
+    if torch.cuda.is_available():
+        gpu_info = get_gpu_memory_info()
+        gpu_gb = gpu_info['allocated'] / (1024**3)
+        return f"CPU: {cpu_gb:.1f}GB, GPU: {gpu_gb:.1f}GB"
+    return f"CPU: {cpu_gb:.1f}GB"
 
 
 def collect_val_cache_parallel(
@@ -94,6 +108,8 @@ def collect_val_cache_parallel(
 
     # 不要な中間テンソルを解放
     del previous_contexts, init_ctx
+    gc.collect()
+    clear_gpu_cache(device)
 
     return contexts, token_embeds
 
@@ -250,13 +266,14 @@ def train_phase2(
             # 進捗表示（最初のエポックのみ詳細表示、中間成績付き）
             if epoch == 1 and (batch_num % 50 == 0 or batch_num == num_batches - 1):
                 processed = batch_num * batch_size
+                elapsed = time.time() - epoch_start
                 if processed > 0:
                     interim_ppl = torch.exp(torch.tensor(train_loss / processed)).item()
                     interim_acc = train_correct / processed * 100
                     print_flush(f"    Epoch 1: batch {batch_num+1}/{num_batches} "
-                                f"(ppl={interim_ppl:.1f}, acc={interim_acc:.1f}%)")
+                                f"(ppl={interim_ppl:.1f}, acc={interim_acc:.1f}%, {elapsed:.1f}s)")
                 else:
-                    print_flush(f"    Epoch 1: batch {batch_num+1}/{num_batches}...")
+                    print_flush(f"    Epoch 1: batch {batch_num+1}/{num_batches} ({elapsed:.1f}s)...")
 
             # 動的にcontext chunksを構築（GPU上で直接作成）
             batch_context_chunks = build_batch_context_chunks(
@@ -374,6 +391,7 @@ def run_context_kv_experiment(
     train_token_ids, val_token_ids = data_provider.load_data()
     num_train_tokens = len(train_token_ids)
     print_flush(f"Data: {num_train_tokens:,} train, {len(val_token_ids):,} val tokens")
+    print_flush(f"Memory after data load: {get_memory_usage()}")
 
     # モデル作成（1ブロック）
     context_dims = [context_dim]
@@ -390,6 +408,7 @@ def run_context_kv_experiment(
 
     params = model.num_params()
     print_flush(f"Parameters: {params['total']:,} total")
+    print_flush(f"Memory after model init: {get_memory_usage()}")
 
     # ========== Phase 1: ContextBlock学習 ==========
     print_flush(f"\n[Phase 1] Training ContextBlock (cd={context_dim})...")
@@ -412,6 +431,7 @@ def run_context_kv_experiment(
 
     model.freeze_context_block(0)
     print_flush("✓ ContextBlock frozen")
+    print_flush(f"Memory after Phase 1: {get_memory_usage()}")
 
     # ========== Phase 2 Prep: キャッシュとチャンク境界を準備 ==========
     print_flush("\n[Phase 2 Prep] Preparing cache and chunk boundaries...")
@@ -430,15 +450,20 @@ def run_context_kv_experiment(
     del train_result
     gc.collect()
     clear_gpu_cache(device)
+    print_flush(f"Memory after train_result release: {get_memory_usage()}")
 
     train_chunk_boundaries = get_chunk_boundaries(train_context_cache, chunk_size)
     train_targets = train_token_ids[1:].clone()
 
     # Val dataはPhase 1と同じ並列方式でキャッシュ収集
+    print_flush(f"Memory before val cache: {get_memory_usage()}")
     print_flush("  Collecting val cache (parallel)...")
     val_context_cache, val_token_embeds = collect_val_cache_parallel(
         wrapper, val_token_ids, device, config_wrapper.phase1_batch_size
     )
+    gc.collect()
+    clear_gpu_cache(device)
+    print_flush(f"Memory after val cache: {get_memory_usage()}")
 
     # wrapperとconfig_wrapperを解放（Phase 2では使わない）
     del wrapper, config_wrapper
@@ -455,6 +480,16 @@ def run_context_kv_experiment(
     print_flush(f"Cache preparation: {cache_time:.1f}s")
     print_flush(f"  Train: {train_context_cache.shape}, {len(train_chunk_boundaries)} chunks")
     print_flush(f"  Val: {val_context_cache.shape}, {len(val_chunk_boundaries)} chunks")
+
+    # キャッシュサイズを表示
+    train_ctx_mb = train_context_cache.numel() * 4 / (1024**2)
+    train_emb_mb = train_token_embeds.numel() * 4 / (1024**2)
+    val_ctx_mb = val_context_cache.numel() * 4 / (1024**2)
+    val_emb_mb = val_token_embeds.numel() * 4 / (1024**2)
+    total_cache_mb = train_ctx_mb + train_emb_mb + val_ctx_mb + val_emb_mb
+    print_flush(f"  Cache sizes: train_ctx={train_ctx_mb:.0f}MB, train_emb={train_emb_mb:.0f}MB, "
+                f"val_ctx={val_ctx_mb:.0f}MB, val_emb={val_emb_mb:.0f}MB (total={total_cache_mb:.0f}MB)")
+    print_flush(f"Memory after Phase 2 Prep: {get_memory_usage()}")
 
     # Effective Rank（最終位置のcontextで計算）
     val_er = compute_effective_rank(val_context_cache.cpu())
