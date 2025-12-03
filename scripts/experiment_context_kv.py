@@ -135,7 +135,7 @@ def build_batch_context_chunks(
     context_dim = context_cache.shape[1]
 
     # バッチ内の最大位置から必要なチャンク数を計算
-    max_pos = batch_indices.max().item()
+    max_pos = int(batch_indices.max().item())
     batch_max_chunks = (max_pos + 1) // chunk_size + 1
 
     # 出力テンソル（バッチに必要な分だけ確保）
