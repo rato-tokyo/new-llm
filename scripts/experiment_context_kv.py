@@ -27,7 +27,6 @@ from src.config.wrappers import Phase1ConfigWrapper
 from src.providers.data.memory import MemoryDataProvider
 from src.evaluation.metrics import compute_effective_rank
 from src.models.context_kv import ContextKVAttentionLLM, ContextKVWrapper
-from src.trainers.phase1.base import Phase1Result
 from src.trainers.phase1.memory import MemoryPhase1Trainer
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
@@ -39,45 +38,30 @@ def collect_context_chunks(
     token_ids: torch.Tensor,
     device: torch.device,
     chunk_size: int = 100,
-) -> Tuple[torch.Tensor, torch.Tensor, List[torch.Tensor]]:
+) -> Tuple[torch.Tensor, torch.Tensor]:
     """
-    チャンク単位でcontextを収集
-
-    Args:
-        model: ContextKVAttentionLLM
-        token_ids: [num_tokens]
-        device: 計算デバイス
-        chunk_size: チャンクサイズ
+    チャンク単位でcontextを収集（シンプル版）
 
     Returns:
-        context_chunks: [num_tokens-1, max_chunks, combined_dim]
+        context_chunks: [num_tokens-1, max_chunks, context_dim]
         token_embeds: [num_tokens-1, embed_dim]
-        chunk_boundaries: チャンク境界位置のリスト
     """
+    import sys
     num_tokens = len(token_ids)
-    num_blocks = model.num_context_blocks
-    combined_dim = model.combined_context_dim
-
-    # 出力テンソル
-    # 最大チャンク数を計算
-    max_chunks = (num_tokens - 1) // chunk_size + 1
-
-    # 出力テンソル（CPU上に事前確保）
-    context_chunks = torch.zeros(num_tokens - 1, max_chunks, combined_dim)
-    token_embeds_out = torch.zeros(num_tokens - 1, model.embed_dim)
-
-    # 順次処理でcontext収集
-    contexts = [
-        torch.zeros(model.context_dims[i], device=device)
-        for i in range(num_blocks)
-    ]
-
-    # チャンク境界のcontext（CPU上）
-    chunk_contexts_cpu: List[torch.Tensor] = []
-
+    context_dim = model.context_dims[0]  # 1ブロックのみ
     total_tokens = num_tokens - 1
-    log_interval = max(1000, total_tokens // 10)  # 10%ごと または 1000ごと
-    print_flush(f"    Collecting context chunks ({total_tokens:,} tokens, chunk_size={chunk_size})...")
+    max_chunks = total_tokens // chunk_size + 1
+
+    print_flush(f"    Starting collection: {total_tokens:,} tokens, chunk_size={chunk_size}")
+    sys.stdout.flush()
+
+    # 出力テンソル（CPU）
+    context_chunks = torch.zeros(total_tokens, max_chunks, context_dim)
+    token_embeds_out = torch.zeros(total_tokens, model.embed_dim)
+
+    # 初期context
+    context = torch.zeros(context_dim, device=device)
+    chunk_contexts: List[torch.Tensor] = []
 
     start_time = time.time()
 
@@ -88,44 +72,36 @@ def collect_context_chunks(
             token_embed = model.token_embedding(token_id)
             token_embed = model.embed_norm(token_embed).squeeze(0)
 
-            # 全ContextBlockを更新
-            new_contexts = []
-            for block_idx in range(num_blocks):
-                ctx = contexts[block_idx].unsqueeze(0)
-                te = token_embed.unsqueeze(0)
-                new_ctx = model.forward_context(block_idx, ctx, te).squeeze(0)
-                new_contexts.append(new_ctx.detach())
-            contexts = new_contexts
+            # Context更新
+            ctx = context.unsqueeze(0)
+            te = token_embed.unsqueeze(0)
+            context = model.forward_context(0, ctx, te).squeeze(0).detach()
 
-            # 現在のcontextを連結
-            current_combined = torch.cat(contexts, dim=-1)
-
-            # チャンク境界の場合、chunk_contextsに追加
+            # チャンク境界
             if (i + 1) % chunk_size == 0:
-                chunk_contexts_cpu.append(current_combined.cpu())
+                chunk_contexts.append(context.cpu())
 
-            # この位置で利用可能なチャンク数
-            num_available_chunks = len(chunk_contexts_cpu) + 1  # +1 for current
-
-            # context_chunksに保存（CPU上）
-            # 過去のチャンクはすでにCPUにあるので再変換不要
-            for j, ctx in enumerate(chunk_contexts_cpu):
-                context_chunks[i, j] = ctx
-            context_chunks[i, num_available_chunks - 1] = current_combined.cpu()
-
-            # token_embedsに保存（CPU上）
+            # 保存
+            num_chunks = len(chunk_contexts) + 1
+            for j, c in enumerate(chunk_contexts):
+                context_chunks[i, j] = c
+            context_chunks[i, num_chunks - 1] = context.cpu()
             token_embeds_out[i] = token_embed.cpu()
 
-            if (i + 1) % log_interval == 0:
+            # 進捗（100トークンごと）
+            if (i + 1) % 100 == 0:
                 elapsed = time.time() - start_time
-                speed = (i + 1) / elapsed
+                speed = (i + 1) / elapsed if elapsed > 0 else 0
                 eta = (total_tokens - i - 1) / speed if speed > 0 else 0
-                print_flush(f"      {i+1:,}/{total_tokens:,} ({(i+1)/total_tokens*100:.0f}%) "
-                           f"[{elapsed:.1f}s, {speed:.0f} tok/s, ETA {eta:.0f}s]")
-                # GPUメモリ解放
-                clear_gpu_cache(device)
+                print(f"\r      {i+1:,}/{total_tokens:,} ({(i+1)/total_tokens*100:.0f}%) "
+                      f"[{speed:.0f} tok/s, ETA {eta:.0f}s]", end="")
+                sys.stdout.flush()
 
-    return context_chunks, token_embeds_out, chunk_contexts_cpu
+    print()  # 改行
+    elapsed = time.time() - start_time
+    print_flush(f"    Done: {elapsed:.1f}s ({total_tokens/elapsed:.0f} tok/s)")
+
+    return context_chunks, token_embeds_out
 
 
 def train_phase2(
@@ -278,16 +254,14 @@ def train_phase2(
 
 def run_context_kv_experiment(
     num_samples: int = 200,
-    context_dims: List[int] = [256, 256],
+    context_dim: int = 256,
     chunk_size: int = 100,
     num_heads: int = 8,
     seed: int = 42,
 ) -> Dict[str, Any]:
-    """Context-KV Attention 実験を実行"""
+    """Context-KV Attention 実験を実行（1ブロック版）"""
 
     set_seed(seed)
-    num_blocks = len(context_dims)
-    combined_dim = sum(context_dims)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type == "cuda":
@@ -308,21 +282,9 @@ def run_context_kv_experiment(
     num_train_tokens = len(train_token_ids)
     print_flush(f"Data: {num_train_tokens:,} train, {len(val_token_ids):,} val tokens")
 
-    # データ分割（Phase 1用）
-    train_data_splits: List[torch.Tensor] = []
-    split_size = num_train_tokens // num_blocks
-    for i in range(num_blocks):
-        start_idx = i * split_size
-        if i == num_blocks - 1:
-            end_idx = num_train_tokens
-        else:
-            end_idx = (i + 1) * split_size + 1
-        train_data_splits.append(train_token_ids[start_idx:end_idx])
-    print_flush(f"Split: {', '.join([f'Block{i}={len(s)-1:,}' for i, s in enumerate(train_data_splits)])} tokens")
-
-    # モデル作成
-    dims_str = '+'.join(map(str, context_dims))
-    print_flush(f"\nCreating ContextKVAttentionLLM (cd={dims_str}={combined_dim}, heads={num_heads}, chunk={chunk_size})...")
+    # モデル作成（1ブロック）
+    context_dims = [context_dim]
+    print_flush(f"\nCreating ContextKVAttentionLLM (cd={context_dim}, heads={num_heads}, chunk={chunk_size})...")
 
     model = ContextKVAttentionLLM(
         vocab_size=base_config.vocab_size,
@@ -335,44 +297,34 @@ def run_context_kv_experiment(
 
     params = model.num_params()
     print_flush(f"Parameters: {params['total']:,} total")
-    print_flush(f"  ContextBlocks ({num_blocks}): {params['total_context_blocks']:,}")
-    print_flush(f"  Context-KV Attention: {params['context_kv_attention']:,}")
-    print_flush(f"  Output FFN: {params['output_ffn']:,}")
 
-    # ========== Phase 1: 各ContextBlock学習 ==========
-    phase1_times: List[float] = []
-    phase1_stats: List[Phase1Result] = []
+    # ========== Phase 1: ContextBlock学習 ==========
+    print_flush(f"\n[Phase 1] Training ContextBlock (cd={context_dim})...")
+    wrapper = ContextKVWrapper(model, block_idx=0)
+    config_wrapper = Phase1ConfigWrapper(base_config, context_dim)
+    trainer = MemoryPhase1Trainer(wrapper, config_wrapper, device)
 
-    for block_idx in range(num_blocks):
-        print_flush(f"\n[Phase 1-{block_idx}] Training ContextBlock {block_idx} (cd={context_dims[block_idx]})...")
-        wrapper = ContextKVWrapper(model, block_idx=block_idx)
-        config_wrapper = Phase1ConfigWrapper(base_config, context_dims[block_idx])
-        trainer = MemoryPhase1Trainer(wrapper, config_wrapper, device)
+    phase1_start = time.time()
+    result = trainer.train(
+        train_token_ids,
+        label="Context",
+        return_all_layers=True,
+    )
+    phase1_time = time.time() - phase1_start
 
-        phase_start = time.time()
-        result = trainer.train(
-            train_data_splits[block_idx],
-            label=f"Context{block_idx}",
-            return_all_layers=True,
-        )
-        phase_time = time.time() - phase_start
-
-        phase1_times.append(phase_time)
-        phase1_stats.append(result)
-
-        model.freeze_context_block(block_idx)
-        print_flush(f"✓ ContextBlock {block_idx} frozen")
+    model.freeze_context_block(0)
+    print_flush(f"✓ ContextBlock frozen")
 
     # ========== Phase 2 Prep: Context chunks収集 ==========
     print_flush("\n[Phase 2 Prep] Collecting context chunks...")
     cache_start = time.time()
 
-    train_context_chunks, train_token_embeds, _ = collect_context_chunks(
+    train_context_chunks, train_token_embeds = collect_context_chunks(
         model, train_token_ids, device, chunk_size
     )
     train_targets = train_token_ids[1:].clone()
 
-    val_context_chunks, val_token_embeds, _ = collect_context_chunks(
+    val_context_chunks, val_token_embeds = collect_context_chunks(
         model, val_token_ids, device, chunk_size
     )
     val_targets = val_token_ids[1:].clone()
@@ -383,17 +335,10 @@ def run_context_kv_experiment(
     print_flush(f"  Val: {val_context_chunks.shape}")
 
     # Effective Rank
-    # 最後のチャンクのcontextで計算
-    val_last_context = val_context_chunks[:, -1, :]  # [num_val, combined_dim]
+    val_last_context = val_context_chunks[:, -1, :]
     val_er = compute_effective_rank(val_last_context.cpu())
-    val_er_pct = val_er / combined_dim * 100
+    val_er_pct = val_er / context_dim * 100
     print_flush(f"Effective Rank: Val={val_er_pct:.1f}%")
-
-    # CPUに移動（メモリ節約）
-    train_context_chunks = train_context_chunks.cpu()
-    train_token_embeds = train_token_embeds.cpu()
-    val_context_chunks = val_context_chunks.cpu()
-    val_token_embeds = val_token_embeds.cpu()
 
     clear_gpu_cache(device)
 
@@ -413,20 +358,17 @@ def run_context_kv_experiment(
     )
     phase2_time = time.time() - phase2_start
 
-    total_time = sum(phase1_times) + cache_time + phase2_time
+    total_time = phase1_time + cache_time + phase2_time
 
     # ========== サマリー ==========
     print_flush("\n" + "=" * 70)
-    print_flush(f"SUMMARY - Context-KV Attention Experiment ({num_blocks} blocks)")
+    print_flush("SUMMARY - Context-KV Attention Experiment")
     print_flush("=" * 70)
-    print_flush("Architecture: ContextKVAttentionLLM")
-    print_flush(f"  Context dims: {context_dims}")
-    print_flush(f"  Combined dim: {combined_dim}")
+    print_flush(f"  Context dim: {context_dim}")
     print_flush(f"  Num heads: {num_heads}")
     print_flush(f"  Chunk size: {chunk_size}")
     print_flush(f"Parameters: {params['total']:,}")
-    for i in range(num_blocks):
-        print_flush(f"Phase 1-{i}: {phase1_times[i]:.1f}s")
+    print_flush(f"Phase 1: {phase1_time:.1f}s")
     print_flush(f"Cache collection: {cache_time:.1f}s")
     print_flush(f"Phase 2: {phase2_time:.1f}s, epoch {best_epoch}")
     print_flush(f"Effective Rank: {val_er_pct:.1f}%")
@@ -437,13 +379,13 @@ def run_context_kv_experiment(
 
     return {
         'num_samples': num_samples,
-        'context_dims': context_dims,
+        'context_dim': context_dim,
         'chunk_size': chunk_size,
         'num_heads': num_heads,
         'val_ppl': best_ppl,
         'val_acc': best_acc,
         'val_er_pct': val_er_pct,
-        'phase1_times': phase1_times,
+        'phase1_time': phase1_time,
         'cache_time': cache_time,
         'phase2_time': phase2_time,
         'total_time': total_time,
@@ -466,8 +408,8 @@ Examples:
     )
     parser.add_argument('-s', '--samples', type=int, default=200,
                         help='Number of samples (default: 200)')
-    parser.add_argument('-c', '--context-dims', type=str, default='256,256',
-                        help='Context dimensions (default: 256,256)')
+    parser.add_argument('-c', '--context-dim', type=int, default=256,
+                        help='Context dimension (default: 256)')
     parser.add_argument('--chunk-size', type=int, default=100,
                         help='Chunk size for context KV (default: 100)')
     parser.add_argument('--num-heads', type=int, default=8,
@@ -477,21 +419,18 @@ Examples:
 
     args = parser.parse_args()
 
-    # context_dimsのパース
-    context_dims = [int(d.strip()) for d in args.context_dims.split(',')]
-
     print_flush("=" * 70)
     print_flush("CONTEXT-KV ATTENTION EXPERIMENT")
     print_flush("=" * 70)
     print_flush(f"Samples: {args.samples}")
-    print_flush(f"Context dims: {context_dims}")
+    print_flush(f"Context dim: {args.context_dim}")
     print_flush(f"Chunk size: {args.chunk_size}")
     print_flush(f"Num heads: {args.num_heads}")
     print_flush("=" * 70)
 
     run_context_kv_experiment(
         num_samples=args.samples,
-        context_dims=context_dims,
+        context_dim=args.context_dim,
         chunk_size=args.chunk_size,
         num_heads=args.num_heads,
         seed=args.seed,
