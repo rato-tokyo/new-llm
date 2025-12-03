@@ -37,16 +37,15 @@ def train_epoch(
     criterion: nn.Module,
     device: torch.device,
     batch_size: int = 32,
-) -> Tuple[float, float]:
+) -> float:
     """
     1エポックの学習
 
     Returns:
-        avg_loss, accuracy
+        avg_loss
     """
     model.train()
     total_loss = 0.0
-    total_correct = 0
     total_tokens = 0
 
     num_samples = len(train_inputs)
@@ -74,16 +73,12 @@ def train_epoch(
         optimizer.step()
 
         total_loss += loss.item() * batch_size_actual * seq_len
-        total_correct += (logits_flat.argmax(dim=-1) == targets_flat).sum().item()
         total_tokens += batch_size_actual * seq_len
 
         del batch_inputs, batch_targets, logits
         clear_gpu_cache(device)
 
-    avg_loss = total_loss / total_tokens
-    accuracy = total_correct / total_tokens
-
-    return avg_loss, accuracy
+    return total_loss / total_tokens
 
 
 @torch.no_grad()
@@ -94,16 +89,15 @@ def evaluate(
     criterion: nn.Module,
     device: torch.device,
     batch_size: int = 32,
-) -> Tuple[float, float, float]:
+) -> Tuple[float, float]:
     """
     評価
 
     Returns:
-        avg_loss, perplexity, accuracy
+        avg_loss, perplexity
     """
     model.eval()
     total_loss = 0.0
-    total_correct = 0
     total_tokens = 0
 
     num_samples = len(val_inputs)
@@ -123,7 +117,6 @@ def evaluate(
         loss = criterion(logits_flat, targets_flat)
 
         total_loss += loss.item() * batch_size_actual * seq_len
-        total_correct += (logits_flat.argmax(dim=-1) == targets_flat).sum().item()
         total_tokens += batch_size_actual * seq_len
 
         del batch_inputs, batch_targets, logits
@@ -131,9 +124,8 @@ def evaluate(
 
     avg_loss = total_loss / total_tokens
     perplexity = torch.exp(torch.tensor(avg_loss)).item()
-    accuracy = total_correct / total_tokens
 
-    return avg_loss, perplexity, accuracy
+    return avg_loss, perplexity
 
 
 def train_model(
@@ -174,16 +166,19 @@ def train_model(
         epoch_start = time.time()
 
         # Train
-        train_loss, train_acc = train_epoch(
+        train_loss = train_epoch(
             model, train_inputs, train_targets, optimizer, criterion, device, batch_size
         )
 
         # Evaluate
-        val_loss, val_ppl, val_acc = evaluate(
+        val_loss, val_ppl = evaluate(
             model, val_inputs, val_targets, criterion, device, batch_size
         )
 
         epoch_time = time.time() - epoch_start
+
+        # Calculate train perplexity
+        train_ppl = torch.exp(torch.tensor(train_loss)).item()
 
         # Early stopping: stop immediately if val_ppl worsens
         improved = val_ppl < best_val_ppl
@@ -195,18 +190,16 @@ def train_model(
             marker = ""
 
         print_flush(
-            f"  Epoch {epoch:2d}: train_loss={train_loss:.4f} "
-            f"val_ppl={val_ppl:.1f} val_acc={val_acc*100:.2f}% "
+            f"  Epoch {epoch:2d}: train_ppl={train_ppl:.1f} val_ppl={val_ppl:.1f} "
             f"[{epoch_time:.1f}s]{marker}"
         )
 
         history.append({
             "epoch": epoch,
             "train_loss": train_loss,
-            "train_acc": train_acc,
+            "train_ppl": train_ppl,
             "val_loss": val_loss,
             "val_ppl": val_ppl,
-            "val_acc": val_acc,
         })
 
         # Stop immediately if val_ppl didn't improve
