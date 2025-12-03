@@ -21,7 +21,7 @@ class Phase1Config:
 
     # ========== 収束判定 ==========
     convergence_threshold = 0.001   # 収束判定の閾値（context変化量）
-    early_stopping_rate = 0.30      # 収束率がこの値以上でEarly Stop（過去実装: 0.30）
+    early_stopping_rate = 0.90      # 収束率がこの値以上でEarly Stop
 
     # ========== バッチ処理 ==========
     batches_per_iteration = 10      # イテレーションあたりのバッチ数（勾配累積）
