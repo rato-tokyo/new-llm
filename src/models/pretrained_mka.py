@@ -71,9 +71,10 @@ class PretrainedMKALayer(nn.Module):
         # ===== Stage 1: Pretrained Pythia Layer (Frozen) =====
         # 事前学習済みの層を通してlocal Aを取得
         # pretrained_layerはGPTNeoXLayerで、attention + MLPを含む
-        with torch.no_grad():
-            A_local = self.pretrained_layer(hidden_states)[0]
-            # GPTNeoXLayerは(hidden_states, present_key_value)を返す
+        # Note: パラメータはrequires_grad=Falseで凍結済みなので
+        # torch.no_grad()は使わない（勾配が流れなくなる問題を回避）
+        A_local = self.pretrained_layer(hidden_states)[0]
+        # GPTNeoXLayerは(hidden_states, present_key_value)を返す
 
         # ===== Stage 2: KA Attention (Trainable) =====
         # A同士のattentionを計算
@@ -278,10 +279,10 @@ class PretrainedMKAModelV2(nn.Module):
 
         # ===== Stage 1: Pretrained Pythia (Frozen) =====
         # 事前学習済みPythia全体を通してAを取得
-        with torch.no_grad():
-            # Get hidden states before LM head
-            outputs = self.pretrained.gpt_neox(input_ids)
-            A = outputs.last_hidden_state  # [batch, seq, hidden]
+        # Note: パラメータはrequires_grad=Falseで凍結済みなので
+        # torch.no_grad()は不要（勾配が流れなくなる問題を回避）
+        outputs = self.pretrained.gpt_neox(input_ids)
+        A = outputs.last_hidden_state  # [batch, seq, hidden]
 
         # ===== Stage 2: KA Attention (Trainable) =====
         # A同士のattentionを計算
@@ -320,9 +321,10 @@ class PretrainedMKAModelV2(nn.Module):
         ka_output = self.output_proj(ka_output)
         hidden_states = self.ka_layer_norm(A + ka_output)
 
-        # LM Head (frozen)
-        with torch.no_grad():
-            logits = self.pretrained.embed_out(hidden_states)
+        # LM Head
+        # Note: embed_outのパラメータは凍結済みだが、
+        # hidden_statesから勾配を流すためにtorch.no_grad()は使わない
+        logits = self.pretrained.embed_out(hidden_states)
 
         return logits
 
