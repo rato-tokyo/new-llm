@@ -77,6 +77,90 @@ def evaluate_model(
     return ppl
 
 
+def evaluate_position_wise_ppl(
+    model: nn.Module,
+    val_loader: DataLoader,
+    device: torch.device,
+    position_ranges: list[tuple[int, int]] | None = None,
+) -> Dict[str, float]:
+    """
+    Evaluate position-wise perplexity.
+
+    Args:
+        model: Model to evaluate
+        val_loader: Validation data loader
+        device: Device
+        position_ranges: List of (start, end) tuples for position ranges.
+                        If None, uses default ranges for seq_len=128.
+
+    Returns:
+        Dictionary with position range keys and PPL values
+    """
+    model.eval()
+
+    # Get sequence length from first batch
+    first_batch = next(iter(val_loader))
+    seq_len = first_batch[0].shape[1]
+
+    # Default position ranges
+    if position_ranges is None:
+        position_ranges = [
+            (0, 16),
+            (16, 32),
+            (32, 64),
+            (64, 96),
+            (96, seq_len),
+        ]
+
+    # Initialize accumulators for each range
+    range_losses: Dict[str, float] = {}
+    range_tokens: Dict[str, int] = {}
+    for start, end in position_ranges:
+        key = f"{start}-{end}"
+        range_losses[key] = 0.0
+        range_tokens[key] = 0
+
+    with torch.no_grad():
+        for batch in val_loader:
+            input_ids, labels = batch
+            input_ids = input_ids.to(device)
+            labels = labels.to(device)
+
+            logits = model(input_ids)  # [batch, seq_len, vocab]
+
+            # Compute per-position loss
+            # logits: [batch, seq_len, vocab]
+            # labels: [batch, seq_len]
+            for start, end in position_ranges:
+                key = f"{start}-{end}"
+
+                # Get logits and labels for this position range
+                range_logits = logits[:, start:end, :]  # [batch, range_len, vocab]
+                range_labels = labels[:, start:end]  # [batch, range_len]
+
+                # Compute loss for this range
+                loss = nn.functional.cross_entropy(
+                    range_logits.reshape(-1, range_logits.size(-1)),
+                    range_labels.reshape(-1),
+                    reduction="sum",
+                )
+
+                range_losses[key] += loss.item()
+                range_tokens[key] += range_labels.numel()
+
+    # Compute PPL for each range
+    results: Dict[str, float] = {}
+    for key in range_losses:
+        if range_tokens[key] > 0:
+            avg_loss = range_losses[key] / range_tokens[key]
+            ppl = torch.exp(torch.tensor(avg_loss)).item()
+            results[key] = ppl
+        else:
+            results[key] = float("inf")
+
+    return results
+
+
 def train_epoch(
     model: nn.Module,
     train_loader: DataLoader,
@@ -192,7 +276,17 @@ def run_experiment(
     print_flush("\n[Pythia-70M] Evaluating pretrained model...")
     pythia_ppl = evaluate_model(pythia_wrapper, val_loader, device)
     print_flush(f"  Pretrained val_ppl: {pythia_ppl:.1f}")
-    results["pythia_pretrained"] = {"val_ppl": pythia_ppl}
+
+    # Position-wise PPL
+    print_flush("\n  Position-wise PPL (long-range dependency):")
+    pythia_pos_ppl = evaluate_position_wise_ppl(pythia_wrapper, val_loader, device)
+    for pos_range, ppl in pythia_pos_ppl.items():
+        print_flush(f"    Position {pos_range}: {ppl:.1f}")
+
+    results["pythia_pretrained"] = {
+        "val_ppl": pythia_ppl,
+        "position_wise_ppl": pythia_pos_ppl,
+    }
 
     del pretrained_pythia, pythia_wrapper
     clear_gpu_cache(device)
@@ -254,9 +348,17 @@ def run_experiment(
             break
 
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
+
+    # Position-wise PPL for MKA model
+    print_flush("\n  Position-wise PPL (long-range dependency):")
+    mka_pos_ppl = evaluate_position_wise_ppl(mka_model, val_loader, device)
+    for pos_range, ppl in mka_pos_ppl.items():
+        print_flush(f"    Position {pos_range}: {ppl:.1f}")
+
     results["pretrained_mka_v2"] = {
         "best_val_ppl": best_val_ppl,
         "best_epoch": best_epoch,
+        "position_wise_ppl": mka_pos_ppl,
     }
 
     del mka_model
@@ -284,6 +386,22 @@ def run_experiment(
         - results["pythia_pretrained"]["val_ppl"]
     )
     print_flush(f"\nDifference: {diff:+.1f} ppl")
+
+    # Position-wise PPL comparison
+    print_flush("\n" + "=" * 70)
+    print_flush("POSITION-WISE PPL (Long-Range Dependency)")
+    print_flush("=" * 70)
+
+    pythia_pos = results["pythia_pretrained"]["position_wise_ppl"]
+    mka_pos = results["pretrained_mka_v2"]["position_wise_ppl"]
+
+    print_flush("\n| Position | Pythia | MKA | Diff |")
+    print_flush("|----------|--------|-----|------|")
+    for pos_range in pythia_pos:
+        pythia_val = pythia_pos[pos_range]
+        mka_val = mka_pos[pos_range]
+        pos_diff = mka_val - pythia_val
+        print_flush(f"| {pos_range} | {pythia_val:.1f} | {mka_val:.1f} | {pos_diff:+.1f} |")
 
     return results
 
