@@ -19,45 +19,49 @@ class PythiaConfig:
     rotary_pct = 0.25               # Rotary embeddingの割合
 
     # ========== 学習設定 ==========
-    learning_rate = 1e-4            # Phase 2 学習率
+    learning_rate = 1e-4            # 学習率
     batch_size = 8                  # バッチサイズ
 
     # ========== トークナイザー ==========
     tokenizer_name = "EleutherAI/pythia-70m"
 
 
-class ContextPythiaConfig(PythiaConfig):
+class DProjPythiaConfig(PythiaConfig):
     """
-    Context-Pythia モデル設定（KVキャッシュ圧縮版）
+    DProj-Pythia モデル設定（KVキャッシュ圧縮版）
 
     アーキテクチャ:
     - Token Embedding: vocab → embed_dim (512)
-    - ContextBlock: embed_dim (512) → context_dim (256)  ← 圧縮
-    - PythiaLayer × 6: context_dim (256) で動作  ← Baselineと同じ構造
-    - Output Head: context_dim (256) → vocab
+    - DiverseProjection: embed_dim (512) → proj_dim (320)  ← 圧縮
+    - PythiaLayer × 6: proj_dim (320) で動作  ← Baselineと同じ構造
+    - Output Head: proj_dim (320) → vocab
 
     KVキャッシュ削減:
     - Baseline: hidden_size (512) × seq_len × num_layers
-    - Context-Pythia: context_dim (256) × seq_len × num_layers
-    - 削減率: 50%
+    - DProj-Pythia: proj_dim (320) × seq_len × num_layers
+    - 削減率: 37.5%
     """
 
     # ========== Embedding次元 ==========
     embed_dim = 512                 # Token Embedding dimension (Pythiaと同じ)
 
-    # ========== Context次元（圧縮後）==========
-    # ⚠️ 重要: context_dimはnum_attention_heads (8) で割り切れる値にすること
+    # ========== Projection次元（圧縮後）==========
+    # ⚠️ 重要: proj_dimはnum_attention_heads (8) で割り切れる値にすること
     # 例: 256, 320, 384, 448, 512 など
-    context_dim = 320               # 圧縮後の次元（PythiaLayerはこの次元で動作）
+    proj_dim = 320                  # 圧縮後の次元（PythiaLayerはこの次元で動作）
 
-    # ========== Transformer設定（context_dimに合わせてスケール）==========
-    # intermediate_size: 2048 * (256/512) = 1024
-    intermediate_size = 1024
+    # ========== Transformer設定（proj_dimに合わせてスケール）==========
+    # intermediate_size: 2048 * (320/512) = 1280
+    intermediate_size = 1280
 
     # ========== チェックポイント ==========
-    phase1_checkpoint_path = "checkpoints/context_block_pythia_phase1.pt"
+    dproj_checkpoint_path = "checkpoints/dproj_pythia.pt"
 
     @classmethod
     def kv_cache_reduction(cls) -> float:
         """KVキャッシュ削減率を計算"""
-        return 1.0 - (cls.context_dim / cls.embed_dim)
+        return 1.0 - (cls.proj_dim / cls.embed_dim)
+
+
+# Backward compatibility alias
+ContextPythiaConfig = DProjPythiaConfig

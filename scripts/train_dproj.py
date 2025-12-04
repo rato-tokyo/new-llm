@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Phase 1 Training for Context-Pythia
+DProj Training - Diverse Projection OACD Training
 
-ContextBlockのOACD学習を行う。
+DiverseProjectionのOACD学習を行う。
 Pythia-70Mのtoken embeddingsを使用。
 
 Usage:
-    python3 scripts/train_phase1_pythia.py --samples 1000
+    python3 scripts/train_dproj.py --samples 1000
 """
 
 import argparse
@@ -19,8 +19,8 @@ import torch
 # Add project root to path
 sys.path.insert(0, ".")
 
-from config import Phase1Config, ContextPythiaConfig
-from src.models.context_pythia import ContextPythiaModel
+from config import DProjTrainingConfig, DProjPythiaConfig
+from src.models.dproj_pythia import DProjPythiaModel
 from src.utils.data_pythia import prepare_pythia_phase1_data
 from src.utils.io import print_flush
 from src.losses.diversity import oacd_loss
@@ -36,8 +36,8 @@ def compute_convergence_rate(
     収束率を計算（バッチ処理でメモリ効率化）
 
     Args:
-        current: 現在のコンテキスト [num_tokens, context_dim]
-        previous: 前回のコンテキスト [num_tokens, context_dim]
+        current: 現在のprojection [num_tokens, proj_dim]
+        previous: 前回のprojection [num_tokens, proj_dim]
         threshold: 収束判定の閾値
         device: デバイス
 
@@ -64,13 +64,13 @@ def compute_convergence_rate(
 
 
 def train_iteration(
-    model: ContextPythiaModel,
+    model: DProjPythiaModel,
     token_embeds: torch.Tensor,
-    previous_contexts: torch.Tensor,
+    previous_projs: torch.Tensor,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     batch_size: int,
-    context_noise: float,
+    proj_noise: float,
     gradient_clip: float,
 ) -> tuple[torch.Tensor, float]:
     """
@@ -79,15 +79,15 @@ def train_iteration(
     Args:
         model: モデル
         token_embeds: [num_tokens, embed_dim] (CPU tensor)
-        previous_contexts: [num_tokens, context_dim] (CPU tensor)
+        previous_projs: [num_tokens, proj_dim] (CPU tensor)
         optimizer: オプティマイザ
         device: デバイス
         batch_size: バッチサイズ
-        context_noise: ガウシアンノイズの標準偏差
+        proj_noise: ガウシアンノイズの標準偏差
         gradient_clip: 勾配クリッピング値
 
     Returns:
-        new_contexts: [num_tokens, context_dim] (CPU tensor)
+        new_projs: [num_tokens, proj_dim] (CPU tensor)
         avg_loss: 平均損失
     """
     num_tokens = len(token_embeds)
@@ -95,11 +95,11 @@ def train_iteration(
 
     optimizer.zero_grad()
 
-    # shifted_prev_contextを作成
-    init_ctx = torch.zeros(1, model.context_dim, device='cpu')
-    shifted_prev_context = torch.cat([init_ctx, previous_contexts[:-1]], dim=0)
+    # shifted_prev_projを作成
+    init_proj = torch.zeros(1, model.proj_dim, device='cpu')
+    shifted_prev_proj = torch.cat([init_proj, previous_projs[:-1]], dim=0)
 
-    all_contexts_cpu = []
+    all_projs_cpu = []
     total_loss_sum = 0.0
 
     for start_idx in range(0, num_tokens, batch_size):
@@ -107,16 +107,16 @@ def train_iteration(
         current_batch_size = end_idx - start_idx
 
         # バッチ分だけGPUに転送
-        batch_contexts = shifted_prev_context[start_idx:end_idx].to(device)
+        batch_projs = shifted_prev_proj[start_idx:end_idx].to(device)
         batch_embeds = token_embeds[start_idx:end_idx].to(device)
 
         # ノイズ追加（汎化性能向上）
-        if context_noise > 0 and model.training:
-            noise = torch.randn_like(batch_contexts) * context_noise
-            batch_contexts = batch_contexts + noise
+        if proj_noise > 0 and model.training:
+            noise = torch.randn_like(batch_projs) * proj_noise
+            batch_projs = batch_projs + noise
 
         # Forward pass
-        batch_output = model.context_block(batch_contexts, batch_embeds)
+        batch_output = model.dproj(batch_projs, batch_embeds)
 
         # OACD損失
         loss = oacd_loss(batch_output, centroid_weight=0.1)
@@ -129,40 +129,40 @@ def train_iteration(
         total_loss_sum += loss.item() * current_batch_size
 
         # 結果をCPUに保存
-        all_contexts_cpu.append(batch_output.detach().cpu())
+        all_projs_cpu.append(batch_output.detach().cpu())
 
-        del batch_contexts, batch_embeds, batch_output
+        del batch_projs, batch_embeds, batch_output
 
     # 勾配クリッピングとパラメータ更新
-    torch.nn.utils.clip_grad_norm_(model.context_block.parameters(), gradient_clip)
+    torch.nn.utils.clip_grad_norm_(model.dproj.parameters(), gradient_clip)
     optimizer.step()
 
     # GPUキャッシュクリア
     if device.type == "cuda":
         torch.cuda.empty_cache()
 
-    # コンテキストを結合
-    new_contexts = torch.cat(all_contexts_cpu, dim=0)
+    # Projectionを結合
+    new_projs = torch.cat(all_projs_cpu, dim=0)
 
-    return new_contexts, total_loss_sum / num_tokens
+    return new_projs, total_loss_sum / num_tokens
 
 
-def train_phase1(
-    model: ContextPythiaModel,
+def train_dproj(
+    model: DProjPythiaModel,
     train_token_embeds: torch.Tensor,
     val_token_embeds: torch.Tensor,
     device: torch.device,
-    phase1_config: Phase1Config,
+    dproj_config: DProjTrainingConfig,
 ) -> dict:
     """
-    Phase 1学習のメインループ
+    DProj学習のメインループ
 
     Args:
-        model: Context-Pythiaモデル
+        model: DProj-Pythiaモデル
         train_token_embeds: 訓練用トークン埋め込み [num_train_tokens, embed_dim] (CPU)
         val_token_embeds: 検証用トークン埋め込み [num_val_tokens, embed_dim] (CPU)
         device: デバイス
-        phase1_config: Phase 1設定
+        dproj_config: DProj学習設定
 
     Returns:
         stats: 学習統計
@@ -171,20 +171,19 @@ def train_phase1(
     num_train_tokens = len(train_token_embeds)
     num_val_tokens = len(val_token_embeds)
 
-    print_flush(f"\nPhase 1 Training:")
+    print_flush("\nDProj Training:")
     print_flush(f"  Train tokens: {num_train_tokens:,}")
     print_flush(f"  Val tokens: {num_val_tokens:,}")
-    print_flush(f"  Max iterations: {phase1_config.max_iterations}")
-    print_flush(f"  Learning rate: {phase1_config.learning_rate}")
-    print_flush(f"  Early stopping rate: {int(phase1_config.early_stopping_threshold * 100)}%")
+    print_flush(f"  Max iterations: {dproj_config.max_iterations}")
+    print_flush(f"  Learning rate: {dproj_config.learning_rate}")
+    print_flush(f"  Early stopping rate: {int(dproj_config.early_stopping_threshold * 100)}%")
 
     optimizer = torch.optim.Adam(
-        model.context_block.parameters(),
-        lr=phase1_config.learning_rate,
+        model.dproj.parameters(),
+        lr=dproj_config.learning_rate,
     )
 
-    previous_contexts = None
-    val_previous_contexts = None
+    previous_projs = None
     final_loss = 0.0
     final_conv_rate = 0.0
 
@@ -196,49 +195,48 @@ def train_phase1(
         'final_conv_rate': 0.0,
     }
 
-    for iteration in range(phase1_config.max_iterations):
+    for iteration in range(dproj_config.max_iterations):
         iter_start = time.time()
 
         if iteration == 0:
             # Iteration 0: ランダム初期化
-            previous_contexts = torch.randn(num_train_tokens, model.context_dim) * 0.01
-            val_previous_contexts = torch.randn(num_val_tokens, model.context_dim) * 0.01
-            print_flush(f"  Iter  1: random init")
+            previous_projs = torch.randn(num_train_tokens, model.proj_dim) * 0.01
+            print_flush("  Iter  1: random init")
             continue
 
         # 学習イテレーション
-        assert previous_contexts is not None
-        current_contexts, train_loss = train_iteration(
-            model, train_token_embeds, previous_contexts, optimizer, device,
-            batch_size=phase1_config.batch_size,
-            context_noise=phase1_config.context_noise,
-            gradient_clip=phase1_config.gradient_clip,
+        assert previous_projs is not None
+        current_projs, train_loss = train_iteration(
+            model, train_token_embeds, previous_projs, optimizer, device,
+            batch_size=dproj_config.batch_size,
+            proj_noise=dproj_config.proj_noise,
+            gradient_clip=dproj_config.gradient_clip,
         )
         final_loss = train_loss
 
         # 収束率計算
         conv_rate = compute_convergence_rate(
-            current_contexts, previous_contexts,
-            phase1_config.convergence_threshold, device,
+            current_projs, previous_projs,
+            dproj_config.convergence_threshold, device,
         )
         final_conv_rate = conv_rate
 
         iter_time = time.time() - iter_start
         print_flush(f"  Iter {iteration+1:2d}: loss={train_loss:.4f}, conv={int(conv_rate*100)}% [{iter_time:.1f}s]")
 
-        previous_contexts = current_contexts
+        previous_projs = current_projs
 
         # Early stopping
-        if phase1_config.early_stopping and conv_rate >= phase1_config.early_stopping_threshold:
+        if dproj_config.early_stopping and conv_rate >= dproj_config.early_stopping_threshold:
             stats['early_stopped'] = True
             stats['stop_reason'] = 'early_stopping'
-            print_flush(f"  → Early stop: conv {int(conv_rate*100)}% >= {int(phase1_config.early_stopping_threshold*100)}%")
+            print_flush(f"  → Early stop: conv {int(conv_rate*100)}% >= {int(dproj_config.early_stopping_threshold*100)}%")
             break
 
         stats['iterations'] = iteration + 1
         stats['final_conv_rate'] = final_conv_rate
 
-    print_flush(f"\nPhase 1 completed:")
+    print_flush("\nDProj Training completed:")
     print_flush(f"  Iterations: {stats['iterations']}")
     print_flush(f"  Final loss: {final_loss:.4f}")
     print_flush(f"  Final conv rate: {int(final_conv_rate*100)}%")
@@ -247,8 +245,8 @@ def train_phase1(
     return stats
 
 
-def main():
-    parser = argparse.ArgumentParser(description="Phase 1 Training for Context-Pythia")
+def main() -> None:
+    parser = argparse.ArgumentParser(description="DProj Training for DProj-Pythia")
     parser.add_argument("--samples", type=int, required=True, help="Number of samples")
     parser.add_argument("--seq-length", type=int, default=128, help="Sequence length")
     parser.add_argument("--val-split", type=float, default=0.1, help="Validation split ratio")
@@ -268,18 +266,18 @@ def main():
         print_flush(f"Device: {device}")
 
     # Configs
-    pythia_config = ContextPythiaConfig()
-    phase1_config = Phase1Config()
+    pythia_config = DProjPythiaConfig()
+    dproj_config = DProjTrainingConfig()
 
     print_flush("=" * 70)
-    print_flush("PHASE 1: CONTEXTBLOCK OACD TRAINING (PYTHIA)")
+    print_flush("DPROJ TRAINING: DIVERSE PROJECTION OACD (PYTHIA)")
     print_flush("=" * 70)
     print_flush(f"Samples: {args.samples:,}")
     print_flush(f"Seq length: {args.seq_length}")
     print_flush(f"Total tokens: {num_tokens:,}")
     print_flush(f"Embed dim: {pythia_config.embed_dim}")
-    print_flush(f"Context dim: {pythia_config.context_dim}")
-    print_flush(f"Checkpoint: {pythia_config.phase1_checkpoint_path}")
+    print_flush(f"Proj dim: {pythia_config.proj_dim}")
+    print_flush(f"Checkpoint: {pythia_config.dproj_checkpoint_path}")
     print_flush("=" * 70)
 
     # Data
@@ -291,11 +289,11 @@ def main():
     )
 
     # Model
-    print_flush("\n[Model] Creating Context-Pythia...")
-    model = ContextPythiaModel(
+    print_flush("\n[Model] Creating DProj-Pythia...")
+    model = DProjPythiaModel(
         vocab_size=pythia_config.vocab_size,
         embed_dim=pythia_config.embed_dim,
-        context_dim=pythia_config.context_dim,
+        proj_dim=pythia_config.proj_dim,
         num_layers=pythia_config.num_layers,
         num_heads=pythia_config.num_attention_heads,
         intermediate_size=pythia_config.intermediate_size,
@@ -303,11 +301,11 @@ def main():
         rotary_pct=pythia_config.rotary_pct,
     ).to(device)
 
-    context_params = sum(p.numel() for p in model.context_block.parameters())
-    print_flush(f"ContextBlock parameters: {context_params:,}")
+    dproj_params = sum(p.numel() for p in model.dproj.parameters())
+    print_flush(f"DiverseProjection parameters: {dproj_params:,}")
 
     # Compute token embeddings (CPUに保存)
-    # ⚠️ 重要: embed_norm による正規化が必須（Phase 1収束に必要）
+    # ⚠️ 重要: embed_norm による正規化が必須（DProj学習収束に必要）
     print_flush("\n[Embeddings] Computing token embeddings...")
     with torch.no_grad():
         # Train
@@ -329,20 +327,20 @@ def main():
 
     # Train
     start_time = time.time()
-    stats = train_phase1(
-        model, train_token_embeds, val_token_embeds, device, phase1_config,
+    stats = train_dproj(
+        model, train_token_embeds, val_token_embeds, device, dproj_config,
     )
     total_time = time.time() - start_time
     print_flush(f"  Total time: {total_time:.1f}s")
 
     # Save checkpoint
-    checkpoint_path = Path(pythia_config.phase1_checkpoint_path)
+    checkpoint_path = Path(pythia_config.dproj_checkpoint_path)
     checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
     checkpoint = {
-        "context_block_state_dict": model.context_block.state_dict(),
+        "dproj_state_dict": model.dproj.state_dict(),
         "config": {
-            "context_dim": pythia_config.context_dim,
+            "proj_dim": pythia_config.proj_dim,
             "embed_dim": pythia_config.embed_dim,
             "num_samples": args.samples,
             "seq_length": args.seq_length,
