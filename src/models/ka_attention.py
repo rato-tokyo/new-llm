@@ -16,7 +16,7 @@ Aには「Vの情報 + Attention構造の情報」が含まれている。
 - トークンn: Q[n], K[1:n] → attention_probs → weighted sum of [A[1:n-1], V[n]] → A[n]
 """
 
-from typing import Optional, Tuple, Dict
+from typing import Optional, Dict, List
 
 import torch
 import torch.nn as nn
@@ -119,7 +119,7 @@ class KAAttention(nn.Module):
         # attn_probs: [batch, heads, seq, seq]
 
         # 位置ごとに計算（学習時も推論時と同じロジック）
-        A_outputs = []
+        A_outputs: List[torch.Tensor] = []
 
         for i in range(seq_len):
             # 位置iでのattention weights: [batch, heads, 1, i+1]

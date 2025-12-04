@@ -31,24 +31,26 @@ def prepare_data(
     print_flush(f"Preparing data: {num_samples:,} samples, seq_len={seq_length}")
 
     # Load from cache or download
-    from src.utils.data_pythia import load_pile_tokens
+    from config.pythia import PythiaConfig
+    from src.utils.data_pythia import load_pile_tokens_cached
 
+    config = PythiaConfig()
     total_tokens_needed = num_samples * seq_length
-    tokens = load_pile_tokens(total_tokens_needed + seq_length)
+    tokens = load_pile_tokens_cached(total_tokens_needed + seq_length, config.tokenizer_name)
 
     # Create samples
-    all_input_ids = []
-    all_labels = []
+    all_input_ids_list = []
+    all_labels_list = []
 
     for i in range(num_samples):
         start = i * seq_length
         input_ids = tokens[start:start + seq_length]
         labels = tokens[start + 1:start + seq_length + 1]
-        all_input_ids.append(input_ids)
-        all_labels.append(labels)
+        all_input_ids_list.append(input_ids)
+        all_labels_list.append(labels)
 
-    all_input_ids = torch.stack(all_input_ids)
-    all_labels = torch.stack(all_labels)
+    all_input_ids = torch.stack(all_input_ids_list)
+    all_labels = torch.stack(all_labels_list)
 
     # Split
     val_size = int(num_samples * val_split)
@@ -241,7 +243,7 @@ def main():
             rotary_pct=config.rotary_pct,
         )
 
-        print_flush(f"\n[Pythia-70M] Training...")
+        print_flush("\n[Pythia-70M] Training...")
         best_ppl, best_epoch = train_model(
             pythia_model,
             train_loader,
@@ -271,7 +273,7 @@ def main():
         rotary_pct=config.rotary_pct,
     )
 
-    print_flush(f"\n[KA-Pythia] Training...")
+    print_flush("\n[KA-Pythia] Training...")
     best_ppl, best_epoch = train_model(
         ka_model,
         train_loader,
