@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-Pythia vs Context-Pythia 比較実験
+Pythia vs DProj-Pythia 比較実験
 
-Pythia-70M（ベースライン）とContext-Pythia（KV圧縮50%）を比較する。
+Pythia-70M（ベースライン）とDProj-Pythia（KV圧縮）を比較する。
 
 Usage:
     python3 scripts/experiment_pythia_comparison.py --samples 10000 --epochs 10
@@ -21,9 +21,9 @@ import torch.optim as optim
 # Add project root to path
 sys.path.insert(0, ".")
 
-from config import ContextPythiaConfig, PythiaConfig
+from config import DProjPythiaConfig, PythiaConfig
 from src.models.pythia import PythiaModel
-from src.models.context_pythia import ContextPythiaModel
+from src.models.dproj_pythia import DProjPythiaModel
 from src.utils.data_pythia import prepare_pythia_phase2_data
 from src.utils.io import print_flush
 from src.utils.device import clear_gpu_cache
@@ -244,10 +244,10 @@ def run_experiment(
         print_flush(f"Device: {device}")
 
     pythia_config = PythiaConfig()
-    context_config = ContextPythiaConfig()
+    dproj_config = DProjPythiaConfig()
 
     print_flush("=" * 70)
-    print_flush("PYTHIA vs CONTEXT-PYTHIA COMPARISON")
+    print_flush("PYTHIA vs DPROJ-PYTHIA COMPARISON")
     print_flush("=" * 70)
     print_flush(f"Samples: {num_samples:,}")
     print_flush(f"Sequence length: {seq_length}")
@@ -256,8 +256,8 @@ def run_experiment(
     print_flush(f"Learning rate: {lr}")
     print_flush("=" * 70)
     print_flush("\nArchitecture comparison:")
-    print_flush(f"  Pythia:         hidden_size={pythia_config.hidden_size}, intermediate={pythia_config.intermediate_size}")
-    print_flush(f"  Context-Pythia: context_dim={context_config.context_dim}, intermediate={context_config.intermediate_size}")
+    print_flush(f"  Pythia:       hidden_size={pythia_config.hidden_size}, intermediate={pythia_config.intermediate_size}")
+    print_flush(f"  DProj-Pythia: proj_dim={dproj_config.proj_dim}, intermediate={dproj_config.intermediate_size}")
     print_flush("=" * 70)
 
     # Load data
@@ -272,11 +272,11 @@ def run_experiment(
     print_flush(f"  Train: {len(train_inputs):,} samples")
     print_flush(f"  Val: {len(val_inputs):,} samples")
 
-    results = {}
+    results: Dict[str, Any] = {}
 
     # KV cache sizes (K + V, float32)
     kv_size_pythia = pythia_config.hidden_size * seq_length * pythia_config.num_layers * 2 * 4
-    kv_size_context = context_config.context_dim * seq_length * context_config.num_layers * 2 * 4
+    kv_size_dproj = dproj_config.proj_dim * seq_length * dproj_config.num_layers * 2 * 4
 
     # ===== 1. Pythia (Baseline) =====
     if skip_baseline:
@@ -316,53 +316,53 @@ def run_experiment(
         del pythia_model
         clear_gpu_cache(device)
 
-    # ===== 2. Context-Pythia (Ours) =====
+    # ===== 2. DProj-Pythia (Ours) =====
     print_flush("\n" + "=" * 70)
-    print_flush("2. CONTEXT-PYTHIA (Ours - 50% KV Compression)")
+    print_flush("2. DPROJ-PYTHIA (Ours - KV Compression)")
     print_flush("=" * 70)
 
-    context_pythia_model = ContextPythiaModel(
-        vocab_size=context_config.vocab_size,
-        embed_dim=context_config.embed_dim,
-        context_dim=context_config.context_dim,
-        num_layers=context_config.num_layers,
-        num_heads=context_config.num_attention_heads,
-        intermediate_size=context_config.intermediate_size,
-        max_position_embeddings=context_config.max_position_embeddings,
-        rotary_pct=context_config.rotary_pct,
+    dproj_pythia_model = DProjPythiaModel(
+        vocab_size=dproj_config.vocab_size,
+        embed_dim=dproj_config.embed_dim,
+        proj_dim=dproj_config.proj_dim,
+        num_layers=dproj_config.num_layers,
+        num_heads=dproj_config.num_attention_heads,
+        intermediate_size=dproj_config.intermediate_size,
+        max_position_embeddings=dproj_config.max_position_embeddings,
+        rotary_pct=dproj_config.rotary_pct,
     ).to(device)
 
-    # Load Phase 1 checkpoint
-    checkpoint_path = Path(context_config.phase1_checkpoint_path)
+    # Load DProj checkpoint
+    checkpoint_path = Path(dproj_config.dproj_checkpoint_path)
     if checkpoint_path.exists():
-        print_flush(f"  Loading Phase 1 checkpoint: {checkpoint_path}")
+        print_flush(f"  Loading DProj checkpoint: {checkpoint_path}")
         checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=True)
-        context_pythia_model.context_block.load_state_dict(
-            checkpoint["context_block_state_dict"]
+        dproj_pythia_model.dproj.load_state_dict(
+            checkpoint["dproj_state_dict"]
         )
-        print_flush("  ✓ ContextBlock loaded")
+        print_flush("  ✓ DiverseProjection loaded")
     else:
-        print_flush(f"  ⚠️ Phase 1 checkpoint not found: {checkpoint_path}")
-        print_flush("  Using random initialization for ContextBlock")
+        print_flush(f"  ⚠️ DProj checkpoint not found: {checkpoint_path}")
+        print_flush("  Using random initialization for DiverseProjection")
 
-    # Freeze ContextBlock
-    context_pythia_model.freeze_context_block()
+    # Freeze DiverseProjection
+    dproj_pythia_model.freeze_dproj()
 
-    context_pythia_results = train_model(
-        context_pythia_model,
+    dproj_pythia_results = train_model(
+        dproj_pythia_model,
         train_inputs, train_targets,
         val_inputs, val_targets,
         device,
         num_epochs=num_epochs,
         batch_size=batch_size,
         lr=lr,
-        model_name="Context-Pythia",
+        model_name="DProj-Pythia",
     )
-    results["context_pythia"] = context_pythia_results
+    results["dproj_pythia"] = dproj_pythia_results
 
-    print_flush(f"  KV Cache: {kv_size_context / 1024:.1f} KB per sample")
+    print_flush(f"  KV Cache: {kv_size_dproj / 1024:.1f} KB per sample")
 
-    del context_pythia_model
+    del dproj_pythia_model
     clear_gpu_cache(device)
 
     # ===== Summary =====
@@ -381,25 +381,29 @@ def run_experiment(
     else:
         print_flush(f"| Pythia-70M | (skipped) | {kv_size_pythia / 1024:.1f} KB | - |")
 
+    kv_reduction = 100 * (1 - kv_size_dproj / kv_size_pythia)
     print_flush(
-        f"| Context-Pythia | {results['context_pythia']['best_val_ppl']:.1f} | "
-        f"{kv_size_context / 1024:.1f} KB | 50% |"
+        f"| DProj-Pythia | {results['dproj_pythia']['best_val_ppl']:.1f} | "
+        f"{kv_size_dproj / 1024:.1f} KB | {kv_reduction:.0f}% |"
     )
 
     if results["pythia"] is not None:
-        ppl_diff = results["context_pythia"]["best_val_ppl"] - results["pythia"]["best_val_ppl"]
+        ppl_diff = results["dproj_pythia"]["best_val_ppl"] - results["pythia"]["best_val_ppl"]
         print_flush(f"\nPPL difference: {ppl_diff:+.1f}")
 
     return results
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Pythia vs Context-Pythia Comparison")
+    # Get defaults from config
+    config = PythiaConfig()
+
+    parser = argparse.ArgumentParser(description="Pythia vs DProj-Pythia Comparison")
     parser.add_argument("--samples", type=int, default=10000, help="Number of samples")
     parser.add_argument("--seq-length", type=int, default=128, help="Sequence length")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
-    parser.add_argument("--batch-size", type=int, default=32, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--epochs", type=int, default=config.num_epochs, help="Number of epochs")
+    parser.add_argument("--batch-size", type=int, default=config.batch_size, help="Batch size")
+    parser.add_argument("--lr", type=float, default=config.learning_rate, help="Learning rate")
     parser.add_argument("--skip-baseline", action="store_true", help="Skip Pythia-70M baseline")
     args = parser.parse_args()
 

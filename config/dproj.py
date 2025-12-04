@@ -14,6 +14,7 @@ class DProjTrainingConfig:
     learning_rate = 0.003            # 学習率
     batch_size = 5000                # 並列処理のバッチサイズ（L4 GPU 24GB対応）
     gradient_clip = 2.0              # 勾配クリッピング値
+    convergence_batch_size = 100000  # 収束率計算用バッチサイズ
 
     # ========== ノイズ（汎化性能向上） ==========
     proj_noise = 0.05                # ガウシアンノイズの標準偏差

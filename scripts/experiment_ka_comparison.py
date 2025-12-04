@@ -150,12 +150,15 @@ def run_experiment(
 
 
 def main() -> None:
+    # Get defaults from config
+    config = PythiaConfig()
+
     parser = argparse.ArgumentParser(description="KA-Attention vs Pythia Comparison")
     parser.add_argument("--samples", type=int, default=10000, help="Number of samples")
     parser.add_argument("--seq-length", type=int, default=128, help="Sequence length")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
-    parser.add_argument("--batch-size", type=int, default=32, help="Batch size")
-    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--epochs", type=int, default=config.num_epochs, help="Number of epochs")
+    parser.add_argument("--batch-size", type=int, default=config.batch_size, help="Batch size")
+    parser.add_argument("--lr", type=float, default=config.learning_rate, help="Learning rate")
     parser.add_argument("--skip-baseline", action="store_true", help="Skip baseline training")
     args = parser.parse_args()
 

@@ -31,6 +31,7 @@ def compute_convergence_rate(
     previous: torch.Tensor,
     device: torch.device,
     threshold: float,
+    batch_size: int,
 ) -> float:
     """
     収束率を計算（バッチ処理でメモリ効率化）
@@ -38,14 +39,14 @@ def compute_convergence_rate(
     Args:
         current: 現在のprojection [num_tokens, proj_dim]
         previous: 前回のprojection [num_tokens, proj_dim]
-        threshold: 収束判定の閾値
         device: デバイス
+        threshold: 収束判定の閾値
+        batch_size: バッチサイズ
 
     Returns:
         収束率（0.0-1.0）
     """
     num_tokens = len(current)
-    batch_size = 100000
 
     with torch.no_grad():
         converged_count = 0
@@ -213,6 +214,7 @@ def train_dproj(
         conv_rate = compute_convergence_rate(
             current_projs, previous_projs, device,
             threshold=dproj_config.convergence_threshold,
+            batch_size=dproj_config.convergence_batch_size,
         )
         final_conv_rate = conv_rate
 
