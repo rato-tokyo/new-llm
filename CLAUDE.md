@@ -255,6 +255,82 @@ def compute_convergence_rate(current, previous, threshold=0.03):
 
 ---
 
+## 📚 DeepSeek MLA (Multi-head Latent Attention) 参考資料
+
+### MLA概要
+
+DeepSeek-V2で導入されたKVキャッシュ圧縮技術。K+Vを共通の低次元潜在ベクトルに圧縮し、「吸収」技法により復元せずにAttention計算を実現。
+
+### 吸収モード（Absorbed Projection）の数式
+
+```
+標準MHA:
+  scores = Q @ K^T
+  output = softmax(scores) @ V
+
+MLA（圧縮・復元あり）:
+  c_q = X @ W_DQ       # Q圧縮: (seq, 512) → (seq, 128)
+  c_kv = X @ W_DKV     # KV共通圧縮: (seq, 512) → (seq, 128)
+
+  Q = c_q @ W_UQ       # Q復元: (seq, 128) → (seq, 512)
+  K = c_kv @ W_UK      # K復元
+  V = c_kv @ W_UV      # V復元
+
+MLA（吸収モード - 復元不要）:
+  scores = Q @ K^T
+        = (c_q @ W_UQ) @ (c_kv @ W_UK)^T
+        = (c_q @ W_UQ) @ (W_UK^T @ c_kv^T)
+        = c_q @ (W_UQ @ W_UK^T) @ c_kv^T
+        #       ↑ これを事前計算して吸収
+        = c_q @ W_absorbed @ c_kv^T
+
+  # W_absorbed = W_UQ @ W_UK^T は (128, 128) の小さな行列
+  # 512次元に復元せず、128次元のまま計算可能！
+```
+
+### V処理（吸収モード）
+
+```
+output = softmax(scores) @ V
+       = attn_weights @ (c_kv @ W_UV)
+       = (attn_weights @ c_kv) @ W_UV  ← 結合法則
+         ↑ 圧縮空間での計算    ↑ 最後に復元
+```
+
+### KVキャッシュの削減効果
+
+| 方式 | キャッシュ内容 | 例（512-dim） |
+|------|---------------|---------------|
+| 標準MHA | K(512) + V(512) | 1024 |
+| MLA | c_kv(128) + k_pe(64) | 192 |
+| 削減率 | | 81% |
+
+### Decoupled RoPE
+
+MLAはRoPE情報を分離してキャッシュ:
+```
+c_kv: コンテンツ情報（圧縮）
+k_pe: 位置情報（RoPE適用済み、別途キャッシュ）
+
+scores = (q_content @ c_kv^T) + (q_pe @ k_pe^T)
+```
+
+### Q, K, V 圧縮の難易度
+
+| 対象 | 難易度 | 理由 |
+|------|--------|------|
+| V | 低 | 重み付き平均で誤差が吸収される |
+| K | 中〜高 | Attention分布に直接影響、RoPE情報を含む |
+| Q | 高 | 現在のトークンの「意図」を表現 |
+
+### 参考リンク
+
+- [DeepSeek-V2 Paper](https://arxiv.org/abs/2405.04434)
+- [MLA Explanation (HuggingFace)](https://huggingface.co/blog/NormalUhr/mla-explanation)
+- [Understanding MLA](https://planetbanatt.net/articles/mla.html)
+
+---
+
 ## 🔧 開発環境
 
 ### Lint/Type Check
