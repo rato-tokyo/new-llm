@@ -11,164 +11,40 @@ Usage:
 """
 
 import argparse
-import random
 import sys
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
-import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-
-# ============================================================
-# Training Parameters (modify here for easy tuning)
-# ============================================================
-EARLY_STOPPING_PATIENCE = 1  # Early stopping patience
-DEFAULT_RECON_WEIGHT = 0.1   # Reconstruction loss weight
-GRADIENT_CLIP = 1.0          # Gradient clipping value
-# ============================================================
 
 # Add project root to path
 sys.path.insert(0, ".")
 
 from config.pythia import PythiaConfig  # noqa: E402
+from src.config.experiment_defaults import (  # noqa: E402
+    EARLY_STOPPING_PATIENCE,
+    GRADIENT_CLIP,
+    DEFAULT_RECON_WEIGHT,
+)
 from src.models.pythia import PythiaModel  # noqa: E402
 from src.models.vdproj_pythia import VDProjPythiaModel  # noqa: E402
 from src.utils.io import print_flush  # noqa: E402
+from src.utils.seed import set_seed  # noqa: E402
 from src.utils.training import prepare_data_loaders, get_device  # noqa: E402
+from src.utils.evaluation import evaluate_ppl, evaluate_position_wise_ppl  # noqa: E402
 from src.utils.device import clear_gpu_cache  # noqa: E402
 
 
-def set_seed(seed: int = 42) -> None:
-    """Set random seed for reproducibility"""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
-
-
-def evaluate_model(
-    model: nn.Module,
-    val_loader: DataLoader,
-    device: torch.device,
-) -> Dict[str, float]:
-    """Evaluate model and return metrics"""
-    model.eval()
-    total_loss = 0.0
-    total_recon_loss = 0.0
-    total_tokens = 0
-    num_batches = 0
-
-    with torch.no_grad():
-        for batch in val_loader:
-            input_ids, labels = batch
-            input_ids = input_ids.to(device)
-            labels = labels.to(device)
-
-            # Forward with reconstruction loss
-            logits, recon_loss = model(input_ids, return_reconstruction_loss=True)
-
-            # LM loss
-            loss = nn.functional.cross_entropy(
-                logits.view(-1, logits.size(-1)),
-                labels.view(-1),
-                reduction="sum",
-            )
-
-            total_loss += loss.item()
-            total_tokens += labels.numel()
-
-            if recon_loss is not None:
-                total_recon_loss += recon_loss.item()
-                num_batches += 1
-
-    avg_loss = total_loss / total_tokens
-    ppl = torch.exp(torch.tensor(avg_loss)).item()
-    avg_recon_loss = total_recon_loss / num_batches if num_batches > 0 else 0.0
-
-    return {
-        "ppl": ppl,
-        "recon_loss": avg_recon_loss,
-    }
-
-
-def evaluate_position_wise_ppl(
-    model: nn.Module,
-    val_loader: DataLoader,
-    device: torch.device,
-    position_ranges: Optional[list] = None,
-) -> Dict[str, float]:
-    """Evaluate position-wise perplexity"""
-    model.eval()
-
-    # Get sequence length from first batch
-    first_batch = next(iter(val_loader))
-    seq_len = first_batch[0].shape[1]
-
-    # Default position ranges
-    if position_ranges is None:
-        position_ranges = [
-            (0, 16),
-            (16, 32),
-            (32, 64),
-            (64, 96),
-            (96, seq_len),
-        ]
-
-    # Initialize accumulators
-    range_losses: Dict[str, float] = {}
-    range_tokens: Dict[str, int] = {}
-    for start, end in position_ranges:
-        key = f"{start}-{end}"
-        range_losses[key] = 0.0
-        range_tokens[key] = 0
-
-    with torch.no_grad():
-        for batch in val_loader:
-            input_ids, labels = batch
-            input_ids = input_ids.to(device)
-            labels = labels.to(device)
-
-            logits, _ = model(input_ids, return_reconstruction_loss=False)
-
-            for start, end in position_ranges:
-                key = f"{start}-{end}"
-                range_logits = logits[:, start:end, :]
-                range_labels = labels[:, start:end]
-
-                loss = nn.functional.cross_entropy(
-                    range_logits.reshape(-1, range_logits.size(-1)),
-                    range_labels.reshape(-1),
-                    reduction="sum",
-                )
-
-                range_losses[key] += loss.item()
-                range_tokens[key] += range_labels.numel()
-
-    # Compute PPL
-    results: Dict[str, float] = {}
-    for key in range_losses:
-        if range_tokens[key] > 0:
-            avg_loss = range_losses[key] / range_tokens[key]
-            ppl = torch.exp(torch.tensor(avg_loss)).item()
-            results[key] = ppl
-        else:
-            results[key] = float("inf")
-
-    return results
-
-
-def train_epoch(
+def train_epoch_with_recon(
     model: nn.Module,
     train_loader: DataLoader,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     recon_weight: float = 0.1,
 ) -> Dict[str, float]:
-    """Train for one epoch"""
+    """Train for one epoch with reconstruction loss."""
     model.train()
     total_lm_loss = 0.0
     total_recon_loss = 0.0
@@ -183,13 +59,11 @@ def train_epoch(
         optimizer.zero_grad()
         logits, recon_loss = model(input_ids, return_reconstruction_loss=True)
 
-        # LM loss
         lm_loss = nn.functional.cross_entropy(
             logits.view(-1, logits.size(-1)),
             labels.view(-1),
         )
 
-        # Combined loss
         if recon_loss is not None:
             loss = lm_loss + recon_weight * recon_loss
             total_recon_loss += recon_loss.item()
@@ -208,10 +82,7 @@ def train_epoch(
     ppl = torch.exp(torch.tensor(avg_lm_loss)).item()
     avg_recon_loss = total_recon_loss / num_batches if num_batches > 0 else 0.0
 
-    return {
-        "ppl": ppl,
-        "recon_loss": avg_recon_loss,
-    }
+    return {"ppl": ppl, "recon_loss": avg_recon_loss}
 
 
 def run_experiment(
@@ -221,25 +92,10 @@ def run_experiment(
     batch_size: int = 8,
     lr: float = 1e-4,
     v_proj_dim: int = 320,
-    recon_weight: float = 0.1,
+    recon_weight: float = DEFAULT_RECON_WEIGHT,
     skip_baseline: bool = False,
 ) -> Dict[str, Any]:
-    """
-    Run V-DProj experiment
-
-    Args:
-        num_samples: Number of training samples
-        seq_length: Sequence length
-        num_epochs: Number of epochs
-        batch_size: Batch size
-        lr: Learning rate
-        v_proj_dim: V projection dimension (compressed size)
-        recon_weight: Weight for reconstruction loss
-        skip_baseline: Skip Pythia baseline training
-
-    Returns:
-        Results dict
-    """
+    """Run V-DProj experiment."""
     set_seed(42)
 
     device = get_device()
@@ -257,12 +113,10 @@ def run_experiment(
     print_flush(f"Skip baseline: {skip_baseline}")
     print_flush("=" * 70)
 
-    # Calculate KV cache reduction
-    reduction = (1.0 - v_proj_dim / config.hidden_size) / 2 * 100  # V only
+    reduction = (1.0 - v_proj_dim / config.hidden_size) / 2 * 100
     print_flush(f"\nKV Cache reduction (V only): {reduction:.1f}%")
     print_flush("=" * 70)
 
-    # Load data
     print_flush("\n[Data] Loading Pile data...")
     train_loader, val_loader = prepare_data_loaders(
         num_samples=num_samples,
@@ -309,7 +163,7 @@ def run_experiment(
         for epoch in range(1, num_epochs + 1):
             start_time = time.time()
 
-            # Train (Pythia doesn't have recon loss)
+            # Train
             pythia_model.train()
             total_loss = 0.0
             total_tokens = 0
@@ -334,24 +188,7 @@ def run_experiment(
             train_ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
 
             # Evaluate
-            pythia_model.eval()
-            val_loss = 0.0
-            val_tokens = 0
-            with torch.no_grad():
-                for batch in val_loader:
-                    input_ids, labels = batch
-                    input_ids = input_ids.to(device)
-                    labels = labels.to(device)
-                    logits = pythia_model(input_ids)
-                    loss = nn.functional.cross_entropy(
-                        logits.view(-1, logits.size(-1)),
-                        labels.view(-1),
-                        reduction="sum",
-                    )
-                    val_loss += loss.item()
-                    val_tokens += labels.numel()
-
-            val_ppl = torch.exp(torch.tensor(val_loss / val_tokens)).item()
+            val_ppl = evaluate_ppl(pythia_model, val_loader, device)
             elapsed = time.time() - start_time
 
             improved = val_ppl < best_val_ppl
@@ -375,19 +212,8 @@ def run_experiment(
 
         print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
 
-        # Position-wise PPL (wrap for compatibility)
-        class PythiaWrapper(nn.Module):
-            def __init__(self, model):
-                super().__init__()
-                self.model = model
-
-            def forward(self, input_ids, return_reconstruction_loss=False):
-                logits = self.model(input_ids)
-                return logits, None
-
-        pythia_wrapper = PythiaWrapper(pythia_model)
         print_flush("\n  Position-wise PPL:")
-        pythia_pos_ppl = evaluate_position_wise_ppl(pythia_wrapper, val_loader, device)
+        pythia_pos_ppl = evaluate_position_wise_ppl(pythia_model, val_loader, device)
         for pos_range, ppl in pythia_pos_ppl.items():
             print_flush(f"    Position {pos_range}: {ppl:.1f}")
 
@@ -397,7 +223,7 @@ def run_experiment(
             "position_wise_ppl": pythia_pos_ppl,
         }
 
-        del pythia_model, pythia_wrapper
+        del pythia_model
         clear_gpu_cache(device)
 
     # ===== 2. V-DProj Pythia =====
@@ -421,7 +247,6 @@ def run_experiment(
     print_flush(f"  Total parameters: {param_info['total']:,}")
     print_flush(f"  V projection: {param_info['v_projection']:,}")
 
-    # KV cache info
     cache_info = vdproj_model.kv_cache_size(seq_length)
     print_flush(f"  KV Cache reduction: {cache_info['reduction_percent']:.1f}%")
 
@@ -435,10 +260,10 @@ def run_experiment(
     for epoch in range(1, num_epochs + 1):
         start_time = time.time()
 
-        train_metrics = train_epoch(
+        train_metrics = train_epoch_with_recon(
             vdproj_model, train_loader, optimizer, device, recon_weight
         )
-        val_metrics = evaluate_model(vdproj_model, val_loader, device)
+        val_metrics = evaluate_ppl(vdproj_model, val_loader, device, return_recon_loss=True)
 
         elapsed = time.time() - start_time
 
@@ -465,9 +290,10 @@ def run_experiment(
 
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
 
-    # Position-wise PPL
     print_flush("\n  Position-wise PPL:")
-    vdproj_pos_ppl = evaluate_position_wise_ppl(vdproj_model, val_loader, device)
+    vdproj_pos_ppl = evaluate_position_wise_ppl(
+        vdproj_model, val_loader, device, return_recon_loss=True
+    )
     for pos_range, ppl in vdproj_pos_ppl.items():
         print_flush(f"    Position {pos_range}: {ppl:.1f}")
 
@@ -503,7 +329,6 @@ def run_experiment(
         f"{results['vdproj']['cache_reduction']:.1f}% |"
     )
 
-    # Position-wise comparison
     if results["pythia"] is not None:
         diff = results["vdproj"]["best_val_ppl"] - results["pythia"]["best_val_ppl"]
         print_flush(f"\nDifference: {diff:+.1f} ppl")
@@ -547,7 +372,8 @@ def main() -> None:
         "--v-proj-dim", type=int, default=320, help="V projection dimension"
     )
     parser.add_argument(
-        "--recon-weight", type=float, default=0.1, help="Reconstruction loss weight"
+        "--recon-weight", type=float, default=DEFAULT_RECON_WEIGHT,
+        help="Reconstruction loss weight"
     )
     parser.add_argument(
         "--skip-baseline", action="store_true", help="Skip Pythia baseline"

@@ -14,159 +14,40 @@ Usage:
 """
 
 import argparse
-import random
 import sys
 import time
-from typing import Dict, Any, Optional
+from typing import Dict, Any
 
-import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from transformers import GPTNeoXForCausalLM
 
-# ============================================================
-# Training Parameters (modify here for easy tuning)
-# ============================================================
-EARLY_STOPPING_PATIENCE = 1  # Early stopping patience
-GRADIENT_CLIP = 1.0          # Gradient clipping value
-# ============================================================
-
 # Add project root to path
 sys.path.insert(0, ".")
 
 from config.pythia import PythiaConfig  # noqa: E402
+from src.config.experiment_defaults import (  # noqa: E402
+    EARLY_STOPPING_PATIENCE,
+    GRADIENT_CLIP,
+)
 from src.models.pretrained_mka import PretrainedMKAModelV2  # noqa: E402
 from src.utils.io import print_flush  # noqa: E402
+from src.utils.seed import set_seed  # noqa: E402
 from src.utils.training import prepare_data_loaders, get_device  # noqa: E402
+from src.utils.evaluation import evaluate_ppl, evaluate_position_wise_ppl  # noqa: E402
 from src.utils.device import clear_gpu_cache  # noqa: E402
 
 
-def set_seed(seed: int = 42) -> None:
-    """Set random seed for reproducibility"""
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+class PythiaWrapper(nn.Module):
+    """Wrapper to make HuggingFace model compatible with evaluation functions."""
 
+    def __init__(self, model):
+        super().__init__()
+        self.model = model
 
-def evaluate_model(
-    model: nn.Module,
-    val_loader: DataLoader,
-    device: torch.device,
-) -> float:
-    """Evaluate model and return perplexity"""
-    model.eval()
-    total_loss = 0.0
-    total_tokens = 0
-
-    with torch.no_grad():
-        for batch in val_loader:
-            input_ids, labels = batch
-            input_ids = input_ids.to(device)
-            labels = labels.to(device)
-
-            logits = model(input_ids)
-
-            # labels are already shifted (labels[i] = next token of input_ids[i])
-            loss = nn.functional.cross_entropy(
-                logits.view(-1, logits.size(-1)),
-                labels.view(-1),
-                reduction="sum",
-            )
-
-            total_loss += loss.item()
-            total_tokens += labels.numel()
-
-    avg_loss = total_loss / total_tokens
-    ppl = torch.exp(torch.tensor(avg_loss)).item()
-    return ppl
-
-
-def evaluate_position_wise_ppl(
-    model: nn.Module,
-    val_loader: DataLoader,
-    device: torch.device,
-    position_ranges: Optional[list] = None,
-) -> Dict[str, float]:
-    """
-    Evaluate position-wise perplexity.
-
-    Args:
-        model: Model to evaluate
-        val_loader: Validation data loader
-        device: Device
-        position_ranges: List of (start, end) tuples for position ranges.
-                        If None, uses default ranges for seq_len=128.
-
-    Returns:
-        Dictionary with position range keys and PPL values
-    """
-    model.eval()
-
-    # Get sequence length from first batch
-    first_batch = next(iter(val_loader))
-    seq_len = first_batch[0].shape[1]
-
-    # Default position ranges
-    if position_ranges is None:
-        position_ranges = [
-            (0, 16),
-            (16, 32),
-            (32, 64),
-            (64, 96),
-            (96, seq_len),
-        ]
-
-    # Initialize accumulators for each range
-    range_losses: Dict[str, float] = {}
-    range_tokens: Dict[str, int] = {}
-    for start, end in position_ranges:
-        key = f"{start}-{end}"
-        range_losses[key] = 0.0
-        range_tokens[key] = 0
-
-    with torch.no_grad():
-        for batch in val_loader:
-            input_ids, labels = batch
-            input_ids = input_ids.to(device)
-            labels = labels.to(device)
-
-            logits = model(input_ids)  # [batch, seq_len, vocab]
-
-            # Compute per-position loss
-            # logits: [batch, seq_len, vocab]
-            # labels: [batch, seq_len]
-            for start, end in position_ranges:
-                key = f"{start}-{end}"
-
-                # Get logits and labels for this position range
-                range_logits = logits[:, start:end, :]  # [batch, range_len, vocab]
-                range_labels = labels[:, start:end]  # [batch, range_len]
-
-                # Compute loss for this range
-                loss = nn.functional.cross_entropy(
-                    range_logits.reshape(-1, range_logits.size(-1)),
-                    range_labels.reshape(-1),
-                    reduction="sum",
-                )
-
-                range_losses[key] += loss.item()
-                range_tokens[key] += range_labels.numel()
-
-    # Compute PPL for each range
-    results: Dict[str, float] = {}
-    for key in range_losses:
-        if range_tokens[key] > 0:
-            avg_loss = range_losses[key] / range_tokens[key]
-            ppl = torch.exp(torch.tensor(avg_loss)).item()
-            results[key] = ppl
-        else:
-            results[key] = float("inf")
-
-    return results
+    def forward(self, input_ids):
+        return self.model(input_ids).logits
 
 
 def train_epoch(
@@ -175,7 +56,7 @@ def train_epoch(
     optimizer: torch.optim.Optimizer,
     device: torch.device,
 ) -> float:
-    """Train for one epoch"""
+    """Train for one epoch."""
     model.train()
     total_loss = 0.0
     total_tokens = 0
@@ -188,7 +69,6 @@ def train_epoch(
         optimizer.zero_grad()
         logits = model(input_ids)
 
-        # labels are already shifted (labels[i] = next token of input_ids[i])
         loss = nn.functional.cross_entropy(
             logits.view(-1, logits.size(-1)),
             labels.view(-1),
@@ -214,21 +94,7 @@ def run_experiment(
     lr: float = 1e-4,
     eval_only: bool = False,
 ) -> Dict[str, Any]:
-    """
-    Run pretrained MKA experiment
-
-    Args:
-        num_samples: Number of training samples
-        seq_length: Sequence length
-        num_epochs: Number of epochs
-        batch_size: Batch size
-        lr: Learning rate
-        eval_only: Only evaluate pretrained baseline
-
-    Returns:
-        Results dict
-    """
-    # Set seed for reproducibility
+    """Run pretrained MKA experiment."""
     set_seed(42)
 
     device = get_device()
@@ -249,7 +115,6 @@ def run_experiment(
     print_flush("  PretrainedMKA V2: Pythia frozen + KA attention trainable")
     print_flush("=" * 70)
 
-    # Load data
     print_flush("\n[Data] Loading Pile data...")
     train_loader, val_loader = prepare_data_loaders(
         num_samples=num_samples,
@@ -270,22 +135,12 @@ def run_experiment(
     pretrained_pythia = pretrained_pythia.to(device)
     pretrained_pythia.eval()
 
-    # Wrap for our evaluation function
-    class PythiaWrapper(nn.Module):
-        def __init__(self, model):
-            super().__init__()
-            self.model = model
-
-        def forward(self, input_ids):
-            return self.model(input_ids).logits
-
     pythia_wrapper = PythiaWrapper(pretrained_pythia)
 
     print_flush("\n[Pythia-70M] Evaluating pretrained model...")
-    pythia_ppl = evaluate_model(pythia_wrapper, val_loader, device)
+    pythia_ppl = evaluate_ppl(pythia_wrapper, val_loader, device)
     print_flush(f"  Pretrained val_ppl: {pythia_ppl:.1f}")
 
-    # Position-wise PPL
     print_flush("\n  Position-wise PPL (long-range dependency):")
     pythia_pos_ppl = evaluate_position_wise_ppl(pythia_wrapper, val_loader, device)
     for pos_range, ppl in pythia_pos_ppl.items():
@@ -316,7 +171,6 @@ def run_experiment(
     print_flush(f"  Trainable: {param_info['trainable']:,}")
     print_flush(f"  Frozen: {param_info['frozen']:,}")
 
-    # Only optimize trainable parameters
     trainable_params = [p for p in mka_model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=lr)
 
@@ -330,7 +184,7 @@ def run_experiment(
         start_time = time.time()
 
         train_ppl = train_epoch(mka_model, train_loader, optimizer, device)
-        val_ppl = evaluate_model(mka_model, val_loader, device)
+        val_ppl = evaluate_ppl(mka_model, val_loader, device)
 
         elapsed = time.time() - start_time
 
@@ -355,7 +209,6 @@ def run_experiment(
 
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
 
-    # Position-wise PPL for MKA model
     print_flush("\n  Position-wise PPL (long-range dependency):")
     mka_pos_ppl = evaluate_position_wise_ppl(mka_model, val_loader, device)
     for pos_range, ppl in mka_pos_ppl.items():
@@ -386,14 +239,12 @@ def run_experiment(
         f"epoch {results['pretrained_mka_v2']['best_epoch']} |"
     )
 
-    # Difference
     diff = (
         results["pretrained_mka_v2"]["best_val_ppl"]
         - results["pythia_pretrained"]["val_ppl"]
     )
     print_flush(f"\nDifference: {diff:+.1f} ppl")
 
-    # Position-wise PPL comparison
     print_flush("\n" + "=" * 70)
     print_flush("POSITION-WISE PPL (Long-Range Dependency)")
     print_flush("=" * 70)
