@@ -464,6 +464,7 @@ def run_experiment(
             f"[{elapsed:.1f}s] {marker}"
         )
 
+        # Early stopping check (patience=1 means stop after 1 epoch without improvement)
         if patience_counter >= PHASE2_EARLY_STOPPING_PATIENCE:
             print_flush("  -> Early stop")
             break
