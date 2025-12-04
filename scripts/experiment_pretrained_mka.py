@@ -44,23 +44,21 @@ def evaluate_model(
 
     with torch.no_grad():
         for batch in val_loader:
-            input_ids = batch["input_ids"].to(device)
-            labels = batch["labels"].to(device)
+            input_ids, labels = batch
+            input_ids = input_ids.to(device)
+            labels = labels.to(device)
 
             logits = model(input_ids)
 
-            # Shift for next token prediction
-            shift_logits = logits[:, :-1, :].contiguous()
-            shift_labels = labels[:, 1:].contiguous()
-
+            # labels are already shifted (labels[i] = next token of input_ids[i])
             loss = nn.functional.cross_entropy(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1),
+                logits.view(-1, logits.size(-1)),
+                labels.view(-1),
                 reduction="sum",
             )
 
             total_loss += loss.item()
-            total_tokens += shift_labels.numel()
+            total_tokens += labels.numel()
 
     avg_loss = total_loss / total_tokens
     ppl = torch.exp(torch.tensor(avg_loss)).item()
@@ -79,27 +77,25 @@ def train_epoch(
     total_tokens = 0
 
     for batch in train_loader:
-        input_ids = batch["input_ids"].to(device)
-        labels = batch["labels"].to(device)
+        input_ids, labels = batch
+        input_ids = input_ids.to(device)
+        labels = labels.to(device)
 
         optimizer.zero_grad()
         logits = model(input_ids)
 
-        # Shift for next token prediction
-        shift_logits = logits[:, :-1, :].contiguous()
-        shift_labels = labels[:, 1:].contiguous()
-
+        # labels are already shifted (labels[i] = next token of input_ids[i])
         loss = nn.functional.cross_entropy(
-            shift_logits.view(-1, shift_logits.size(-1)),
-            shift_labels.view(-1),
+            logits.view(-1, logits.size(-1)),
+            labels.view(-1),
         )
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
 
-        total_loss += loss.item() * shift_labels.numel()
-        total_tokens += shift_labels.numel()
+        total_loss += loss.item() * labels.numel()
+        total_tokens += labels.numel()
 
     avg_loss = total_loss / total_tokens
     ppl = torch.exp(torch.tensor(avg_loss)).item()
