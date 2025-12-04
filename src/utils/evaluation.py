@@ -4,7 +4,7 @@ Evaluation utilities for experiments.
 共通の評価関数を提供する。
 """
 
-from typing import Dict, Optional, Union, Any
+from typing import Dict, Optional, Union
 
 import torch
 import torch.nn as nn

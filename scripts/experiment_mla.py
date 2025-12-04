@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-V-DProj Experiment: Value Compression for KV Cache Reduction
+MLA Experiment: KV Cache Compression with ALiBi
 
-V（Value）を圧縮してそのままAttentionに使用する方式でKVキャッシュを削減。
-Pythiaベースラインとの比較実験。
+MLAによるKVキャッシュ圧縮実験。
+Pythia (RoPE) vs MLA-Pythia (ALiBi) の比較。
 
 Usage:
-    python3 scripts/experiment_vdproj.py --samples 10000 --epochs 30
-    python3 scripts/experiment_vdproj.py --samples 10000 --skip-baseline
+    python3 scripts/experiment_mla.py --samples 10000 --epochs 30
+    python3 scripts/experiment_mla.py --samples 10000 --skip-baseline
 """
 
 import argparse
 import sys
 import time
-from typing import Dict, Any
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -28,7 +28,7 @@ from src.config.experiment_defaults import (  # noqa: E402
     GRADIENT_CLIP,
 )
 from src.models.pythia import PythiaModel  # noqa: E402
-from src.models.vdproj_pythia import VDProjPythiaModel  # noqa: E402
+from src.models.mla_pythia import MLAPythiaModel  # noqa: E402
 from src.utils.io import print_flush  # noqa: E402
 from src.utils.seed import set_seed  # noqa: E402
 from src.utils.training import prepare_data_loaders, get_device  # noqa: E402
@@ -78,30 +78,32 @@ def run_experiment(
     num_epochs: int = 30,
     batch_size: int = 8,
     lr: float = 1e-4,
-    v_proj_dim: int = 320,
+    kv_dim: int = 128,
+    alibi_slope: float = 0.0625,
     skip_baseline: bool = False,
-) -> Dict[str, Any]:
-    """Run V-DProj experiment."""
+) -> dict[str, Any]:
+    """Run MLA experiment."""
     set_seed(42)
 
     device = get_device()
     config = PythiaConfig()
 
     print_flush("=" * 70)
-    print_flush("V-DPROJ EXPERIMENT: Value Compression (No Restoration)")
+    print_flush("MLA EXPERIMENT: KV Cache Compression with ALiBi")
     print_flush("=" * 70)
     print_flush(f"Samples: {num_samples:,}")
     print_flush(f"Sequence length: {seq_length}")
     print_flush(f"Epochs: {num_epochs}")
     print_flush(f"Learning rate: {lr}")
-    print_flush(f"V proj dim: {v_proj_dim} (from {config.hidden_size})")
+    print_flush(f"KV dim: {kv_dim} (from {config.hidden_size})")
+    print_flush(f"ALiBi slope: {alibi_slope}")
     print_flush(f"Skip baseline: {skip_baseline}")
     print_flush("=" * 70)
 
     # KV Cache reduction calculation
-    standard_kv = config.hidden_size + config.hidden_size  # K + V
-    vdproj_kv = config.hidden_size + v_proj_dim  # K + V_compressed
-    reduction = (standard_kv - vdproj_kv) / standard_kv * 100
+    standard_kv = config.hidden_size * 2  # K + V
+    mla_kv = kv_dim  # c_kv only
+    reduction = (standard_kv - mla_kv) / standard_kv * 100
     print_flush(f"\nKV Cache reduction: {reduction:.1f}%")
     print_flush("=" * 70)
 
@@ -114,17 +116,17 @@ def run_experiment(
         batch_size=batch_size,
     )
 
-    results: Dict[str, Any] = {}
+    results: dict[str, Any] = {}
 
-    # ===== 1. Pythia Baseline =====
+    # ===== 1. Pythia Baseline (RoPE) =====
     if skip_baseline:
         print_flush("\n" + "=" * 70)
-        print_flush("1. PYTHIA-70M (Baseline) - SKIPPED")
+        print_flush("1. PYTHIA-70M (Baseline, RoPE) - SKIPPED")
         print_flush("=" * 70)
         results["pythia"] = None
     else:
         print_flush("\n" + "=" * 70)
-        print_flush("1. PYTHIA-70M (Baseline)")
+        print_flush("1. PYTHIA-70M (Baseline, RoPE)")
         print_flush("=" * 70)
 
         pythia_model = PythiaModel(
@@ -152,7 +154,8 @@ def run_experiment(
             start_time = time.time()
 
             train_ppl = train_epoch(pythia_model, train_loader, optimizer, device)
-            val_ppl = evaluate_ppl(pythia_model, val_loader, device)
+            val_ppl_result = evaluate_ppl(pythia_model, val_loader, device)
+            val_ppl = float(val_ppl_result) if isinstance(val_ppl_result, (int, float)) else val_ppl_result["ppl"]
             elapsed = time.time() - start_time
 
             improved = val_ppl < best_val_ppl
@@ -190,33 +193,33 @@ def run_experiment(
         del pythia_model
         clear_gpu_cache(device)
 
-    # ===== 2. V-DProj Pythia =====
+    # ===== 2. MLA-Pythia (ALiBi) =====
     print_flush("\n" + "=" * 70)
-    print_flush(f"2. V-DPROJ PYTHIA (V: {config.hidden_size} → {v_proj_dim})")
+    print_flush(f"2. MLA-PYTHIA (kv_dim={kv_dim}, ALiBi)")
     print_flush("=" * 70)
 
-    vdproj_model = VDProjPythiaModel(
+    mla_model = MLAPythiaModel(
         vocab_size=config.vocab_size,
         hidden_size=config.hidden_size,
         num_layers=config.num_layers,
         num_heads=config.num_attention_heads,
         intermediate_size=config.intermediate_size,
-        v_proj_dim=v_proj_dim,
-        max_position_embeddings=config.max_position_embeddings,
-        rotary_pct=config.rotary_pct,
+        kv_dim=kv_dim,
+        q_compressed=False,  # KV圧縮のみ（Q圧縮なし）
+        alibi_slope=alibi_slope,
     )
-    vdproj_model = vdproj_model.to(device)
+    mla_model = mla_model.to(device)
 
-    param_info = vdproj_model.num_parameters()
+    param_info = mla_model.num_parameters()
     print_flush(f"  Total parameters: {param_info['total']:,}")
-    print_flush(f"  V projection: {param_info['v_projection']:,}")
+    print_flush(f"  MLA attention: {param_info['mla_attention']:,}")
 
-    cache_info = vdproj_model.kv_cache_size(seq_length)
+    cache_info = mla_model.kv_cache_size(seq_length)
     print_flush(f"  KV Cache reduction: {cache_info['reduction_percent']:.1f}%")
 
-    optimizer = torch.optim.AdamW(vdproj_model.parameters(), lr=lr)
+    optimizer = torch.optim.AdamW(mla_model.parameters(), lr=lr)
 
-    print_flush("\n[V-DProj] Training...")
+    print_flush("\n[MLA] Training...")
     best_val_ppl = float("inf")
     best_epoch = 0
     patience_counter = 0
@@ -224,8 +227,9 @@ def run_experiment(
     for epoch in range(1, num_epochs + 1):
         start_time = time.time()
 
-        train_ppl = train_epoch(vdproj_model, train_loader, optimizer, device)
-        val_ppl = evaluate_ppl(vdproj_model, val_loader, device)
+        train_ppl = train_epoch(mla_model, train_loader, optimizer, device)
+        val_ppl_result = evaluate_ppl(mla_model, val_loader, device)
+        val_ppl = float(val_ppl_result) if isinstance(val_ppl_result, (int, float)) else val_ppl_result["ppl"]
         elapsed = time.time() - start_time
 
         improved = val_ppl < best_val_ppl
@@ -250,19 +254,19 @@ def run_experiment(
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
 
     print_flush("\n  Position-wise PPL:")
-    vdproj_pos_ppl = evaluate_position_wise_ppl(vdproj_model, val_loader, device)
-    for pos_range, ppl in vdproj_pos_ppl.items():
+    mla_pos_ppl = evaluate_position_wise_ppl(mla_model, val_loader, device)
+    for pos_range, ppl in mla_pos_ppl.items():
         print_flush(f"    Position {pos_range}: {ppl:.1f}")
 
-    results["vdproj"] = {
+    results["mla"] = {
         "best_val_ppl": best_val_ppl,
         "best_epoch": best_epoch,
-        "position_wise_ppl": vdproj_pos_ppl,
-        "v_proj_dim": v_proj_dim,
+        "position_wise_ppl": mla_pos_ppl,
+        "kv_dim": kv_dim,
         "cache_reduction": cache_info["reduction_percent"],
     }
 
-    del vdproj_model
+    del mla_model
     clear_gpu_cache(device)
 
     # ===== Summary =====
@@ -275,18 +279,18 @@ def run_experiment(
 
     if results["pythia"] is not None:
         print_flush(
-            f"| Pythia | {results['pythia']['best_val_ppl']:.1f} | "
+            f"| Pythia (RoPE) | {results['pythia']['best_val_ppl']:.1f} | "
             f"{results['pythia']['best_epoch']} | 0% |"
         )
 
     print_flush(
-        f"| V-DProj | {results['vdproj']['best_val_ppl']:.1f} | "
-        f"{results['vdproj']['best_epoch']} | "
-        f"{results['vdproj']['cache_reduction']:.1f}% |"
+        f"| MLA (ALiBi) | {results['mla']['best_val_ppl']:.1f} | "
+        f"{results['mla']['best_epoch']} | "
+        f"{results['mla']['cache_reduction']:.1f}% |"
     )
 
     if results["pythia"] is not None:
-        diff = results["vdproj"]["best_val_ppl"] - results["pythia"]["best_val_ppl"]
+        diff = results["mla"]["best_val_ppl"] - results["pythia"]["best_val_ppl"]
         print_flush(f"\nDifference: {diff:+.1f} ppl")
 
         print_flush("\n" + "=" * 70)
@@ -294,16 +298,16 @@ def run_experiment(
         print_flush("=" * 70)
 
         pythia_pos = results["pythia"]["position_wise_ppl"]
-        vdproj_pos = results["vdproj"]["position_wise_ppl"]
+        mla_pos = results["mla"]["position_wise_ppl"]
 
-        print_flush("\n| Position | Pythia | V-DProj | Diff |")
-        print_flush("|----------|--------|---------|------|")
+        print_flush("\n| Position | Pythia | MLA | Diff |")
+        print_flush("|----------|--------|-----|------|")
         for pos_range in pythia_pos:
             pythia_val = pythia_pos[pos_range]
-            vdproj_val = vdproj_pos[pos_range]
-            pos_diff = vdproj_val - pythia_val
+            mla_val = mla_pos[pos_range]
+            pos_diff = mla_val - pythia_val
             print_flush(
-                f"| {pos_range} | {pythia_val:.1f} | {vdproj_val:.1f} | {pos_diff:+.1f} |"
+                f"| {pos_range} | {pythia_val:.1f} | {mla_val:.1f} | {pos_diff:+.1f} |"
             )
 
     return results
@@ -312,7 +316,7 @@ def run_experiment(
 def main() -> None:
     config = PythiaConfig()
 
-    parser = argparse.ArgumentParser(description="V-DProj Experiment")
+    parser = argparse.ArgumentParser(description="MLA Experiment")
     parser.add_argument("--samples", type=int, default=10000, help="Number of samples")
     parser.add_argument("--seq-length", type=int, default=128, help="Sequence length")
     parser.add_argument(
@@ -325,7 +329,10 @@ def main() -> None:
         "--lr", type=float, default=config.learning_rate, help="Learning rate"
     )
     parser.add_argument(
-        "--v-proj-dim", type=int, default=320, help="V projection dimension"
+        "--kv-dim", type=int, default=128, help="KV compression dimension"
+    )
+    parser.add_argument(
+        "--alibi-slope", type=float, default=0.0625, help="ALiBi slope (uniform)"
     )
     parser.add_argument(
         "--skip-baseline", action="store_true", help="Skip Pythia baseline"
@@ -338,7 +345,8 @@ def main() -> None:
         num_epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
-        v_proj_dim=args.v_proj_dim,
+        kv_dim=args.kv_dim,
+        alibi_slope=args.alibi_slope,
         skip_baseline=args.skip_baseline,
     )
 

@@ -2,255 +2,53 @@
 
 ---
 
-## ⚠️⚠️⚠️ CLAUDE AIへの重要な警告 ⚠️⚠️⚠️
+## 🎯 MLA-Pythia Architecture (2025-12-05)
 
-**このセクションは絶対に削除しないでください。**
+**Pythia-70MをベースにMLA（Multi-head Latent Attention）でKVキャッシュを大幅削減。**
+**位置エンコーディングはALiBi（統一スロープ）を採用。**
 
-### 過去の問題
-
-2025-12-04にPythia統合を試みた際、CLAUDE.mdの編集時にDProj学習の重要な仕様が誤って削除されました。
-これにより、DProj学習が正常に収束しなくなり、プロジェクトを以前の状態にリバートする必要がありました。
-
-### ルール
-
-1. **DProj学習仕様セクションは絶対に削除禁止**
-2. **DiverseProjection/DiverseProjectionLayerの実装詳細は削除禁止**
-3. **初期化方法（normal_ std=0.1）の記述は削除禁止**
-4. CLAUDE.mdを編集する際は、既存の重要なセクションが残っていることを必ず確認すること
-
----
-
-## 🎯 DProj-Pythia Architecture (2025-12-04)
-
-**Pythia-70MをベースにKVキャッシュを削減するDProj-Pythia方式を採用。**
-
-### ⚠️ 重要な設計方針（絶対に守ること）
-
-**Baselineとの違いは「Token Embedding → DiverseProjection」の圧縮部分のみ。**
-**PythiaLayer自体は同じ構造（RoPE含む）で、hidden_size=proj_dimで動作させる。**
+### アーキテクチャ
 
 ```
-Pythia (Baseline):                    DProj-Pythia (Ours):
+Pythia (Baseline, RoPE):              MLA-Pythia (Ours, ALiBi):
 Token Embedding (512-dim)             Token Embedding (512-dim)
        ↓                                     ↓
-       │                              DiverseProjection (512 → 320)  ← ここだけ違う
+PythiaLayer × 6                       MLALayer × 6
+  ├─ Attention (RoPE)                   ├─ MLA Attention (ALiBi)
+  │    K: 512-dim                       │    c_kv: 128-dim (KV共通圧縮)
+  │    V: 512-dim                       │    吸収モード
+  └─ MLP                                └─ MLP
        ↓                                     ↓
-PythiaLayer × 6 (512-dim, RoPE)       PythiaLayer × 6 (320-dim, RoPE)
-       ↓                                     ↓
-Output Head (512 → vocab)             Output Head (320 → vocab)
+Output Head (512 → vocab)             Output Head (512 → vocab)
 
-KV Cache: 3072 KB                     KV Cache: 1920 KB (37.5%削減)
+KV Cache: K(512) + V(512) = 1024      KV Cache: c_kv(128) = 128
+削減率: 0%                            削減率: 87.5%
 ```
 
 ### 設定値
 
-| 項目 | Baseline (Pythia) | DProj-Pythia |
-|------|-------------------|--------------|
-| embed_dim | 512 | 512 |
-| hidden_size / proj_dim | 512 | 320 |
+| 項目 | Baseline (Pythia) | MLA-Pythia |
+|------|-------------------|------------|
+| hidden_size | 512 | 512 |
+| kv_dim | - | 128 |
 | Layers | 6 | 6 |
 | Attention Heads | 8 | 8 |
-| intermediate_size | 2048 | 1280 |
-| Position Encoding | RoPE (25%) | RoPE (25%) |
-| Vocab Size | 50,304 | 50,304 |
-
-### 学習フロー
-
-```
-DProj Training: OACD (DiverseProjection多様性学習)
-  ├─ DiverseProjectionのみを学習
-  ├─ OACD損失で多様なprojection vectorを生成
-  └─ 収束まで実行（~60 iterations, 90%+収束）
-       ↓
-Main Training: Full Training (DiverseProjection frozen)
-  ├─ DiverseProjectionをfreeze
-  ├─ PythiaLayer × 6 + Output Headを学習 (proj_dim=320で動作)
-  └─ Cross-entropy損失
-```
+| intermediate_size | 2048 | 2048 |
+| Position Encoding | RoPE (25%) | ALiBi (統一スロープ) |
+| KV Cache削減 | 0% | 87.5% |
 
 ### 実験の実行
 
 ```bash
-# DProj Training: DiverseProjection OACD学習
-python3 scripts/train_dproj.py --samples 1000
+# MLA実験: Pythia (RoPE) vs MLA-Pythia (ALiBi)
+python3 scripts/experiment_mla.py --samples 10000 --epochs 30
 
-# Main Training: 比較実験
-python3 scripts/experiment_pythia_comparison.py --samples 10000 --epochs 10
-```
+# MLAのみ（baselineスキップ）
+python3 scripts/experiment_mla.py --samples 10000 --skip-baseline
 
-### ⚠️ DProj Training コマンドラインオプションの制約
-
-**DProj Trainingは`--samples`のみ使用可能。`--tokens`オプションは禁止。**
-
-理由: サンプル数で指定することで、データサイズが直感的に理解しやすくなる。
-
-### ⚠️ proj_dim の制約
-
-**`proj_dim`は`num_attention_heads` (8) で割り切れる値が推奨。**
-
-割り切れない場合は自動的に切り上げて調整される:
-- 300 → 304 (304 / 8 = 38)
-- 250 → 256 (256 / 8 = 32)
-
-有効な値の例:
-- 256 (256 / 8 = 32) ← 50%圧縮
-- 320 (320 / 8 = 40) ← デフォルト、37.5%圧縮
-- 384 (384 / 8 = 48) ← 25%圧縮
-
----
-
-## 🚨🚨🚨 DProj Training 完全仕様（削除禁止）🚨🚨🚨
-
-**このセクションは試行錯誤の末に確立された必須仕様です。絶対に削除しないでください。**
-
-### DProj Trainingの目的
-
-DiverseProjectionを使って、多様なprojection vectorを生成する。
-OACD（Origin-Anchored Centroid Dispersion）損失で学習し、収束率90%以上を目指す。
-
-### DiverseProjection/DiverseProjectionLayerの実装（削除禁止）
-
-```python
-# src/models/dproj.py - DiverseProjectionLayer
-class DiverseProjectionLayer(nn.Module):
-    def __init__(self, proj_input_dim, proj_output_dim, token_input_dim):
-        # FFN: Linear(input_dim → output_dim) + GELU
-        input_dim = proj_input_dim + token_input_dim
-        self.ffn = FFN(input_dim, proj_output_dim)
-
-        # LayerNorm（必須：数値安定性のため）
-        self.proj_norm = nn.LayerNorm(proj_output_dim)
-
-        # 残差接続用の射影（次元が異なる場合のみ）
-        if proj_input_dim != proj_output_dim:
-            self.residual_proj = nn.Linear(proj_input_dim, proj_output_dim)
-
-        # ⚠️ 重要: 初期化は normal_(std=0.1)
-        init_linear_weights(self)  # weight: std=0.1, bias: std=0.01
-
-    def forward(self, prev_proj, token_embeds):
-        ffn_input = torch.cat([prev_proj, token_embeds], dim=-1)
-        delta = self.ffn(ffn_input)
-
-        # 残差接続 + LayerNorm
-        new_proj = self.proj_norm(prev_proj + delta)
-        return new_proj
-```
-
-### 初期化方法（削除禁止）
-
-```python
-# src/utils/initialization.py
-def init_linear_weights(module, weight_std=0.1, bias_std=0.01):
-    for submodule in module.modules():
-        if isinstance(submodule, nn.Linear):
-            nn.init.normal_(submodule.weight, mean=0.0, std=0.1)  # ⚠️ Xavier禁止
-            if submodule.bias is not None:
-                nn.init.normal_(submodule.bias, mean=0.0, std=0.01)
-```
-
-**⚠️ 警告**: Xavier初期化やKaiming初期化を使用すると、DProj学習が収束しません。
-必ず `normal_(std=0.1)` を使用してください。
-
-### OACD損失関数（削除禁止）
-
-```python
-# src/losses/diversity.py
-def oacd_loss(projections, centroid_weight=0.1):
-    proj_mean = projections.mean(dim=0)
-    deviation = projections - proj_mean
-
-    # Term 1: 重心からの分散を最大化（負の損失で最大化）
-    dispersion_loss = -torch.norm(deviation, p=2) / len(projections)
-
-    # Term 2: 重心を原点に引き寄せる
-    centroid_loss = torch.norm(proj_mean, p=2) ** 2
-
-    return dispersion_loss + centroid_weight * centroid_loss
-```
-
-### DProj Training 設定値（削除禁止）
-
-| パラメータ | 値 | 説明 |
-|-----------|-----|------|
-| `max_iterations` | 100 | 最大イテレーション数 |
-| `convergence_threshold` | 0.03 | 収束判定のMSE閾値 |
-| `learning_rate` | 0.003 | 学習率 |
-| `batch_size` | 5000 | バッチサイズ |
-| `gradient_clip` | 2.0 | 勾配クリッピング値 |
-| `proj_noise` | 0.05 | ガウシアンノイズ（収束優先） |
-| `early_stopping_threshold` | 0.95 | 収束率95%で早期停止 |
-
-### embed_norm（埋め込み正規化）（削除禁止）
-
-```python
-# ⚠️ 重要: 埋め込み後の正規化が必須（DProj学習収束に必要）
-self.embed_norm = nn.LayerNorm(hidden_size)
-
-# 使用時
-token_embeds = model.embed_in(token_ids)
-token_embeds = model.embed_norm(token_embeds)  # ⚠️ 必須
-```
-
-**⚠️ 警告**: embed_normがないとDProj学習が収束しません。
-
-### shifted_prev_proj方式（並列処理）（削除禁止）
-
-```python
-# ❌ 禁止: 順次処理（非常に遅い）
-for i in range(num_tokens):
-    new_proj = model.dproj(prev_proj, token_embed)
-    prev_proj = new_proj
-
-# ✅ 必須: shifted_prev_proj方式（並列処理）
-for iteration in range(max_iterations):
-    # ゼロベクトルから開始
-    init_proj = torch.zeros(1, proj_dim)
-    shifted_prev_proj = torch.cat([init_proj, previous_projs[:-1]], dim=0)
-
-    # バッチ並列処理
-    new_projs = model.dproj(shifted_prev_proj, token_embeds)
-    previous_projs = new_projs
-```
-
-### 勾配累積（削除禁止）
-
-```python
-# バッチごとに勾配を計算・累積
-optimizer.zero_grad()
-for batch in batches:
-    loss = oacd_loss(batch_output)
-    scaled_loss = loss / num_batches  # バッチ数で割る
-    scaled_loss.backward()  # 勾配累積
-
-# 最後にまとめて更新
-torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
-optimizer.step()
-```
-
-### CPU/GPUメモリ分離（削除禁止）
-
-```python
-# token_embedsとprevious_projsはCPUに保持
-token_embeds = token_embeds_gpu.cpu()
-previous_projs = projs.cpu()
-
-# バッチごとにGPUに転送して処理
-for start_idx in range(0, num_tokens, batch_size):
-    batch_projs = previous_projs[start_idx:end_idx].to(device)
-    batch_embeds = token_embeds[start_idx:end_idx].to(device)
-
-    # 処理後は即座にCPUに戻す
-    all_projs_cpu.append(batch_output.detach().cpu())
-```
-
-### 収束率計算（削除禁止）
-
-```python
-def compute_convergence_rate(current, previous, threshold=0.03):
-    token_losses = ((current - previous) ** 2).mean(dim=1)
-    converged_count = (token_losses < threshold).sum()
-    return converged_count / len(current)
+# kv_dim変更
+python3 scripts/experiment_mla.py --kv-dim 256  # 75%削減
+python3 scripts/experiment_mla.py --kv-dim 64   # 93.75%削減
 ```
 
 ---
@@ -269,23 +67,16 @@ DeepSeek-V2で導入されたKVキャッシュ圧縮技術。K+Vを共通の低�
   output = softmax(scores) @ V
 
 MLA（圧縮・復元あり）:
-  c_q = X @ W_DQ       # Q圧縮: (seq, 512) → (seq, 128)
   c_kv = X @ W_DKV     # KV共通圧縮: (seq, 512) → (seq, 128)
-
-  Q = c_q @ W_UQ       # Q復元: (seq, 128) → (seq, 512)
   K = c_kv @ W_UK      # K復元
   V = c_kv @ W_UV      # V復元
 
 MLA（吸収モード - 復元不要）:
   scores = Q @ K^T
-        = (c_q @ W_UQ) @ (c_kv @ W_UK)^T
-        = (c_q @ W_UQ) @ (W_UK^T @ c_kv^T)
-        = c_q @ (W_UQ @ W_UK^T) @ c_kv^T
-        #       ↑ これを事前計算して吸収
-        = c_q @ W_absorbed @ c_kv^T
+        = Q @ (c_kv @ W_UK)^T
+        = Q @ W_UK^T @ c_kv^T
 
-  # W_absorbed = W_UQ @ W_UK^T は (128, 128) の小さな行列
-  # 512次元に復元せず、128次元のまま計算可能！
+  # KVキャッシュは c_kv のみ保存
 ```
 
 ### V処理（吸収モード）
@@ -299,35 +90,69 @@ output = softmax(scores) @ V
 
 ### KVキャッシュの削減効果
 
-| 方式 | キャッシュ内容 | 例（512-dim） |
-|------|---------------|---------------|
-| 標準MHA | K(512) + V(512) | 1024 |
-| MLA | c_kv(128) + k_pe(64) | 192 |
-| 削減率 | | 81% |
-
-### Decoupled RoPE
-
-MLAはRoPE情報を分離してキャッシュ:
-```
-c_kv: コンテンツ情報（圧縮）
-k_pe: 位置情報（RoPE適用済み、別途キャッシュ）
-
-scores = (q_content @ c_kv^T) + (q_pe @ k_pe^T)
-```
-
-### Q, K, V 圧縮の難易度
-
-| 対象 | 難易度 | 理由 |
-|------|--------|------|
-| V | 低 | 重み付き平均で誤差が吸収される |
-| K | 中〜高 | Attention分布に直接影響、RoPE情報を含む |
-| Q | 高 | 現在のトークンの「意図」を表現 |
+| 方式 | キャッシュ内容 | 例（512-dim） | 削減率 |
+|------|---------------|---------------|--------|
+| 標準MHA | K(512) + V(512) | 1024 | 0% |
+| MLA (kv_dim=128) | c_kv(128) | 128 | 87.5% |
+| MLA (kv_dim=64) | c_kv(64) | 64 | 93.75% |
 
 ### 参考リンク
 
 - [DeepSeek-V2 Paper](https://arxiv.org/abs/2405.04434)
 - [MLA Explanation (HuggingFace)](https://huggingface.co/blog/NormalUhr/mla-explanation)
 - [Understanding MLA](https://planetbanatt.net/articles/mla.html)
+
+---
+
+## 🎯 ALiBi (Attention with Linear Biases) 採用方針
+
+### 採用決定事項
+
+**本プロジェクトではRoPEの代わりにALiBiを採用する。**
+
+理由:
+- ALiBiはMLA（吸収モード）と完全に互換性がある
+- RoPEは回転行列が位置依存のため、吸収モードで事前計算できない
+- ALiBiは加算バイアスのため、吸収後のscoreに単純に加算可能
+
+### ALiBi仕様
+
+```
+score = Q @ K^T - m * distance_matrix
+
+distance_matrix[i][j] = |i - j|  # 位置間の距離
+m = slope (全ヘッド統一)
+```
+
+### スロープ設定（重要）
+
+**全ヘッドで統一スロープを使用する（ヘッドごとに異なるスロープは使用しない）**
+
+理由:
+- ヘッド分割は埋め込み次元を任意に分割したもの
+- 異なる次元に異なるスロープを割り当てる理論的根拠が薄い
+- シンプルな統一スロープで十分
+
+```python
+# ✅ 採用: 統一スロープ
+slope = 0.0625  # デフォルト: 1/16
+alibi_bias = -slope * distance_matrix
+
+# ❌ 不採用: ヘッドごとに異なるスロープ
+# slopes = 2 ** (-8 * torch.arange(1, num_heads + 1) / num_heads)
+```
+
+### ALiBi + MLA の組み合わせ
+
+```
+# MLA吸収モードとの互換性
+score = Q @ W_UK^T @ c_kv^T - m * distance_matrix
+        ↑ 事前計算可能      ↑ 加算バイアス（干渉なし）
+
+# RoPEの場合（不可能）
+score = (R_q @ Q) @ (R_k @ c_kv @ W_UK)^T
+        ↑ 回転行列が位置依存のため事前計算不可
+```
 
 ---
 
@@ -366,21 +191,19 @@ python3 -m mypy src/ --ignore-missing-imports
 
 ### Core Components
 
-**1. DProjPythiaModel (Ours)**
-- Token Embedding: vocab → embed_dim (512)
-- embed_norm: LayerNorm（DProj学習収束に必須）
-- DiverseProjection: embed_dim (512) → proj_dim (320)
-- PythiaLayer × 6: hidden_size=proj_dim (320)、RoPE含む
-- Output Head: proj_dim (320) → vocab_size
+**1. MLAPythiaModel (Ours)**
+- Token Embedding: vocab → hidden_size (512)
+- MLALayer × 6: KV共通圧縮 (kv_dim=128)、ALiBi
+- Output Head: hidden_size (512) → vocab_size
 
-**2. DiverseProjection (DProj)**
-- 1層固定、DProj Trainingで学習、Main Trainingでfreeze
-- OACDアルゴリズムで多様性学習
-- 初期化: normal_(std=0.1)
+**2. MLAAttention**
+- KV共通圧縮: hidden_size → kv_dim
+- ALiBi位置エンコーディング（統一スロープ）
+- 吸収モード対応
 
 **3. PythiaModel (Baseline)**
 - Token Embedding: vocab → hidden_size (512)
-- PythiaLayer × 6: hidden_size (512)
+- PythiaLayer × 6: RoPE (25%)
 - Output Head: hidden_size (512) → vocab_size
 
 ---
@@ -389,28 +212,23 @@ python3 -m mypy src/ --ignore-missing-imports
 
 ```
 new-llm/
-├── checkpoints/
-│   └── dproj_pythia.pt           # DProj checkpoint
 ├── config/
 │   ├── __init__.py
-│   ├── dproj.py                  # DProj Training設定
-│   └── pythia.py                 # PythiaConfig, DProjPythiaConfig
+│   └── pythia.py                 # PythiaConfig
 ├── scripts/
-│   ├── train_dproj.py            # DProj Training: DiverseProjection OACD学習
-│   ├── experiment_pythia_comparison.py  # Pythia vs DProj-Pythia比較
-│   └── experiment_ka_comparison.py      # KA-Attention実験
+│   └── experiment_mla.py         # MLA実験: Pythia vs MLA-Pythia
 ├── src/
 │   ├── models/
-│   │   ├── pythia.py             # PythiaModel (baseline)
-│   │   ├── dproj_pythia.py       # DProjPythiaModel (ours)
-│   │   ├── dproj.py              # DiverseProjection, DiverseProjectionLayer
-│   │   └── ka_attention.py       # KA-Attention実験
-│   ├── losses/
-│   │   └── diversity.py          # OACD algorithm
+│   │   ├── pythia.py             # PythiaModel (baseline, RoPE)
+│   │   ├── mla_pythia.py         # MLAPythiaModel (ours, ALiBi)
+│   │   ├── mla.py                # MLAAttention, MLALayer
+│   │   └── alibi.py              # ALiBi実装
 │   └── utils/
-│       ├── data_pythia.py        # Pileデータローダー
 │       ├── training.py           # 共通学習ユーティリティ
-│       └── initialization.py     # 重み初期化
+│       ├── evaluation.py         # 評価関数
+│       └── device.py             # デバイス管理
+├── docs/
+│   └── experiments/              # 実験結果
 ├── CLAUDE.md
 └── README.md
 ```
@@ -421,15 +239,97 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
-| 2025-12-04 | **Rename**: Phase 1 → DProj Training, ContextBlock → DiverseProjection |
-| 2025-12-04 | **KA-Attention**: V を A に置き換える実験実装 |
-| 2025-12-04 | **重要**: PythiaLayerをproj_dim (320)で動作させる設計に変更 |
-| 2025-12-04 | Main Training比較実験スクリプト追加、DProj Trainingパラメータ調整 |
-| 2025-12-04 | embed_norm追加（DProj学習収束に必須） |
-| 2025-12-04 | Pythia-70M統合（DProj-Pythia方式に完全移行） |
-| 2025-12-04 | DProj学習仕様の詳細を追記（Pythia統合失敗からの復旧後） |
-| 2025-12-03 | Context-KV Attention方式（旧方式、削除済み） |
+| 2025-12-05 | **MLA-Pythia実装**: V-DProjからMLA方式に移行、ALiBi採用 |
+| 2025-12-05 | **ALiBi採用**: RoPEからALiBiに変更、統一スロープ方式 |
+| 2025-12-04 | V-DProj実験（アーカイブ済み） |
+| 2025-12-04 | DProj-Pythia実験（アーカイブ済み） |
 
 ---
 
-Last Updated: 2025-12-04
+## 📦 アーカイブ: DProj関連（参考用）
+
+以下は過去の実験で使用した仕様です。現在はMLA方式に移行しています。
+
+<details>
+<summary>DProj Training 仕様（クリックで展開）</summary>
+
+### DProj Trainingの目的
+
+DiverseProjectionを使って、多様なprojection vectorを生成する。
+OACD（Origin-Anchored Centroid Dispersion）損失で学習し、収束率90%以上を目指す。
+
+### DiverseProjection/DiverseProjectionLayerの実装
+
+```python
+# src/models/dproj.py - DiverseProjectionLayer
+class DiverseProjectionLayer(nn.Module):
+    def __init__(self, proj_input_dim, proj_output_dim, token_input_dim):
+        # FFN: Linear(input_dim → output_dim) + GELU
+        input_dim = proj_input_dim + token_input_dim
+        self.ffn = FFN(input_dim, proj_output_dim)
+
+        # LayerNorm（必須：数値安定性のため）
+        self.proj_norm = nn.LayerNorm(proj_output_dim)
+
+        # 残差接続用の射影（次元が異なる場合のみ）
+        if proj_input_dim != proj_output_dim:
+            self.residual_proj = nn.Linear(proj_input_dim, proj_output_dim)
+
+        # ⚠️ 重要: 初期化は normal_(std=0.1)
+        init_linear_weights(self)  # weight: std=0.1, bias: std=0.01
+
+    def forward(self, prev_proj, token_embeds):
+        ffn_input = torch.cat([prev_proj, token_embeds], dim=-1)
+        delta = self.ffn(ffn_input)
+
+        # 残差接続 + LayerNorm
+        new_proj = self.proj_norm(prev_proj + delta)
+        return new_proj
+```
+
+### 初期化方法
+
+```python
+# src/utils/initialization.py
+def init_linear_weights(module, weight_std=0.1, bias_std=0.01):
+    for submodule in module.modules():
+        if isinstance(submodule, nn.Linear):
+            nn.init.normal_(submodule.weight, mean=0.0, std=0.1)  # ⚠️ Xavier禁止
+            if submodule.bias is not None:
+                nn.init.normal_(submodule.bias, mean=0.0, std=0.01)
+```
+
+### OACD損失関数
+
+```python
+# src/losses/diversity.py
+def oacd_loss(projections, centroid_weight=0.1):
+    proj_mean = projections.mean(dim=0)
+    deviation = projections - proj_mean
+
+    # Term 1: 重心からの分散を最大化（負の損失で最大化）
+    dispersion_loss = -torch.norm(deviation, p=2) / len(projections)
+
+    # Term 2: 重心を原点に引き寄せる
+    centroid_loss = torch.norm(proj_mean, p=2) ** 2
+
+    return dispersion_loss + centroid_weight * centroid_loss
+```
+
+### DProj Training 設定値
+
+| パラメータ | 値 | 説明 |
+|-----------|-----|------|
+| `max_iterations` | 100 | 最大イテレーション数 |
+| `convergence_threshold` | 0.03 | 収束判定のMSE閾値 |
+| `learning_rate` | 0.003 | 学習率 |
+| `batch_size` | 5000 | バッチサイズ |
+| `gradient_clip` | 2.0 | 勾配クリッピング値 |
+| `proj_noise` | 0.05 | ガウシアンノイズ |
+| `early_stopping_threshold` | 0.95 | 収束率95%で早期停止 |
+
+</details>
+
+---
+
+Last Updated: 2025-12-05
