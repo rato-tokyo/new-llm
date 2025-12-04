@@ -9,12 +9,16 @@ Usage:
 """
 
 import argparse
+import sys
 import time
 from typing import Tuple
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
+
+# Add project root to path
+sys.path.insert(0, ".")
 
 from config.pythia import PythiaConfig
 from src.models.pythia import PythiaModel
