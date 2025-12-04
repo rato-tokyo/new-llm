@@ -28,6 +28,16 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+# ============================================================
+# Training Parameters (modify here for easy tuning)
+# ============================================================
+PHASE1_EARLY_STOPPING_PATIENCE = 1  # Phase 1 early stopping patience
+PHASE2_EARLY_STOPPING_PATIENCE = 1  # Phase 2 early stopping patience
+GRADIENT_CLIP = 1.0                  # Gradient clipping value
+DEFAULT_PHASE1_LR = 1e-3             # Phase 1 learning rate
+DEFAULT_PHASE2_LR = 1e-4             # Phase 2 learning rate
+# ============================================================
+
 # Add project root to path
 sys.path.insert(0, ".")
 
@@ -101,7 +111,7 @@ def train_phase1_epoch(
 
         if recon_loss is not None:
             recon_loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), GRADIENT_CLIP)
             optimizer.step()
 
             total_recon_loss += recon_loss.item()
@@ -367,7 +377,6 @@ def run_experiment(
 
     best_recon_loss = float("inf")
     patience_counter = 0
-    patience = 3
 
     for epoch in range(1, phase1_epochs + 1):
         start_time = time.time()
@@ -391,7 +400,7 @@ def run_experiment(
             f"val_recon={val_recon:.6f} [{elapsed:.1f}s] {marker}"
         )
 
-        if patience_counter >= patience:
+        if patience_counter >= PHASE1_EARLY_STOPPING_PATIENCE:
             print_flush("  -> Early stop (reconstruction converged)")
             break
 
@@ -427,7 +436,6 @@ def run_experiment(
     best_val_ppl = float("inf")
     best_epoch = 0
     patience_counter = 0
-    patience = config.early_stopping_patience
 
     print_flush("\n[Phase 2] Training...")
 
@@ -456,7 +464,7 @@ def run_experiment(
             f"[{elapsed:.1f}s] {marker}"
         )
 
-        if patience_counter >= patience:
+        if patience_counter >= PHASE2_EARLY_STOPPING_PATIENCE:
             print_flush("  -> Early stop")
             break
 
@@ -515,10 +523,10 @@ def main() -> None:
         "--batch-size", type=int, default=config.batch_size, help="Batch size"
     )
     parser.add_argument(
-        "--phase1-lr", type=float, default=1e-3, help="Phase 1 learning rate"
+        "--phase1-lr", type=float, default=DEFAULT_PHASE1_LR, help="Phase 1 learning rate"
     )
     parser.add_argument(
-        "--phase2-lr", type=float, default=config.learning_rate, help="Phase 2 LR"
+        "--phase2-lr", type=float, default=DEFAULT_PHASE2_LR, help="Phase 2 LR"
     )
     parser.add_argument(
         "--v-proj-dim", type=int, default=320, help="V projection dimension"

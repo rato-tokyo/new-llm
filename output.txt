@@ -1,131 +1,72 @@
-remote: Enumerating objects: 11, done.
-remote: Counting objects: 100% (11/11), done.
-remote: Compressing objects: 100% (5/5), done.
-remote: Total 8 (delta 6), reused 5 (delta 3), pack-reused 0 (from 0)
-Unpacking objects: 100% (8/8), 2.57 KiB | 1.29 MiB/s, done.
 From https://github.com/rato-tokyo/new-llm
  * branch            main       -> FETCH_HEAD
-   78f5719..18e8785  main       -> origin/main
-Updating 78f5719..18e8785
-Fast-forward
- scripts/experiment_pretrained_mka.py | 145 +++++++++++++++++++++++++++++++++--
- 1 file changed, 139 insertions(+), 6 deletions(-)
-2025-12-04 08:59:22.674953: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
-2025-12-04 08:59:22.692172: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
-WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
-E0000 00:00:1764838762.713174   29361 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
-E0000 00:00:1764838762.719572   29361 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
-W0000 00:00:1764838762.735423   29361 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764838762.735452   29361 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764838762.735455   29361 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-W0000 00:00:1764838762.735458   29361 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
-2025-12-04 08:59:22.740186: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
-To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
+Already up to date.
 Device: cuda (NVIDIA L4, 23.8GB)
 ======================================================================
-PRETRAINED MKA-ATTENTION EXPERIMENT
+V-DPROJ EXPERIMENT: Value Compression
 ======================================================================
 Samples: 10,000
 Sequence length: 128
 Epochs: 30
 Learning rate: 0.0001
-Eval only: False
+V proj dim: 320 (from 512)
+Reconstruction weight: 0.1
+Skip baseline: True
 ======================================================================
 
-Architecture:
-  Pythia-70M (pretrained): Frozen baseline
-  PretrainedMKA V2: Pythia frozen + KA attention trainable
+KV Cache reduction (V only): 18.8%
 ======================================================================
 
 [Data] Loading Pile data...
 Preparing data: 10,000 samples, seq_len=128
-Loading cached tokens: cache/pile_tokens/pile_1280128.pt
-  Loaded 1,280,128 tokens from cache
+Downloading Pile dataset: 1,280,128 tokens
+  Loading tokenizer: EleutherAI/pythia-70m
+tokenizer_config.json: 100% 396/396 [00:00<00:00, 3.56MB/s]
+tokenizer.json: 2.11MB [00:00, 119MB/s]
+special_tokens_map.json: 100% 99.0/99.0 [00:00<00:00, 1.20MB/s]
+  Loading dataset (streaming)...
+README.md: 100% 776/776 [00:00<00:00, 9.09MB/s]
+Resolving data files: 100% 30/30 [00:00<00:00, 93.54it/s]
+  Tokenizing...
+  Saved 1,280,128 tokens to cache: cache/pile_tokens/pile_1280128.pt
   Train: 9,000 samples
   Val: 1,000 samples
 
 ======================================================================
-1. PYTHIA-70M (Pretrained, Frozen)
+1. PYTHIA-70M (Baseline) - SKIPPED
 ======================================================================
 
-[Pythia-70M] Evaluating pretrained model...
-  Pretrained val_ppl: 26.6
-
-  Position-wise PPL (long-range dependency):
-    Position 0-16: 77.1
-    Position 16-32: 33.6
-    Position 32-64: 25.0
-    Position 64-96: 21.1
-    Position 96-128: 18.8
-
 ======================================================================
-2. PRETRAINED-MKA V2 (Pythia frozen + KA trainable)
+2. V-DPROJ PYTHIA (V: 512 → 320)
 ======================================================================
-  Total parameters: 71,215,616
-  Trainable: 788,992
-  Frozen: 70,426,624
+  Total parameters: 72,391,552
+  V projection: 1,971,072
+  KV Cache reduction: 18.8%
 
-[PretrainedMKA V2] Training...
-  Epoch  1: train_ppl=438.5 val_ppl=316.8 [28.4s] *
-  Epoch  2: train_ppl=198.8 val_ppl=171.0 [28.8s] *
-  Epoch  3: train_ppl=122.9 val_ppl=117.8 [28.4s] *
-  Epoch  4: train_ppl=89.3 val_ppl=91.4 [28.1s] *
-  Epoch  5: train_ppl=71.0 val_ppl=74.7 [28.3s] *
-  Epoch  6: train_ppl=59.3 val_ppl=64.0 [28.4s] *
-  Epoch  7: train_ppl=51.3 val_ppl=56.7 [28.4s] *
-  Epoch  8: train_ppl=45.6 val_ppl=51.5 [28.4s] *
-  Epoch  9: train_ppl=41.4 val_ppl=47.2 [28.4s] *
-  Epoch 10: train_ppl=38.3 val_ppl=44.4 [28.4s] *
-  Epoch 11: train_ppl=35.9 val_ppl=41.9 [28.3s] *
-  Epoch 12: train_ppl=34.1 val_ppl=40.1 [28.3s] *
-  Epoch 13: train_ppl=32.7 val_ppl=38.5 [28.4s] *
-  Epoch 14: train_ppl=31.5 val_ppl=37.3 [28.5s] *
-  Epoch 15: train_ppl=30.6 val_ppl=36.1 [28.4s] *
-  Epoch 16: train_ppl=29.9 val_ppl=36.3 [28.4s] 
-  Epoch 17: train_ppl=29.3 val_ppl=35.1 [28.4s] *
-  Epoch 18: train_ppl=28.8 val_ppl=34.8 [28.5s] *
-  Epoch 19: train_ppl=28.4 val_ppl=35.3 [28.5s] 
-  Epoch 20: train_ppl=28.1 val_ppl=34.1 [28.4s] *
-  Epoch 21: train_ppl=27.7 val_ppl=33.8 [28.4s] *
-  Epoch 22: train_ppl=27.5 val_ppl=33.8 [28.4s] 
-  Epoch 23: train_ppl=27.2 val_ppl=34.0 [28.4s] 
-  Epoch 24: train_ppl=27.0 val_ppl=33.2 [28.3s] *
-  Epoch 25: train_ppl=26.8 val_ppl=33.2 [28.3s] 
-  Epoch 26: train_ppl=26.6 val_ppl=33.0 [28.4s] *
-  Epoch 27: train_ppl=26.4 val_ppl=33.4 [28.4s] 
-  Epoch 28: train_ppl=26.3 val_ppl=33.4 [28.3s] 
-  Epoch 29: train_ppl=26.1 val_ppl=32.9 [28.3s] *
-  Epoch 30: train_ppl=25.9 val_ppl=33.2 [28.3s] 
-  Best: epoch 29, ppl=32.9
+[V-DProj] Training (recon_weight=0.1)...
+  Epoch  1: train_ppl=615.6 val_ppl=635.5 recon=0.1266 [79.6s] *
+  Epoch  2: train_ppl=160.7 val_ppl=477.9 recon=0.1248 [80.6s] *
+  Epoch  3: train_ppl=85.8 val_ppl=435.4 recon=0.1268 [80.8s] *
+  Epoch  4: train_ppl=53.4 val_ppl=428.7 recon=0.1300 [80.7s] *
+  Epoch  5: train_ppl=35.6 val_ppl=456.5 recon=0.1366 [80.7s] 
+  Epoch  6: train_ppl=24.4 val_ppl=514.0 recon=0.1422 [80.9s] 
+  Epoch  7: train_ppl=16.9 val_ppl=613.3 recon=0.1498 [80.8s] 
+  -> Early stop
+  Best: epoch 4, ppl=428.7
 
-  Position-wise PPL (long-range dependency):
-    Position 0-16: 96.9
-    Position 16-32: 42.2
-    Position 32-64: 30.9
-    Position 64-96: 26.2
-    Position 96-128: 23.3
+  Position-wise PPL:
+    Position 0-16: 853.0
+    Position 16-32: 667.5
+    Position 32-64: 586.6
+    Position 64-96: 578.1
+    Position 96-128: 552.8
 
 ======================================================================
 SUMMARY
 ======================================================================
 
-| Model | PPL | Note |
-|-------|-----|------|
-| Pythia-70M (pretrained) | 26.6 | frozen baseline |
-| PretrainedMKA V2 | 32.9 | epoch 29 |
-
-Difference: +6.3 ppl
-
-======================================================================
-POSITION-WISE PPL (Long-Range Dependency)
-======================================================================
-
-| Position | Pythia | MKA | Diff |
-|----------|--------|-----|------|
-| 0-16 | 77.1 | 96.9 | +19.8 |
-| 16-32 | 33.6 | 42.2 | +8.6 |
-| 32-64 | 25.0 | 30.9 | +5.8 |
-| 64-96 | 21.1 | 26.2 | +5.2 |
-| 96-128 | 18.8 | 23.3 | +4.5 |
+| Model | PPL | Epoch | KV Reduction |
+|-------|-----|-------|--------------|
+| V-DProj | 428.7 | 4 | 18.8% |
 
 DONE

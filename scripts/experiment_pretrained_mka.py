@@ -16,13 +16,21 @@ Usage:
 import argparse
 import random
 import sys
-from typing import Dict, Any
+import time
+from typing import Dict, Any, Optional
 
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from transformers import GPTNeoXForCausalLM
+
+# ============================================================
+# Training Parameters (modify here for easy tuning)
+# ============================================================
+EARLY_STOPPING_PATIENCE = 1  # Early stopping patience
+GRADIENT_CLIP = 1.0          # Gradient clipping value
+# ============================================================
 
 # Add project root to path
 sys.path.insert(0, ".")
@@ -81,7 +89,7 @@ def evaluate_position_wise_ppl(
     model: nn.Module,
     val_loader: DataLoader,
     device: torch.device,
-    position_ranges: list[tuple[int, int]] | None = None,
+    position_ranges: Optional[list] = None,
 ) -> Dict[str, float]:
     """
     Evaluate position-wise perplexity.
@@ -187,7 +195,7 @@ def train_epoch(
         )
 
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), GRADIENT_CLIP)
         optimizer.step()
 
         total_loss += loss.item() * labels.numel()
@@ -317,10 +325,8 @@ def run_experiment(
     best_val_ppl = float("inf")
     best_epoch = 0
     patience_counter = 0
-    patience = config.early_stopping_patience
 
     for epoch in range(1, num_epochs + 1):
-        import time
         start_time = time.time()
 
         train_ppl = train_epoch(mka_model, train_loader, optimizer, device)
@@ -343,8 +349,8 @@ def run_experiment(
             f"[{elapsed:.1f}s] {marker}"
         )
 
-        if patience_counter >= patience:
-            print_flush(f"  -> Early stop: val_ppl worsened for {patience} epochs")
+        if patience_counter >= EARLY_STOPPING_PATIENCE:
+            print_flush("  -> Early stop")
             break
 
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
