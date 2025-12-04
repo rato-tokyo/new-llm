@@ -271,3 +271,17 @@ def get_device() -> torch.device:
         device = torch.device("cpu")
         print_flush("Device: cpu")
     return device
+
+
+def get_tokenizer(tokenizer_name: str) -> Any:
+    """
+    Get tokenizer by name.
+
+    Args:
+        tokenizer_name: Tokenizer name (e.g., "EleutherAI/pythia-70m")
+
+    Returns:
+        Tokenizer instance
+    """
+    from transformers import AutoTokenizer
+    return AutoTokenizer.from_pretrained(tokenizer_name)

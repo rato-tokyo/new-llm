@@ -4,7 +4,7 @@ Evaluation utilities for experiments.
 共通の評価関数を提供する。
 """
 
-from typing import Dict, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -176,3 +176,119 @@ def get_default_position_ranges(seq_len: int) -> list:
         (64, 96),
         (96, seq_len),
     ]
+
+
+def evaluate_reversal_curse(
+    model: nn.Module,
+    tokenizer: Any,
+    pairs: List[Dict[str, str]],
+    device: torch.device,
+    max_length: int = 64,
+) -> Dict[str, float]:
+    """
+    Evaluate Reversal Curse.
+
+    順方向（"A is B"）と逆方向（"B is A"）のPPLを比較し、
+    モデルが双方向の知識を持っているかを評価する。
+
+    Args:
+        model: Model to evaluate
+        tokenizer: Tokenizer
+        pairs: List of dicts with 'forward' and 'backward' keys
+        device: Device
+        max_length: Maximum sequence length
+
+    Returns:
+        Dict with forward_ppl, backward_ppl, reversal_ratio, etc.
+    """
+    model.eval()
+
+    forward_losses: List[float] = []
+    backward_losses: List[float] = []
+
+    with torch.no_grad():
+        for pair in pairs:
+            # Forward direction
+            forward_loss = _compute_sentence_loss(
+                model, tokenizer, pair["forward"], device, max_length
+            )
+            forward_losses.append(forward_loss)
+
+            # Backward direction
+            backward_loss = _compute_sentence_loss(
+                model, tokenizer, pair["backward"], device, max_length
+            )
+            backward_losses.append(backward_loss)
+
+    # Compute average PPL
+    avg_forward_loss = sum(forward_losses) / len(forward_losses)
+    avg_backward_loss = sum(backward_losses) / len(backward_losses)
+
+    forward_ppl = torch.exp(torch.tensor(avg_forward_loss)).item()
+    backward_ppl = torch.exp(torch.tensor(avg_backward_loss)).item()
+
+    # Reversal Ratio: closer to 1.0 = less reversal curse
+    # < 1.0 means backward is harder (typical reversal curse)
+    reversal_ratio = forward_ppl / backward_ppl if backward_ppl > 0 else float("inf")
+
+    # Reversal Gap: difference in PPL
+    reversal_gap = backward_ppl - forward_ppl
+
+    return {
+        "forward_ppl": forward_ppl,
+        "backward_ppl": backward_ppl,
+        "reversal_ratio": reversal_ratio,
+        "reversal_gap": reversal_gap,
+        "num_pairs": len(pairs),
+    }
+
+
+def _compute_sentence_loss(
+    model: nn.Module,
+    tokenizer: Any,
+    sentence: str,
+    device: torch.device,
+    max_length: int,
+) -> float:
+    """
+    Compute average cross-entropy loss for a single sentence.
+
+    Args:
+        model: Model
+        tokenizer: Tokenizer
+        sentence: Input sentence
+        device: Device
+        max_length: Max length
+
+    Returns:
+        Average loss per token
+    """
+    # Tokenize
+    tokens = tokenizer.encode(sentence, add_special_tokens=False)
+
+    # Truncate if needed
+    if len(tokens) > max_length - 1:
+        tokens = tokens[: max_length - 1]
+
+    # Create input and label
+    input_ids = torch.tensor([tokens[:-1]], device=device)
+    labels = torch.tensor([tokens[1:]], device=device)
+
+    if input_ids.size(1) == 0:
+        return 0.0
+
+    # Forward pass
+    output = model(input_ids)
+    if isinstance(output, tuple):
+        logits = output[0]
+    else:
+        logits = output
+
+    # Compute loss
+    loss = nn.functional.cross_entropy(
+        logits.view(-1, logits.size(-1)),
+        labels.view(-1),
+        reduction="mean",
+    )
+
+    return loss.item()

@@ -5,7 +5,7 @@ Utility modules for New-LLM
 from .device import is_cuda_device, clear_gpu_cache, synchronize_device
 from .io import print_flush
 from .training import train_epoch
-from .evaluation import evaluate_ppl, evaluate_position_wise_ppl
+from .evaluation import evaluate_ppl, evaluate_position_wise_ppl, evaluate_reversal_curse
 
 __all__ = [
     # Device utilities
@@ -19,4 +19,5 @@ __all__ = [
     # Evaluation utilities
     'evaluate_ppl',
     'evaluate_position_wise_ppl',
+    'evaluate_reversal_curse',
 ]

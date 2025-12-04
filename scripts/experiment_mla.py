@@ -29,10 +29,15 @@ from src.config.experiment_defaults import (  # noqa: E402
 )
 from src.models.pythia import PythiaModel  # noqa: E402
 from src.models.mla_pythia import MLAPythiaModel  # noqa: E402
+from src.data.reversal_pairs import get_reversal_pairs  # noqa: E402
 from src.utils.io import print_flush  # noqa: E402
 from src.utils.seed import set_seed  # noqa: E402
-from src.utils.training import prepare_data_loaders, get_device  # noqa: E402
-from src.utils.evaluation import evaluate_ppl, evaluate_position_wise_ppl  # noqa: E402
+from src.utils.training import prepare_data_loaders, get_device, get_tokenizer  # noqa: E402
+from src.utils.evaluation import (  # noqa: E402
+    evaluate_ppl,
+    evaluate_position_wise_ppl,
+    evaluate_reversal_curse,
+)
 from src.utils.device import clear_gpu_cache  # noqa: E402
 
 
@@ -184,10 +189,23 @@ def run_experiment(
         for pos_range, ppl in pythia_pos_ppl.items():
             print_flush(f"    Position {pos_range}: {ppl:.1f}")
 
+        # Reversal Curse evaluation
+        print_flush("\n  Reversal Curse evaluation:")
+        tokenizer = get_tokenizer(config.tokenizer_name)
+        reversal_pairs = get_reversal_pairs()
+        pythia_reversal = evaluate_reversal_curse(
+            pythia_model, tokenizer, reversal_pairs, device
+        )
+        print_flush(f"    Forward PPL: {pythia_reversal['forward_ppl']:.1f}")
+        print_flush(f"    Backward PPL: {pythia_reversal['backward_ppl']:.1f}")
+        print_flush(f"    Reversal Ratio: {pythia_reversal['reversal_ratio']:.3f}")
+        print_flush(f"    Reversal Gap: {pythia_reversal['reversal_gap']:+.1f}")
+
         results["pythia"] = {
             "best_val_ppl": best_val_ppl,
             "best_epoch": best_epoch,
             "position_wise_ppl": pythia_pos_ppl,
+            "reversal_curse": pythia_reversal,
         }
 
         del pythia_model
@@ -258,10 +276,23 @@ def run_experiment(
     for pos_range, ppl in mla_pos_ppl.items():
         print_flush(f"    Position {pos_range}: {ppl:.1f}")
 
+    # Reversal Curse evaluation
+    print_flush("\n  Reversal Curse evaluation:")
+    tokenizer = get_tokenizer(config.tokenizer_name)
+    reversal_pairs = get_reversal_pairs()
+    mla_reversal = evaluate_reversal_curse(
+        mla_model, tokenizer, reversal_pairs, device
+    )
+    print_flush(f"    Forward PPL: {mla_reversal['forward_ppl']:.1f}")
+    print_flush(f"    Backward PPL: {mla_reversal['backward_ppl']:.1f}")
+    print_flush(f"    Reversal Ratio: {mla_reversal['reversal_ratio']:.3f}")
+    print_flush(f"    Reversal Gap: {mla_reversal['reversal_gap']:+.1f}")
+
     results["mla"] = {
         "best_val_ppl": best_val_ppl,
         "best_epoch": best_epoch,
         "position_wise_ppl": mla_pos_ppl,
+        "reversal_curse": mla_reversal,
         "kv_dim": kv_dim,
         "cache_reduction": cache_info["reduction_percent"],
     }
@@ -309,6 +340,31 @@ def run_experiment(
             print_flush(
                 f"| {pos_range} | {pythia_val:.1f} | {mla_val:.1f} | {pos_diff:+.1f} |"
             )
+
+        # Reversal Curse comparison
+        print_flush("\n" + "=" * 70)
+        print_flush("REVERSAL CURSE")
+        print_flush("=" * 70)
+
+        pythia_rev = results["pythia"]["reversal_curse"]
+        mla_rev = results["mla"]["reversal_curse"]
+
+        print_flush("\n| Model | Forward PPL | Backward PPL | Ratio | Gap |")
+        print_flush("|-------|-------------|--------------|-------|-----|")
+        print_flush(
+            f"| Pythia | {pythia_rev['forward_ppl']:.1f} | "
+            f"{pythia_rev['backward_ppl']:.1f} | "
+            f"{pythia_rev['reversal_ratio']:.3f} | "
+            f"{pythia_rev['reversal_gap']:+.1f} |"
+        )
+        print_flush(
+            f"| MLA | {mla_rev['forward_ppl']:.1f} | "
+            f"{mla_rev['backward_ppl']:.1f} | "
+            f"{mla_rev['reversal_ratio']:.3f} | "
+            f"{mla_rev['reversal_gap']:+.1f} |"
+        )
+
+        print_flush("\n(Reversal Ratio closer to 1.0 = less reversal curse)")
 
     return results
 
