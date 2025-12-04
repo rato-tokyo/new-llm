@@ -14,9 +14,11 @@ Usage:
 """
 
 import argparse
+import random
 import sys
 from typing import Dict, Any
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
@@ -25,11 +27,21 @@ from transformers import GPTNeoXForCausalLM
 # Add project root to path
 sys.path.insert(0, ".")
 
-from config.pythia import PythiaConfig
-from src.models.pretrained_mka import PretrainedMKAModelV2
-from src.utils.io import print_flush
-from src.utils.training import prepare_data_loaders, get_device
-from src.utils.device import clear_gpu_cache
+from config.pythia import PythiaConfig  # noqa: E402
+from src.models.pretrained_mka import PretrainedMKAModelV2  # noqa: E402
+from src.utils.io import print_flush  # noqa: E402
+from src.utils.training import prepare_data_loaders, get_device  # noqa: E402
+from src.utils.device import clear_gpu_cache  # noqa: E402
+
+
+def set_seed(seed: int = 42) -> None:
+    """Set random seed for reproducibility"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
 
 def evaluate_model(
@@ -124,6 +136,9 @@ def run_experiment(
     Returns:
         Results dict
     """
+    # Set seed for reproducibility
+    set_seed(42)
+
     device = get_device()
     config = PythiaConfig()
 
