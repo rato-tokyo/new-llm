@@ -187,6 +187,55 @@ python3 -m mypy src/ --ignore-missing-imports
 
 ---
 
+## ⚠️ 過去のバグと教訓
+
+### 1. ALiBi因果マスクの行列方向バグ（2025-12-05）
+
+**症状**: MLA-PythiaのPPLが異常に低い（1.5）、Pythiaは正常（424）
+
+**原因**: `build_alibi_bias_causal`で行列の行と列が逆転していた
+
+```python
+# ❌ バグ: relative_pos[i][j] = j - i （未来が見えていた）
+relative_pos = positions.unsqueeze(0) - positions.unsqueeze(1)
+
+# ✅ 修正: relative_pos[i][j] = i - j （正しい因果マスク）
+relative_pos = positions.unsqueeze(1) - positions.unsqueeze(0)
+```
+
+**教訓**:
+- PPL < 10 は異常。データ暗記または因果マスクのバグを疑う
+- 行列演算では`unsqueeze`の順序（行/列）を必ず確認
+- Attentionマスクは「queryが行、keyが列」が標準
+
+### 2. PPL異常値の診断基準
+
+| PPL | 状態 | 対処 |
+|-----|------|------|
+| < 5 | **異常** - データリーク/因果マスクバグ | コード点検必須 |
+| 5-30 | **疑わしい** - 過学習の可能性 | データ量・分割を確認 |
+| 30-100 | 正常（小規模データ） | - |
+| 100-500 | 正常（スクラッチ訓練） | - |
+| > 1000 | 学習不足 | epoch増加/lr調整 |
+
+### 3. 因果マスクの検証方法
+
+新しいAttention実装では必ず以下を確認：
+
+```python
+# テストコード
+seq_len = 5
+bias = build_alibi_bias_causal(seq_len, slope=0.0625)
+print(bias)
+# 期待出力: 上三角が-inf、下三角が負の値
+# tensor([[  0., -inf, -inf, -inf, -inf],
+#         [-0.0625,   0., -inf, -inf, -inf],
+#         [-0.1250, -0.0625,   0., -inf, -inf],
+#         ...])
+```
+
+---
+
 ## 📐 アーキテクチャ仕様
 
 ### Core Components
@@ -239,6 +288,8 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-05 | **ALiBi因果マスクバグ修正**: unsqueeze順序の修正、PPL異常の解消 |
+| 2025-12-05 | **Reversal Curse評価追加**: 順方向/逆方向PPL比較機能 |
 | 2025-12-05 | **MLA-Pythia実装**: V-DProjからMLA方式に移行、ALiBi採用 |
 | 2025-12-05 | **ALiBi採用**: RoPEからALiBiに変更、統一スロープ方式 |
 | 2025-12-04 | V-DProj実験（アーカイブ済み） |
