@@ -21,7 +21,7 @@ class PythiaConfig:
     # ========== 学習設定 ==========
     learning_rate = 1e-4            # 学習率
     batch_size = 8                  # バッチサイズ
-    num_epochs = 10                 # 最大エポック数
+    num_epochs = 30                 # 最大エポック数
     early_stopping_patience = 3    # Early Stopping: 何エポック改善しなければ停止
 
     # ========== トークナイザー ==========

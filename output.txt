@@ -1,85 +1,85 @@
-remote: Enumerating objects: 7, done.
-remote: Counting objects: 100% (7/7), done.
-remote: Compressing objects: 100% (1/1), done.
-remote: Total 4 (delta 3), reused 4 (delta 3), pack-reused 0 (from 0)
-Unpacking objects: 100% (4/4), 603 bytes | 603.00 KiB/s, done.
+remote: Enumerating objects: 9, done.
+remote: Counting objects: 100% (9/9), done.
+remote: Compressing objects: 100% (2/2), done.
+remote: Total 5 (delta 3), reused 5 (delta 3), pack-reused 0 (from 0)
+Unpacking objects: 100% (5/5), 974 bytes | 974.00 KiB/s, done.
 From https://github.com/rato-tokyo/new-llm
  * branch            main       -> FETCH_HEAD
-   bf03e6d..f2dce15  main       -> origin/main
-Updating bf03e6d..f2dce15
+   b426d85..d93e4fa  main       -> origin/main
+Updating b426d85..d93e4fa
 Fast-forward
- scripts/experiment_ka_comparison.py | 4 ++++
- 1 file changed, 4 insertions(+)
+ src/models/pretrained_mka.py | 22 ++++++++++++----------
+ 1 file changed, 12 insertions(+), 10 deletions(-)
+2025-12-04 08:38:07.379129: I tensorflow/core/util/port.cc:153] oneDNN custom operations are on. You may see slightly different numerical results due to floating-point round-off errors from different computation orders. To turn them off, set the environment variable `TF_ENABLE_ONEDNN_OPTS=0`.
+2025-12-04 08:38:07.396509: E external/local_xla/xla/stream_executor/cuda/cuda_fft.cc:467] Unable to register cuFFT factory: Attempting to register factory for plugin cuFFT when one has already been registered
+WARNING: All log messages before absl::InitializeLog() is called are written to STDERR
+E0000 00:00:1764837487.417722   23929 cuda_dnn.cc:8579] Unable to register cuDNN factory: Attempting to register factory for plugin cuDNN when one has already been registered
+E0000 00:00:1764837487.424133   23929 cuda_blas.cc:1407] Unable to register cuBLAS factory: Attempting to register factory for plugin cuBLAS when one has already been registered
+W0000 00:00:1764837487.440511   23929 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764837487.440544   23929 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764837487.440547   23929 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+W0000 00:00:1764837487.440550   23929 computation_placer.cc:177] computation placer already registered. Please check linkage and avoid linking the same target more than once.
+2025-12-04 08:38:07.445283: I tensorflow/core/platform/cpu_feature_guard.cc:210] This TensorFlow binary is optimized to use available CPU instructions in performance-critical operations.
+To enable the following instructions: AVX2 AVX512F AVX512_VNNI FMA, in other operations, rebuild TensorFlow with the appropriate compiler flags.
 Device: cuda (NVIDIA L4, 23.8GB)
 ======================================================================
-KA-ATTENTION vs PYTHIA COMPARISON
+PRETRAINED MKA-ATTENTION EXPERIMENT
 ======================================================================
 Samples: 10,000
 Sequence length: 128
 Epochs: 10
 Learning rate: 0.0001
+Eval only: False
 ======================================================================
 
-Architecture comparison:
-  Pythia:      hidden_size=512, intermediate=2048
-  KA-Pythia:   hidden_size=512, intermediate=2048
-  (Same architecture, different attention mechanism)
+Architecture:
+  Pythia-70M (pretrained): Frozen baseline
+  PretrainedMKA V2: Pythia frozen + KA attention trainable
 ======================================================================
 
 [Data] Loading Pile data...
 Preparing data: 10,000 samples, seq_len=128
-Downloading Pile dataset: 1,280,128 tokens
-  Loading tokenizer: EleutherAI/pythia-70m
-tokenizer_config.json: 100% 396/396 [00:00<00:00, 2.64MB/s]
-tokenizer.json: 2.11MB [00:00, 130MB/s]
-special_tokens_map.json: 100% 99.0/99.0 [00:00<00:00, 1.15MB/s]
-  Loading dataset (streaming)...
-README.md: 100% 776/776 [00:00<00:00, 8.14MB/s]
-Resolving data files: 100% 30/30 [00:00<00:00, 107.87it/s]
-  Tokenizing...
-  Saved 1,280,128 tokens to cache: cache/pile_tokens/pile_1280128.pt
+Loading cached tokens: cache/pile_tokens/pile_1280128.pt
+  Loaded 1,280,128 tokens from cache
   Train: 9,000 samples
   Val: 1,000 samples
 
 ======================================================================
-1. PYTHIA-70M (Baseline)
+1. PYTHIA-70M (Pretrained, Frozen)
 ======================================================================
 
-[Pythia-70M] Training...
-  Trainable: 70,426,624 / 70,426,624 parameters
-  Epoch  1: train_ppl=1255.6 val_ppl=875.6 [50.4s] *
-  Epoch  2: train_ppl=275.4 val_ppl=597.4 [51.8s] *
-  Epoch  3: train_ppl=150.1 val_ppl=499.0 [53.4s] *
-  Epoch  4: train_ppl=97.3 val_ppl=452.4 [52.7s] *
-  Epoch  5: train_ppl=68.2 val_ppl=442.2 [53.0s] *
-  Epoch  6: train_ppl=49.6 val_ppl=452.8 [53.1s]
-  Epoch  7: train_ppl=36.9 val_ppl=472.6 [52.9s]
-  Epoch  8: train_ppl=27.6 val_ppl=531.2 [53.0s]
-  → Early stop: val_ppl worsened for 3 epochs
-  Best: epoch 5, ppl=442.2
+[Pythia-70M] Evaluating pretrained model...
+  Pretrained val_ppl: 26.6
 
 ======================================================================
-2. KA-PYTHIA (KA-Attention)
+2. PRETRAINED-MKA V2 (Pythia frozen + KA trainable)
 ======================================================================
+  Total parameters: 71,215,616
+  Trainable: 788,992
+  Frozen: 70,426,624
 
-[KA-Pythia] Training...
-  Trainable: 70,426,624 / 70,426,624 parameters
-  Epoch  1: train_ppl=1380.0 val_ppl=949.3 [247.9s] *
-  Epoch  2: train_ppl=312.5 val_ppl=642.9 [246.8s] *
-  Epoch  3: train_ppl=170.2 val_ppl=533.1 [247.5s] *
-  Epoch  4: train_ppl=111.7 val_ppl=475.7 [248.3s] *
-  Epoch  5: train_ppl=80.0 val_ppl=453.6 [247.5s] *
-  Epoch  6: train_ppl=59.5 val_ppl=449.3 [246.7s] *
-  Epoch  7: train_ppl=45.5 val_ppl=454.5 [247.0s]
-  Epoch  8: train_ppl=35.4 val_ppl=481.4 [246.6s]
-  Epoch  9: train_ppl=27.8 val_ppl=507.6 [246.8s]
-  → Early stop: val_ppl worsened for 3 epochs
-  Best: epoch 6, ppl=449.3
+[PretrainedMKA V2] Training...
+  Epoch  1: train_ppl=434.5 val_ppl=303.1 [27.5s] *
+  Epoch  2: train_ppl=193.8 val_ppl=167.4 [28.4s] *
+  Epoch  3: train_ppl=119.7 val_ppl=114.2 [28.7s] *
+  Epoch  4: train_ppl=87.7 val_ppl=89.0 [28.5s] *
+  Epoch  5: train_ppl=69.7 val_ppl=74.1 [28.4s] *
+  Epoch  6: train_ppl=58.3 val_ppl=63.2 [28.4s] *
+  Epoch  7: train_ppl=50.6 val_ppl=57.3 [28.4s] *
+  Epoch  8: train_ppl=45.0 val_ppl=51.1 [28.4s] *
+  Epoch  9: train_ppl=40.9 val_ppl=47.3 [28.5s] *
+  Epoch 10: train_ppl=37.8 val_ppl=44.1 [28.4s] *
+  Best: epoch 10, ppl=44.1
 
 ======================================================================
 SUMMARY
 ======================================================================
-  Pythia: val_ppl=442.2
-  KA-Pythia: val_ppl=449.3
 
-  Difference: +7.1 ppl (+1.6%)
+| Model | PPL | Note |
+|-------|-----|------|
+| Pythia-70M (pretrained) | 26.6 | frozen baseline |
+| PretrainedMKA V2 | 44.1 | epoch 10 |
+
+Difference: +17.4 ppl
+
+DONE
