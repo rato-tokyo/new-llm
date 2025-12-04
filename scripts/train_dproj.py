@@ -29,8 +29,8 @@ from src.losses.diversity import oacd_loss
 def compute_convergence_rate(
     current: torch.Tensor,
     previous: torch.Tensor,
-    threshold: float,
     device: torch.device,
+    threshold: float,
 ) -> float:
     """
     収束率を計算（バッチ処理でメモリ効率化）
@@ -69,9 +69,7 @@ def train_iteration(
     previous_projs: torch.Tensor,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    batch_size: int,
-    proj_noise: float,
-    gradient_clip: float,
+    config: DProjTrainingConfig,
 ) -> tuple[torch.Tensor, float]:
     """
     1イテレーションの学習
@@ -82,15 +80,14 @@ def train_iteration(
         previous_projs: [num_tokens, proj_dim] (CPU tensor)
         optimizer: オプティマイザ
         device: デバイス
-        batch_size: バッチサイズ
-        proj_noise: ガウシアンノイズの標準偏差
-        gradient_clip: 勾配クリッピング値
+        config: DProj学習設定
 
     Returns:
         new_projs: [num_tokens, proj_dim] (CPU tensor)
         avg_loss: 平均損失
     """
     num_tokens = len(token_embeds)
+    batch_size = config.batch_size
     num_batches = (num_tokens + batch_size - 1) // batch_size
 
     optimizer.zero_grad()
@@ -111,15 +108,15 @@ def train_iteration(
         batch_embeds = token_embeds[start_idx:end_idx].to(device)
 
         # ノイズ追加（汎化性能向上）
-        if proj_noise > 0 and model.training:
-            noise = torch.randn_like(batch_projs) * proj_noise
+        if config.proj_noise > 0 and model.training:
+            noise = torch.randn_like(batch_projs) * config.proj_noise
             batch_projs = batch_projs + noise
 
         # Forward pass
         batch_output = model.dproj(batch_projs, batch_embeds)
 
         # OACD損失
-        loss = oacd_loss(batch_output, centroid_weight=0.1)
+        loss = oacd_loss(batch_output, centroid_weight=config.centroid_weight)
 
         # 勾配累積
         scaled_loss = loss / num_batches
@@ -134,7 +131,7 @@ def train_iteration(
         del batch_projs, batch_embeds, batch_output
 
     # 勾配クリッピングとパラメータ更新
-    torch.nn.utils.clip_grad_norm_(model.dproj.parameters(), gradient_clip)
+    torch.nn.utils.clip_grad_norm_(model.dproj.parameters(), config.gradient_clip)
     optimizer.step()
 
     # GPUキャッシュクリア
@@ -208,16 +205,14 @@ def train_dproj(
         assert previous_projs is not None
         current_projs, train_loss = train_iteration(
             model, train_token_embeds, previous_projs, optimizer, device,
-            batch_size=dproj_config.batch_size,
-            proj_noise=dproj_config.proj_noise,
-            gradient_clip=dproj_config.gradient_clip,
+            config=dproj_config,
         )
         final_loss = train_loss
 
         # 収束率計算
         conv_rate = compute_convergence_rate(
-            current_projs, previous_projs,
-            dproj_config.convergence_threshold, device,
+            current_projs, previous_projs, device,
+            threshold=dproj_config.convergence_threshold,
         )
         final_conv_rate = conv_rate
 

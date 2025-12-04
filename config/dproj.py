@@ -21,6 +21,9 @@ class DProjTrainingConfig:
                                      # 0.05: 軽いノイズ（収束優先）
                                      # 0.1: 推奨（汎化優先）
 
+    # ========== OACD損失 ==========
+    centroid_weight = 0.1            # 重心を原点に引き寄せる損失の重み
+
     # ========== 収束率Early Stopping ==========
     early_stopping = True            # 収束率による早期停止を有効化
     early_stopping_threshold = 0.95  # 収束率がこの値以上で停止
