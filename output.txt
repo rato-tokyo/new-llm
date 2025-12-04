@@ -3,30 +3,29 @@ From https://github.com/rato-tokyo/new-llm
 Already up to date.
 Device: cuda (NVIDIA L4, 23.8GB)
 ======================================================================
-V-DPROJ EXPERIMENT: Value Compression
+V-DPROJ EXPERIMENT: Value Compression (No Restoration)
 ======================================================================
 Samples: 10,000
 Sequence length: 128
 Epochs: 30
 Learning rate: 0.0001
 V proj dim: 320 (from 512)
-Reconstruction weight: 0.1
 Skip baseline: True
 ======================================================================
 
-KV Cache reduction (V only): 18.8%
+KV Cache reduction: 18.8%
 ======================================================================
 
 [Data] Loading Pile data...
 Preparing data: 10,000 samples, seq_len=128
 Downloading Pile dataset: 1,280,128 tokens
   Loading tokenizer: EleutherAI/pythia-70m
-tokenizer_config.json: 100% 396/396 [00:00<00:00, 3.56MB/s]
-tokenizer.json: 2.11MB [00:00, 119MB/s]
-special_tokens_map.json: 100% 99.0/99.0 [00:00<00:00, 1.20MB/s]
+tokenizer_config.json: 100% 396/396 [00:00<00:00, 3.73MB/s]
+tokenizer.json: 2.11MB [00:00, 71.6MB/s]
+special_tokens_map.json: 100% 99.0/99.0 [00:00<00:00, 972kB/s]
   Loading dataset (streaming)...
-README.md: 100% 776/776 [00:00<00:00, 9.09MB/s]
-Resolving data files: 100% 30/30 [00:00<00:00, 93.54it/s]
+README.md: 100% 776/776 [00:00<00:00, 8.54MB/s]
+Resolving data files: 100% 30/30 [00:00<00:00, 260.39it/s]
   Tokenizing...
   Saved 1,280,128 tokens to cache: cache/pile_tokens/pile_1280128.pt
   Train: 9,000 samples
@@ -39,27 +38,24 @@ Resolving data files: 100% 30/30 [00:00<00:00, 93.54it/s]
 ======================================================================
 2. V-DPROJ PYTHIA (V: 512 → 320)
 ======================================================================
-  Total parameters: 72,391,552
+  Total parameters: 69,239,680
   V projection: 1,971,072
   KV Cache reduction: 18.8%
 
-[V-DProj] Training (recon_weight=0.1)...
-  Epoch  1: train_ppl=615.6 val_ppl=635.5 recon=0.1266 [79.6s] *
-  Epoch  2: train_ppl=160.7 val_ppl=477.9 recon=0.1248 [80.6s] *
-  Epoch  3: train_ppl=85.8 val_ppl=435.4 recon=0.1268 [80.8s] *
-  Epoch  4: train_ppl=53.4 val_ppl=428.7 recon=0.1300 [80.7s] *
-  Epoch  5: train_ppl=35.6 val_ppl=456.5 recon=0.1366 [80.7s] 
-  Epoch  6: train_ppl=24.4 val_ppl=514.0 recon=0.1422 [80.9s] 
-  Epoch  7: train_ppl=16.9 val_ppl=613.3 recon=0.1498 [80.8s] 
+[V-DProj] Training...
+  Epoch  1: train_ppl=621.1 val_ppl=646.1 [73.7s] *
+  Epoch  2: train_ppl=155.8 val_ppl=454.8 [74.3s] *
+  Epoch  3: train_ppl=80.4 val_ppl=423.9 [75.2s] *
+  Epoch  4: train_ppl=48.2 val_ppl=424.8 [75.5s] 
   -> Early stop
-  Best: epoch 4, ppl=428.7
+  Best: epoch 3, ppl=423.9
 
   Position-wise PPL:
-    Position 0-16: 853.0
-    Position 16-32: 667.5
-    Position 32-64: 586.6
-    Position 64-96: 578.1
-    Position 96-128: 552.8
+    Position 0-16: 564.6
+    Position 16-32: 450.5
+    Position 32-64: 405.1
+    Position 64-96: 406.7
+    Position 96-128: 391.8
 
 ======================================================================
 SUMMARY
@@ -67,6 +63,6 @@ SUMMARY
 
 | Model | PPL | Epoch | KV Reduction |
 |-------|-----|-------|--------------|
-| V-DProj | 428.7 | 4 | 18.8% |
+| V-DProj | 423.9 | 3 | 18.8% |
 
 DONE
