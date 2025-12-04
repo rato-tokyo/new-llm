@@ -16,7 +16,7 @@ KVキャッシュ削減:
 - 512 → 320 = 37.5%削減
 """
 
-from typing import Optional, Dict
+from typing import Optional, Dict, Union, Any
 
 import torch
 import torch.nn as nn
@@ -284,7 +284,7 @@ class VDProjPythiaModel(nn.Module):
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         return_reconstruction_loss: bool = False,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> tuple[torch.Tensor, Any]:
         """
         Forward pass
 
@@ -295,13 +295,13 @@ class VDProjPythiaModel(nn.Module):
 
         Returns:
             logits: [batch, seq_len, vocab_size]
-            reconstruction_loss: Optional[torch.Tensor] average across all layers
+            reconstruction_loss: Optional reconstruction loss (Tensor or None)
         """
         # Embedding
         hidden_states = self.embed_in(input_ids)
 
         # Collect reconstruction losses
-        total_recon_loss = 0.0
+        total_recon_loss: Any = 0.0
         num_layers_with_loss = 0
 
         # V-DProj Layers
@@ -322,7 +322,7 @@ class VDProjPythiaModel(nn.Module):
         logits = self.embed_out(hidden_states)
 
         # Average reconstruction loss across layers
-        avg_recon_loss = None
+        avg_recon_loss: Any = None
         if return_reconstruction_loss and num_layers_with_loss > 0:
             avg_recon_loss = total_recon_loss / num_layers_with_loss
 
@@ -350,7 +350,7 @@ class VDProjPythiaModel(nn.Module):
             "transformer": total - embedding - lm_head,
         }
 
-    def kv_cache_size(self, seq_len: int, batch_size: int = 1) -> Dict[str, int]:
+    def kv_cache_size(self, seq_len: int, batch_size: int = 1) -> Dict[str, Union[int, float]]:
         """
         Calculate KV cache size
 

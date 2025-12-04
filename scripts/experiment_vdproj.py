@@ -14,7 +14,7 @@ import argparse
 import random
 import sys
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import numpy as np
 import torch
@@ -91,7 +91,7 @@ def evaluate_position_wise_ppl(
     model: nn.Module,
     val_loader: DataLoader,
     device: torch.device,
-    position_ranges: list[tuple[int, int]] | None = None,
+    position_ranges: Optional[list] = None,
 ) -> Dict[str, float]:
     """Evaluate position-wise perplexity"""
     model.eval()
@@ -363,7 +363,7 @@ def run_experiment(
             )
 
             if patience_counter >= patience:
-                print_flush(f"  -> Early stop")
+                print_flush("  -> Early stop")
                 break
 
         print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
@@ -454,7 +454,7 @@ def run_experiment(
         )
 
         if patience_counter >= patience:
-            print_flush(f"  -> Early stop")
+            print_flush("  -> Early stop")
             break
 
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
