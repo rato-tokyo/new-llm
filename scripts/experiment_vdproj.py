@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-V-DProj Experiment: Value Compression with Invertible Projection
+V-DProj Experiment: Value Compression for KV Cache Reduction
 
-V（Value）を圧縮して復元する方式でKVキャッシュを削減。
+V（Value）を圧縮してそのままAttentionに使用する方式でKVキャッシュを削減。
 Pythiaベースラインとの比較実験。
 
 Usage:
     python3 scripts/experiment_vdproj.py --samples 10000 --epochs 30
-    python3 scripts/experiment_vdproj.py --samples 10000 --recon-weight 0.1
+    python3 scripts/experiment_vdproj.py --samples 10000 --skip-baseline
 """
 
 import argparse
@@ -26,7 +26,6 @@ from config.pythia import PythiaConfig  # noqa: E402
 from src.config.experiment_defaults import (  # noqa: E402
     EARLY_STOPPING_PATIENCE,
     GRADIENT_CLIP,
-    DEFAULT_RECON_WEIGHT,
 )
 from src.models.pythia import PythiaModel  # noqa: E402
 from src.models.vdproj_pythia import VDProjPythiaModel  # noqa: E402
@@ -37,19 +36,16 @@ from src.utils.evaluation import evaluate_ppl, evaluate_position_wise_ppl  # noq
 from src.utils.device import clear_gpu_cache  # noqa: E402
 
 
-def train_epoch_with_recon(
+def train_epoch(
     model: nn.Module,
     train_loader: DataLoader,
     optimizer: torch.optim.Optimizer,
     device: torch.device,
-    recon_weight: float = 0.1,
-) -> Dict[str, float]:
-    """Train for one epoch with reconstruction loss."""
+) -> float:
+    """Train for one epoch. Returns train PPL."""
     model.train()
-    total_lm_loss = 0.0
-    total_recon_loss = 0.0
+    total_loss = 0.0
     total_tokens = 0
-    num_batches = 0
 
     for batch in train_loader:
         input_ids, labels = batch
@@ -57,32 +53,23 @@ def train_epoch_with_recon(
         labels = labels.to(device)
 
         optimizer.zero_grad()
-        logits, recon_loss = model(input_ids, return_reconstruction_loss=True)
+        logits = model(input_ids)
 
-        lm_loss = nn.functional.cross_entropy(
+        loss = nn.functional.cross_entropy(
             logits.view(-1, logits.size(-1)),
             labels.view(-1),
         )
-
-        if recon_loss is not None:
-            loss = lm_loss + recon_weight * recon_loss
-            total_recon_loss += recon_loss.item()
-        else:
-            loss = lm_loss
 
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), GRADIENT_CLIP)
         optimizer.step()
 
-        total_lm_loss += lm_loss.item() * labels.numel()
+        total_loss += loss.item() * labels.numel()
         total_tokens += labels.numel()
-        num_batches += 1
 
-    avg_lm_loss = total_lm_loss / total_tokens
-    ppl = torch.exp(torch.tensor(avg_lm_loss)).item()
-    avg_recon_loss = total_recon_loss / num_batches if num_batches > 0 else 0.0
-
-    return {"ppl": ppl, "recon_loss": avg_recon_loss}
+    avg_loss = total_loss / total_tokens
+    ppl = torch.exp(torch.tensor(avg_loss)).item()
+    return ppl
 
 
 def run_experiment(
@@ -92,7 +79,6 @@ def run_experiment(
     batch_size: int = 8,
     lr: float = 1e-4,
     v_proj_dim: int = 320,
-    recon_weight: float = DEFAULT_RECON_WEIGHT,
     skip_baseline: bool = False,
 ) -> Dict[str, Any]:
     """Run V-DProj experiment."""
@@ -102,19 +88,21 @@ def run_experiment(
     config = PythiaConfig()
 
     print_flush("=" * 70)
-    print_flush("V-DPROJ EXPERIMENT: Value Compression")
+    print_flush("V-DPROJ EXPERIMENT: Value Compression (No Restoration)")
     print_flush("=" * 70)
     print_flush(f"Samples: {num_samples:,}")
     print_flush(f"Sequence length: {seq_length}")
     print_flush(f"Epochs: {num_epochs}")
     print_flush(f"Learning rate: {lr}")
     print_flush(f"V proj dim: {v_proj_dim} (from {config.hidden_size})")
-    print_flush(f"Reconstruction weight: {recon_weight}")
     print_flush(f"Skip baseline: {skip_baseline}")
     print_flush("=" * 70)
 
-    reduction = (1.0 - v_proj_dim / config.hidden_size) / 2 * 100
-    print_flush(f"\nKV Cache reduction (V only): {reduction:.1f}%")
+    # KV Cache reduction calculation
+    standard_kv = config.hidden_size + config.hidden_size  # K + V
+    vdproj_kv = config.hidden_size + v_proj_dim  # K + V_compressed
+    reduction = (standard_kv - vdproj_kv) / standard_kv * 100
+    print_flush(f"\nKV Cache reduction: {reduction:.1f}%")
     print_flush("=" * 70)
 
     print_flush("\n[Data] Loading Pile data...")
@@ -163,31 +151,7 @@ def run_experiment(
         for epoch in range(1, num_epochs + 1):
             start_time = time.time()
 
-            # Train
-            pythia_model.train()
-            total_loss = 0.0
-            total_tokens = 0
-            for batch in train_loader:
-                input_ids, labels = batch
-                input_ids = input_ids.to(device)
-                labels = labels.to(device)
-
-                optimizer.zero_grad()
-                logits = pythia_model(input_ids)
-                loss = nn.functional.cross_entropy(
-                    logits.view(-1, logits.size(-1)),
-                    labels.view(-1),
-                )
-                loss.backward()
-                torch.nn.utils.clip_grad_norm_(pythia_model.parameters(), GRADIENT_CLIP)
-                optimizer.step()
-
-                total_loss += loss.item() * labels.numel()
-                total_tokens += labels.numel()
-
-            train_ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
-
-            # Evaluate
+            train_ppl = train_epoch(pythia_model, train_loader, optimizer, device)
             val_ppl = evaluate_ppl(pythia_model, val_loader, device)
             elapsed = time.time() - start_time
 
@@ -252,7 +216,7 @@ def run_experiment(
 
     optimizer = torch.optim.AdamW(vdproj_model.parameters(), lr=lr)
 
-    print_flush(f"\n[V-DProj] Training (recon_weight={recon_weight})...")
+    print_flush("\n[V-DProj] Training...")
     best_val_ppl = float("inf")
     best_epoch = 0
     patience_counter = 0
@@ -260,16 +224,13 @@ def run_experiment(
     for epoch in range(1, num_epochs + 1):
         start_time = time.time()
 
-        train_metrics = train_epoch_with_recon(
-            vdproj_model, train_loader, optimizer, device, recon_weight
-        )
-        val_metrics = evaluate_ppl(vdproj_model, val_loader, device, return_recon_loss=True)
-
+        train_ppl = train_epoch(vdproj_model, train_loader, optimizer, device)
+        val_ppl = evaluate_ppl(vdproj_model, val_loader, device)
         elapsed = time.time() - start_time
 
-        improved = val_metrics["ppl"] < best_val_ppl
+        improved = val_ppl < best_val_ppl
         if improved:
-            best_val_ppl = val_metrics["ppl"]
+            best_val_ppl = val_ppl
             best_epoch = epoch
             patience_counter = 0
             marker = "*"
@@ -278,9 +239,7 @@ def run_experiment(
             marker = ""
 
         print_flush(
-            f"  Epoch {epoch:2d}: train_ppl={train_metrics['ppl']:.1f} "
-            f"val_ppl={val_metrics['ppl']:.1f} "
-            f"recon={val_metrics['recon_loss']:.4f} "
+            f"  Epoch {epoch:2d}: train_ppl={train_ppl:.1f} val_ppl={val_ppl:.1f} "
             f"[{elapsed:.1f}s] {marker}"
         )
 
@@ -291,9 +250,7 @@ def run_experiment(
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
 
     print_flush("\n  Position-wise PPL:")
-    vdproj_pos_ppl = evaluate_position_wise_ppl(
-        vdproj_model, val_loader, device, return_recon_loss=True
-    )
+    vdproj_pos_ppl = evaluate_position_wise_ppl(vdproj_model, val_loader, device)
     for pos_range, ppl in vdproj_pos_ppl.items():
         print_flush(f"    Position {pos_range}: {ppl:.1f}")
 
@@ -302,7 +259,6 @@ def run_experiment(
         "best_epoch": best_epoch,
         "position_wise_ppl": vdproj_pos_ppl,
         "v_proj_dim": v_proj_dim,
-        "recon_weight": recon_weight,
         "cache_reduction": cache_info["reduction_percent"],
     }
 
@@ -372,10 +328,6 @@ def main() -> None:
         "--v-proj-dim", type=int, default=320, help="V projection dimension"
     )
     parser.add_argument(
-        "--recon-weight", type=float, default=DEFAULT_RECON_WEIGHT,
-        help="Reconstruction loss weight"
-    )
-    parser.add_argument(
         "--skip-baseline", action="store_true", help="Skip Pythia baseline"
     )
     args = parser.parse_args()
@@ -387,7 +339,6 @@ def main() -> None:
         batch_size=args.batch_size,
         lr=args.lr,
         v_proj_dim=args.v_proj_dim,
-        recon_weight=args.recon_weight,
         skip_baseline=args.skip_baseline,
     )
 

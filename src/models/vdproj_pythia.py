@@ -1,19 +1,17 @@
 """
-V-DProj Pythia: Value Compression with Invertible Projection
+V-DProj Pythia: Value Compression for KV Cache Reduction
 
-Vに対してDProj（次元圧縮）を適用し、逆射影で復元する方式。
+Vを圧縮してそのままAttentionに使用する方式。
 
 アーキテクチャ:
-- Q, K: 通常通り (512-dim)
-- V: 512 → v_proj → 320 → v_inv_proj → 512
-
-学習目標:
-1. Reconstruction Loss: ||V - V_restored||^2
-2. LM Loss: Cross-entropy
+- Q, K: 通常通り (512-dim, head_dim=64)
+- V: 512 → v_compress → 320 (head_dim=40) でAttention計算
+- Output: 320 → dense_v → 512
 
 KVキャッシュ削減:
-- 推論時はV_compressed (320-dim) のみ保存
-- 512 → 320 = 37.5%削減
+- K: 512-dim (変更なし)
+- V: 320-dim (圧縮)
+- 削減率: (512+512 - 512+320) / (512+512) = 18.8%
 """
 
 from typing import Optional, Dict, Union, Any
@@ -29,7 +27,7 @@ class VDProjAttention(nn.Module):
     """
     V-DProj Attention
 
-    VをDProjで圧縮し、逆射影で復元してAttentionを計算。
+    Vを圧縮してそのままAttention計算に使用。
     """
 
     def __init__(
@@ -43,22 +41,20 @@ class VDProjAttention(nn.Module):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_heads = num_heads
-        self.head_dim = hidden_size // num_heads
+        self.head_dim = hidden_size // num_heads  # 64
         self.rotary_dim = int(self.head_dim * rotary_pct)
         self.v_proj_dim = v_proj_dim
-        self.v_head_dim = v_proj_dim // num_heads
+        self.v_head_dim = v_proj_dim // num_heads  # 40
 
-        # Query, Key, Value projections
-        self.query_key_value = nn.Linear(hidden_size, 3 * hidden_size)
+        # Query, Key projections (standard)
+        self.query = nn.Linear(hidden_size, hidden_size)
+        self.key = nn.Linear(hidden_size, hidden_size)
 
-        # V compression: hidden_size → v_proj_dim
-        self.v_compress = nn.Linear(hidden_size, v_proj_dim)
+        # Value: compress to v_proj_dim
+        self.value = nn.Linear(hidden_size, v_proj_dim)
 
-        # V restoration: v_proj_dim → hidden_size
-        self.v_restore = nn.Linear(v_proj_dim, hidden_size)
-
-        # Output projection
-        self.dense = nn.Linear(hidden_size, hidden_size)
+        # Output projection: from v_proj_dim back to hidden_size
+        self.dense = nn.Linear(v_proj_dim, hidden_size)
 
         # Rotary embedding
         self.rotary_emb = RotaryEmbedding(
@@ -72,27 +68,35 @@ class VDProjAttention(nn.Module):
         self,
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        return_reconstruction_loss: bool = False,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> torch.Tensor:
         """
         Forward pass
 
         Args:
             hidden_states: [batch, seq_len, hidden_size]
             attention_mask: Optional attention mask
-            return_reconstruction_loss: Whether to return V reconstruction loss
 
         Returns:
             output: [batch, seq_len, hidden_size]
-            reconstruction_loss: Optional[torch.Tensor] if return_reconstruction_loss
         """
         batch_size, seq_len, _ = hidden_states.shape
 
-        # QKV projection
-        qkv = self.query_key_value(hidden_states)
-        qkv = qkv.view(batch_size, seq_len, 3, self.num_heads, self.head_dim)
-        qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, batch, heads, seq, head_dim]
-        query, key, value = qkv[0], qkv[1], qkv[2]
+        # Q, K projection (standard 512-dim)
+        query = self.query(hidden_states)
+        key = self.key(hidden_states)
+
+        # V projection (compressed 320-dim)
+        value = self.value(hidden_states)
+
+        # Reshape Q, K to heads: [batch, heads, seq, head_dim=64]
+        query = query.view(batch_size, seq_len, self.num_heads, self.head_dim)
+        query = query.transpose(1, 2)
+        key = key.view(batch_size, seq_len, self.num_heads, self.head_dim)
+        key = key.transpose(1, 2)
+
+        # Reshape V to heads: [batch, heads, seq, v_head_dim=40]
+        value = value.view(batch_size, seq_len, self.num_heads, self.v_head_dim)
+        value = value.transpose(1, 2)
 
         # Apply rotary embedding to Q, K
         cos, sin = self.rotary_emb(query, seq_len)
@@ -107,29 +111,7 @@ class VDProjAttention(nn.Module):
         query = torch.cat([query_rot, query_pass], dim=-1)
         key = torch.cat([key_rot, key_pass], dim=-1)
 
-        # ===== V Compression & Restoration =====
-        # value: [batch, heads, seq, head_dim] → hidden_states format
-        value_hidden = value.transpose(1, 2).contiguous()
-        value_hidden = value_hidden.view(batch_size, seq_len, self.hidden_size)
-
-        # Compress V
-        v_compressed = self.v_compress(value_hidden)  # [batch, seq, v_proj_dim]
-
-        # Restore V
-        v_restored = self.v_restore(v_compressed)  # [batch, seq, hidden_size]
-
-        # Compute reconstruction loss if needed
-        reconstruction_loss = None
-        if return_reconstruction_loss:
-            reconstruction_loss = F.mse_loss(v_restored, value_hidden)
-
-        # Convert back to heads format for attention
-        v_restored_heads = v_restored.view(
-            batch_size, seq_len, self.num_heads, self.head_dim
-        )
-        v_restored_heads = v_restored_heads.transpose(1, 2)
-
-        # Attention scores
+        # Attention scores: Q @ K^T
         attn_weights = torch.matmul(query, key.transpose(-1, -2)) * self.scale
 
         # Causal mask
@@ -143,16 +125,19 @@ class VDProjAttention(nn.Module):
 
         attn_weights = F.softmax(attn_weights, dim=-1)
 
-        # Attention output with restored V
-        attn_output = torch.matmul(attn_weights, v_restored_heads)
-        attn_output = attn_output.transpose(1, 2).contiguous()
-        attn_output = attn_output.view(batch_size, seq_len, self.hidden_size)
+        # Attention output: attn @ V (compressed)
+        # [batch, heads, seq, seq] @ [batch, heads, seq, v_head_dim=40]
+        # = [batch, heads, seq, v_head_dim=40]
+        attn_output = torch.matmul(attn_weights, value)
 
+        # Reshape back: [batch, seq, v_proj_dim=320]
+        attn_output = attn_output.transpose(1, 2).contiguous()
+        attn_output = attn_output.view(batch_size, seq_len, self.v_proj_dim)
+
+        # Output projection: 320 → 512
         output = self.dense(attn_output)
 
-        if return_reconstruction_loss:
-            return output, reconstruction_loss
-        return output, None
+        return output
 
 
 class VDProjLayer(nn.Module):
@@ -194,31 +179,26 @@ class VDProjLayer(nn.Module):
         self,
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        return_reconstruction_loss: bool = False,
-    ) -> tuple[torch.Tensor, Optional[torch.Tensor]]:
+    ) -> torch.Tensor:
         # Pre-LayerNorm
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
 
         # Parallel attention and MLP (Pythia specific)
-        attn_output, recon_loss = self.attention(
-            hidden_states,
-            attention_mask,
-            return_reconstruction_loss=return_reconstruction_loss,
-        )
+        attn_output = self.attention(hidden_states, attention_mask)
         mlp_output = self.mlp(hidden_states)
 
         # Combine and add residual
         hidden_states = residual + attn_output + mlp_output
 
-        return hidden_states, recon_loss
+        return hidden_states
 
 
 class VDProjPythiaModel(nn.Module):
     """
     V-DProj Pythia: Pythia with Value Compression
 
-    Vを圧縮して復元する方式でKVキャッシュを削減。
+    Vを圧縮してそのままAttentionに使用し、KVキャッシュを削減。
     """
 
     def __init__(
@@ -237,6 +217,7 @@ class VDProjPythiaModel(nn.Module):
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
+        self.num_heads = num_heads
         self.v_proj_dim = v_proj_dim
 
         # Embedding
@@ -283,37 +264,23 @@ class VDProjPythiaModel(nn.Module):
         self,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        return_reconstruction_loss: bool = False,
-    ) -> tuple[torch.Tensor, Any]:
+    ) -> torch.Tensor:
         """
         Forward pass
 
         Args:
             input_ids: [batch, seq_len]
             attention_mask: Optional attention mask
-            return_reconstruction_loss: Whether to return V reconstruction loss
 
         Returns:
             logits: [batch, seq_len, vocab_size]
-            reconstruction_loss: Optional reconstruction loss (Tensor or None)
         """
         # Embedding
         hidden_states = self.embed_in(input_ids)
 
-        # Collect reconstruction losses
-        total_recon_loss: Any = 0.0
-        num_layers_with_loss = 0
-
         # V-DProj Layers
         for layer in self.layers:
-            hidden_states, recon_loss = layer(
-                hidden_states,
-                attention_mask,
-                return_reconstruction_loss=return_reconstruction_loss,
-            )
-            if recon_loss is not None:
-                total_recon_loss = total_recon_loss + recon_loss
-                num_layers_with_loss += 1
+            hidden_states = layer(hidden_states, attention_mask)
 
         # Final layer norm
         hidden_states = self.final_layer_norm(hidden_states)
@@ -321,12 +288,7 @@ class VDProjPythiaModel(nn.Module):
         # LM Head
         logits = self.embed_out(hidden_states)
 
-        # Average reconstruction loss across layers
-        avg_recon_loss: Any = None
-        if return_reconstruction_loss and num_layers_with_loss > 0:
-            avg_recon_loss = total_recon_loss / num_layers_with_loss
-
-        return logits, avg_recon_loss
+        return logits
 
     def num_parameters(self) -> Dict[str, int]:
         """Count parameters"""
@@ -334,13 +296,15 @@ class VDProjPythiaModel(nn.Module):
         embedding = self.embed_in.weight.numel()
         lm_head = self.embed_out.weight.numel()
 
-        # V projection parameters
+        # V projection parameters (value linear + dense)
         v_proj_params = 0
         for layer in self.layers:
-            v_proj_params += layer.attention.v_compress.weight.numel()
-            v_proj_params += layer.attention.v_compress.bias.numel()
-            v_proj_params += layer.attention.v_restore.weight.numel()
-            v_proj_params += layer.attention.v_restore.bias.numel()
+            # value: hidden_size → v_proj_dim
+            v_proj_params += layer.attention.value.weight.numel()
+            v_proj_params += layer.attention.value.bias.numel()
+            # dense: v_proj_dim → hidden_size
+            v_proj_params += layer.attention.dense.weight.numel()
+            v_proj_params += layer.attention.dense.bias.numel()
 
         return {
             "total": total,
