@@ -68,10 +68,12 @@ def build_alibi_bias_causal(
     # 位置インデックス
     positions = torch.arange(seq_len, device=device)
 
-    # 相対位置: i - j
-    relative_pos = positions.unsqueeze(0) - positions.unsqueeze(1)
+    # 相対位置: i - j (query位置 - key位置)
+    # unsqueeze(1)が行(query), unsqueeze(0)が列(key)
+    relative_pos = positions.unsqueeze(1) - positions.unsqueeze(0)
 
     # 因果マスク付きALiBiバイアス
+    # i >= j (query >= key) なら見える、i < j なら見えない
     alibi_bias = torch.where(
         relative_pos >= 0,
         -slope * relative_pos.float(),  # 過去・現在: -slope * distance

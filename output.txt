@@ -1,61 +1,75 @@
-From https://github.com/rato-tokyo/new-llm
- * branch            main       -> FETCH_HEAD
-Already up to date.
 Device: cuda (NVIDIA L4, 23.8GB)
 ======================================================================
-V-DPROJ EXPERIMENT: Value Compression (No Restoration)
+MLA EXPERIMENT: KV Cache Compression with ALiBi
 ======================================================================
 Samples: 10,000
 Sequence length: 128
 Epochs: 30
 Learning rate: 0.0001
-V proj dim: 320 (from 512)
-Skip baseline: True
+KV dim: 128 (from 512)
+ALiBi slope: 0.0625
+Skip baseline: False
 ======================================================================
 
-KV Cache reduction: 18.8%
+KV Cache reduction: 87.5%
 ======================================================================
 
 [Data] Loading Pile data...
 Preparing data: 10,000 samples, seq_len=128
 Downloading Pile dataset: 1,280,128 tokens
   Loading tokenizer: EleutherAI/pythia-70m
-tokenizer_config.json: 100% 396/396 [00:00<00:00, 3.73MB/s]
-tokenizer.json: 2.11MB [00:00, 71.6MB/s]
-special_tokens_map.json: 100% 99.0/99.0 [00:00<00:00, 972kB/s]
   Loading dataset (streaming)...
-README.md: 100% 776/776 [00:00<00:00, 8.54MB/s]
-Resolving data files: 100% 30/30 [00:00<00:00, 260.39it/s]
+Resolving data files: 100% 30/30 [00:00<00:00, 205.89it/s]
   Tokenizing...
   Saved 1,280,128 tokens to cache: cache/pile_tokens/pile_1280128.pt
   Train: 9,000 samples
   Val: 1,000 samples
 
 ======================================================================
-1. PYTHIA-70M (Baseline) - SKIPPED
+1. PYTHIA-70M (Baseline, RoPE)
 ======================================================================
+  Total parameters: 70,426,624
 
-======================================================================
-2. V-DPROJ PYTHIA (V: 512 → 320)
-======================================================================
-  Total parameters: 69,239,680
-  V projection: 1,971,072
-  KV Cache reduction: 18.8%
-
-[V-DProj] Training...
-  Epoch  1: train_ppl=621.1 val_ppl=646.1 [73.7s] *
-  Epoch  2: train_ppl=155.8 val_ppl=454.8 [74.3s] *
-  Epoch  3: train_ppl=80.4 val_ppl=423.9 [75.2s] *
-  Epoch  4: train_ppl=48.2 val_ppl=424.8 [75.5s] 
+[Pythia] Training...
+  Epoch  1: train_ppl=611.7 val_ppl=625.3 [75.1s] *
+  Epoch  2: train_ppl=154.4 val_ppl=465.9 [74.6s] *
+  Epoch  3: train_ppl=79.4 val_ppl=424.4 [74.7s] *
+  Epoch  4: train_ppl=47.3 val_ppl=425.8 [74.7s] 
   -> Early stop
-  Best: epoch 3, ppl=423.9
+  Best: epoch 3, ppl=424.4
 
   Position-wise PPL:
-    Position 0-16: 564.6
-    Position 16-32: 450.5
-    Position 32-64: 405.1
-    Position 64-96: 406.7
-    Position 96-128: 391.8
+    Position 0-16: 565.2
+    Position 16-32: 449.8
+    Position 32-64: 410.2
+    Position 64-96: 407.2
+    Position 96-128: 390.4
+
+======================================================================
+2. MLA-PYTHIA (kv_dim=128, ALiBi)
+======================================================================
+  Total parameters: 68,442,112
+  MLA attention: 4,325,376
+  KV Cache reduction: 87.5%
+
+[MLA] Training...
+  Epoch  1: train_ppl=155.4 val_ppl=25.2 [71.1s] *
+  Epoch  2: train_ppl=5.2 val_ppl=4.1 [71.5s] *
+  Epoch  3: train_ppl=1.9 val_ppl=2.3 [71.7s] *
+  Epoch  4: train_ppl=1.3 val_ppl=1.8 [71.7s] *
+  Epoch  5: train_ppl=1.2 val_ppl=1.6 [71.8s] *
+  Epoch  6: train_ppl=1.1 val_ppl=1.5 [71.7s] *
+  Epoch  7: train_ppl=1.1 val_ppl=1.5 [71.7s] *
+  Epoch  8: train_ppl=1.0 val_ppl=1.5 [71.6s] 
+  -> Early stop
+  Best: epoch 7, ppl=1.5
+
+  Position-wise PPL:
+    Position 0-16: 1.4
+    Position 16-32: 1.4
+    Position 32-64: 1.4
+    Position 64-96: 1.4
+    Position 96-128: 1.8
 
 ======================================================================
 SUMMARY
@@ -63,6 +77,21 @@ SUMMARY
 
 | Model | PPL | Epoch | KV Reduction |
 |-------|-----|-------|--------------|
-| V-DProj | 423.9 | 3 | 18.8% |
+| Pythia (RoPE) | 424.4 | 3 | 0% |
+| MLA (ALiBi) | 1.5 | 7 | 87.5% |
+
+Difference: -423.0 ppl
+
+======================================================================
+POSITION-WISE PPL
+======================================================================
+
+| Position | Pythia | MLA | Diff |
+|----------|--------|-----|------|
+| 0-16 | 565.2 | 1.4 | -563.8 |
+| 16-32 | 449.8 | 1.4 | -448.4 |
+| 32-64 | 410.2 | 1.4 | -408.8 |
+| 64-96 | 407.2 | 1.4 | -405.8 |
+| 96-128 | 390.4 | 1.8 | -388.6 |
 
 DONE
