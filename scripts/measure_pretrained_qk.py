@@ -100,12 +100,16 @@ class PretrainedQKCollector:
             position_ids = torch.arange(seq_len, device=hidden_states.device).unsqueeze(0)
             cos, sin = rotary_emb(k, position_ids)
 
+            # rotary_dim: inv_freq の長さ × 2（cos/sin は rotary_dim 次元）
+            # inv_freq: [rotary_dim / 2]
+            rotary_dim = rotary_emb.inv_freq.shape[0] * 2
+
             # RoPE適用
-            q_rotary, k_rotary = apply_rotary_pos_emb(q, k, cos, sin, rotary_emb.rotary_ndims)
+            q_rotary, k_rotary = apply_rotary_pos_emb(q, k, cos, sin, rotary_dim)
 
             # RoPE適用次元数を保存
             if self._rotary_dim is None:
-                self._rotary_dim = rotary_emb.rotary_ndims
+                self._rotary_dim = rotary_dim
 
             with torch.no_grad():
                 q_abs = q_rotary.abs()
@@ -425,12 +429,20 @@ def main():
     model.eval()
 
     config = model.config
+    head_dim = config.hidden_size // config.num_attention_heads
+    # rotary_dim is computed from rotary_pct (default 0.25 for Pythia)
+    rotary_pct = getattr(config, 'rotary_pct', 0.25)
+    rotary_dim = int(head_dim * rotary_pct)
+    # RoPE base from config
+    rope_theta = getattr(config, 'rotary_emb_base', 10000)
+
     print_flush(f"  Hidden size: {config.hidden_size}")
     print_flush(f"  Layers: {config.num_hidden_layers}")
     print_flush(f"  Heads: {config.num_attention_heads}")
-    print_flush(f"  Head dim: {config.hidden_size // config.num_attention_heads}")
-    print_flush(f"  Rotary dim: {model.gpt_neox.rotary_emb.rotary_ndims}")
-    print_flush(f"  RoPE base: {model.gpt_neox.rotary_emb.base}")
+    print_flush(f"  Head dim: {head_dim}")
+    print_flush(f"  Rotary pct: {rotary_pct}")
+    print_flush(f"  Rotary dim: {rotary_dim}")
+    print_flush(f"  RoPE base: {rope_theta}")
     print_flush(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
     # Prepare data
