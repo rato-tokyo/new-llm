@@ -74,9 +74,9 @@ class InfiniAttention(nn.Module):
 
         # Beta gate (learnable, per head)
         # sigmoid(beta) で local と memory の重みを決定
+        # memory_only=True の場合、betaは使用されないがget_gate_values()のため保持
         if memory_only:
-            # sigmoid(10) ≈ 0.99995 → ほぼ100% Memory Attention
-            self.beta = nn.Parameter(torch.full((num_heads,), 10.0), requires_grad=False)
+            self.register_buffer('beta', torch.full((num_heads,), 10.0))
         else:
             self.beta = nn.Parameter(torch.zeros(num_heads))
 
@@ -214,29 +214,32 @@ class InfiniAttention(nn.Module):
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         # Now: [batch, heads, seq, head_dim]
 
-        # 1. Local attention (standard dot-product, causal)
-        attn_scores = torch.matmul(q, k.transpose(-1, -2)) * self.scale
-
-        # Causal mask (NoPE, no position encoding)
-        causal_mask = torch.triu(
-            torch.ones(seq_len, seq_len, device=hidden_states.device) * float("-inf"),
-            diagonal=1
-        )
-        attn_scores = attn_scores + causal_mask
-
-        attn_weights = F.softmax(attn_scores, dim=-1)
-        a_local = torch.matmul(attn_weights, v)  # [batch, heads, seq, head_dim]
-
-        # 2. Memory attention
+        # Memory attention (always computed)
         a_mem = self._retrieve_from_memory(q)  # [batch, heads, seq, head_dim]
 
-        # 3. Combine with beta gate
-        # gate: sigmoid(beta) per head
-        gate = torch.sigmoid(self.beta)  # [heads]
-        gate = gate.view(1, self.num_heads, 1, 1)  # broadcast
+        if self.memory_only:
+            # Memory-only mode: skip local attention entirely (faster)
+            combined = a_mem
+        else:
+            # 1. Local attention (standard dot-product, causal)
+            attn_scores = torch.matmul(q, k.transpose(-1, -2)) * self.scale
 
-        # A = gate * A_mem + (1 - gate) * A_local
-        combined = gate * a_mem + (1 - gate) * a_local
+            # Causal mask (NoPE, no position encoding)
+            causal_mask = torch.triu(
+                torch.ones(seq_len, seq_len, device=hidden_states.device) * float("-inf"),
+                diagonal=1
+            )
+            attn_scores = attn_scores + causal_mask
+
+            attn_weights = F.softmax(attn_scores, dim=-1)
+            a_local = torch.matmul(attn_weights, v)  # [batch, heads, seq, head_dim]
+
+            # 2. Combine with beta gate
+            gate = torch.sigmoid(self.beta)  # [heads]
+            gate = gate.view(1, self.num_heads, 1, 1)  # broadcast
+
+            # A = gate * A_mem + (1 - gate) * A_local
+            combined = gate * a_mem + (1 - gate) * a_local
 
         # 4. Update memory (after forward, using current K, V)
         if update_memory:
