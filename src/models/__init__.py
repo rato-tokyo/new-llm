@@ -2,7 +2,6 @@
 
 MLA-Pythia architecture for KV cache compression.
 Unified position encoding system (RoPE, ALiBi, NoPE).
-KA cache for inference optimization.
 """
 
 from .pythia import PythiaModel
@@ -19,12 +18,9 @@ from .position_encoding import (
     create_position_encoding,
 )
 from .unified_pythia import UnifiedPythiaModel
-from .ka_cache import KACachePythiaModel, KACache, KVCache
-from .ka_adapter import KAAdapterPythiaModel, KAAdapter, KAAdapterAttention
-from .ka_train import KATrainPythiaModel, KATrainAttention
 
 __all__ = [
-    # Legacy models
+    # Core models
     'PythiaModel',
     'MLAPythiaModel',
     'MLAAttention',
@@ -42,15 +38,4 @@ __all__ = [
     'create_position_encoding',
     # Unified model
     'UnifiedPythiaModel',
-    # KA cache
-    'KACachePythiaModel',
-    'KACache',
-    'KVCache',
-    # KA adapter
-    'KAAdapterPythiaModel',
-    'KAAdapter',
-    'KAAdapterAttention',
-    # KA train (案2)
-    'KATrainPythiaModel',
-    'KATrainAttention',
 ]

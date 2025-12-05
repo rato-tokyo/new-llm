@@ -90,17 +90,6 @@ A = attention_weights @ V  # shape: [batch, heads, seq, head_dim]
 | Attention Scores | - | `Q @ K^T` の結果（softmax前） |
 | Attention Weights | - | softmax後の重み（確率分布） |
 
-### KAキャッシュ
-
-**定義**: Key + Attention Output をキャッシュする方式。
-
-```
-標準KVキャッシュ: K, V をキャッシュ
-KAキャッシュ:     K, A をキャッシュ（Vの代わりにAttention Outputを保存）
-```
-
-過去トークンのAttention Output（A）を再利用することで、Vを再計算せずに次トークンの予測が可能。
-
 ---
 
 ## 📚 DeepSeek MLA (Multi-head Latent Attention) 参考資料
@@ -415,9 +404,7 @@ new-llm/
 │   └── pythia.py                   # PythiaConfig（モデル構造・学習設定）
 ├── scripts/
 │   ├── experiment_mla.py           # MLA実験: Pythia vs MLA-Pythia
-│   ├── experiment_position.py      # 位置エンコーディング比較実験
-│   ├── experiment_ka_cache.py      # KAキャッシュ推論実験（案3）
-│   └── experiment_ka_adapter.py    # KAキャッシュAdapter実験（案1）
+│   └── experiment_position.py      # 位置エンコーディング比較実験
 ├── src/
 │   ├── __init__.py
 │   ├── config/
@@ -433,9 +420,7 @@ new-llm/
 │   │   ├── mla.py                  # MLAAttention, MLALayer
 │   │   ├── alibi.py                # ALiBi実装（MLA用）
 │   │   ├── position_encoding.py    # 位置エンコーディング統一モジュール
-│   │   ├── unified_pythia.py       # UnifiedPythiaModel（位置エンコ切替可能）
-│   │   ├── ka_cache.py             # KAキャッシュ推論モジュール（案3）
-│   │   └── ka_adapter.py           # KAキャッシュAdapterモジュール（案1）
+│   │   └── unified_pythia.py       # UnifiedPythiaModel（位置エンコ切替可能）
 │   └── utils/
 │       ├── __init__.py
 │       ├── training.py             # 共通学習ユーティリティ
@@ -443,6 +428,7 @@ new-llm/
 │       ├── device.py               # デバイス管理
 │       ├── data_pythia.py          # Pileデータ読み込み
 │       ├── io.py                   # 入出力ユーティリティ
+│       ├── rope.py                 # RoPE共通実装
 │       └── seed.py                 # シード設定
 ├── docs/
 │   └── experiments/                # 実験結果
@@ -456,11 +442,10 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-05 | **KAキャッシュ削除**: 全てのKA実装で失敗。コード削除、ドキュメントはdocs/experiments/に保存 |
 | 2025-12-05 | **Reversal Curse評価必須化**: 全実験スクリプトでReversal Curse測定を義務化 |
-| 2025-12-05 | **KAキャッシュAdapter実装（案1）**: A→V変換Adapterによる精度改善 |
-| 2025-12-05 | **KAキャッシュ推論実験追加**: 学習不要でKVキャッシュとKAキャッシュを比較 |
 | 2025-12-05 | **データリークバグ修正**: reversal pairsが検証データに混入していた問題を修正 |
-| 2025-12-05 | **リファクタリング**: 未使用コード削除、エクスポート整理、ドキュメント更新 |
+| 2025-12-05 | **リファクタリング**: 未使用コード削除、RoPE共通化、エクスポート整理 |
 | 2025-12-05 | **位置エンコーディング統一化**: RoPE/ALiBi/NoPEを疎結合で切り替え可能に |
 | 2025-12-05 | **ALiBi因果マスクバグ修正**: unsqueeze順序の修正、PPL異常の解消 |
 | 2025-12-05 | **Reversal Curse評価追加**: 順方向/逆方向PPL比較機能 |
