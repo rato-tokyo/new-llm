@@ -441,7 +441,7 @@ class KAAdapterPythiaModel(nn.Module):
 
         hidden_states = self.embed_in(input_ids)
 
-        total_adapter_loss = 0.0
+        total_adapter_loss: torch.Tensor = torch.tensor(0.0, device=input_ids.device)
         num_layers = 0
 
         for i in range(self.num_layers):
