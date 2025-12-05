@@ -37,6 +37,8 @@ from src.models.ka_adapter import KAAdapterPythiaModel
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
 from src.utils.training import prepare_data_loaders, get_device, get_tokenizer
+from src.utils.evaluation import evaluate_reversal_curse
+from src.data.reversal_pairs import get_reversal_pairs
 
 
 def train_base_model(
@@ -462,6 +464,26 @@ def run_experiment(
 
         print_flush(f"KA (with adapter) vs KV: {diff_with_adapter:+.1f}%")
         print_flush(f"Adapter improvement: {improvement:+.1f}%")
+
+    # Reversal Curse Evaluation
+    print_flush("\n" + "=" * 70)
+    print_flush("REVERSAL CURSE EVALUATION")
+    print_flush("=" * 70)
+
+    tokenizer = get_tokenizer(config.tokenizer_name)
+    reversal_pairs = get_reversal_pairs()
+
+    print_flush(f"\n  Evaluating {len(reversal_pairs)} pairs...")
+    reversal_result = evaluate_reversal_curse(
+        model, tokenizer, reversal_pairs, device
+    )
+
+    print_flush(f"\n  Forward PPL: {reversal_result['forward_ppl']:.1f}")
+    print_flush(f"  Backward PPL: {reversal_result['backward_ppl']:.1f}")
+    print_flush(f"  Reversal Ratio: {reversal_result['reversal_ratio']:.4f}")
+    print_flush(f"  Reversal Gap: {reversal_result['reversal_gap']:.1f}")
+
+    results["reversal_curse"] = reversal_result
 
     return results
 

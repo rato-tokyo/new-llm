@@ -270,6 +270,33 @@ python3 -m mypy src/ --ignore-missing-imports
 **実験でランダムデータ（torch.randint等）を使用することは絶対に禁止。**
 必ず実データ（Pile）を使用すること。
 
+### Reversal Curse評価必須（厳禁: 省略禁止）
+
+**すべての実験スクリプトで、Reversal Curse評価を必ず実行すること。**
+
+実験終了時に以下の指標を出力すること:
+- Forward PPL（順方向文）
+- Backward PPL（逆方向文）
+- Reversal Ratio（Forward / Backward）
+- Reversal Gap（Backward - Forward）
+
+```python
+# 必須コード（すべての実験スクリプトに含める）
+from src.utils.evaluation import evaluate_reversal_curse
+from src.data.reversal_pairs import get_reversal_pairs
+
+tokenizer = get_tokenizer(config.tokenizer_name)
+reversal_pairs = get_reversal_pairs()
+reversal_result = evaluate_reversal_curse(model, tokenizer, reversal_pairs, device)
+
+print_flush(f"Forward PPL: {reversal_result['forward_ppl']:.1f}")
+print_flush(f"Backward PPL: {reversal_result['backward_ppl']:.1f}")
+print_flush(f"Reversal Ratio: {reversal_result['reversal_ratio']:.4f}")
+print_flush(f"Reversal Gap: {reversal_result['reversal_gap']:.1f}")
+```
+
+**勝手にReversal Curse評価を省略することは厳禁。**
+
 ---
 
 ## ⚠️ 過去のバグと教訓
@@ -389,7 +416,8 @@ new-llm/
 ├── scripts/
 │   ├── experiment_mla.py           # MLA実験: Pythia vs MLA-Pythia
 │   ├── experiment_position.py      # 位置エンコーディング比較実験
-│   └── experiment_ka_cache.py      # KAキャッシュ推論実験
+│   ├── experiment_ka_cache.py      # KAキャッシュ推論実験（案3）
+│   └── experiment_ka_adapter.py    # KAキャッシュAdapter実験（案1）
 ├── src/
 │   ├── __init__.py
 │   ├── config/
@@ -406,7 +434,8 @@ new-llm/
 │   │   ├── alibi.py                # ALiBi実装（MLA用）
 │   │   ├── position_encoding.py    # 位置エンコーディング統一モジュール
 │   │   ├── unified_pythia.py       # UnifiedPythiaModel（位置エンコ切替可能）
-│   │   └── ka_cache.py             # KAキャッシュ推論モジュール
+│   │   ├── ka_cache.py             # KAキャッシュ推論モジュール（案3）
+│   │   └── ka_adapter.py           # KAキャッシュAdapterモジュール（案1）
 │   └── utils/
 │       ├── __init__.py
 │       ├── training.py             # 共通学習ユーティリティ
@@ -427,6 +456,8 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-05 | **Reversal Curse評価必須化**: 全実験スクリプトでReversal Curse測定を義務化 |
+| 2025-12-05 | **KAキャッシュAdapter実装（案1）**: A→V変換Adapterによる精度改善 |
 | 2025-12-05 | **KAキャッシュ推論実験追加**: 学習不要でKVキャッシュとKAキャッシュを比較 |
 | 2025-12-05 | **データリークバグ修正**: reversal pairsが検証データに混入していた問題を修正 |
 | 2025-12-05 | **リファクタリング**: 未使用コード削除、エクスポート整理、ドキュメント更新 |
