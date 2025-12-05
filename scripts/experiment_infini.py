@@ -33,6 +33,8 @@ from src.utils.io import print_flush  # noqa: E402
 from src.utils.seed import set_seed  # noqa: E402
 from src.utils.training import (  # noqa: E402
     prepare_data_loaders,
+    prepare_long_document_data,
+    evaluate_long_documents,
     get_device,
     get_tokenizer,
     train_epoch,
@@ -174,6 +176,9 @@ def run_experiment(
     memory_only: bool = False,
     skip_baseline: bool = False,
     skip_infini: bool = False,
+    long_context_eval: bool = False,
+    num_long_documents: int = 50,
+    tokens_per_document: int = 4096,
 ) -> dict[str, Any]:
     """Run Infini-Attention experiment."""
     set_seed(42)
@@ -192,6 +197,8 @@ def run_experiment(
     print_flush(f"Memory only: {memory_only}")
     print_flush(f"Skip baseline: {skip_baseline}")
     print_flush(f"Skip infini: {skip_infini}")
+    if long_context_eval:
+        print_flush(f"Long context eval: {num_long_documents} docs × {tokens_per_document} tokens")
     print_flush("=" * 70)
 
     print_flush("\n[Data] Loading Pile data...")
@@ -380,8 +387,142 @@ def run_experiment(
             "final_gate_values": gate_values.tolist(),
         }
 
-        del infini_model
-        clear_gpu_cache(device)
+        # Don't delete infini_model yet if long_context_eval is needed
+        if not long_context_eval:
+            del infini_model
+            clear_gpu_cache(device)
+
+    # ===== Long Context Evaluation =====
+    if long_context_eval:
+        print_flush("\n" + "=" * 70)
+        print_flush("LONG CONTEXT EVALUATION")
+        print_flush("=" * 70)
+        print_flush("  Memory reset per document, updated per segment")
+        print_flush(f"  Documents: {num_long_documents}")
+        print_flush(f"  Tokens per document: {tokens_per_document:,}")
+        print_flush(f"  Segment length: {seq_length}")
+
+        # Prepare long document data
+        _, long_val_documents = prepare_long_document_data(
+            num_documents=num_long_documents,
+            tokens_per_document=tokens_per_document,
+            segment_length=seq_length,
+            tokenizer_name=config.tokenizer_name,
+            val_split=1.0,  # All for validation
+        )
+
+        # Evaluate Pythia (if trained)
+        if results.get("pythia") is not None:
+            print_flush("\n[Pythia] Long context evaluation...")
+            # Need to recreate model for evaluation
+            pythia_model = PythiaModel(
+                vocab_size=config.vocab_size,
+                hidden_size=config.hidden_size,
+                num_layers=config.num_layers,
+                num_heads=config.num_attention_heads,
+                intermediate_size=config.intermediate_size,
+                max_position_embeddings=config.max_position_embeddings,
+                rotary_pct=config.rotary_pct,
+            ).to(device)
+
+            pythia_long_result = evaluate_long_documents(
+                pythia_model,
+                long_val_documents,
+                device,
+                update_memory=False,
+                has_reset_memory=False,
+            )
+            results["pythia"]["long_context"] = pythia_long_result
+            print_flush(f"  Total PPL: {pythia_long_result['total_ppl']:.1f}")
+            print_flush("  Segment-wise PPL:")
+            for seg_name, seg_ppl in list(pythia_long_result['segment_ppls'].items())[:5]:
+                print_flush(f"    {seg_name}: {seg_ppl:.1f}")
+            if len(pythia_long_result['segment_ppls']) > 5:
+                print_flush(f"    ... ({len(pythia_long_result['segment_ppls'])} segments total)")
+
+            del pythia_model
+            clear_gpu_cache(device)
+
+        # Evaluate Infini (if trained)
+        if results.get("infini") is not None:
+            # Recreate model if it was deleted
+            if 'infini_model' not in dir() or infini_model is None:
+                infini_model = InfiniPythiaModel(
+                    vocab_size=config.vocab_size,
+                    hidden_size=config.hidden_size,
+                    num_layers=config.num_layers,
+                    num_heads=config.num_attention_heads,
+                    intermediate_size=config.intermediate_size,
+                    max_position_embeddings=config.max_position_embeddings,
+                    rotary_pct=config.rotary_pct,
+                    use_delta_rule=use_delta_rule,
+                    memory_only=memory_only,
+                ).to(device)
+
+            print_flush("\n[Infini] Long context evaluation (with memory)...")
+            infini_long_result = evaluate_long_documents(
+                infini_model,
+                long_val_documents,
+                device,
+                update_memory=True,
+                has_reset_memory=True,
+            )
+            results["infini"]["long_context"] = infini_long_result
+            print_flush(f"  Total PPL: {infini_long_result['total_ppl']:.1f}")
+            print_flush("  Segment-wise PPL:")
+            for seg_name, seg_ppl in list(infini_long_result['segment_ppls'].items())[:5]:
+                print_flush(f"    {seg_name}: {seg_ppl:.1f}")
+            if len(infini_long_result['segment_ppls']) > 5:
+                print_flush(f"    ... ({len(infini_long_result['segment_ppls'])} segments total)")
+
+            # Also evaluate without memory update for comparison
+            print_flush("\n[Infini] Long context evaluation (without memory)...")
+            infini_model.reset_memory()
+            infini_no_mem_result = evaluate_long_documents(
+                infini_model,
+                long_val_documents,
+                device,
+                update_memory=False,
+                has_reset_memory=True,
+            )
+            results["infini"]["long_context_no_memory"] = infini_no_mem_result
+            print_flush(f"  Total PPL: {infini_no_mem_result['total_ppl']:.1f}")
+
+            del infini_model
+            clear_gpu_cache(device)
+
+        # Long context comparison
+        if results.get("pythia") is not None and results.get("infini") is not None:
+            print_flush("\n" + "-" * 50)
+            print_flush("Long Context Comparison:")
+            pythia_lc = results["pythia"]["long_context"]
+            infini_lc = results["infini"]["long_context"]
+            infini_no_mem = results["infini"]["long_context_no_memory"]
+
+            print_flush(f"\n| Model | Total PPL | Seg 0 | Seg 1 | Seg 2 | Last |")
+            print_flush(f"|-------|-----------|-------|-------|-------|------|")
+
+            segs = list(pythia_lc['segment_ppls'].keys())
+            p_s0 = pythia_lc['segment_ppls'].get(segs[0], 0) if segs else 0
+            p_s1 = pythia_lc['segment_ppls'].get(segs[1], 0) if len(segs) > 1 else 0
+            p_s2 = pythia_lc['segment_ppls'].get(segs[2], 0) if len(segs) > 2 else 0
+            p_last = pythia_lc['segment_ppls'].get(segs[-1], 0) if segs else 0
+            print_flush(f"| Pythia | {pythia_lc['total_ppl']:.1f} | {p_s0:.1f} | {p_s1:.1f} | {p_s2:.1f} | {p_last:.1f} |")
+
+            i_s0 = infini_lc['segment_ppls'].get(segs[0], 0) if segs else 0
+            i_s1 = infini_lc['segment_ppls'].get(segs[1], 0) if len(segs) > 1 else 0
+            i_s2 = infini_lc['segment_ppls'].get(segs[2], 0) if len(segs) > 2 else 0
+            i_last = infini_lc['segment_ppls'].get(segs[-1], 0) if segs else 0
+            print_flush(f"| Infini (mem) | {infini_lc['total_ppl']:.1f} | {i_s0:.1f} | {i_s1:.1f} | {i_s2:.1f} | {i_last:.1f} |")
+
+            n_s0 = infini_no_mem['segment_ppls'].get(segs[0], 0) if segs else 0
+            n_s1 = infini_no_mem['segment_ppls'].get(segs[1], 0) if len(segs) > 1 else 0
+            n_s2 = infini_no_mem['segment_ppls'].get(segs[2], 0) if len(segs) > 2 else 0
+            n_last = infini_no_mem['segment_ppls'].get(segs[-1], 0) if segs else 0
+            print_flush(f"| Infini (no mem) | {infini_no_mem['total_ppl']:.1f} | {n_s0:.1f} | {n_s1:.1f} | {n_s2:.1f} | {n_last:.1f} |")
+
+            print_flush("\n  (Seg 0 = first segment, Last = final segment of document)")
+            print_flush("  Memory benefit should show in later segments (Seg 1+)")
 
     # ===== Summary =====
     print_flush("\n" + "=" * 70)
@@ -479,6 +620,18 @@ def main() -> None:
     parser.add_argument(
         "--skip-infini", action="store_true", help="Skip Infini-Pythia (run baseline only)"
     )
+    parser.add_argument(
+        "--long-context", action="store_true",
+        help="Enable long context evaluation (proper memory reset per document)"
+    )
+    parser.add_argument(
+        "--num-long-docs", type=int, default=50,
+        help="Number of long documents for evaluation"
+    )
+    parser.add_argument(
+        "--tokens-per-doc", type=int, default=4096,
+        help="Tokens per document for long context evaluation"
+    )
     args = parser.parse_args()
 
     run_experiment(
@@ -491,6 +644,9 @@ def main() -> None:
         memory_only=args.memory_only,
         skip_baseline=args.skip_baseline,
         skip_infini=args.skip_infini,
+        long_context_eval=args.long_context,
+        num_long_documents=args.num_long_docs,
+        tokens_per_document=args.tokens_per_doc,
     )
 
     print_flush("\nDONE")

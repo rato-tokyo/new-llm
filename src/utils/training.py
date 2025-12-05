@@ -381,3 +381,168 @@ def get_tokenizer(tokenizer_name: str) -> Any:
     """
     from transformers import AutoTokenizer
     return AutoTokenizer.from_pretrained(tokenizer_name)
+
+
+def prepare_long_document_data(
+    num_documents: int,
+    tokens_per_document: int,
+    segment_length: int,
+    tokenizer_name: str,
+    val_split: float = 0.1,
+) -> Tuple[list, list]:
+    """
+    Prepare long document data for Infini-Attention evaluation.
+
+    Each document is split into multiple segments.
+    Memory should be reset at document boundaries, not segment boundaries.
+
+    Args:
+        num_documents: Number of documents
+        tokens_per_document: Tokens per document (e.g., 4096, 8192)
+        segment_length: Segment length (e.g., 256)
+        tokenizer_name: Tokenizer name
+        val_split: Validation split ratio
+
+    Returns:
+        train_documents: List of documents, each is list of (input_ids, labels) segments
+        val_documents: List of documents for validation
+    """
+    from src.utils.data_pythia import load_pile_tokens_cached
+
+    total_tokens_needed = num_documents * tokens_per_document
+    tokens = load_pile_tokens_cached(total_tokens_needed + segment_length, tokenizer_name)
+
+    segments_per_document = tokens_per_document // segment_length
+
+    print_flush(f"Preparing long document data:")
+    print_flush(f"  Documents: {num_documents}")
+    print_flush(f"  Tokens per document: {tokens_per_document:,}")
+    print_flush(f"  Segment length: {segment_length}")
+    print_flush(f"  Segments per document: {segments_per_document}")
+
+    all_documents = []
+
+    for doc_idx in range(num_documents):
+        doc_start = doc_idx * tokens_per_document
+        document_segments = []
+
+        for seg_idx in range(segments_per_document):
+            seg_start = doc_start + seg_idx * segment_length
+            input_ids = tokens[seg_start:seg_start + segment_length]
+            labels = tokens[seg_start + 1:seg_start + segment_length + 1]
+            document_segments.append((input_ids, labels))
+
+        all_documents.append(document_segments)
+
+    # Split into train/val
+    val_size = int(num_documents * val_split)
+    train_size = num_documents - val_size
+
+    # Shuffle documents
+    perm = torch.randperm(num_documents).tolist()
+    all_documents = [all_documents[i] for i in perm]
+
+    train_documents = all_documents[:train_size]
+    val_documents = all_documents[train_size:]
+
+    print_flush(f"  Train documents: {len(train_documents)}")
+    print_flush(f"  Val documents: {len(val_documents)}")
+
+    return train_documents, val_documents
+
+
+@torch.no_grad()
+def evaluate_long_documents(
+    model: nn.Module,
+    documents: list,
+    device: torch.device,
+    update_memory: bool = True,
+    has_reset_memory: bool = False,
+) -> Dict[str, Any]:
+    """
+    Evaluate model on long documents with proper memory management.
+
+    For Infini-Attention:
+    - Memory is reset at the start of each document
+    - Memory is updated after each segment (if update_memory=True)
+
+    For standard models (Pythia):
+    - No memory to manage, just evaluate each segment
+
+    Args:
+        model: Model to evaluate
+        documents: List of documents, each is list of (input_ids, labels) segments
+        device: Device
+        update_memory: Whether to update memory between segments (Infini only)
+        has_reset_memory: Whether model has reset_memory method
+
+    Returns:
+        Dict with:
+        - total_ppl: Overall perplexity
+        - segment_ppls: PPL by segment position (1st, 2nd, 3rd, ...)
+        - per_document_ppls: PPL for each document
+    """
+    model.eval()
+
+    total_loss = 0.0
+    total_tokens = 0
+    segment_losses = {}  # segment_idx -> (total_loss, total_tokens)
+    per_document_ppls = []
+
+    for doc_idx, document in enumerate(documents):
+        # Reset memory at document boundary
+        if has_reset_memory:
+            model.reset_memory()
+
+        doc_loss = 0.0
+        doc_tokens = 0
+
+        for seg_idx, (input_ids, labels) in enumerate(document):
+            input_ids = input_ids.unsqueeze(0).to(device)  # [1, seq_len]
+            labels = labels.unsqueeze(0).to(device)
+
+            # Forward pass
+            if has_reset_memory:
+                logits = model(input_ids, update_memory=update_memory)
+            else:
+                logits = model(input_ids)
+
+            # Calculate loss
+            loss = torch.nn.functional.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                labels.view(-1),
+                reduction="sum",
+            )
+
+            num_tokens = labels.numel()
+            total_loss += loss.item()
+            total_tokens += num_tokens
+            doc_loss += loss.item()
+            doc_tokens += num_tokens
+
+            # Track by segment position
+            if seg_idx not in segment_losses:
+                segment_losses[seg_idx] = (0.0, 0)
+            seg_total, seg_count = segment_losses[seg_idx]
+            segment_losses[seg_idx] = (seg_total + loss.item(), seg_count + num_tokens)
+
+        # Per-document PPL
+        doc_ppl = torch.exp(torch.tensor(doc_loss / doc_tokens)).item()
+        per_document_ppls.append(doc_ppl)
+
+    # Overall PPL
+    total_ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+
+    # Segment-wise PPL
+    segment_ppls = {}
+    for seg_idx, (seg_loss, seg_tokens) in sorted(segment_losses.items()):
+        seg_ppl = torch.exp(torch.tensor(seg_loss / seg_tokens)).item()
+        segment_ppls[f"segment_{seg_idx}"] = seg_ppl
+
+    return {
+        "total_ppl": total_ppl,
+        "segment_ppls": segment_ppls,
+        "per_document_ppls": per_document_ppls,
+        "num_documents": len(documents),
+        "segments_per_document": len(documents[0]) if documents else 0,
+    }
