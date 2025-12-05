@@ -319,6 +319,28 @@ print(bias)
 #         ...])
 ```
 
+### 4. データリーク：訓練/検証データの分割バグ（2025-12-05）
+
+**症状**: PPLが以前より急に上がった（改善に見える値が実は異常だった）
+
+**原因**: reversal pairsを追加した後にシャッフル→分割していたため、同じデータが訓練と検証の両方に含まれていた
+
+```python
+# ❌ バグ: シャッフル後に分割（データリーク）
+all_data = pile_data + reversal_pairs
+shuffle(all_data)
+train, val = split(all_data)  # reversal pairsが両方に混入
+
+# ✅ 修正: 分割後に追加（データリークなし）
+train, val = split(pile_data)  # Pileデータのみで分割
+train = train + reversal_pairs  # 訓練データにのみ追加
+```
+
+**教訓**:
+- 検証データに訓練データと同じサンプルが含まれるとPPLが人工的に低くなる
+- 追加データは分割後に訓練データのみに追加すること
+- PPLが「良すぎる」場合もデータリークを疑う
+
 ---
 
 ## 📐 アーキテクチャ仕様
@@ -363,22 +385,36 @@ model = UnifiedPythiaModel(pos_encoding=PositionEncodingConfig(type="none"))
 new-llm/
 ├── config/
 │   ├── __init__.py
-│   └── pythia.py                   # PythiaConfig
+│   └── pythia.py                   # PythiaConfig（モデル構造・学習設定）
 ├── scripts/
 │   ├── experiment_mla.py           # MLA実験: Pythia vs MLA-Pythia
-│   └── experiment_position.py      # 位置エンコーディング比較実験
+│   ├── experiment_position.py      # 位置エンコーディング比較実験
+│   └── experiment_ka_cache.py      # KAキャッシュ推論実験
 ├── src/
+│   ├── __init__.py
+│   ├── config/
+│   │   ├── __init__.py
+│   │   └── experiment_defaults.py  # 実験デフォルト設定
+│   ├── data/
+│   │   ├── __init__.py
+│   │   └── reversal_pairs.py       # Reversal Curse評価データ
 │   ├── models/
+│   │   ├── __init__.py
 │   │   ├── pythia.py               # PythiaModel (baseline, RoPE)
 │   │   ├── mla_pythia.py           # MLAPythiaModel (ours, ALiBi)
 │   │   ├── mla.py                  # MLAAttention, MLALayer
-│   │   ├── alibi.py                # ALiBi実装
+│   │   ├── alibi.py                # ALiBi実装（MLA用）
 │   │   ├── position_encoding.py    # 位置エンコーディング統一モジュール
-│   │   └── unified_pythia.py       # UnifiedPythiaModel（位置エンコ切替可能）
+│   │   ├── unified_pythia.py       # UnifiedPythiaModel（位置エンコ切替可能）
+│   │   └── ka_cache.py             # KAキャッシュ推論モジュール
 │   └── utils/
+│       ├── __init__.py
 │       ├── training.py             # 共通学習ユーティリティ
 │       ├── evaluation.py           # 評価関数
-│       └── device.py               # デバイス管理
+│       ├── device.py               # デバイス管理
+│       ├── data_pythia.py          # Pileデータ読み込み
+│       ├── io.py                   # 入出力ユーティリティ
+│       └── seed.py                 # シード設定
 ├── docs/
 │   └── experiments/                # 実験結果
 ├── CLAUDE.md
@@ -391,6 +427,9 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-05 | **KAキャッシュ推論実験追加**: 学習不要でKVキャッシュとKAキャッシュを比較 |
+| 2025-12-05 | **データリークバグ修正**: reversal pairsが検証データに混入していた問題を修正 |
+| 2025-12-05 | **リファクタリング**: 未使用コード削除、エクスポート整理、ドキュメント更新 |
 | 2025-12-05 | **位置エンコーディング統一化**: RoPE/ALiBi/NoPEを疎結合で切り替え可能に |
 | 2025-12-05 | **ALiBi因果マスクバグ修正**: unsqueeze順序の修正、PPL異常の解消 |
 | 2025-12-05 | **Reversal Curse評価追加**: 順方向/逆方向PPL比較機能 |

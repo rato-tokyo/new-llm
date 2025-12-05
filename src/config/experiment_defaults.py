@@ -5,18 +5,19 @@ Default experiment configuration values.
 """
 
 # Early stopping
-EARLY_STOPPING_PATIENCE = 1
+EARLY_STOPPING_PATIENCE = 3
 
 # Gradient clipping
 GRADIENT_CLIP = 1.0
 
-# Default learning rates
+# Default learning rate
 DEFAULT_LR = 1e-4
-DEFAULT_PHASE1_LR = 1e-3  # For V-DProj Phase 1
-DEFAULT_PHASE2_LR = 1e-4  # For V-DProj Phase 2
 
-# Reconstruction loss weight
-DEFAULT_RECON_WEIGHT = 0.1
+# MLA default KV dimension
+DEFAULT_KV_DIM = 128
 
-# Default V projection dimension
-DEFAULT_V_PROJ_DIM = 320
+# ALiBi default slope
+DEFAULT_ALIBI_SLOPE = 0.0625
+
+# RoPE default rotary percentage
+DEFAULT_ROTARY_PCT = 0.25
