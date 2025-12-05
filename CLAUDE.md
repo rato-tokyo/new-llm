@@ -60,6 +60,49 @@ python3 scripts/experiment_position.py --pos-types none  # NoPE
 
 ---
 
+## 📖 用語定義
+
+### Attention の計算ステップと名称
+
+```
+入力: X (hidden states)
+
+1. Q, K, V = Linear(X)           # Query, Key, Value
+
+2. scores = Q @ K^T / sqrt(d_k)  # Attention Scores
+
+3. weights = softmax(scores)     # Attention Weights
+
+4. A = weights @ V               # Attention Output ← ここ
+```
+
+### Attention Output（A）
+
+**定義**: Attention weightsとValue vectorsの重み付き和。
+
+```python
+A = attention_weights @ V  # shape: [batch, heads, seq, head_dim]
+```
+
+| 用語 | 別名 | 説明 |
+|------|------|------|
+| **Attention Output** | Context Vector | `weights @ V` の結果。本プロジェクトでは **A** と表記 |
+| Attention Scores | - | `Q @ K^T` の結果（softmax前） |
+| Attention Weights | - | softmax後の重み（確率分布） |
+
+### KAキャッシュ
+
+**定義**: Key + Attention Output をキャッシュする方式。
+
+```
+標準KVキャッシュ: K, V をキャッシュ
+KAキャッシュ:     K, A をキャッシュ（Vの代わりにAttention Outputを保存）
+```
+
+過去トークンのAttention Output（A）を再利用することで、Vを再計算せずに次トークンの予測が可能。
+
+---
+
 ## 📚 DeepSeek MLA (Multi-head Latent Attention) 参考資料
 
 ### MLA概要

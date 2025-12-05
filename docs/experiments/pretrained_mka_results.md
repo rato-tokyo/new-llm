@@ -3,16 +3,21 @@
 ## 実験日時
 2025-12-04
 
+## 用語
+
+- **Attention Output (A)**: `attention_weights @ V` の結果
+- **KA Attention**: Attention Output同士のAttention
+
 ## 実験概要
 
-事前学習済みPythia-70Mを凍結し、KA attention層のみを学習する方式の検証。
+事前学習済みPythia-70Mを凍結し、KA Attention層のみを学習する方式の検証。
 
 ### アーキテクチャ
 
 ```
 PretrainedMKA V2:
-  Stage 1: Pretrained Pythia (Frozen) → A
-  Stage 2: KA Attention (Trainable) → A同士のattention
+  Stage 1: Pretrained Pythia (Frozen) → A (Attention Output)
+  Stage 2: KA Attention (Trainable) → Attention Output同士のattention
 
   Parameters:
     Total: 71,215,616

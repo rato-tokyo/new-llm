@@ -4,29 +4,34 @@ Date: 2025-12-04
 
 ## Experiment Overview
 
-KA-Attention (Key-Attention) is a novel attention mechanism that replaces Value vectors with past Attention outputs for previous tokens.
+KA-Attention (Key-Attention Output) は、過去トークンのValue vectors (V) を Attention Output (A) で置き換える新しいAttentionメカニズム。
+
+### 用語
+
+- **Attention Output (A)**: `attention_weights @ V` の結果。Context Vectorとも呼ばれる。
+- **KAキャッシュ**: Key + Attention Output をキャッシュする方式（KVキャッシュの代替）
 
 ### KA-Attention Mechanism
 
 **Standard Attention:**
 ```
-output[i] = Σ_j (attention_probs[i,j] * V[j])
+A[i] = Σ_j (attention_weights[i,j] * V[j])  # Attention Output
 ```
 
 **KA-Attention:**
 ```
 For token n:
-- Token 1: Q[1], K[1], V[1] → attention → A[1]
-- Token n: Q[n], K[1:n] → attention_probs → weighted sum of [A[1:n-1], V[n]] → A[n]
+- Token 1: Q[1], K[1], V[1] → attention → A[1] (Attention Output)
+- Token n: Q[n], K[1:n] → attention_weights → weighted sum of [A[1:n-1], V[n]] → A[n]
 
-KA cache stores A (attention outputs) instead of V (value vectors)
+KAキャッシュ: K, A をキャッシュ（Vの代わりにAttention Outputを保存）
 ```
 
 ### Hypothesis
 
-By reusing attention outputs (A) instead of value vectors (V) for past tokens, we can:
-1. Potentially capture more contextual information
-2. Test if KV cache can be replaced with KA cache
+過去トークンのAttention Output (A) をValue (V) の代わりに再利用することで:
+1. より文脈的な情報を活用できる可能性
+2. KVキャッシュをKAキャッシュで置き換え可能か検証
 
 ## Configuration
 
