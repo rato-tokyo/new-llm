@@ -179,7 +179,7 @@ class InfiniPythiaModel(nn.Module):
         """Infini-Attentionのゲート値を取得"""
         return self.infini_layer.attention.get_gate_values()
 
-    def kv_cache_info(self, seq_len: int, batch_size: int = 1) -> Dict[str, any]:
+    def kv_cache_info(self, seq_len: int, batch_size: int = 1) -> dict[str, float]:
         """KVキャッシュ情報を計算"""
         # Standard MHA: K + V per layer = 2 * hidden_size * num_layers
         standard_per_layer = batch_size * seq_len * self.hidden_size * 2 * 4  # float32

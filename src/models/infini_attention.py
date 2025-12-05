@@ -22,7 +22,7 @@ Infini-Attentionは圧縮メモリを持つアテンション機構:
 ここで σ(x) = ELU(x) + 1
 """
 
-from typing import Optional, Tuple, Dict
+from typing import Optional
 
 import torch
 import torch.nn as nn
