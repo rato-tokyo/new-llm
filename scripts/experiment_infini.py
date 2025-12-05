@@ -12,6 +12,8 @@ Usage:
     python3 scripts/experiment_infini.py --skip-baseline   # Infini only
     python3 scripts/experiment_infini.py --skip-infini     # Pythia baseline only
     python3 scripts/experiment_infini.py --seq-length 512  # longer context
+    python3 scripts/experiment_infini.py --alibi           # ALiBi position encoding
+    python3 scripts/experiment_infini.py --alibi --alibi-scale 2.0  # stronger decay
 """
 
 import argparse
@@ -173,6 +175,8 @@ def run_experiment(
     tokens_per_document: int = 4096,
     num_memory_banks: int = 1,
     segments_per_bank: int = 4,
+    use_alibi: bool = False,
+    alibi_scale: float = 1.0,
 ) -> dict[str, Any]:
     """Run Infini-Attention experiment."""
     set_seed(42)
@@ -181,13 +185,18 @@ def run_experiment(
     config = PythiaConfig()
 
     print_flush("=" * 70)
-    print_flush("INFINI-ATTENTION EXPERIMENT (Memory-Only)")
+    if use_alibi:
+        print_flush("INFINI-ATTENTION EXPERIMENT (Memory-Only + ALiBi)")
+    else:
+        print_flush("INFINI-ATTENTION EXPERIMENT (Memory-Only)")
     print_flush("=" * 70)
     print_flush(f"Samples: {num_samples:,}")
     print_flush(f"Sequence length: {seq_length}")
     print_flush(f"Epochs: {num_epochs}")
     print_flush(f"Learning rate: {lr}")
     print_flush(f"Delta rule: {use_delta_rule}")
+    if use_alibi:
+        print_flush(f"ALiBi: enabled (scale={alibi_scale})")
     if num_memory_banks > 1:
         print_flush(f"Multi-Memory: {num_memory_banks} banks, {segments_per_bank} segments/bank")
     print_flush(f"Skip baseline: {skip_baseline}")
@@ -335,12 +344,17 @@ def run_experiment(
         results["infini"] = None
     else:
         print_flush("\n" + "=" * 70)
-        if num_memory_banks > 1:
+        if use_alibi:
+            print_flush("2. INFINI-PYTHIA (Memory-Only + ALiBi)")
+        elif num_memory_banks > 1:
             print_flush(f"2. INFINI-PYTHIA ({num_memory_banks} Memory Banks)")
         else:
             print_flush("2. INFINI-PYTHIA (Memory-Only)")
         print_flush("=" * 70)
-        print_flush("  Layer 0: Infini-Attention (NoPE, Memory Only)")
+        if use_alibi:
+            print_flush("  Layer 0: Infini-Attention (ALiBi, Memory Only)")
+        else:
+            print_flush("  Layer 0: Infini-Attention (NoPE, Memory Only)")
         print_flush("  Layer 1-5: Standard Pythia (RoPE)")
 
         infini_model = InfiniPythiaModel(
@@ -354,6 +368,8 @@ def run_experiment(
             use_delta_rule=use_delta_rule,
             num_memory_banks=num_memory_banks,
             segments_per_bank=segments_per_bank,
+            use_alibi=use_alibi,
+            alibi_scale=alibi_scale,
         )
         infini_model = infini_model.to(device)
 
@@ -529,6 +545,8 @@ def run_experiment(
                 use_delta_rule=use_delta_rule,
                 num_memory_banks=num_memory_banks,
                 segments_per_bank=segments_per_bank,
+                use_alibi=use_alibi,
+                alibi_scale=alibi_scale,
             ).to(device)
             infini_model.load_state_dict(results["infini"]["model_state_dict"])
             infini_model.eval()
@@ -712,6 +730,14 @@ def main() -> None:
         "--segments-per-bank", type=int, default=4,
         help="Number of segments per memory bank before switching"
     )
+    parser.add_argument(
+        "--alibi", action="store_true",
+        help="Enable ALiBi position encoding for Infini-Attention"
+    )
+    parser.add_argument(
+        "--alibi-scale", type=float, default=1.0,
+        help="ALiBi slope scale factor (larger = stronger decay)"
+    )
     args = parser.parse_args()
 
     run_experiment(
@@ -729,6 +755,8 @@ def main() -> None:
         tokens_per_document=args.tokens_per_doc,
         num_memory_banks=args.num_memory_banks,
         segments_per_bank=args.segments_per_bank,
+        use_alibi=args.alibi,
+        alibi_scale=args.alibi_scale,
     )
 
     print_flush("\nDONE")

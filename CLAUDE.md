@@ -44,6 +44,29 @@ model = InfiniPythiaModel(
 )
 ```
 
+### ALiBi (Attention with Linear Biases)
+
+線形化近似でALiBiを圧縮メモリに組み込む:
+
+```
+メモリ更新 (ALiBi重み付き):
+  M_φ = Σ_i w_i * φ(K_i) * V_i^T
+  z_φ = Σ_i w_i * φ(K_i)
+
+  w_i = exp(-slope * segment_distance)  # 遠いほど小さい重み
+
+メモリ取得:
+  Output = φ(Q) @ M_φ / (φ(Q) @ z_φ)
+```
+
+```python
+# ALiBi付きモデル
+model = InfiniPythiaModel(
+    use_alibi=True,      # ALiBi有効化
+    alibi_scale=1.0,     # スロープスケール（大きいほど減衰が強い）
+)
+```
+
 ### 実験の実行
 
 ```bash
@@ -58,6 +81,12 @@ python3 scripts/experiment_infini.py --skip-infini
 
 # Multi-Memory Bank
 python3 scripts/experiment_infini.py --num-memory-banks 2 --segments-per-bank 4
+
+# ALiBi位置エンコーディング
+python3 scripts/experiment_infini.py --alibi --skip-baseline
+
+# ALiBi (強い減衰)
+python3 scripts/experiment_infini.py --alibi --alibi-scale 2.0 --skip-baseline
 
 # Long Context訓練・評価
 python3 scripts/experiment_infini.py --long-context-train --long-context
@@ -183,6 +212,7 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-06 | **ALiBi位置エンコーディング追加**: 線形化近似でALiBiをメモリに組み込み |
 | 2025-12-05 | **Memory-Onlyに集中**: Local Attention削除、コード簡素化 |
 | 2025-12-05 | **Multi-Memory Bank追加**: 複数バンクで情報混合低減 |
 | 2025-12-05 | **Long Context評価バグ修正**: 訓練済み重みをロード |
@@ -190,4 +220,4 @@ new-llm/
 
 ---
 
-Last Updated: 2025-12-05
+Last Updated: 2025-12-06
