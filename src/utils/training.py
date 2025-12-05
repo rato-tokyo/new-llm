@@ -56,35 +56,49 @@ def prepare_data_loaders(
         all_input_ids_list.append(input_ids)
         all_labels_list.append(labels)
 
-    # Add reversal pairs (forward direction only) to training data
+    # Stack Pile samples
+    pile_input_ids = torch.stack(all_input_ids_list)
+    pile_labels = torch.stack(all_labels_list)
+
+    # Split Pile data FIRST (before adding reversal pairs)
+    val_size = int(num_samples * val_split)
+    train_size = num_samples - val_size
+
+    # Shuffle Pile data
+    perm = torch.randperm(num_samples)
+    pile_input_ids = pile_input_ids[perm]
+    pile_labels = pile_labels[perm]
+
+    train_input = pile_input_ids[:train_size]
+    train_labels = pile_labels[:train_size]
+    val_input = pile_input_ids[train_size:]
+    val_labels = pile_labels[train_size:]
+
+    # Add reversal pairs ONLY to training data (not validation)
+    # This prevents data leakage
     if include_reversal_pairs:
         reversal_samples = _create_reversal_training_samples(
             tokenizer_name, seq_length
         )
         if reversal_samples:
             rev_inputs, rev_labels = reversal_samples
-            all_input_ids_list.extend(rev_inputs)
-            all_labels_list.extend(rev_labels)
-            print_flush(f"  Added {len(rev_inputs)} reversal pair samples to training")
+            rev_inputs_tensor = torch.stack(rev_inputs)
+            rev_labels_tensor = torch.stack(rev_labels)
 
-    all_input_ids = torch.stack(all_input_ids_list)
-    all_labels = torch.stack(all_labels_list)
+            train_input = torch.cat([train_input, rev_inputs_tensor], dim=0)
+            train_labels = torch.cat([train_labels, rev_labels_tensor], dim=0)
+            print_flush(f"  Added {len(rev_inputs)} reversal pair samples to training only")
 
-    # Shuffle before split to mix reversal pairs with Pile data
-    total_samples = len(all_input_ids)
-    perm = torch.randperm(total_samples)
-    all_input_ids = all_input_ids[perm]
-    all_labels = all_labels[perm]
+            # Shuffle training data (with reversal pairs mixed in)
+            train_perm = torch.randperm(len(train_input))
+            train_input = train_input[train_perm]
+            train_labels = train_labels[train_perm]
 
-    # Split
-    val_size = int(num_samples * val_split)  # Use original num_samples for val size
-    train_size = total_samples - val_size
+    train_dataset = TensorDataset(train_input, train_labels)
+    val_dataset = TensorDataset(val_input, val_labels)
 
-    train_dataset = TensorDataset(all_input_ids[:train_size], all_labels[:train_size])
-    val_dataset = TensorDataset(all_input_ids[train_size:], all_labels[train_size:])
-
-    print_flush(f"  Train: {train_size:,} samples")
-    print_flush(f"  Val: {val_size:,} samples")
+    print_flush(f"  Train: {len(train_input):,} samples (Pile: {train_size:,})")
+    print_flush(f"  Val: {val_size:,} samples (Pile only, no reversal pairs)")
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
