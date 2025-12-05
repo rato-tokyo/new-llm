@@ -534,6 +534,150 @@ python3 scripts/experiment_infini.py \
 
 ---
 
+## ALiBi位置エンコーディング実験
+
+**追加実験日時**: 2025-12-06
+
+### 目的
+
+Infini-Attentionの圧縮メモリに位置情報を組み込むため、ALiBi（Attention with Linear Biases）を線形化近似で導入。RoPEは線形化アテンションと相性が悪いため、ALiBiを採用。
+
+### ALiBiの線形化近似
+
+従来のALiBiはsoftmax内でバイアスを加算するが、線形アテンションでは以下のように近似：
+
+```
+メモリ更新 (ALiBi重み付き):
+  M_φ = Σ_i w_i * φ(K_i) * V_i^T
+  z_φ = Σ_i w_i * φ(K_i)
+
+  w_i = exp(-slope * segment_distance)
+
+メモリ取得:
+  Output = φ(Q) @ M_φ / (φ(Q) @ z_φ)
+```
+
+- **slope**: ヘッドごとに異なる値（ALiBi論文に準拠）
+- **segment_distance**: 現在のセグメントからの距離（0, 1, 2, ...）
+- **効果**: 古いセグメントほど重みが小さくなり、位置情報がメモリに反映
+
+### 設定
+
+| パラメータ | 値 |
+|-----------|-----|
+| サンプル数 | 5,000 |
+| シーケンス長 | 256 |
+| エポック数 | 30 |
+| ALiBi | 有効 (scale=1.0) |
+| Delta Rule | 有効 |
+| Baseline | スキップ |
+
+### アーキテクチャ
+
+```
+Infini-Pythia (ALiBi):
+  Layer 0: InfiniAttentionALiBi (Memory-Only + ALiBi位置重み付け)
+    ├─ φ(K) に exp(-slope * segment_count) を乗算
+    ├─ メモリ更新時に重み付き外積
+    └─ 古いセグメントは減衰
+  Layer 1-5: Standard Pythia (RoPE)
+```
+
+- **パラメータ数**: 70,418,432
+- **メモリサイズ**: 133,120 bytes
+
+### 結果
+
+| モデル | Val PPL | Best Epoch |
+|--------|---------|------------|
+| Pythia (前回baseline) | 106.0 | 7 |
+| Infini (通常, Memory-Only, 前回) | 105.7 | 7 |
+| **Infini (ALiBi)** | **105.7** | 7 |
+
+### 学習曲線
+
+| Epoch | Train PPL | Val PPL | 備考 |
+|-------|-----------|---------|------|
+| 1 | 662.4 | 436.3 | * |
+| 2 | 173.5 | 240.3 | * |
+| 3 | 95.8 | 172.5 | * |
+| 4 | 61.7 | 138.7 | * |
+| 5 | 42.6 | 119.3 | * |
+| 6 | 30.5 | 108.8 | * |
+| 7 | 22.1 | **105.7** | * Best |
+| 8 | 16.1 | 107.9 | Early stop |
+
+### Position-wise PPL
+
+| Position | Pythia (前回) | Infini Memory-Only (前回) | Infini ALiBi |
+|----------|---------------|---------------------------|--------------|
+| 0-16 | 165.9 | 154.6 | 154.5 |
+| 16-32 | 110.3 | 112.2 | 112.1 |
+| 32-64 | 102.1 | 104.4 | 104.4 |
+| 64-96 | 99.2 | 100.3 | 100.3 |
+| 96-256 | 104.8 | 106.0 | 106.0 |
+
+### Reversal Curse
+
+| モデル | Forward PPL | Backward PPL | Ratio | Gap |
+|--------|-------------|--------------|-------|-----|
+| Pythia (前回) | 1.7 | 684.4 | 0.002 | +682.8 |
+| Infini Memory-Only (前回) | 1.7 | 584.7 | 0.003 | +583.0 |
+| **Infini ALiBi** | 1.7 | **619.1** | 0.003 | +617.4 |
+
+### 分析
+
+#### PPL比較
+
+| 比較 | 差分 | 解釈 |
+|------|------|------|
+| ALiBi vs Pythia | -0.3 | わずかに改善 |
+| ALiBi vs Memory-Only | ±0.0 | 同等 |
+
+#### 観察
+
+1. **全体PPL**: ALiBi (105.7) = Memory-Only (105.7)、両者とも Pythia (106.0) より改善
+2. **Position-wise**: ALiBiとMemory-Onlyはほぼ同一のパターン
+3. **Reversal Curse**: ALiBi (619.1) はMemory-Only (584.7) より劣化 (+34.4)
+
+#### 考察
+
+**ALiBiが期待通りに機能しなかった理由**:
+
+1. **セグメント粒度の問題**:
+   - ALiBiはセグメント単位（256トークン）で距離を計測
+   - 実験設定では各サンプルが独立（セグメント数=1）
+   - 複数セグメントを跨ぐLong Context訓練でないと効果が見えにくい
+
+2. **減衰の適用タイミング**:
+   - 現在の実装: メモリ更新時に累積的に減衰
+   - 問題: 訓練データが独立サンプルの場合、segment_count=0で常に重み=1.0
+
+3. **Short Contextでの限界**:
+   - 256トークンのシーケンスでは、位置情報の恩恵が限定的
+   - RoPE（Layer 1-5で使用）が既に十分な位置情報を提供
+
+4. **Reversal Curseへの悪影響**:
+   - 位置バイアスが逆方向推論を阻害した可能性
+   - 「A is B」と「B is A」で異なる位置減衰が適用される
+
+**改善案**:
+
+1. **Long Context訓練で再評価**: 複数セグメントを跨ぐドキュメントでALiBiの効果を検証
+2. **トークンレベルALiBi**: セグメント単位ではなくトークン単位で距離を計算
+3. **alibi_scale調整**: scale=0.5, 2.0など異なる減衰強度で実験
+
+### 実行コマンド
+
+```bash
+python3 scripts/experiment_infini.py --alibi --skip-baseline
+
+# 強い減衰
+python3 scripts/experiment_infini.py --alibi --alibi-scale 2.0 --skip-baseline
+```
+
+---
+
 ## 次のステップ（提案）
 
 1. **より長いシーケンス長での実験**: seq_length=512, 1024
@@ -542,6 +686,8 @@ python3 scripts/experiment_infini.py \
 4. **Delta Rule無効時との比較**: `--no-delta-rule`オプション
 5. **Long Context訓練の問題調査**: データ分割とメモリ更新ロジックの検証
 6. **Multi-Memory Bank改良**: Long Contextでの評価、バンク数増加
+7. **ALiBi Long Context評価**: 複数セグメントを跨ぐ訓練でALiBiの効果を検証
+8. **トークンレベル位置エンコーディング**: セグメント単位ではなくトークン単位のALiBi
 
 ---
 
@@ -553,6 +699,10 @@ python3 scripts/experiment_infini.py --samples 5000 --seq-length 256 --epochs 30
 
 # Multi-Memory Bank実験
 python3 scripts/experiment_infini.py --num-memory-banks 2 --segments-per-bank 4 --skip-baseline
+
+# ALiBi位置エンコーディング実験
+python3 scripts/experiment_infini.py --alibi --skip-baseline
+python3 scripts/experiment_infini.py --alibi --alibi-scale 2.0 --skip-baseline
 
 # Long Context訓練・評価
 python3 scripts/experiment_infini.py --long-context-train --long-context --num-long-docs 50 --tokens-per-doc 4096
