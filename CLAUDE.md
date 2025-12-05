@@ -2,9 +2,9 @@
 
 ---
 
-## 🎯 Infini-Pythia Architecture (2025-12-05)
+## 🎯 Infini-Pythia Architecture (Memory-Only)
 
-**Pythia-70Mベースに1層目Infini-Attention（圧縮メモリ）を導入。**
+**Pythia-70Mベースに1層目Infini-Attention（Memory-Only）を導入。**
 
 ### アーキテクチャ
 
@@ -12,10 +12,8 @@
 Infini-Pythia:
 Token Embedding (512-dim)
        ↓
-Layer 0: InfiniAttentionLayer (NoPE, 圧縮メモリ)
-  ├─ Local Attention (dot-product)
-  ├─ Memory Attention (linear attention)
-  └─ Beta Gate (learned)
+Layer 0: InfiniAttentionLayer (NoPE, Memory Only)
+  └─ Memory Attention (linear attention)
        ↓
 Layer 1-5: PythiaLayer (RoPE)
   ├─ Multi-Head Attention
@@ -24,7 +22,7 @@ Layer 1-5: PythiaLayer (RoPE)
 Output Head (512 → vocab)
 ```
 
-### Infini-Attention
+### Infini-Attention (Memory-Only)
 
 ```
 メモリ更新 (Delta Rule):
@@ -33,16 +31,23 @@ Output Head (512 → vocab)
 メモリ取得:
   A_mem = σ(Q) @ M / (σ(Q) @ z)
 
-結合:
-  A = sigmoid(β) * A_mem + (1 - sigmoid(β)) * A_local
-
 σ(x) = ELU(x) + 1
+```
+
+### Multi-Memory Bank
+
+```python
+# 複数メモリバンクで情報混合を低減
+model = InfiniPythiaModel(
+    num_memory_banks=2,      # 2つのバンク
+    segments_per_bank=4,     # 4セグメントで次バンクに切替
+)
 ```
 
 ### 実験の実行
 
 ```bash
-# Infini実験（両モデル比較）
+# 標準実験（両モデル比較）
 python3 scripts/experiment_infini.py --samples 5000 --epochs 30
 
 # Infiniのみ
@@ -51,8 +56,11 @@ python3 scripts/experiment_infini.py --skip-baseline
 # Baselineのみ
 python3 scripts/experiment_infini.py --skip-infini
 
-# 長いシーケンス（Infiniの強み）
-python3 scripts/experiment_infini.py --seq-length 512
+# Multi-Memory Bank
+python3 scripts/experiment_infini.py --num-memory-banks 2 --segments-per-bank 4
+
+# Long Context訓練・評価
+python3 scripts/experiment_infini.py --long-context-train --long-context
 ```
 
 ---
@@ -128,6 +136,19 @@ self.memory = (self.memory + memory_update).detach()
 | 100-500 | 正常（スクラッチ訓練） | - |
 | > 1000 | 学習不足 | epoch増加/lr調整 |
 
+### 3. Long Context評価でuntrained modelを使用
+
+```python
+# ❌ バグ: 新しいモデルを作成して評価
+pythia_model = PythiaModel(...)  # 未訓練のランダム重み
+result = evaluate_long_documents(pythia_model, ...)
+
+# ✅ 修正: 訓練済み重みをロード
+pythia_model = PythiaModel(...)
+pythia_model.load_state_dict(results["pythia"]["model_state_dict"])
+result = evaluate_long_documents(pythia_model, ...)
+```
+
 ---
 
 ## 📁 File Structure
@@ -162,9 +183,10 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
-| 2025-12-05 | **MLA関連コード削除**: Infini-Attentionに集中 |
+| 2025-12-05 | **Memory-Onlyに集中**: Local Attention削除、コード簡素化 |
+| 2025-12-05 | **Multi-Memory Bank追加**: 複数バンクで情報混合低減 |
+| 2025-12-05 | **Long Context評価バグ修正**: 訓練済み重みをロード |
 | 2025-12-05 | **Infini-Pythia実装**: 1層目Infini + RoPE |
-| 2025-12-05 | **Reversal Curse評価追加**: 順方向/逆方向PPL比較 |
 
 ---
 

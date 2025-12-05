@@ -2,7 +2,7 @@
 """
 Infini-Attention Experiment
 
-1層目: Infini-Attention (NoPE, compressive memory)
+1層目: Infini-Attention (NoPE, Memory Only)
 2層目以降: 標準Pythia (RoPE)
 
 Pythia (RoPE) vs Infini-Pythia (1層目Infini + RoPE) の比較。
@@ -79,11 +79,9 @@ def train_infini_model(
     for epoch in range(1, num_epochs + 1):
         start_time = time.time()
 
-        # Reset memory at start of each epoch (optional)
         if reset_memory_per_epoch:
             model.reset_memory()
 
-        # Train
         model.train()
         total_loss = 0.0
         total_tokens = 0
@@ -95,7 +93,6 @@ def train_infini_model(
 
             optimizer.zero_grad()
 
-            # Forward with memory update
             logits = model(input_ids, update_memory=True)
 
             loss = torch.nn.functional.cross_entropy(
@@ -113,12 +110,10 @@ def train_infini_model(
         train_loss = total_loss / total_tokens
         train_ppl = torch.exp(torch.tensor(train_loss)).item()
 
-        # Evaluate (without memory update for consistency)
         model.eval()
         eval_loss = 0.0
         eval_tokens = 0
 
-        # Reset memory for evaluation
         model.reset_memory()
 
         with torch.no_grad():
@@ -151,13 +146,9 @@ def train_infini_model(
             patience_counter += 1
             marker = ""
 
-        # Get gate values
-        gate_values = model.get_infini_gate_values()
-        gate_mean = gate_values.mean().item()
-
         print_flush(
             f"  Epoch {epoch:2d}: train_ppl={train_ppl:.1f} val_ppl={val_ppl:.1f} "
-            f"gate={gate_mean:.3f} [{elapsed:.1f}s] {marker}"
+            f"[{elapsed:.1f}s] {marker}"
         )
 
         if patience_counter >= EARLY_STOPPING_PATIENCE:
@@ -174,7 +165,6 @@ def run_experiment(
     batch_size: int = 8,
     lr: float = 1e-4,
     use_delta_rule: bool = True,
-    memory_only: bool = False,
     skip_baseline: bool = False,
     skip_infini: bool = False,
     long_context_eval: bool = False,
@@ -191,25 +181,23 @@ def run_experiment(
     config = PythiaConfig()
 
     print_flush("=" * 70)
-    print_flush("INFINI-ATTENTION EXPERIMENT")
+    print_flush("INFINI-ATTENTION EXPERIMENT (Memory-Only)")
     print_flush("=" * 70)
     print_flush(f"Samples: {num_samples:,}")
     print_flush(f"Sequence length: {seq_length}")
     print_flush(f"Epochs: {num_epochs}")
     print_flush(f"Learning rate: {lr}")
     print_flush(f"Delta rule: {use_delta_rule}")
-    print_flush(f"Memory only: {memory_only}")
     if num_memory_banks > 1:
         print_flush(f"Multi-Memory: {num_memory_banks} banks, {segments_per_bank} segments/bank")
     print_flush(f"Skip baseline: {skip_baseline}")
     print_flush(f"Skip infini: {skip_infini}")
     if long_context_train:
-        print_flush(f"Long context TRAIN: {num_long_documents} docs × {tokens_per_document} tokens")
+        print_flush(f"Long context TRAIN: {num_long_documents} docs x {tokens_per_document} tokens")
     if long_context_eval:
-        print_flush(f"Long context eval: {num_long_documents} docs × {tokens_per_document} tokens")
+        print_flush(f"Long context eval: {num_long_documents} docs x {tokens_per_document} tokens")
     print_flush("=" * 70)
 
-    # Prepare data based on training mode
     train_loader = None
     val_loader = None
     train_documents = None
@@ -272,13 +260,11 @@ def run_experiment(
             start_time = time.time()
 
             if long_context_train:
-                # Long document training (Truncated BPTT)
                 train_loss = train_long_documents(
                     pythia_model, train_documents, optimizer, device,
                     has_reset_memory=False,
                 )
                 train_ppl = torch.exp(torch.tensor(train_loss)).item()
-                # Evaluate on long documents
                 val_result = evaluate_long_documents(
                     pythia_model, val_documents, device,
                     update_memory=False, has_reset_memory=False,
@@ -312,7 +298,6 @@ def run_experiment(
 
         print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
 
-        # Position-wise PPL (only for standard training)
         pythia_pos_ppl = {}
         if not long_context_train and val_loader is not None:
             print_flush("\n  Position-wise PPL:")
@@ -320,7 +305,6 @@ def run_experiment(
         for pos_range, ppl in pythia_pos_ppl.items():
             print_flush(f"    Position {pos_range}: {ppl:.1f}")
 
-        # Reversal Curse evaluation
         print_flush("\n  Reversal Curse evaluation:")
         tokenizer = get_tokenizer(config.tokenizer_name)
         reversal_pairs = get_reversal_pairs()
@@ -337,13 +321,13 @@ def run_experiment(
             "best_epoch": best_epoch,
             "position_wise_ppl": pythia_pos_ppl,
             "reversal_curse": pythia_reversal,
-            "model_state_dict": pythia_model.state_dict(),  # Save trained weights
+            "model_state_dict": pythia_model.state_dict(),
         }
 
         del pythia_model
         clear_gpu_cache(device)
 
-    # ===== 2. Infini-Pythia (1層目Infini + RoPE) =====
+    # ===== 2. Infini-Pythia (Memory-Only) =====
     if skip_infini:
         print_flush("\n" + "=" * 70)
         print_flush("2. INFINI-PYTHIA - SKIPPED")
@@ -352,16 +336,11 @@ def run_experiment(
     else:
         print_flush("\n" + "=" * 70)
         if num_memory_banks > 1:
-            print_flush(f"2. MULTI-MEMORY INFINI-PYTHIA ({num_memory_banks} banks)")
+            print_flush(f"2. INFINI-PYTHIA ({num_memory_banks} Memory Banks)")
         else:
-            print_flush("2. INFINI-PYTHIA (1層目Infini + RoPE)")
+            print_flush("2. INFINI-PYTHIA (Memory-Only)")
         print_flush("=" * 70)
-        if memory_only:
-            print_flush("  Layer 0: Infini-Attention (NoPE, MEMORY ONLY - no local attention)")
-        elif num_memory_banks > 1:
-            print_flush(f"  Layer 0: Multi-Memory Infini-Attention ({num_memory_banks} banks)")
-        else:
-            print_flush("  Layer 0: Infini-Attention (NoPE, compressive memory)")
+        print_flush("  Layer 0: Infini-Attention (NoPE, Memory Only)")
         print_flush("  Layer 1-5: Standard Pythia (RoPE)")
 
         infini_model = InfiniPythiaModel(
@@ -373,7 +352,6 @@ def run_experiment(
             max_position_embeddings=config.max_position_embeddings,
             rotary_pct=config.rotary_pct,
             use_delta_rule=use_delta_rule,
-            memory_only=memory_only,
             num_memory_banks=num_memory_banks,
             segments_per_bank=segments_per_bank,
         )
@@ -386,15 +364,14 @@ def run_experiment(
 
         memory_info = infini_model.memory_info()
         if num_memory_banks > 1:
-            print_flush(f"  Memory banks: {memory_info['num_memory_banks']}")
-        print_flush(f"  Infini memory: {memory_info['total_memory_bytes']:,} bytes (fixed)")
+            print_flush(f"  Memory banks: {memory_info['num_banks']}")
+        print_flush(f"  Infini memory: {memory_info['total_bytes']:,} bytes (fixed)")
 
         optimizer = torch.optim.AdamW(infini_model.parameters(), lr=lr)
 
         print_flush("\n[Infini] Training...")
 
         if long_context_train:
-            # Long document training with proper memory management
             best_val_ppl = float("inf")
             best_epoch = 0
             patience_counter = 0
@@ -402,14 +379,12 @@ def run_experiment(
             for epoch in range(1, num_epochs + 1):
                 start_time = time.time()
 
-                # Train on long documents (Truncated BPTT)
                 train_loss = train_long_documents(
                     infini_model, train_documents, optimizer, device,
                     has_reset_memory=True,
                 )
                 train_ppl = torch.exp(torch.tensor(train_loss)).item()
 
-                # Evaluate on long documents with memory
                 val_result = evaluate_long_documents(
                     infini_model, val_documents, device,
                     update_memory=True, has_reset_memory=True,
@@ -428,19 +403,15 @@ def run_experiment(
                     patience_counter += 1
                     marker = ""
 
-                gate_values = infini_model.get_infini_gate_values()
-                gate_mean = gate_values.mean().item()
-
                 print_flush(
                     f"  Epoch {epoch:2d}: train_ppl={train_ppl:.1f} val_ppl={val_ppl:.1f} "
-                    f"gate={gate_mean:.3f} [{elapsed:.1f}s] {marker}"
+                    f"[{elapsed:.1f}s] {marker}"
                 )
 
                 if patience_counter >= EARLY_STOPPING_PATIENCE:
                     print_flush("  -> Early stop")
                     break
         else:
-            # Standard training
             best_val_ppl, best_epoch = train_infini_model(
                 infini_model,
                 train_loader,
@@ -453,13 +424,14 @@ def run_experiment(
 
         print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
 
-        # Final gate values
-        gate_values = infini_model.get_infini_gate_values()
-        print_flush(f"\n  Final gate values (per head):")
-        for i, g in enumerate(gate_values):
-            print_flush(f"    Head {i}: {g.item():.3f}")
+        # Bank weights (for multi-memory)
+        bank_weights = infini_model.get_bank_weights()
+        if bank_weights is not None:
+            print_flush(f"\n  Bank weights (per head):")
+            for i, weights in enumerate(bank_weights):
+                weights_str = ", ".join(f"{w:.3f}" for w in weights)
+                print_flush(f"    Head {i}: [{weights_str}]")
 
-        # Position-wise PPL (only for standard training)
         infini_pos_ppl = {}
         if not long_context_train and val_loader is not None:
             print_flush("\n  Position-wise PPL:")
@@ -470,7 +442,6 @@ def run_experiment(
             for pos_range, ppl in infini_pos_ppl.items():
                 print_flush(f"    Position {pos_range}: {ppl:.1f}")
 
-        # Reversal Curse evaluation
         print_flush("\n  Reversal Curse evaluation:")
         tokenizer = get_tokenizer(config.tokenizer_name)
         reversal_pairs = get_reversal_pairs()
@@ -488,9 +459,10 @@ def run_experiment(
             "best_epoch": best_epoch,
             "position_wise_ppl": infini_pos_ppl,
             "reversal_curse": infini_reversal,
-            "final_gate_values": gate_values.tolist(),
-            "model_state_dict": infini_model.state_dict(),  # Save trained weights
+            "model_state_dict": infini_model.state_dict(),
         }
+        if bank_weights is not None:
+            results["infini"]["bank_weights"] = bank_weights.tolist()
 
         del infini_model
         clear_gpu_cache(device)
@@ -505,19 +477,16 @@ def run_experiment(
         print_flush(f"  Tokens per document: {tokens_per_document:,}")
         print_flush(f"  Segment length: {seq_length}")
 
-        # Prepare long document data
         _, long_val_documents = prepare_long_document_data(
             num_documents=num_long_documents,
             tokens_per_document=tokens_per_document,
             segment_length=seq_length,
             tokenizer_name=config.tokenizer_name,
-            val_split=1.0,  # All for validation
+            val_split=1.0,
         )
 
-        # Evaluate Pythia (if trained)
         if results.get("pythia") is not None:
             print_flush("\n[Pythia] Long context evaluation...")
-            # Recreate model and load trained weights
             pythia_model = PythiaModel(
                 vocab_size=config.vocab_size,
                 hidden_size=config.hidden_size,
@@ -527,7 +496,6 @@ def run_experiment(
                 max_position_embeddings=config.max_position_embeddings,
                 rotary_pct=config.rotary_pct,
             ).to(device)
-            # Load trained weights
             pythia_model.load_state_dict(results["pythia"]["model_state_dict"])
             pythia_model.eval()
 
@@ -549,9 +517,7 @@ def run_experiment(
             del pythia_model
             clear_gpu_cache(device)
 
-        # Evaluate Infini (if trained)
         if results.get("infini") is not None:
-            # Recreate model and load trained weights
             infini_model = InfiniPythiaModel(
                 vocab_size=config.vocab_size,
                 hidden_size=config.hidden_size,
@@ -561,11 +527,9 @@ def run_experiment(
                 max_position_embeddings=config.max_position_embeddings,
                 rotary_pct=config.rotary_pct,
                 use_delta_rule=use_delta_rule,
-                memory_only=memory_only,
                 num_memory_banks=num_memory_banks,
                 segments_per_bank=segments_per_bank,
             ).to(device)
-            # Load trained weights
             infini_model.load_state_dict(results["infini"]["model_state_dict"])
             infini_model.eval()
 
@@ -585,7 +549,6 @@ def run_experiment(
             if len(infini_long_result['segment_ppls']) > 5:
                 print_flush(f"    ... ({len(infini_long_result['segment_ppls'])} segments total)")
 
-            # Also evaluate without memory update for comparison
             print_flush("\n[Infini] Long context evaluation (without memory)...")
             infini_model.reset_memory()
             infini_no_mem_result = evaluate_long_documents(
@@ -601,7 +564,6 @@ def run_experiment(
             del infini_model
             clear_gpu_cache(device)
 
-        # Long context comparison
         if results.get("pythia") is not None and results.get("infini") is not None:
             print_flush("\n" + "-" * 50)
             print_flush("Long Context Comparison:")
@@ -675,7 +637,6 @@ def run_experiment(
                 f"| {pos_range} | {pythia_val:.1f} | {infini_val:.1f} | {pos_diff:+.1f} |"
             )
 
-        # Reversal Curse comparison
         print_flush("\n" + "=" * 70)
         print_flush("REVERSAL CURSE")
         print_flush("=" * 70)
@@ -706,9 +667,9 @@ def run_experiment(
 def main() -> None:
     config = PythiaConfig()
 
-    parser = argparse.ArgumentParser(description="Infini-Attention Experiment")
+    parser = argparse.ArgumentParser(description="Infini-Attention Experiment (Memory-Only)")
     parser.add_argument("--samples", type=int, default=5000, help="Number of samples")
-    parser.add_argument("--seq-length", type=int, default=256, help="Sequence length (longer is better for Infini)")
+    parser.add_argument("--seq-length", type=int, default=256, help="Sequence length")
     parser.add_argument(
         "--epochs", type=int, default=config.num_epochs, help="Number of epochs"
     )
@@ -722,9 +683,6 @@ def main() -> None:
         "--no-delta-rule", action="store_true", help="Disable delta rule for Infini"
     )
     parser.add_argument(
-        "--memory-only", action="store_true", help="Use memory attention only (no local attention)"
-    )
-    parser.add_argument(
         "--skip-baseline", action="store_true", help="Skip Pythia baseline"
     )
     parser.add_argument(
@@ -732,11 +690,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--long-context", action="store_true",
-        help="Enable long context evaluation (proper memory reset per document)"
+        help="Enable long context evaluation"
     )
     parser.add_argument(
         "--long-context-train", action="store_true",
-        help="Train on long documents with proper memory management (Truncated BPTT)"
+        help="Train on long documents (Truncated BPTT)"
     )
     parser.add_argument(
         "--num-long-docs", type=int, default=50,
@@ -744,11 +702,11 @@ def main() -> None:
     )
     parser.add_argument(
         "--tokens-per-doc", type=int, default=4096,
-        help="Tokens per document for long context training/evaluation"
+        help="Tokens per document for long context"
     )
     parser.add_argument(
         "--num-memory-banks", type=int, default=1,
-        help="Number of memory banks (1=standard, 2+=multi-memory)"
+        help="Number of memory banks (1=single, 2+=multi-memory)"
     )
     parser.add_argument(
         "--segments-per-bank", type=int, default=4,
@@ -763,7 +721,6 @@ def main() -> None:
         batch_size=args.batch_size,
         lr=args.lr,
         use_delta_rule=not args.no_delta_rule,
-        memory_only=args.memory_only,
         skip_baseline=args.skip_baseline,
         skip_infini=args.skip_infini,
         long_context_eval=args.long_context,

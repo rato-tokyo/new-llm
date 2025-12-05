@@ -1,13 +1,13 @@
 """
 Infini-Pythia Model Implementation
 
-1層目: Infini-Attention (NoPE - 位置エンコーディングなし)
+1層目: Infini-Attention (NoPE - Memory Only)
 2層目以降: 標準Pythia (RoPE)
 
 アーキテクチャ:
   Token Embedding (512-dim)
          ↓
-  Layer 0: InfiniAttentionLayer (NoPE, 圧縮メモリ)
+  Layer 0: InfiniAttentionLayer (NoPE, Memory Only)
          ↓
   Layer 1-5: PythiaLayer (RoPE)
          ↓
@@ -17,20 +17,20 @@ Infini-Attentionのメモリは訓練中に蓄積され、
 長距離依存関係の学習に貢献する。
 """
 
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 import torch.nn as nn
 
-from src.models.infini_attention import InfiniAttentionLayer, MultiMemoryInfiniAttentionLayer
+from src.models.infini_attention import InfiniAttentionLayer
 from src.models.pythia import PythiaLayer
 
 
 class InfiniPythiaModel(nn.Module):
     """
-    Infini-Pythia Model
+    Infini-Pythia Model (Memory-Only)
 
-    1層目: Infini-Attention (NoPE, compressive memory)
+    1層目: Infini-Attention (NoPE, Memory Only)
     2層目以降: 標準Pythia (RoPE)
     """
 
@@ -44,7 +44,6 @@ class InfiniPythiaModel(nn.Module):
         max_position_embeddings: int = 2048,
         rotary_pct: float = 0.25,
         use_delta_rule: bool = True,
-        memory_only: bool = False,
         num_memory_banks: int = 1,
         segments_per_bank: int = 4,
     ):
@@ -58,8 +57,7 @@ class InfiniPythiaModel(nn.Module):
             max_position_embeddings: 最大位置エンベディング
             rotary_pct: RoPEを適用する次元の割合
             use_delta_rule: Infini-AttentionでDelta Ruleを使用するか
-            memory_only: Memory Attentionのみ使用（Local Attentionなし）
-            num_memory_banks: メモリバンク数（1=通常、2以上=Multi-Memory）
+            num_memory_banks: メモリバンク数（1=シングル、2以上=マルチ）
             segments_per_bank: 各バンクに蓄積するセグメント数
         """
         super().__init__()
@@ -68,34 +66,20 @@ class InfiniPythiaModel(nn.Module):
         self.hidden_size = hidden_size
         self.num_layers = num_layers
         self.num_heads = num_heads
-        self.memory_only = memory_only
         self.num_memory_banks = num_memory_banks
 
         # Embedding
         self.embed_in = nn.Embedding(vocab_size, hidden_size)
 
-        # Layer 0: Infini-Attention (NoPE)
-        self.infini_layer: Union[InfiniAttentionLayer, MultiMemoryInfiniAttentionLayer]
-        if num_memory_banks > 1:
-            # Multi-Memory Bank version
-            self.infini_layer = MultiMemoryInfiniAttentionLayer(
-                hidden_size=hidden_size,
-                num_heads=num_heads,
-                intermediate_size=intermediate_size,
-                num_memory_banks=num_memory_banks,
-                segments_per_bank=segments_per_bank,
-                use_delta_rule=use_delta_rule,
-                memory_only=memory_only,
-            )
-        else:
-            # Standard single memory version
-            self.infini_layer = InfiniAttentionLayer(
-                hidden_size=hidden_size,
-                num_heads=num_heads,
-                intermediate_size=intermediate_size,
-                use_delta_rule=use_delta_rule,
-                memory_only=memory_only,
-            )
+        # Layer 0: Infini-Attention (NoPE, Memory Only)
+        self.infini_layer = InfiniAttentionLayer(
+            hidden_size=hidden_size,
+            num_heads=num_heads,
+            intermediate_size=intermediate_size,
+            num_memory_banks=num_memory_banks,
+            segments_per_bank=segments_per_bank,
+            use_delta_rule=use_delta_rule,
+        )
 
         # Layers 1-(num_layers-1): Standard Pythia (RoPE)
         self.pythia_layers = nn.ModuleList([
@@ -152,24 +136,18 @@ class InfiniPythiaModel(nn.Module):
         Returns:
             logits: [batch, seq_len, vocab_size]
         """
-        # Embedding
         hidden_states = self.embed_in(input_ids)
 
-        # Layer 0: Infini-Attention
         hidden_states = self.infini_layer(
             hidden_states,
             attention_mask,
             update_memory=update_memory,
         )
 
-        # Layers 1+: Standard Pythia (RoPE)
         for layer in self.pythia_layers:
             hidden_states = layer(hidden_states, attention_mask)
 
-        # Final layer norm
         hidden_states = self.final_layer_norm(hidden_states)
-
-        # LM Head
         logits = self.embed_out(hidden_states)
 
         return logits
@@ -195,33 +173,10 @@ class InfiniPythiaModel(nn.Module):
             "transformer": infini_params + pythia_params,
         }
 
-    def get_infini_gate_values(self) -> torch.Tensor:
-        """Infini-Attentionのゲート値を取得"""
-        return self.infini_layer.attention.get_gate_values()
-
     def memory_info(self) -> dict[str, int]:
-        """Infini-Attentionのメモリ情報を計算"""
-        # Infini layer: メモリは固定サイズ (num_heads, head_dim, head_dim)
-        head_dim = self.hidden_size // self.num_heads
-
-        # M matrix: [num_heads, head_dim, head_dim]
-        m_matrix_size = self.num_heads * head_dim * head_dim * 4  # float32
-
-        # z vector: [num_heads, head_dim]
-        z_vector_size = self.num_heads * head_dim * 4
-
-        # For multi-memory, multiply by number of banks
-        num_banks = self.num_memory_banks
-
-        return {
-            "m_matrix_bytes": m_matrix_size * num_banks,
-            "z_vector_bytes": z_vector_size * num_banks,
-            "total_memory_bytes": (m_matrix_size + z_vector_size) * num_banks,
-            "num_memory_banks": num_banks,
-        }
+        """Infini-Attentionのメモリ情報を取得"""
+        return self.infini_layer.attention.memory_info()
 
     def get_bank_weights(self) -> Optional[torch.Tensor]:
         """Multi-Memory版の場合、バンク重みを取得"""
-        if self.num_memory_banks > 1:
-            return self.infini_layer.attention.get_bank_weights()
-        return None
+        return self.infini_layer.attention.get_bank_weights()
