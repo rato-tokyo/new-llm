@@ -49,6 +49,13 @@ python3 scripts/experiment_mla.py --samples 10000 --skip-baseline
 # kv_dim変更
 python3 scripts/experiment_mla.py --kv-dim 256  # 75%削減
 python3 scripts/experiment_mla.py --kv-dim 64   # 93.75%削減
+
+# 位置エンコーディング比較実験（統一モデル使用）
+python3 scripts/experiment_position.py --samples 10000 --epochs 30
+
+# 特定の位置エンコーディングのみ
+python3 scripts/experiment_position.py --pos-types rope alibi
+python3 scripts/experiment_position.py --pos-types none  # NoPE
 ```
 
 ---
@@ -240,17 +247,32 @@ print(bias)
 
 ### Core Components
 
-**1. MLAPythiaModel (Ours)**
+**1. UnifiedPythiaModel（統一モデル）**
+- 位置エンコーディングを設定で切り替え可能
+- RoPE, ALiBi, NoPE（なし）に対応
+- 疎結合設計により拡張が容易
+
+**2. PositionEncoding（位置エンコーディングモジュール）**
+```python
+# 使用例
+from src.models import UnifiedPythiaModel, PositionEncodingConfig
+
+# RoPE
+model = UnifiedPythiaModel(pos_encoding=PositionEncodingConfig(type="rope"))
+
+# ALiBi
+model = UnifiedPythiaModel(pos_encoding=PositionEncodingConfig(type="alibi"))
+
+# NoPE（位置情報なし）
+model = UnifiedPythiaModel(pos_encoding=PositionEncodingConfig(type="none"))
+```
+
+**3. MLAPythiaModel（KVキャッシュ圧縮）**
 - Token Embedding: vocab → hidden_size (512)
 - MLALayer × 6: KV共通圧縮 (kv_dim=128)、ALiBi
 - Output Head: hidden_size (512) → vocab_size
 
-**2. MLAAttention**
-- KV共通圧縮: hidden_size → kv_dim
-- ALiBi位置エンコーディング（統一スロープ）
-- 吸収モード対応
-
-**3. PythiaModel (Baseline)**
+**4. PythiaModel (Baseline)**
 - Token Embedding: vocab → hidden_size (512)
 - PythiaLayer × 6: RoPE (25%)
 - Output Head: hidden_size (512) → vocab_size
@@ -263,21 +285,24 @@ print(bias)
 new-llm/
 ├── config/
 │   ├── __init__.py
-│   └── pythia.py                 # PythiaConfig
+│   └── pythia.py                   # PythiaConfig
 ├── scripts/
-│   └── experiment_mla.py         # MLA実験: Pythia vs MLA-Pythia
+│   ├── experiment_mla.py           # MLA実験: Pythia vs MLA-Pythia
+│   └── experiment_position.py      # 位置エンコーディング比較実験
 ├── src/
 │   ├── models/
-│   │   ├── pythia.py             # PythiaModel (baseline, RoPE)
-│   │   ├── mla_pythia.py         # MLAPythiaModel (ours, ALiBi)
-│   │   ├── mla.py                # MLAAttention, MLALayer
-│   │   └── alibi.py              # ALiBi実装
+│   │   ├── pythia.py               # PythiaModel (baseline, RoPE)
+│   │   ├── mla_pythia.py           # MLAPythiaModel (ours, ALiBi)
+│   │   ├── mla.py                  # MLAAttention, MLALayer
+│   │   ├── alibi.py                # ALiBi実装
+│   │   ├── position_encoding.py    # 位置エンコーディング統一モジュール
+│   │   └── unified_pythia.py       # UnifiedPythiaModel（位置エンコ切替可能）
 │   └── utils/
-│       ├── training.py           # 共通学習ユーティリティ
-│       ├── evaluation.py         # 評価関数
-│       └── device.py             # デバイス管理
+│       ├── training.py             # 共通学習ユーティリティ
+│       ├── evaluation.py           # 評価関数
+│       └── device.py               # デバイス管理
 ├── docs/
-│   └── experiments/              # 実験結果
+│   └── experiments/                # 実験結果
 ├── CLAUDE.md
 └── README.md
 ```
@@ -288,6 +313,7 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-05 | **位置エンコーディング統一化**: RoPE/ALiBi/NoPEを疎結合で切り替え可能に |
 | 2025-12-05 | **ALiBi因果マスクバグ修正**: unsqueeze順序の修正、PPL異常の解消 |
 | 2025-12-05 | **Reversal Curse評価追加**: 順方向/逆方向PPL比較機能 |
 | 2025-12-05 | **MLA-Pythia実装**: V-DProjからMLA方式に移行、ALiBi採用 |

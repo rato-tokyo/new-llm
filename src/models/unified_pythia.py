@@ -1,13 +1,27 @@
 """
-NoPE-Pythia: Pythia without Position Encoding
+Unified Pythia Model
 
-位置エンコーディングなしのPythiaモデル。
-位置情報の重要性を測定するためのアブレーション実験用。
+位置エンコーディングを設定で切り替え可能な統一Pythiaモデル。
+RoPE, ALiBi, NoPEを簡単に入れ替え可能。
 
-特徴:
-- RoPE/ALiBi等の位置エンコーディングなし
-- Causal maskのみで順序情報を暗黙的に保持
-- それ以外はPythiaと同一アーキテクチャ
+Usage:
+    from src.models.unified_pythia import UnifiedPythiaModel
+    from src.models.position_encoding import PositionEncodingConfig
+
+    # RoPE (default Pythia)
+    model = UnifiedPythiaModel(
+        pos_encoding=PositionEncodingConfig(type="rope", rotary_pct=0.25)
+    )
+
+    # ALiBi
+    model = UnifiedPythiaModel(
+        pos_encoding=PositionEncodingConfig(type="alibi", alibi_slope=0.0625)
+    )
+
+    # No position encoding
+    model = UnifiedPythiaModel(
+        pos_encoding=PositionEncodingConfig(type="none")
+    )
 """
 
 from typing import Optional, Dict
@@ -16,26 +30,31 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+from src.models.position_encoding import (
+    PositionEncodingConfig,
+    PositionEncoding,
+    create_position_encoding,
+)
 
-class NoPEAttention(nn.Module):
+
+class UnifiedAttention(nn.Module):
     """
-    Multi-Head Attention without Position Encoding
+    Unified Multi-Head Attention
 
-    Features:
-    - No rotary embedding
-    - No position bias
-    - Only causal mask for autoregressive property
+    位置エンコーディングをモジュールとして注入可能。
     """
 
     def __init__(
         self,
         hidden_size: int,
         num_heads: int,
+        pos_encoding: PositionEncoding,
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_heads = num_heads
         self.head_dim = hidden_size // num_heads
+        self.pos_encoding = pos_encoding
 
         # Query, Key, Value projections
         self.query_key_value = nn.Linear(hidden_size, 3 * hidden_size)
@@ -58,16 +77,14 @@ class NoPEAttention(nn.Module):
         qkv = qkv.permute(2, 0, 3, 1, 4)  # [3, batch, heads, seq, head_dim]
         query, key, value = qkv[0], qkv[1], qkv[2]
 
-        # Attention scores (NO position encoding applied)
+        # Apply position encoding to Q/K (if applicable)
+        query, key = self.pos_encoding.apply_to_qk(query, key, seq_len)
+
+        # Attention scores
         attn_weights = torch.matmul(query, key.transpose(-1, -2)) * self.scale
 
-        # Causal mask only
-        if attention_mask is None:
-            causal_mask = torch.triu(
-                torch.ones(seq_len, seq_len, device=hidden_states.device) * float("-inf"),
-                diagonal=1
-            )
-            attn_weights = attn_weights + causal_mask
+        # Apply position bias to scores (includes causal mask)
+        attn_weights = self.pos_encoding.apply_to_scores(attn_weights, seq_len)
 
         attn_weights = F.softmax(attn_weights, dim=-1)
 
@@ -80,8 +97,8 @@ class NoPEAttention(nn.Module):
         return output
 
 
-class NoPEMLP(nn.Module):
-    """Feed-Forward Network (same as Pythia)"""
+class UnifiedMLP(nn.Module):
+    """Feed-Forward Network"""
 
     def __init__(self, hidden_size: int, intermediate_size: int):
         super().__init__()
@@ -96,14 +113,11 @@ class NoPEMLP(nn.Module):
         return hidden_states
 
 
-class NoPELayer(nn.Module):
+class UnifiedLayer(nn.Module):
     """
-    Transformer Layer without Position Encoding
+    Unified Transformer Layer
 
-    Features:
-    - Parallel Attention (same as Pythia)
-    - Pre-LayerNorm
-    - No position encoding
+    Parallel Attention + MLP (Pythia style)
     """
 
     def __init__(
@@ -111,6 +125,7 @@ class NoPELayer(nn.Module):
         hidden_size: int,
         num_heads: int,
         intermediate_size: int,
+        pos_encoding: PositionEncoding,
     ):
         super().__init__()
 
@@ -118,14 +133,15 @@ class NoPELayer(nn.Module):
         self.input_layernorm = nn.LayerNorm(hidden_size)
         self.post_attention_layernorm = nn.LayerNorm(hidden_size)
 
-        # Attention (no position encoding)
-        self.attention = NoPEAttention(
+        # Attention
+        self.attention = UnifiedAttention(
             hidden_size=hidden_size,
             num_heads=num_heads,
+            pos_encoding=pos_encoding,
         )
 
         # MLP
-        self.mlp = NoPEMLP(hidden_size, intermediate_size)
+        self.mlp = UnifiedMLP(hidden_size, intermediate_size)
 
     def forward(
         self,
@@ -136,7 +152,7 @@ class NoPELayer(nn.Module):
         residual = hidden_states
         hidden_states = self.input_layernorm(hidden_states)
 
-        # Parallel attention and MLP (Pythia specific)
+        # Parallel attention and MLP
         attn_output = self.attention(hidden_states, attention_mask)
         mlp_output = self.mlp(hidden_states)
 
@@ -146,20 +162,17 @@ class NoPELayer(nn.Module):
         return hidden_states
 
 
-class NoPEPythiaModel(nn.Module):
+class UnifiedPythiaModel(nn.Module):
     """
-    NoPE-Pythia: Pythia without Position Encoding
+    Unified Pythia Language Model
+
+    位置エンコーディングを設定で切り替え可能。
 
     Architecture:
     - Embedding: vocab_size -> hidden_size
-    - 6 Transformer layers (no position encoding)
+    - N Transformer layers with configurable position encoding
     - Final LayerNorm
     - LM Head: hidden_size -> vocab_size
-
-    Note:
-    - 位置情報なしのため、トークンの順序を区別できない
-    - Causal maskにより「未来を見ない」制約のみ保持
-    - Bag-of-Wordsに近い動作が予想される
     """
 
     def __init__(
@@ -169,22 +182,35 @@ class NoPEPythiaModel(nn.Module):
         num_layers: int = 6,
         num_heads: int = 8,
         intermediate_size: int = 2048,
+        pos_encoding: Optional[PositionEncodingConfig] = None,
     ):
         super().__init__()
 
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
+        self.num_heads = num_heads
+        self.head_dim = hidden_size // num_heads
 
-        # Embedding (no position embedding)
+        # Default to RoPE if not specified
+        if pos_encoding is None:
+            pos_encoding = PositionEncodingConfig(type="rope")
+
+        self.pos_encoding_config = pos_encoding
+
+        # Create position encoding module
+        pos_enc_module = create_position_encoding(pos_encoding, self.head_dim)
+
+        # Embedding
         self.embed_in = nn.Embedding(vocab_size, hidden_size)
 
-        # Transformer layers
+        # Transformer layers (share the same pos_encoding config)
         self.layers = nn.ModuleList([
-            NoPELayer(
+            UnifiedLayer(
                 hidden_size=hidden_size,
                 num_heads=num_heads,
                 intermediate_size=intermediate_size,
+                pos_encoding=pos_enc_module,
             )
             for _ in range(num_layers)
         ])
@@ -226,7 +252,7 @@ class NoPEPythiaModel(nn.Module):
         Returns:
             logits: [batch, seq_len, vocab_size]
         """
-        # Embedding (no position encoding added)
+        # Embedding
         hidden_states = self.embed_in(input_ids)
 
         # Transformer layers
@@ -253,3 +279,8 @@ class NoPEPythiaModel(nn.Module):
             "lm_head": lm_head,
             "transformer": total - embedding - lm_head,
         }
+
+    @property
+    def position_encoding_type(self) -> str:
+        """現在の位置エンコーディングタイプを返す"""
+        return self.pos_encoding_config.type
