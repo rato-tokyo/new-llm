@@ -333,6 +333,7 @@ def run_experiment(
             "best_epoch": best_epoch,
             "position_wise_ppl": pythia_pos_ppl,
             "reversal_curse": pythia_reversal,
+            "model_state_dict": pythia_model.state_dict(),  # Save trained weights
         }
 
         del pythia_model
@@ -475,12 +476,11 @@ def run_experiment(
             "position_wise_ppl": infini_pos_ppl,
             "reversal_curse": infini_reversal,
             "final_gate_values": gate_values.tolist(),
+            "model_state_dict": infini_model.state_dict(),  # Save trained weights
         }
 
-        # Don't delete infini_model yet if long_context_eval is needed
-        if not long_context_eval:
-            del infini_model
-            clear_gpu_cache(device)
+        del infini_model
+        clear_gpu_cache(device)
 
     # ===== Long Context Evaluation =====
     if long_context_eval:
@@ -504,7 +504,7 @@ def run_experiment(
         # Evaluate Pythia (if trained)
         if results.get("pythia") is not None:
             print_flush("\n[Pythia] Long context evaluation...")
-            # Need to recreate model for evaluation
+            # Recreate model and load trained weights
             pythia_model = PythiaModel(
                 vocab_size=config.vocab_size,
                 hidden_size=config.hidden_size,
@@ -514,6 +514,9 @@ def run_experiment(
                 max_position_embeddings=config.max_position_embeddings,
                 rotary_pct=config.rotary_pct,
             ).to(device)
+            # Load trained weights
+            pythia_model.load_state_dict(results["pythia"]["model_state_dict"])
+            pythia_model.eval()
 
             pythia_long_result = evaluate_long_documents(
                 pythia_model,
@@ -535,19 +538,21 @@ def run_experiment(
 
         # Evaluate Infini (if trained)
         if results.get("infini") is not None:
-            # Recreate model if it was deleted
-            if 'infini_model' not in dir() or infini_model is None:
-                infini_model = InfiniPythiaModel(
-                    vocab_size=config.vocab_size,
-                    hidden_size=config.hidden_size,
-                    num_layers=config.num_layers,
-                    num_heads=config.num_attention_heads,
-                    intermediate_size=config.intermediate_size,
-                    max_position_embeddings=config.max_position_embeddings,
-                    rotary_pct=config.rotary_pct,
-                    use_delta_rule=use_delta_rule,
-                    memory_only=memory_only,
-                ).to(device)
+            # Recreate model and load trained weights
+            infini_model = InfiniPythiaModel(
+                vocab_size=config.vocab_size,
+                hidden_size=config.hidden_size,
+                num_layers=config.num_layers,
+                num_heads=config.num_attention_heads,
+                intermediate_size=config.intermediate_size,
+                max_position_embeddings=config.max_position_embeddings,
+                rotary_pct=config.rotary_pct,
+                use_delta_rule=use_delta_rule,
+                memory_only=memory_only,
+            ).to(device)
+            # Load trained weights
+            infini_model.load_state_dict(results["infini"]["model_state_dict"])
+            infini_model.eval()
 
             print_flush("\n[Infini] Long context evaluation (with memory)...")
             infini_long_result = evaluate_long_documents(
