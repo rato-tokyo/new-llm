@@ -171,6 +171,7 @@ def run_experiment(
     batch_size: int = 8,
     lr: float = 1e-4,
     use_delta_rule: bool = True,
+    memory_only: bool = False,
     skip_baseline: bool = False,
     skip_infini: bool = False,
 ) -> dict[str, Any]:
@@ -188,6 +189,7 @@ def run_experiment(
     print_flush(f"Epochs: {num_epochs}")
     print_flush(f"Learning rate: {lr}")
     print_flush(f"Delta rule: {use_delta_rule}")
+    print_flush(f"Memory only: {memory_only}")
     print_flush(f"Skip baseline: {skip_baseline}")
     print_flush(f"Skip infini: {skip_infini}")
     print_flush("=" * 70)
@@ -301,7 +303,10 @@ def run_experiment(
         print_flush("\n" + "=" * 70)
         print_flush("2. INFINI-PYTHIA (1層目Infini + RoPE)")
         print_flush("=" * 70)
-        print_flush("  Layer 0: Infini-Attention (NoPE, compressive memory)")
+        if memory_only:
+            print_flush("  Layer 0: Infini-Attention (NoPE, MEMORY ONLY - no local attention)")
+        else:
+            print_flush("  Layer 0: Infini-Attention (NoPE, compressive memory)")
         print_flush("  Layer 1-5: Standard Pythia (RoPE)")
 
         infini_model = InfiniPythiaModel(
@@ -313,6 +318,7 @@ def run_experiment(
             max_position_embeddings=config.max_position_embeddings,
             rotary_pct=config.rotary_pct,
             use_delta_rule=use_delta_rule,
+            memory_only=memory_only,
         )
         infini_model = infini_model.to(device)
 
@@ -465,6 +471,9 @@ def main() -> None:
         "--no-delta-rule", action="store_true", help="Disable delta rule for Infini"
     )
     parser.add_argument(
+        "--memory-only", action="store_true", help="Use memory attention only (no local attention)"
+    )
+    parser.add_argument(
         "--skip-baseline", action="store_true", help="Skip Pythia baseline"
     )
     parser.add_argument(
@@ -479,6 +488,7 @@ def main() -> None:
         batch_size=args.batch_size,
         lr=args.lr,
         use_delta_rule=not args.no_delta_rule,
+        memory_only=args.memory_only,
         skip_baseline=args.skip_baseline,
         skip_infini=args.skip_infini,
     )

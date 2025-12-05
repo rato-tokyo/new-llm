@@ -47,12 +47,14 @@ class InfiniAttention(nn.Module):
         hidden_size: int,
         num_heads: int,
         use_delta_rule: bool = True,
+        memory_only: bool = False,
     ):
         """
         Args:
             hidden_size: 隠れ層の次元
             num_heads: アテンションヘッド数
             use_delta_rule: Delta ruleを使用するか（よりスマートなメモリ更新）
+            memory_only: Trueの場合、Memory Attentionのみ使用（Local Attentionなし）
         """
         super().__init__()
 
@@ -60,6 +62,7 @@ class InfiniAttention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = hidden_size // num_heads
         self.use_delta_rule = use_delta_rule
+        self.memory_only = memory_only
 
         # Q, K, V projections
         self.w_q = nn.Linear(hidden_size, hidden_size, bias=False)
@@ -71,7 +74,11 @@ class InfiniAttention(nn.Module):
 
         # Beta gate (learnable, per head)
         # sigmoid(beta) で local と memory の重みを決定
-        self.beta = nn.Parameter(torch.zeros(num_heads))
+        if memory_only:
+            # sigmoid(10) ≈ 0.99995 → ほぼ100% Memory Attention
+            self.beta = nn.Parameter(torch.full((num_heads,), 10.0), requires_grad=False)
+        else:
+            self.beta = nn.Parameter(torch.zeros(num_heads))
 
         # Scaling for dot-product attention
         self.scale = self.head_dim ** -0.5
@@ -260,6 +267,7 @@ class InfiniAttentionLayer(nn.Module):
         num_heads: int,
         intermediate_size: int,
         use_delta_rule: bool = True,
+        memory_only: bool = False,
     ):
         super().__init__()
 
@@ -269,6 +277,7 @@ class InfiniAttentionLayer(nn.Module):
             hidden_size=hidden_size,
             num_heads=num_heads,
             use_delta_rule=use_delta_rule,
+            memory_only=memory_only,
         )
 
         self.mlp = nn.Sequential(

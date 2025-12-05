@@ -44,6 +44,7 @@ class InfiniPythiaModel(nn.Module):
         max_position_embeddings: int = 2048,
         rotary_pct: float = 0.25,
         use_delta_rule: bool = True,
+        memory_only: bool = False,
     ):
         """
         Args:
@@ -55,12 +56,14 @@ class InfiniPythiaModel(nn.Module):
             max_position_embeddings: 最大位置エンベディング
             rotary_pct: RoPEを適用する次元の割合
             use_delta_rule: Infini-AttentionでDelta Ruleを使用するか
+            memory_only: Memory Attentionのみ使用（Local Attentionなし）
         """
         super().__init__()
 
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
+        self.memory_only = memory_only
 
         # Embedding
         self.embed_in = nn.Embedding(vocab_size, hidden_size)
@@ -71,6 +74,7 @@ class InfiniPythiaModel(nn.Module):
             num_heads=num_heads,
             intermediate_size=intermediate_size,
             use_delta_rule=use_delta_rule,
+            memory_only=memory_only,
         )
 
         # Layers 1-(num_layers-1): Standard Pythia (RoPE)
