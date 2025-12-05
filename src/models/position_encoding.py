@@ -612,8 +612,8 @@ class Rotary3DPositionEncoding(PositionEncoding):
             x_grouped
         )
 
-        # 元の形状に戻す
-        rotated = rotated.view(batch, heads, seq, self.rotary_dim)
+        # 元の形状に戻す（einsumの結果は非連続の場合があるため contiguous() が必要）
+        rotated = rotated.contiguous().view(batch, heads, seq, self.rotary_dim)
 
         # pass-through部分と結合
         return torch.cat([rotated, x_pass], dim=-1)
