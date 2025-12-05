@@ -90,6 +90,55 @@ python3 scripts/experiment_infini.py --alibi --alibi-scale 2.0 --skip-baseline
 
 # Long Context訓練・評価
 python3 scripts/experiment_infini.py --long-context-train --long-context
+
+# 全層Infini（RoPEなし、高速）
+python3 scripts/experiment_infini.py --all-infini --samples 10000 --seq-length 512 --epochs 50 --skip-baseline
+```
+
+### Full Infini Model (全層)
+
+全層でInfini-Attentionを使用するモデル。計算量O(n²) → O(n×d²)に削減。
+
+```
+Full Infini:
+Token Embedding (512-dim)
+       ↓
+Layer 0-5: InfiniAttentionLayer (Memory Only)
+  └─ Memory Attention (linear attention)
+       ↓
+Output Head (512 → vocab)
+```
+
+**計算量比較**:
+| シーケンス長 | 標準Attention | Full Infini | 速度比 |
+|-------------|---------------|-------------|--------|
+| 256 | 基準 | 2倍遅い | 0.5x |
+| 512 | 基準 | 同等 | 1.0x |
+| 2048 | 基準 | 4倍速い | 4.0x |
+| 8192 | 基準 | 16倍速い | 16.0x |
+
+**メモリ使用量**:
+```
+Full Infini (6層):
+  = 6 × num_heads × head_dim² × 4bytes
+  = 6 × 8 × 64² × 4 = 786KB (固定)
+
+標準Pythia KVキャッシュ (n=4096):
+  = 6 × 2 × n × hidden_size × 4bytes
+  = 96MB (シーケンス長に比例)
+```
+
+```python
+from src.models.full_infini import FullInfiniModel
+
+# 全層Infiniモデル
+model = FullInfiniModel(
+    vocab_size=50304,
+    hidden_size=512,
+    num_layers=6,
+    num_heads=8,
+    use_alibi=True,  # 位置エンコーディング推奨
+)
 ```
 
 ---
@@ -194,7 +243,8 @@ new-llm/
 │   ├── models/
 │   │   ├── pythia.py               # PythiaModel (RoPE)
 │   │   ├── infini_attention.py     # InfiniAttention, InfiniAttentionLayer
-│   │   └── infini_pythia.py        # InfiniPythiaModel
+│   │   ├── infini_pythia.py        # InfiniPythiaModel (1層Infini + RoPE)
+│   │   └── full_infini.py          # FullInfiniModel (全層Infini)
 │   └── utils/
 │       ├── training.py             # 共通学習ユーティリティ
 │       ├── evaluation.py           # 評価関数
@@ -212,6 +262,7 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-06 | **Full Infini Model追加**: 全層Infini-Attention、O(n²)→O(n×d²)計算量削減 |
 | 2025-12-06 | **ALiBi位置エンコーディング追加**: 線形化近似でALiBiをメモリに組み込み |
 | 2025-12-05 | **Memory-Onlyに集中**: Local Attention削除、コード簡素化 |
 | 2025-12-05 | **Multi-Memory Bank追加**: 複数バンクで情報混合低減 |
