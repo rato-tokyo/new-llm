@@ -76,6 +76,7 @@ def train_model(
     rotary_pct: float,
     rope3d_pct: float,
     alibi_slope: float,
+    rope_base: int = 10000,
 ) -> dict[str, Any]:
     """Train a model with specified position encoding."""
     pos_name = POS_ENCODING_NAMES.get(pos_type, pos_type)
@@ -87,6 +88,7 @@ def train_model(
         rotary_pct=rotary_pct,
         rope3d_pct=rope3d_pct,
         alibi_slope=alibi_slope,
+        rope_base=rope_base,
         max_position_embeddings=config.max_position_embeddings,
     )
 
@@ -220,6 +222,7 @@ def run_experiment(
     rotary_pct: float = 0.25,
     rope3d_pct: float = 0.25,
     alibi_slope: float = 0.0625,
+    rope_base: int = 10000,
 ) -> dict[str, Any]:
     """Run position encoding comparison experiment."""
     set_seed(42)
@@ -236,6 +239,8 @@ def run_experiment(
     print_flush(f"Learning rate: {lr}")
     print_flush(f"Position types: {pos_types}")
     print_flush(f"RoPE rotary_pct: {rotary_pct}")
+    if "rope" in pos_types:
+        print_flush(f"RoPE base: {rope_base}")
     if "rope3d" in pos_types:
         print_flush(f"RoPE3D rotary_pct: {rope3d_pct}")
     print_flush(f"ALiBi slope: {alibi_slope}")
@@ -269,6 +274,7 @@ def run_experiment(
             rotary_pct=rotary_pct,
             rope3d_pct=rope3d_pct,
             alibi_slope=alibi_slope,
+            rope_base=rope_base,
         )
         results[pos_type] = result
 
@@ -383,6 +389,9 @@ def main() -> None:
         "--alibi-slope", type=float, default=0.0625, help="ALiBi slope (uniform)"
     )
     parser.add_argument(
+        "--rope-base", type=int, default=10000, help="RoPE base frequency (smaller = faster rotation)"
+    )
+    parser.add_argument(
         "--skip",
         nargs="+",
         default=[],
@@ -407,6 +416,7 @@ def main() -> None:
         rotary_pct=args.rotary_pct,
         rope3d_pct=args.rope3d_pct,
         alibi_slope=args.alibi_slope,
+        rope_base=args.rope_base,
     )
 
     print_flush("\nDONE")
