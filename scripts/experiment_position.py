@@ -3,7 +3,7 @@
 Position Encoding Experiment
 
 位置エンコーディングの比較実験。
-RoPE (2D), RoPE3D (3D), ALiBi, NoPE, Learnable を統一モデルで比較。
+RoPE (2D), RoPE3D (3D), ALiBi, NoPE を統一モデルで比較。
 
 Usage:
     # 全種類比較
@@ -21,10 +21,6 @@ Usage:
 
     # ALiBi slope変更
     python3 scripts/experiment_position.py --pos-types alibi --alibi-slope 0.125
-
-    # Learnable position encoding
-    python3 scripts/experiment_position.py --pos-types learnable --learnable-nonlinear gelu
-    python3 scripts/experiment_position.py --pos-types rope learnable --learnable-dim 32
 """
 
 import argparse
@@ -55,6 +51,7 @@ from src.utils.training import (  # noqa: E402
 from src.utils.evaluation import (  # noqa: E402
     evaluate_position_wise_ppl,
     evaluate_reversal_curse,
+    analyze_qk_stats,
 )
 from src.utils.device import clear_gpu_cache  # noqa: E402
 
@@ -65,7 +62,6 @@ POS_ENCODING_NAMES = {
     "rope3d": "RoPE3D (3D)",
     "alibi": "ALiBi",
     "none": "NoPE (None)",
-    "learnable": "Learnable (K only)",
 }
 
 
@@ -80,8 +76,6 @@ def train_model(
     rotary_pct: float,
     rope3d_pct: float,
     alibi_slope: float,
-    learnable_dim: int | None = None,
-    learnable_nonlinear: str = "gelu",
 ) -> dict[str, Any]:
     """Train a model with specified position encoding."""
     pos_name = POS_ENCODING_NAMES.get(pos_type, pos_type)
@@ -93,8 +87,6 @@ def train_model(
         rotary_pct=rotary_pct,
         rope3d_pct=rope3d_pct,
         alibi_slope=alibi_slope,
-        learnable_dim=learnable_dim,
-        learnable_nonlinear=learnable_nonlinear,
         max_position_embeddings=config.max_position_embeddings,
     )
 
@@ -163,6 +155,38 @@ def train_model(
     print_flush(f"    Reversal Ratio: {reversal['reversal_ratio']:.3f}")
     print_flush(f"    Reversal Gap: {reversal['reversal_gap']:+.1f}")
 
+    # Q, K Statistics (Massive Values analysis)
+    print_flush("\n  Q, K Statistics (Massive Values):")
+    qk_stats = analyze_qk_stats(model, val_loader, device, num_batches=10)
+
+    if qk_stats:
+        print_flush(f"    Overall Q max: {qk_stats['all_q_max']:.2f}")
+        print_flush(f"    Overall K max: {qk_stats['all_k_max']:.2f}")
+
+        print_flush("\n    Layer-wise max values:")
+        print_flush("    | Layer | Q max | K max |")
+        print_flush("    |-------|-------|-------|")
+        for layer_idx in sorted(qk_stats['layer_q_max'].keys()):
+            q_max = qk_stats['layer_q_max'][layer_idx]
+            k_max = qk_stats['layer_k_max'][layer_idx]
+            print_flush(f"    | {layer_idx} | {q_max:.2f} | {k_max:.2f} |")
+
+        if qk_stats.get('dim_analysis'):
+            dim = qk_stats['dim_analysis']
+            print_flush("\n    Frequency band analysis (high freq = early dims, low freq = late dims):")
+            print_flush(f"      Q high-freq max: {dim['q_high_freq_max']:.2f}")
+            print_flush(f"      Q low-freq max:  {dim['q_low_freq_max']:.2f}")
+            print_flush(f"      K high-freq max: {dim['k_high_freq_max']:.2f}")
+            print_flush(f"      K low-freq max:  {dim['k_low_freq_max']:.2f}")
+
+            # Massive Values比率（低周波/高周波）
+            if dim['q_high_freq_max'] > 0:
+                q_ratio = dim['q_low_freq_max'] / dim['q_high_freq_max']
+                print_flush(f"      Q low/high ratio: {q_ratio:.2f}x")
+            if dim['k_high_freq_max'] > 0:
+                k_ratio = dim['k_low_freq_max'] / dim['k_high_freq_max']
+                print_flush(f"      K low/high ratio: {k_ratio:.2f}x")
+
     result = {
         "pos_type": pos_type,
         "pos_name": pos_name,
@@ -170,6 +194,7 @@ def train_model(
         "best_epoch": best_epoch,
         "position_wise_ppl": pos_ppl,
         "reversal_curse": reversal,
+        "qk_stats": qk_stats,
         "params": param_info["total"],
     }
 
@@ -189,8 +214,6 @@ def run_experiment(
     rotary_pct: float = 0.25,
     rope3d_pct: float = 0.25,
     alibi_slope: float = 0.0625,
-    learnable_dim: int | None = None,
-    learnable_nonlinear: str = "gelu",
 ) -> dict[str, Any]:
     """Run position encoding comparison experiment."""
     set_seed(42)
@@ -210,9 +233,6 @@ def run_experiment(
     if "rope3d" in pos_types:
         print_flush(f"RoPE3D rotary_pct: {rope3d_pct}")
     print_flush(f"ALiBi slope: {alibi_slope}")
-    if "learnable" in pos_types:
-        print_flush(f"Learnable dim: {learnable_dim or 'full head_dim'}")
-        print_flush(f"Learnable nonlinear: {learnable_nonlinear}")
     print_flush("=" * 70)
 
     print_flush("\n[Data] Loading Pile data...")
@@ -243,8 +263,6 @@ def run_experiment(
             rotary_pct=rotary_pct,
             rope3d_pct=rope3d_pct,
             alibi_slope=alibi_slope,
-            learnable_dim=learnable_dim,
-            learnable_nonlinear=learnable_nonlinear,
         )
         results[pos_type] = result
 
@@ -346,7 +364,7 @@ def main() -> None:
         "--pos-types",
         nargs="+",
         default=["rope", "alibi", "none"],
-        choices=["rope", "rope3d", "alibi", "none", "learnable"],
+        choices=["rope", "rope3d", "alibi", "none"],
         help="Position encoding types to compare",
     )
     parser.add_argument(
@@ -359,23 +377,10 @@ def main() -> None:
         "--alibi-slope", type=float, default=0.0625, help="ALiBi slope (uniform)"
     )
     parser.add_argument(
-        "--learnable-dim",
-        type=int,
-        default=None,
-        help="Learnable position encoding dimension (default: full head_dim)",
-    )
-    parser.add_argument(
-        "--learnable-nonlinear",
-        type=str,
-        default="gelu",
-        choices=["gelu", "relu", "tanh", "none"],
-        help="Learnable position encoding nonlinearity",
-    )
-    parser.add_argument(
         "--skip",
         nargs="+",
         default=[],
-        choices=["rope", "rope3d", "alibi", "none", "learnable"],
+        choices=["rope", "rope3d", "alibi", "none"],
         help="Position encoding types to skip (bypass)",
     )
     args = parser.parse_args()
@@ -396,8 +401,6 @@ def main() -> None:
         rotary_pct=args.rotary_pct,
         rope3d_pct=args.rope3d_pct,
         alibi_slope=args.alibi_slope,
-        learnable_dim=args.learnable_dim,
-        learnable_nonlinear=args.learnable_nonlinear,
     )
 
     print_flush("\nDONE")

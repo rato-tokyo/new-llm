@@ -370,6 +370,58 @@ RoPE 3D: 5グループ → 低周波側が少ない
 
 ---
 
+## RoPE3D 回転軸の比較実験 - 2025-12-05
+
+### 目的
+
+RoPE3Dの3D回転軸を変更し、位置エンコーディングの性能への影響を調査。
+
+### 軸の設定
+
+| 軸名 | ベクトル | 正規化後 | 特徴 |
+|------|---------|---------|------|
+| 対称軸 | (1, 1, 1) | (0.577, 0.577, 0.577) | 各次元への影響が均等 |
+| 非対称軸 | (1, 2, 3) | (0.267, 0.535, 0.802) | 各次元への影響が異なる |
+
+### 結果
+
+| 回転軸 | PPL | Epoch | Backward PPL | Reversal Gap |
+|--------|-----|-------|--------------|--------------|
+| RoPE (2D) baseline | 90.3 | 5 | 637.9 | +636.2 |
+| RoPE3D (1,1,1) 対称 | 90.7 | 5 | 805.6 | +803.9 |
+| RoPE3D (1,2,3) 非対称 | **90.8** | 5 | 755.6 | +753.9 |
+
+### Position-wise PPL 比較
+
+| Position | RoPE (2D) | RoPE3D (1,1,1) | RoPE3D (1,2,3) |
+|----------|-----------|----------------|----------------|
+| 0-16 | 148.2 | 147.7 | 147.7 |
+| 16-32 | 89.0 | 88.7 | **89.8** |
+| 32-64 | 85.2 | **85.7** | **85.5** |
+| 64-96 | 86.8 | **86.7** | **87.1** |
+| 96-128 | **81.7** | **82.1** | **82.1** |
+
+### 分析
+
+**PPLの差異**:
+- 対称軸(1,1,1): 90.7 (RoPE比 +0.4%)
+- 非対称軸(1,2,3): 90.8 (RoPE比 +0.6%)
+- 非対称軸は対称軸よりわずかに劣化 (+0.1%)
+
+**Reversal Curseの改善**:
+- 非対称軸(1,2,3)のBackward PPL: 755.6
+- 対称軸(1,1,1)のBackward PPL: 805.6
+- **非対称軸は逆方向の予測精度が約6%改善**
+
+**考察**:
+1. **PPLはほぼ同等**: 回転軸の変更による順方向PPLの差は微差（0.1%）
+2. **Reversal Curseが改善**: 非対称軸は対称軸より50ポイント（約6%）改善
+3. **各次元への不均等な影響**: 非対称軸(1,2,3)では各次元が異なる比率で変化するため、方向依存性がやや緩和された可能性
+
+**結論**: 回転軸の変更は順方向PPLにほとんど影響しないが、Reversal Curseには一定の影響を与える。非対称軸は対称軸よりReversal Curseを約6%緩和した。ただし、2D RoPEのReversal Gap (+636.2)と比較すると依然として大きい (+753.9)。
+
+---
+
 ## 実行コマンド
 
 ```bash
@@ -379,11 +431,11 @@ python3 scripts/experiment_position.py --samples 10000 --epochs 30 --pos-types r
 # RoPE3D (10,000 samples)
 python3 scripts/experiment_position.py --samples 10000 --epochs 30 --pos-types rope3d
 
-# Learnable (10,000 samples)
-python3 scripts/experiment_position.py --samples 10000 --epochs 30 --pos-types learnable
+# RoPE vs RoPE3D 比較
+python3 scripts/experiment_position.py --samples 10000 --epochs 30 --pos-types rope rope3d
 
-# 全比較 (5,000 samples)
-python3 scripts/experiment_position.py --samples 5000 --epochs 30
+# 全種類比較
+python3 scripts/experiment_position.py --samples 10000 --epochs 30 --pos-types rope rope3d alibi none
 ```
 
 ---
