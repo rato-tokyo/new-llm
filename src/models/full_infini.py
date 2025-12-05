@@ -165,7 +165,7 @@ class FullInfiniModel(nn.Module):
             "transformer": layer_params,
         }
 
-    def memory_info(self) -> dict[str, any]:
+    def memory_info(self) -> dict[str, object]:
         """全レイヤーのメモリ情報を取得"""
         layer_info = self.layers[0].attention.memory_info()
         return {
