@@ -159,6 +159,100 @@ Infini-Pythiaのメモリ: 133,120 bytes (固定)
 
 ---
 
+## Memory-Only 実験 (Local Attention無効)
+
+**追加実験日時**: 2025-12-05
+
+### 設定
+
+Local Attentionを完全に無効化し、Memory Attentionのみを使用する実験。
+- `--memory-only`フラグ: β=10（sigmoid≈0.99995）で固定、学習不可
+- Gate値は全ヘッドで1.000に固定
+
+### 結果比較
+
+| モデル | Val PPL | Best Epoch | Gate | Local Attention |
+|--------|---------|------------|------|-----------------|
+| Pythia (baseline) | 106.0 | 7 | - | - |
+| Infini-Pythia | 103.9 | 7 | 0.460 | 有効 |
+| **Infini-Pythia (Memory-Only)** | **105.7** | 7 | 1.000固定 | **無効** |
+
+### 学習曲線 (Memory-Only)
+
+| Epoch | Train PPL | Val PPL | Gate | 備考 |
+|-------|-----------|---------|------|------|
+| 1 | 662.4 | 436.3 | 1.000 | * |
+| 2 | 173.5 | 240.3 | 1.000 | * |
+| 3 | 95.8 | 172.5 | 1.000 | * |
+| 4 | 61.7 | 138.7 | 1.000 | * |
+| 5 | 42.6 | 119.3 | 1.000 | * |
+| 6 | 30.5 | 108.8 | 1.000 | * |
+| 7 | 22.1 | **105.7** | 1.000 | * Best |
+| 8 | 16.1 | 108.0 | 1.000 | Early stop |
+
+### Position-wise PPL 比較
+
+| Position | Pythia | Infini (通常) | Infini (Memory-Only) |
+|----------|--------|---------------|----------------------|
+| 0-16 | 165.9 | 163.2 | 154.6 |
+| 16-32 | 110.3 | 111.0 | 112.2 |
+| 32-64 | 102.1 | 102.0 | 104.4 |
+| 64-96 | 99.2 | 99.2 | 100.3 |
+| 96-256 | 104.8 | 104.1 | 106.0 |
+
+### Reversal Curse 比較
+
+| モデル | Forward PPL | Backward PPL | Ratio | Gap |
+|--------|-------------|--------------|-------|-----|
+| Pythia | 1.7 | 684.4 | 0.002 | +682.8 |
+| Infini (通常) | 1.7 | 569.6 | 0.003 | +567.9 |
+| **Infini (Memory-Only)** | 1.7 | **584.7** | 0.003 | +583.0 |
+
+### 分析
+
+#### 全体PPL
+
+| 比較 | 差分 | 解釈 |
+|------|------|------|
+| Memory-Only vs Pythia | -0.3 | わずかに改善 |
+| Memory-Only vs 通常Infini | +1.8 | 通常版が優位 |
+
+#### Position-wise分析
+
+1. **序盤 (0-16)**: Memory-Only が最も良い (-11.3 vs Pythia)
+   - 純粋な圧縮メモリは短距離でも有効
+2. **中盤 (16-96)**: 通常版が優位
+   - Local Attentionの細かい文脈把握が重要
+3. **終盤 (96-256)**: 通常版が優位
+   - 長距離依存性にはLocal+Memoryの組み合わせが最適
+
+#### Reversal Curse分析
+
+- Memory-Only: 584.7 (通常版より+15.1)
+- Local Attentionの存在が逆方向推論に寄与している可能性
+
+### 結論
+
+**Local Attentionは重要な役割を果たしている**
+
+1. **全体性能**: 通常版（103.9）> Memory-Only（105.7）> Pythia（106.0）
+2. **学習済みGate（0.46）の妥当性**: モデルは約54% Local / 46% Memory のバランスを選択
+3. **序盤のみMemory-Only優位**: Position 0-16では純粋メモリが有効
+4. **Reversal Curse**: Local Attentionが逆方向推論に寄与
+
+**示唆**:
+- 圧縮メモリ単体でもPythiaと同等の性能を達成可能
+- 最適なパフォーマンスにはLocal AttentionとMemory Attentionの組み合わせが必要
+- 学習可能なβゲートにより、モデルが適切なバランスを発見できる
+
+### 実行コマンド
+
+```bash
+python3 scripts/experiment_infini.py --memory-only --skip-baseline
+```
+
+---
+
 ## 次のステップ（提案）
 
 1. **より長いシーケンス長での実験**: seq_length=512, 1024
@@ -171,5 +265,9 @@ Infini-Pythiaのメモリ: 133,120 bytes (固定)
 ## 実行コマンド
 
 ```bash
+# 通常実験（両モデル比較）
 python3 scripts/experiment_infini.py --samples 5000 --seq-length 256 --epochs 30
+
+# Memory-Only実験
+python3 scripts/experiment_infini.py --memory-only --skip-baseline
 ```
