@@ -69,14 +69,15 @@ def get_alibi_slopes(num_heads: int) -> torch.Tensor:
 
 class InfiniAttention(nn.Module):
     """
-    Memory-Only Infini-Attention Module
+    Infini-Attention Module with Causal Linear Attention
 
-    圧縮メモリのみを使用するアテンション機構。
+    圧縮メモリ + 現在セグメント内のCausal Linear Attentionを使用。
     Multi-Memory Bank対応（num_memory_banks >= 1）。
 
     特徴:
-    - Local Attentionなし（Memory Attentionのみ）
-    - 複数メモリバンク対応で情報混合を低減
+    - 過去セグメント: 圧縮メモリから取得
+    - 現在セグメント: Causal Linear Attentionで計算
+    - 両者を組み合わせて出力
     - Delta Ruleによる効率的なメモリ更新
     """
 
@@ -112,6 +113,9 @@ class InfiniAttention(nn.Module):
 
         # Output projection
         self.w_o = nn.Linear(hidden_size, hidden_size, bias=False)
+
+        # Learnable gate to combine memory and local attention
+        self.gate = nn.Parameter(torch.zeros(num_heads))
 
         # Bank aggregation weights (learnable, per head per bank)
         if num_memory_banks > 1:
@@ -226,13 +230,54 @@ class InfiniAttention(nn.Module):
                 self.segment_counter = torch.tensor(0, device=k.device)
                 self.current_bank = (self.current_bank + 1) % self.num_memory_banks
 
+    def _causal_linear_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        現在のセグメント内でCausal Linear Attentionを計算
+
+        累積和を使用してO(n)で計算。各位置iは位置0~iのK,Vにのみアテンション可能。
+
+        Args:
+            q: [batch, heads, seq, head_dim]
+            k: [batch, heads, seq, head_dim]
+            v: [batch, heads, seq, head_dim]
+
+        Returns:
+            output: [batch, heads, seq, head_dim]
+        """
+        batch_size, num_heads, seq_len, head_dim = q.shape
+
+        sigma_q = elu_plus_one(q)  # [B, H, S, D]
+        sigma_k = elu_plus_one(k)  # [B, H, S, D]
+
+        # 累積的にK^T @ Vを計算: [B, H, S, D, D]
+        # kv_cumsum[i] = sum_{j=0}^{i} K_j^T @ V_j
+        kv = torch.einsum('bhsd,bhse->bhsde', sigma_k, v)  # [B, H, S, D, D]
+        kv_cumsum = torch.cumsum(kv, dim=2)  # [B, H, S, D, D]
+
+        # 累積的にKを計算（正規化用）: [B, H, S, D]
+        k_cumsum = torch.cumsum(sigma_k, dim=2)  # [B, H, S, D]
+
+        # Q @ (cumsum K^T V) / (Q @ cumsum K)
+        numerator = torch.einsum('bhsd,bhsde->bhse', sigma_q, kv_cumsum)  # [B, H, S, D]
+        denominator = torch.einsum('bhsd,bhsd->bhs', sigma_q, k_cumsum)  # [B, H, S]
+        denominator = denominator.clamp(min=1e-6).unsqueeze(-1)  # [B, H, S, 1]
+
+        output = numerator / denominator  # [B, H, S, D]
+
+        return output
+
     def forward(
         self,
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         update_memory: bool = True,
     ) -> torch.Tensor:
-        """Forward pass (Memory-Only)"""
+        """Forward pass with Memory + Causal Linear Attention"""
         batch_size, seq_len, _ = hidden_states.shape
 
         q = self.w_q(hidden_states)
@@ -243,8 +288,18 @@ class InfiniAttention(nn.Module):
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
-        output = self._retrieve_from_memory(q)
+        # 1. 過去のメモリから取得
+        memory_output = self._retrieve_from_memory(q)
 
+        # 2. 現在のセグメント内でCausal Linear Attention
+        local_output = self._causal_linear_attention(q, k, v)
+
+        # 3. 学習可能なゲートで組み合わせ
+        # gate: [num_heads] -> sigmoid -> [1, num_heads, 1, 1]
+        gate = torch.sigmoid(self.gate).view(1, self.num_heads, 1, 1)
+        output = gate * memory_output + (1 - gate) * local_output
+
+        # 4. メモリ更新
         if update_memory:
             self._update_memory(k, v)
 
@@ -276,11 +331,12 @@ class InfiniAttention(nn.Module):
 
 class InfiniAttentionALiBi(nn.Module):
     """
-    ALiBi付きInfini-Attention Module (Memory-Only)
+    ALiBi付きInfini-Attention Module with Causal Linear Attention
 
     線形化近似でALiBiを組み込む:
     - メモリ更新時にALiBi重み exp(-slope * segment_distance) を適用
     - 遠いセグメントほど重みが小さくなり、位置バイアスが反映される
+    - 現在セグメント内はCausal Linear Attentionで計算
 
     数式:
       M_φ = Σ_i w_i * φ(K_i) * V_i^T   where w_i = exp(-slope * d_i)
@@ -317,6 +373,9 @@ class InfiniAttentionALiBi(nn.Module):
 
         # Output projection
         self.w_o = nn.Linear(hidden_size, hidden_size, bias=False)
+
+        # Learnable gate to combine memory and local attention
+        self.gate = nn.Parameter(torch.zeros(num_heads))
 
         # ALiBi slopes (non-learnable, per head)
         alibi_slopes = get_alibi_slopes(num_heads) * alibi_scale
@@ -420,13 +479,49 @@ class InfiniAttentionALiBi(nn.Module):
         # セグメントカウンタを更新
         self.segment_count = self.segment_count + 1
 
+    def _causal_linear_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        現在のセグメント内でCausal Linear Attentionを計算
+
+        累積和を使用してO(n)で計算。各位置iは位置0~iのK,Vにのみアテンション可能。
+
+        Args:
+            q: [batch, heads, seq, head_dim]
+            k: [batch, heads, seq, head_dim]
+            v: [batch, heads, seq, head_dim]
+
+        Returns:
+            output: [batch, heads, seq, head_dim]
+        """
+        sigma_q = elu_plus_one(q)
+        sigma_k = elu_plus_one(k)
+
+        # 累積的にK^T @ Vを計算
+        kv = torch.einsum('bhsd,bhse->bhsde', sigma_k, v)
+        kv_cumsum = torch.cumsum(kv, dim=2)
+
+        # 累積的にKを計算（正規化用）
+        k_cumsum = torch.cumsum(sigma_k, dim=2)
+
+        # Q @ (cumsum K^T V) / (Q @ cumsum K)
+        numerator = torch.einsum('bhsd,bhsde->bhse', sigma_q, kv_cumsum)
+        denominator = torch.einsum('bhsd,bhsd->bhs', sigma_q, k_cumsum)
+        denominator = denominator.clamp(min=1e-6).unsqueeze(-1)
+
+        return numerator / denominator
+
     def forward(
         self,
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         update_memory: bool = True,
     ) -> torch.Tensor:
-        """Forward pass (Memory-Only with ALiBi)"""
+        """Forward pass with Memory + Causal Linear Attention (ALiBi)"""
         batch_size, seq_len, _ = hidden_states.shape
 
         q = self.w_q(hidden_states)
@@ -437,8 +532,17 @@ class InfiniAttentionALiBi(nn.Module):
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
-        output = self._retrieve_from_memory(q)
+        # 1. 過去のメモリから取得
+        memory_output = self._retrieve_from_memory(q)
 
+        # 2. 現在のセグメント内でCausal Linear Attention
+        local_output = self._causal_linear_attention(q, k, v)
+
+        # 3. 学習可能なゲートで組み合わせ
+        gate = torch.sigmoid(self.gate).view(1, self.num_heads, 1, 1)
+        output = gate * memory_output + (1 - gate) * local_output
+
+        # 4. メモリ更新
         if update_memory:
             self._update_memory(k, v)
 
