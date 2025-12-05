@@ -25,7 +25,7 @@ ALiBi版:
 
 import math
 
-from typing import Optional
+from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -484,6 +484,7 @@ class InfiniAttentionLayer(nn.Module):
         self.input_layernorm = nn.LayerNorm(hidden_size)
         self.use_alibi = use_alibi
 
+        self.attention: Union[InfiniAttention, InfiniAttentionALiBi]
         if use_alibi:
             # ALiBi版（Multi-Memory Bankは非対応）
             self.attention = InfiniAttentionALiBi(
