@@ -476,7 +476,7 @@ class Rotary3DPositionEncoding(PositionEncoding):
     3D Rotary Position Embedding (RoPE3D)
 
     3次元回転を位置エンコーディングに使用。
-    回転軸は (1,1,1)/√3 の斜め方向で、全3次元が均等に更新される。
+    回転軸は (1,2,3)/√14 の非対称な斜め方向で、各次元への影響が異なる。
 
     ロドリゲスの回転公式を使用:
     R(θ) = I + sin(θ) * K + (1 - cos(θ)) * K²
@@ -500,8 +500,9 @@ class Rotary3DPositionEncoding(PositionEncoding):
         self.max_position_embeddings = max_position_embeddings
         self.base = base
 
-        # 回転軸: (1, 1, 1) / √3（正規化）
-        axis = torch.tensor([1.0, 1.0, 1.0])
+        # 回転軸: (1, 2, 3) / √14（正規化）
+        # 非対称な軸で各次元への影響が異なる
+        axis = torch.tensor([1.0, 2.0, 3.0])
         axis = axis / axis.norm()
         self.register_buffer("rotation_axis", axis)
 

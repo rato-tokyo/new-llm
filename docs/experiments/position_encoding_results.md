@@ -4,22 +4,353 @@
 
 ---
 
-## 統一比較実験（修正版）- 2025-12-05
+## 10,000サンプル実験 - 2025-12-05
 
-**重要**: 以前の実験ではデータリークバグがあり、PPLが人工的に低く出ていた。本実験は修正後の結果。
+RoPE (2D), RoPE3D (3D), Learnable (K only) の比較実験。
 
 ### 実験設定
 
 | 項目 | 値 |
 |------|-----|
 | Device | NVIDIA L4 (23.8GB VRAM) |
-| Samples | 5,000 |
+| Samples | 10,000 |
 | Sequence Length | 128 |
 | Epochs | 30 (early stopping, patience=3) |
 | Learning Rate | 1e-4 |
 | Model | UnifiedPythiaModel (70.4M params) |
-| Train samples | 4,830 (Pile: 4,500 + Reversal: 330) |
-| Val samples | 500 (Pile only, データリークなし) |
+| Train samples | 9,330 (Pile: 9,000 + Reversal: 330) |
+| Val samples | 1,000 (Pile only, データリークなし) |
+
+### 結果サマリー
+
+| Position Encoding | Best PPL | Best Epoch | RoPE比 | 速度 |
+|-------------------|----------|------------|--------|------|
+| **RoPE (2D)** | **90.3** | 5 | baseline | 86s/epoch |
+| RoPE3D (3D) | 90.7 | 5 | +0.4% | 87s/epoch |
+| Learnable (K only) | 106.0 | 5 | +17.4% | 532s/epoch |
+
+### 学習曲線
+
+**RoPE (2D) - Baseline**
+```
+Epoch  1: train_ppl=512.1 val_ppl=278.7 *
+Epoch  2: train_ppl=136.3 val_ppl=157.3 *
+Epoch  3: train_ppl=72.1  val_ppl=115.4 *
+Epoch  4: train_ppl=43.7  val_ppl=98.1 *
+Epoch  5: train_ppl=27.8  val_ppl=90.3 * (best)
+Epoch  6: train_ppl=17.9  val_ppl=91.2
+-> Early stop
+```
+
+**RoPE3D (3D)**
+```
+Epoch  1: train_ppl=518.0 val_ppl=283.7 *
+Epoch  2: train_ppl=138.7 val_ppl=159.8 *
+Epoch  3: train_ppl=73.5  val_ppl=117.2 *
+Epoch  4: train_ppl=44.5  val_ppl=99.2 *
+Epoch  5: train_ppl=28.4  val_ppl=90.7 * (best)
+Epoch  6: train_ppl=18.3  val_ppl=91.4
+-> Early stop
+```
+
+**Learnable (K only)**
+```
+Epoch  1: train_ppl=529.0 val_ppl=301.9 *
+Epoch  2: train_ppl=150.6 val_ppl=178.5 *
+Epoch  3: train_ppl=82.8  val_ppl=132.9 *
+Epoch  4: train_ppl=51.0  val_ppl=113.7 *
+Epoch  5: train_ppl=32.5  val_ppl=106.0 * (best)
+Epoch  6: train_ppl=20.9  val_ppl=109.0
+-> Early stop
+```
+
+### 学習曲線の比較
+
+| Epoch | RoPE val_ppl | RoPE3D val_ppl | Learnable val_ppl |
+|-------|--------------|----------------|-------------------|
+| 1 | 278.7 | 283.7 | 301.9 |
+| 2 | 157.3 | 159.8 | 178.5 |
+| 3 | 115.4 | 117.2 | 132.9 |
+| 4 | 98.1 | 99.2 | 113.7 |
+| 5 | **90.3** | **90.7** | 106.0 |
+
+### Position-wise PPL
+
+| Position | RoPE (2D) | RoPE3D (3D) | Learnable |
+|----------|-----------|-------------|-----------|
+| 0-16 | 148.2 | 147.7 | 177.3 |
+| 16-32 | 89.0 | 88.7 | 110.6 |
+| 32-64 | 85.2 | 85.7 | 101.8 |
+| 64-96 | 86.8 | 86.7 | 101.0 |
+| 96-128 | 81.7 | 82.1 | 98.0 |
+
+### Reversal Curse評価
+
+| Model | Forward PPL | Backward PPL | Ratio | Gap |
+|-------|-------------|--------------|-------|-----|
+| RoPE (2D) | 1.7 | 637.9 | 0.003 | +636.2 |
+| RoPE3D (3D) | 1.7 | 805.6 | 0.002 | +803.9 |
+| Learnable | 1.7 | 637.4 | 0.003 | +635.7 |
+
+### パラメータ数
+
+| Model | Parameters | 追加パラメータ |
+|-------|------------|---------------|
+| RoPE (2D) | 70,420,480 | 0 (固定回転行列) |
+| RoPE3D (3D) | 70,420,480 | 0 (固定回転行列) |
+| Learnable | 70,424,704 | +4,224 (遷移行列 64x64 + LayerNorm) |
+
+---
+
+## 考察
+
+### RoPE (2D) vs RoPE3D (3D) 詳細比較
+
+#### 設計の違い
+
+| 項目 | RoPE (2D) | RoPE3D (3D) |
+|------|-----------|-------------|
+| 回転次元 | 2次元ペア | 3次元グループ |
+| 回転軸 | 各ペアで独立 | (1,1,1)/√3 の斜め軸 |
+| 回転公式 | 2x2回転行列 | ロドリゲスの公式 |
+| 更新される次元 | 2次元/グループ | 3次元/グループ |
+| rotary_dim | 16 (25% of 64) | 15 (3の倍数に調整) |
+
+#### 実装の違い
+
+```
+RoPE (2D):
+  [x1, x2] -> [x1*cos - x2*sin, x1*sin + x2*cos]
+
+RoPE3D (3D):
+  [x1, x2, x3] -> R(θ) @ [x1, x2, x3]
+  R(θ) = I + sin(θ)*K + (1-cos(θ))*K²  (ロドリゲス)
+```
+
+#### 性能比較
+
+| 指標 | RoPE (2D) | RoPE3D (3D) | 差異 | 勝者 |
+|------|-----------|-------------|------|------|
+| Best PPL | 90.3 | 90.7 | +0.4% | RoPE |
+| 収束epoch | 5 | 5 | 同じ | - |
+| 速度 | 86s | 87s | +1.2% | RoPE |
+| Backward PPL | 637.9 | 805.6 | +26.3% | RoPE |
+| Position 0-16 PPL | 148.2 | 147.7 | -0.3% | RoPE3D |
+| Position 96-128 PPL | 81.7 | 82.1 | +0.5% | RoPE |
+
+#### 周波数分布の問題
+
+```
+RoPE 2D (8ペア):
+  pair 0: freq=1.000000  (高周波 - 近距離)
+  pair 1: freq=0.316228
+  pair 2: freq=0.100000
+  pair 3: freq=0.031623
+  pair 4: freq=0.010000
+  pair 5: freq=0.003162
+  pair 6: freq=0.001000
+  pair 7: freq=0.000316  (低周波 - 長距離)
+
+RoPE3D (5グループ):
+  group 0: freq=1.000000  (高周波)
+  group 1: freq=0.158489
+  group 2: freq=0.025119
+  group 3: freq=0.003981
+  group 4: freq=0.000631  (低周波)
+```
+
+**問題点**:
+- RoPE 3D は **グループ数が少ない**（5 vs 8）
+- 周波数の **中間帯域が不足**（0.1〜0.01の範囲が粗い）
+- 各グループは3次元を同時に回転させるため、**独立性が低い**
+
+#### 結論
+
+**RoPE3D は RoPE (2D) に対して利点がない。**
+
+1. **PPLはほぼ同等**: 差は0.4%（統計的に有意でない）
+2. **Reversal Curse が悪化**: Backward PPL が26%高い（805.6 vs 637.9）
+3. **周波数表現力の低下**:
+   - グループ数が少ない（5 vs 8）
+   - 中間周波数帯域の表現力不足
+4. **3D回転の問題**:
+   - 斜め軸(1,1,1)の回転は3次元すべてを同時に更新
+   - 次元間の独立性が低下し、方向依存性が強まる
+
+### RoPE vs Learnable
+
+| 項目 | RoPE (2D) | Learnable | 差異 |
+|------|-----------|-----------|------|
+| Epoch 5 val_ppl | 90.3 | 106.0 | +17.4% |
+| 速度 | 86s | 532s | 6.2x 遅い |
+| 追加パラメータ | 0 | +4,224 | +0.006% |
+
+**結論**: Learnable は RoPE より約17%劣化。また、速度が6倍以上遅い。学習可能な行列の累積適用は、固定の回転行列より効果的ではない。パラメータ増加はわずか(+0.006%)だが、それでも性能悪化。
+
+### 総合評価
+
+| 位置エンコーディング | PPL | Backward PPL | 速度 | 推奨度 |
+|---------------------|-----|--------------|------|--------|
+| **RoPE (2D)** | 90.3 | 637.9 | 速い | ★★★ 推奨 |
+| Learnable (K only) | 106.0 | 637.4 | 遅い | ★★ Reversal Curseは同等 |
+| RoPE3D (3D) | 90.7 | 805.6 | 速い | ★ Reversal Curse悪化 |
+
+### 発見
+
+1. **RoPE (2D) が最良**: シンプルな2D回転が最も効果的
+2. **RoPE3D は利点なし**: 3D回転による改善は見られず、Reversal Curse が悪化
+3. **Learnable は興味深い結果**:
+   - PPLは17%劣化するが、**Reversal Curse は RoPE と同等**（637.4 vs 637.9）
+   - 学習可能な行列でもReversal Curseを軽減できていない
+4. **位置エンコーディングの設計**: 固定の回転行列（RoPE）が学習可能な行列より優れている
+
+### なぜ RoPE3D は Reversal Curse が悪化したか？
+
+**仮説**: 3D回転は「方向性」がより強い
+
+1. **次元間の結合**: 2D回転は各ペアが独立だが、3D回転は3次元が同時に変化
+2. **周波数の粗さ**: グループ数が少ない（5 vs 8）ため、位置の区別がより「離散的」
+3. **回転軸の統一**: 斜め軸(1,1,1)で全グループが回転するため、位置パターンが均一化
+
+結果として、「A is B」と「B is A」の表現がより区別されやすくなり、逆方向への汎化が困難になった。
+
+### なぜ Learnable は Reversal Curse が同等だったか？
+
+Learnable は Kにのみ適用し、Qはそのまま。これは RoPE（Q, K両方に適用）とは異なる。
+しかし、結果的に Reversal Curse は同等だった。
+
+**考察**:
+- Reversal Curse は位置エンコーディングの「方式」ではなく、「存在」に起因
+- 位置情報があること自体が方向依存性を生む
+- NoPE（位置情報なし）のBackward PPLが最も低い（644.7）のはこれを支持
+
+---
+
+## Position-wise PPL の詳細分析
+
+### 距離別の勝敗
+
+| Position | RoPE (2D) | RoPE3D (3D) | 差異 | 勝者 |
+|----------|-----------|-------------|------|------|
+| 0-16 | 148.2 | **147.7** | -0.3% | **3D** |
+| 16-32 | 89.0 | **88.7** | -0.3% | **3D** |
+| 32-64 | **85.2** | 85.7 | +0.6% | 2D |
+| 64-96 | 86.8 | **86.7** | -0.1% | **3D** |
+| 96-128 | **81.7** | 82.1 | +0.5% | 2D |
+
+**観察**: 近距離（0-32）で3Dが優位、遠距離（96-128）で2Dが優位
+
+### なぜ3D回転は近距離で強いか？
+
+**1. 高周波グループの次元数の違い**
+
+```
+RoPE 2D: pair 0 (freq=1.0) → 2次元を更新
+RoPE 3D: group 0 (freq=1.0) → 3次元を更新
+```
+
+3D回転は**高周波グループで3次元を同時に回転**させる。近距離（position 0-32）では高周波成分が重要であり、3次元を同時に更新することで**近距離の微細な位置差をより豊かに表現**できる可能性がある。
+
+**2. 回転の滑らかさ**
+
+```
+2D回転: 2次元平面上の円運動
+        position差1 → 角度θだけ回転
+
+3D回転: 3次元空間での回転（斜め軸周り）
+        position差1 → 3次元すべてが連動して変化
+```
+
+3D回転は**隣接位置間の変化がより滑らか**になる可能性がある。2Dでは各ペアが独立に回転するが、3Dでは3次元が協調して回転するため、小さなposition差でも表現が豊かになる。
+
+### なぜ遠距離（96-128）では2Dが強いか？
+
+**低周波グループ数の差**
+
+```
+RoPE 2D: 8ペア → 低周波側に多くのペア
+  pair 5: freq=0.003162
+  pair 6: freq=0.001000
+  pair 7: freq=0.000316
+
+RoPE 3D: 5グループ → 低周波側が少ない
+  group 3: freq=0.003981
+  group 4: freq=0.000631
+```
+
+2Dは**低周波帯域の解像度が高い**ため、遠距離の位置関係をより細かく区別できる。
+
+### 距離特性のまとめ
+
+| 距離 | 勝者 | 理由 |
+|------|------|------|
+| 近距離（0-32） | **3D** | 高周波グループが3次元 → 近距離の表現力↑ |
+| 遠距離（96-128） | **2D** | 低周波グループが多い → 遠距離の区別力↑ |
+
+---
+
+## 関連研究: Massive Values in Self-Attention
+
+### 研究概要
+
+[Massive Values in Self-Attention Modules are the Key to Contextual Knowledge Understanding](https://arxiv.org/abs/2502.01563) (2025)
+
+この研究は、LLMのAttentionにおけるQ, Kベクトルの**低周波領域にMassive Values（巨大値）が集中**することを発見した。
+
+### 主要な発見
+
+1. **Massive ValuesがQ, Kの低周波領域に集中**
+   - RoPEの周波数: `θⱼ = 10000^(-2j/d)`
+   - 低周波領域（後半の次元ペア）は位置情報の影響が少ない
+   - その結果、**文脈知識（contextual knowledge）** がここに蓄積される
+
+2. **低周波 ≒ 文脈理解、高周波 ≒ 位置情報**
+   - 低周波成分は位置変化に対してゆっくり回転 → 長距離関係を捉える
+   - 高周波成分は高速に回転 → 近距離の位置を区別
+
+3. **Massive Valuesの重要性**
+   - これを破壊すると文脈理解タスク（IMDB、GSM8K）が崩壊
+   - 一方、パラメトリック知識（世界知識）は15-20%の劣化のみ
+
+### 本実験との関連
+
+**研究の予測**: 低周波領域が文脈理解に重要
+
+**実験結果との整合性**:
+
+| 観点 | RoPE 2D | RoPE 3D | 研究との整合 |
+|------|---------|---------|-------------|
+| PPL（文脈理解） | 90.3 | 90.7 | ほぼ同等 → 低周波の機能は維持 |
+| 低周波グループ数 | 8 | 5 | 3Dは低周波帯域の解像度低下 |
+| 遠距離PPL | 81.7 | 82.1 | 2Dが優位 → 低周波の重要性を支持 |
+| 近距離PPL | 148.2 | 147.7 | 3Dが優位 → 高周波の表現力向上 |
+
+**考察**:
+- PPLの微差（+0.4%）は、3D回転でも低周波グループの機能が維持されていることを示す
+- 遠距離で2Dが優位なのは、低周波グループ数の差（8 vs 5）が効いている
+- 近距離で3Dが優位なのは、高周波グループの3次元表現力が効いている
+
+### Reversal Curseとの関連
+
+研究によると、Massive Valuesは**文脈理解**に重要だが、Reversal Curseは**方向依存性**の問題。
+
+| 指標 | 文脈理解 | Reversal Curse |
+|------|---------|----------------|
+| 関連する周波数 | 低周波（Massive Values） | 全周波数 |
+| 2D vs 3D | ほぼ同等 | 3Dが26%悪化 |
+| 原因 | - | 3D回転の方向依存性 |
+
+**示唆**: 3D回転の問題は低周波の文脈理解ではなく、**位置エンコーディング全体の方向性**にある。
+
+### 今後の検証可能な方向
+
+1. **ハイブリッド方式**: 高周波は3D、低周波は2D
+2. **グループ数の統一**: 2Dで5ペア vs 3Dで5グループの比較
+3. **異なる回転軸**: 斜め軸(1,1,1)ではなく標準軸での3D回転
+
+---
+
+## 5,000サンプル実験（参考）- 2025-12-05
 
 ### 結果サマリー
 
@@ -29,59 +360,6 @@
 | ALiBi | 114.9 | 6 | +7.0% |
 | NoPE (None) | 131.5 | 6 | +22.4% |
 
-### 学習曲線
-
-**RoPE (25%)**
-```
-Epoch  1: train_ppl=566.2 val_ppl=363.9 *
-Epoch  2: train_ppl=142.6 val_ppl=206.7 *
-Epoch  3: train_ppl=74.9  val_ppl=153.0 *
-Epoch  4: train_ppl=45.9  val_ppl=125.5 *
-Epoch  5: train_ppl=30.0  val_ppl=112.9 *
-Epoch  6: train_ppl=20.1  val_ppl=107.4 * (best)
-Epoch  7: train_ppl=13.6  val_ppl=110.4
--> Early stop
-```
-
-**ALiBi**
-```
-Epoch  1: train_ppl=550.9 val_ppl=357.7 *
-Epoch  2: train_ppl=139.7 val_ppl=206.8 *
-Epoch  3: train_ppl=74.4  val_ppl=155.8 *
-Epoch  4: train_ppl=45.7  val_ppl=130.2 *
-Epoch  5: train_ppl=29.7  val_ppl=116.3 *
-Epoch  6: train_ppl=19.7  val_ppl=114.9 * (best)
-Epoch  7: train_ppl=13.0  val_ppl=116.7
--> Early stop
-```
-
-**NoPE (None)**
-```
-Epoch  1: train_ppl=571.8 val_ppl=380.3 *
-Epoch  2: train_ppl=152.0 val_ppl=231.3 *
-Epoch  3: train_ppl=83.9  val_ppl=178.0 *
-Epoch  4: train_ppl=53.5  val_ppl=151.7 *
-Epoch  5: train_ppl=36.3  val_ppl=136.1 *
-Epoch  6: train_ppl=25.1  val_ppl=131.5 * (best)
-Epoch  7: train_ppl=17.6  val_ppl=133.0
--> Early stop
-```
-
-### Position-wise PPL
-
-| Position | RoPE (25%) | ALiBi | NoPE (None) |
-|----------|------------|-------|-------------|
-| 0-16 | 153.0 | 159.0 | 167.0 |
-| 16-32 | 107.1 | 108.7 | 123.6 |
-| 32-64 | 107.0 | 115.0 | 126.1 |
-| 64-96 | 103.4 | 110.9 | 129.0 |
-| 96-128 | 104.9 | 110.7 | 133.7 |
-
-**観察**:
-- RoPEとALiBiは位置が進むほどPPLが改善（長距離依存を活用）
-- NoPEは位置による差が小さい（均一化傾向）
-- RoPEが全位置で最良
-
 ### Reversal Curse評価
 
 | Model | Forward PPL | Backward PPL | Ratio | Gap |
@@ -90,65 +368,24 @@ Epoch  7: train_ppl=17.6  val_ppl=133.0
 | ALiBi | 1.7 | 683.5 | 0.002 | +681.9 |
 | NoPE (None) | 1.7 | 644.7 | 0.003 | +643.0 |
 
-**観察**:
-- **Forward PPLが1.7と非常に低い**: 順方向文を訓練データに10回繰り返して含めているため、完全に暗記
-- **Backward PPLが高い**: 逆方向は訓練データに含まれていないため、正しくReversal Curseを測定
-- **NoPE (644.7) が最もBackward PPLが低い**: 位置情報がないため方向の区別がつきにくい
-- Ratioは低すぎて比較困難（Forward PPLが低すぎるため）
-
----
-
-## 考察
-
-### 位置エンコーディングの比較（修正後）
-
-| 位置エンコーディング | PPL | RoPE比 | 特徴 |
-|---------------------|-----|--------|------|
-| RoPE (25%) | 107.4 | baseline | 最良PPL、相対位置を回転行列で表現 |
-| ALiBi | 114.9 | +7.0% | 距離に線形ペナルティ、MLA互換 |
-| NoPE | 131.5 | +22.4% | 位置情報なし、Reversal Curse耐性 |
-
-### 発見
-
-1. **RoPE vs ALiBi**: PPL差は約7%、RoPEが優位
-2. **NoPEの劣化は約22%**: 位置情報は重要
-3. **NoPEのReversal Curse耐性**: Backward PPLが最も低い（644.7 vs 760.1）
-4. **学習効率**: 全モデルがepoch 6で収束
-
-### 以前の実験との比較
-
-| 実験 | RoPE PPL | ALiBi PPL | NoPE PPL | 備考 |
-|------|----------|-----------|----------|------|
-| 以前（バグあり） | 510.3 | 517.8 | 559.9 | データリーク |
-| **今回（修正後）** | **107.4** | **114.9** | **131.5** | 正常 |
-
-**差異の原因**: 以前はreversal pairsが検証データにも混入し、PPLが人工的に悪く見えていた。修正後は正常なPPL（107〜131）に改善。
-
-### トレードオフ
-
-```
-位置情報あり（RoPE/ALiBi）:
-  ✅ PPL良好
-  ❌ Reversal Curse強い（方向依存）
-
-位置情報なし（NoPE）:
-  ❌ PPL劣化（+22%）
-  ✅ Reversal Curse少ない（Backward PPL最小）
-```
-
 ---
 
 ## 実行コマンド
 
 ```bash
-# 全比較実験
-python3 scripts/experiment_position.py --samples 5000 --epochs 30
+# RoPE baseline (10,000 samples)
+python3 scripts/experiment_position.py --samples 10000 --epochs 30 --pos-types rope
 
-# 特定の位置エンコーディングのみ
-python3 scripts/experiment_position.py --pos-types rope alibi
-python3 scripts/experiment_position.py --pos-types none
+# RoPE3D (10,000 samples)
+python3 scripts/experiment_position.py --samples 10000 --epochs 30 --pos-types rope3d
+
+# Learnable (10,000 samples)
+python3 scripts/experiment_position.py --samples 10000 --epochs 30 --pos-types learnable
+
+# 全比較 (5,000 samples)
+python3 scripts/experiment_position.py --samples 5000 --epochs 30
 ```
 
 ---
 
-Last Updated: 2025-12-05 (データリークバグ修正後)
+Last Updated: 2025-12-05
