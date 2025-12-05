@@ -2,92 +2,58 @@
 
 ---
 
-## 🎯 MLA-Pythia Architecture (2025-12-05)
+## 🎯 Infini-Pythia Architecture (2025-12-05)
 
-**Pythia-70MをベースにMLA（Multi-head Latent Attention）でKVキャッシュを大幅削減。**
-**位置エンコーディングはALiBi（統一スロープ）を採用。**
+**Pythia-70Mベースに1層目Infini-Attention（圧縮メモリ）を導入。**
 
 ### アーキテクチャ
 
 ```
-MLA-Pythia (ALiBi):
+Infini-Pythia:
 Token Embedding (512-dim)
        ↓
-MLALayer × 6
-  ├─ MLA Attention (ALiBi)
-  │    c_kv: 128-dim (KV共通圧縮)
-  │    吸収モード
+Layer 0: InfiniAttentionLayer (NoPE, 圧縮メモリ)
+  ├─ Local Attention (dot-product)
+  ├─ Memory Attention (linear attention)
+  └─ Beta Gate (learned)
+       ↓
+Layer 1-5: PythiaLayer (RoPE)
+  ├─ Multi-Head Attention
   └─ MLP
        ↓
 Output Head (512 → vocab)
-
-KV Cache: c_kv(128) = 128
-削減率: 87.5%
 ```
 
-### 設定値
+### Infini-Attention
 
-| 項目 | MLA-Pythia |
-|------|------------|
-| hidden_size | 512 |
-| kv_dim | 128 |
-| Layers | 6 |
-| Attention Heads | 8 |
-| intermediate_size | 2048 |
-| Position Encoding | ALiBi (統一スロープ) |
-| KV Cache削減 | 87.5% |
+```
+メモリ更新 (Delta Rule):
+  M_s = M_{s-1} + σ(K)^T @ (V - retrieved_V)
+
+メモリ取得:
+  A_mem = σ(Q) @ M / (σ(Q) @ z)
+
+結合:
+  A = sigmoid(β) * A_mem + (1 - sigmoid(β)) * A_local
+
+σ(x) = ELU(x) + 1
+```
 
 ### 実験の実行
 
 ```bash
-# MLA実験
-python3 scripts/experiment_mla.py --samples 10000 --epochs 30
+# Infini実験（両モデル比較）
+python3 scripts/experiment_infini.py --samples 5000 --epochs 30
 
-# kv_dim変更
-python3 scripts/experiment_mla.py --kv-dim 256  # 75%削減
-python3 scripts/experiment_mla.py --kv-dim 64   # 93.75%削減
+# Infiniのみ
+python3 scripts/experiment_infini.py --skip-baseline
+
+# Baselineのみ
+python3 scripts/experiment_infini.py --skip-infini
+
+# 長いシーケンス（Infiniの強み）
+python3 scripts/experiment_infini.py --seq-length 512
 ```
-
----
-
-## 🎯 ALiBi (Attention with Linear Biases)
-
-### 仕様
-
-```
-score = Q @ K^T - m * distance_matrix
-
-distance_matrix[i][j] = |i - j|  # 位置間の距離
-m = slope (全ヘッド統一、デフォルト: 0.0625)
-```
-
-### 使用方法
-
-```python
-from src.models import ALiBiPositionEncoding
-
-pos_enc = ALiBiPositionEncoding(slope=0.0625)
-attn_scores = pos_enc.apply_to_scores(attn_scores, seq_len)
-```
-
----
-
-## 📚 DeepSeek MLA (Multi-head Latent Attention)
-
-### 吸収モード（Absorbed Projection）
-
-```
-MLA（吸収モード - 復元不要）:
-  c_kv = X @ W_DKV     # KV共通圧縮: (seq, 512) → (seq, 128)
-  scores = Q @ W_UK^T @ c_kv^T
-
-  # KVキャッシュは c_kv のみ保存（87.5%削減）
-```
-
-### 参考リンク
-
-- [DeepSeek-V2 Paper](https://arxiv.org/abs/2405.04434)
-- [MLA Explanation (HuggingFace)](https://huggingface.co/blog/NormalUhr/mla-explanation)
 
 ---
 
@@ -142,14 +108,14 @@ reversal_result = evaluate_reversal_curse(model, tokenizer, reversal_pairs, devi
 
 ## ⚠️ 過去のバグと教訓
 
-### 1. ALiBi因果マスクの行列方向バグ
+### 1. Infini-Attention メモリ勾配バグ
 
 ```python
-# ❌ バグ: relative_pos[i][j] = j - i （未来が見えていた）
-relative_pos = positions.unsqueeze(0) - positions.unsqueeze(1)
+# ❌ バグ: メモリ更新でグラフが残り、二重backwardエラー
+self.memory = self.memory + memory_update
 
-# ✅ 修正: relative_pos[i][j] = i - j （正しい因果マスク）
-relative_pos = positions.unsqueeze(1) - positions.unsqueeze(0)
+# ✅ 修正: detach()でグラフを切断
+self.memory = (self.memory + memory_update).detach()
 ```
 
 ### 2. PPL異常値の診断基準
@@ -171,15 +137,14 @@ new-llm/
 ├── config/
 │   └── pythia.py                   # PythiaConfig
 ├── scripts/
-│   └── experiment_mla.py           # MLA実験
+│   └── experiment_infini.py        # Infini-Attention実験
 ├── src/
 │   ├── data/
 │   │   └── reversal_pairs.py       # Reversal Curse評価データ
 │   ├── models/
-│   │   ├── mla_pythia.py           # MLAPythiaModel (ALiBi)
-│   │   ├── mla.py                  # MLAAttention, MLALayer
-│   │   ├── alibi.py                # ALiBi実装
-│   │   └── position_encoding.py    # ALiBiPositionEncoding
+│   │   ├── pythia.py               # PythiaModel (RoPE)
+│   │   ├── infini_attention.py     # InfiniAttention, InfiniAttentionLayer
+│   │   └── infini_pythia.py        # InfiniPythiaModel
 │   └── utils/
 │       ├── training.py             # 共通学習ユーティリティ
 │       ├── evaluation.py           # 評価関数
@@ -197,9 +162,8 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
-| 2025-12-05 | **RoPE関連コード削除**: ALiBi一本化、シンプル化 |
-| 2025-12-05 | **MLA-Pythia実装**: KVキャッシュ87.5%削減 |
-| 2025-12-05 | **ALiBi採用**: 統一スロープ方式 |
+| 2025-12-05 | **MLA関連コード削除**: Infini-Attentionに集中 |
+| 2025-12-05 | **Infini-Pythia実装**: 1層目Infini + RoPE |
 | 2025-12-05 | **Reversal Curse評価追加**: 順方向/逆方向PPL比較 |
 
 ---

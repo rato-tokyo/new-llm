@@ -1,11 +1,10 @@
 """
-New-LLM: MLA-Pythia for KV Cache Compression
+New-LLM: Experimental LLM Architectures
 
-Pythia-70MベースのMLA (Multi-head Latent Attention) 実装。
-KVキャッシュを87.5%削減。
+Pythia-70Mベースの実験的アーキテクチャ実装。
 
 主要コンポーネント:
-- UnifiedPythiaModel: 位置エンコーディング切替可能な統一モデル (RoPE/ALiBi/NoPE)
-- MLAPythiaModel: KVキャッシュ圧縮モデル (ALiBi)
 - PythiaModel: ベースラインモデル (RoPE)
+- InfiniPythiaModel: 1層目Infini-Attention + RoPE
+- MLAPythiaModel: KVキャッシュ圧縮モデル (ALiBi)
 """
