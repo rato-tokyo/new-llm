@@ -402,6 +402,138 @@ python3 scripts/experiment_infini.py \
 
 ---
 
+## Multi-Memory Bank 実験
+
+**追加実験日時**: 2025-12-05
+
+**注意**: この実験はリファクタリング前のコード（Local Attention有効版）で実行されました。Gate値はLocal/Memory比率を示しています。リファクタリング後はMemory-Onlyモードのみとなります。
+
+### 目的
+
+複数のメモリバンクを使用することで、圧縮メモリ内の情報混合を低減し、より正確な検索を実現できるか検証。
+
+### 設定
+
+| パラメータ | 値 |
+|-----------|-----|
+| サンプル数 | 5,000 |
+| シーケンス長 | 256 |
+| メモリバンク数 | 2 |
+| バンクあたりセグメント数 | 4 |
+| Delta Rule | 有効 |
+| Baseline | スキップ |
+
+### アーキテクチャ
+
+```
+Multi-Memory Infini-Pythia:
+  Layer 0: Multi-Memory Infini-Attention
+    ├─ Memory Bank 0 (セグメント0-3を蓄積)
+    ├─ Memory Bank 1 (セグメント4-7を蓄積)
+    └─ Bank Weights (学習可能、softmaxで統合)
+  Layer 1-5: Standard Pythia (RoPE)
+```
+
+- **メモリサイズ**: 266,240 bytes (133,120 × 2 banks)
+- **バンク切り替え**: 4セグメントごとに次のバンクへ
+- **検索時**: 全バンクから取得し、学習可能な重みで統合
+
+### 結果
+
+| モデル | Val PPL | Best Epoch |
+|--------|---------|------------|
+| Pythia (baseline, 前回) | 106.0 | 7 |
+| Infini (通常, 前回) | 103.9 | 7 |
+| **Multi-Memory (2 banks)** | **105.5** | 7 |
+
+### 学習曲線
+
+| Epoch | Train PPL | Val PPL | Gate | 備考 |
+|-------|-----------|---------|------|------|
+| 1 | 659.8 | 433.9 | 0.498 | * |
+| 2 | 172.5 | 239.3 | 0.495 | * |
+| 3 | 94.9 | 171.2 | 0.490 | * |
+| 4 | 60.9 | 137.4 | 0.486 | * |
+| 5 | 41.8 | 118.3 | 0.480 | * |
+| 6 | 29.7 | 108.5 | 0.474 | * |
+| 7 | 21.4 | **105.5** | 0.467 | * Best |
+| 8 | 15.5 | 109.4 | 0.460 | Early stop |
+
+### Gate値の分析
+
+| Head | Gate値 | 解釈 |
+|------|--------|------|
+| 0 | 0.456 | Memory 45.6%, Local 54.4% |
+| 1 | 0.465 | Memory 46.5%, Local 53.5% |
+| 2 | 0.461 | Memory 46.1%, Local 53.9% |
+| 3 | 0.453 | Memory 45.3%, Local 54.7% |
+| 4 | 0.466 | Memory 46.6%, Local 53.4% |
+| 5 | 0.462 | Memory 46.2%, Local 53.8% |
+| 6 | 0.464 | Memory 46.4%, Local 53.6% |
+| 7 | 0.456 | Memory 45.6%, Local 54.4% |
+
+**平均**: 0.460 (通常Infiniと同じ)
+
+### Position-wise PPL
+
+| Position | Pythia (前回) | Infini (前回) | Multi-Memory |
+|----------|---------------|---------------|--------------|
+| 0-16 | 165.9 | 163.2 | 161.7 |
+| 16-32 | 110.3 | 111.0 | 114.5 |
+| 32-64 | 102.1 | 102.0 | 104.3 |
+| 64-96 | 99.2 | 99.2 | 101.2 |
+| 96-256 | 104.8 | 104.1 | 107.3 |
+
+### Reversal Curse
+
+| モデル | Forward PPL | Backward PPL | Ratio | Gap |
+|--------|-------------|--------------|-------|-----|
+| Pythia (前回) | 1.7 | 684.4 | 0.002 | +682.8 |
+| Infini (前回) | 1.7 | 569.6 | 0.003 | +567.9 |
+| **Multi-Memory** | 1.7 | **600.8** | 0.003 | +599.1 |
+
+### 分析
+
+#### PPL比較
+
+| 比較 | 差分 | 解釈 |
+|------|------|------|
+| Multi-Memory vs Pythia | -0.5 | わずかに改善 |
+| Multi-Memory vs 通常Infini | +1.6 | 通常版が優位 |
+
+#### 観察
+
+1. **全体PPL**: Multi-Memory (105.5) は Pythia (106.0) より改善するが、通常Infini (103.9) より劣る
+2. **Position 0-16**: Multi-Memoryが最も良い (161.7) - 序盤での圧縮メモリ効果
+3. **Position 16-256**: 通常Infiniが優位 - バンク分割によるオーバーヘッド？
+4. **Reversal Curse**: Multi-Memory (600.8) は通常Infini (569.6) より劣る
+
+#### 考察
+
+**Multi-Memory Bankが期待通りに機能しなかった理由**:
+
+1. **バンク数の問題**: 2バンクでは情報混合の低減効果が限定的
+2. **セグメント長との不整合**: 256トークンのセグメントで4セグメント（1024トークン）ごとにバンク切り替えは、短いコンテキストでは効果が見えにくい
+3. **学習データ規模**: 5,000サンプルでは複数バンクの効果を発揮しにくい
+4. **Bank Weights**: 初期値0（uniform 0.5, 0.5）から学習するが、短い訓練では最適化が不十分
+
+**改善案**:
+
+1. **Long Context訓練で評価**: より長いドキュメントでバンク切り替え効果を検証
+2. **バンク数増加**: 4, 8バンクでの実験
+3. **セグメント数調整**: segments_per_bank を小さく（1, 2）
+
+### 実行コマンド
+
+```bash
+python3 scripts/experiment_infini.py \
+    --num-memory-banks 2 \
+    --segments-per-bank 4 \
+    --skip-baseline
+```
+
+---
+
 ## 次のステップ（提案）
 
 1. **より長いシーケンス長での実験**: seq_length=512, 1024
@@ -409,6 +541,7 @@ python3 scripts/experiment_infini.py \
 3. **より大規模データでの検証**: samples=10,000以上
 4. **Delta Rule無効時との比較**: `--no-delta-rule`オプション
 5. **Long Context訓練の問題調査**: データ分割とメモリ更新ロジックの検証
+6. **Multi-Memory Bank改良**: Long Contextでの評価、バンク数増加
 
 ---
 
@@ -418,8 +551,8 @@ python3 scripts/experiment_infini.py \
 # 通常実験（両モデル比較）
 python3 scripts/experiment_infini.py --samples 5000 --seq-length 256 --epochs 30
 
-# Memory-Only実験
-python3 scripts/experiment_infini.py --memory-only --skip-baseline
+# Multi-Memory Bank実験
+python3 scripts/experiment_infini.py --num-memory-banks 2 --segments-per-bank 4 --skip-baseline
 
 # Long Context訓練・評価
 python3 scripts/experiment_infini.py --long-context-train --long-context --num-long-docs 50 --tokens-per-doc 4096
