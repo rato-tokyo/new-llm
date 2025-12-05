@@ -500,6 +500,29 @@ def main():
                 k_ratio = dim['k_low_freq_max'] / dim['k_high_freq_max']
                 print_flush(f"    K low/high ratio: {k_ratio:.2f}x")
 
+            # 次元ペアごとの詳細分析
+            print_flush(f"\n  Dimension pair analysis (theta = 1 / base^(2i/rotary_dim), base={rope_theta}):")
+            print_flush("  | dims | theta | Q max | K max | Region |")
+            print_flush("  |------|-------|-------|-------|--------|")
+
+            q_dim_max = dim.get('q_dim_max', [])
+            k_dim_max = dim.get('k_dim_max', [])
+
+            for dim_pair in range(0, head_dim, 2):
+                q_val = max(q_dim_max[dim_pair], q_dim_max[dim_pair + 1]) if dim_pair + 1 < len(q_dim_max) else q_dim_max[dim_pair]
+                k_val = max(k_dim_max[dim_pair], k_dim_max[dim_pair + 1]) if dim_pair + 1 < len(k_dim_max) else k_dim_max[dim_pair]
+
+                if dim_pair < rotary_dim:
+                    # RoPE適用領域: theta = base^(-2i/rotary_dim) = 1/base^(2i/rotary_dim)
+                    # ペアインデックス i = dim_pair // 2
+                    pair_idx = dim_pair // 2
+                    theta = rope_theta ** (-2 * pair_idx / rotary_dim)
+                    region = "RoPE (high)" if dim_pair < rotary_half else "RoPE (low)"
+                    print_flush(f"  | {dim_pair:2d}-{dim_pair+1:2d} | {theta:.4f} | {q_val:7.2f} | {k_val:7.2f} | {region} |")
+                else:
+                    # パススルー領域
+                    print_flush(f"  | {dim_pair:2d}-{dim_pair+1:2d} | (none) | {q_val:7.2f} | {k_val:7.2f} | Passthrough |")
+
     print_flush("\n" + "=" * 70)
     print_flush("SUMMARY")
     print_flush("=" * 70)
