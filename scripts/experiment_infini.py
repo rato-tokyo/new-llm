@@ -3,9 +3,9 @@
 Infini-Attention Experiment
 
 1層目: Infini-Attention (NoPE, compressive memory)
-2層目以降: MLA with ALiBi
+2層目以降: 標準Pythia (RoPE)
 
-Pythia (RoPE) vs Infini-Pythia (1層目Infini + MLA ALiBi) の比較。
+Pythia (RoPE) vs Infini-Pythia (1層目Infini + RoPE) の比較。
 
 Usage:
     python3 scripts/experiment_infini.py --samples 5000 --epochs 30
@@ -170,8 +170,6 @@ def run_experiment(
     num_epochs: int = 30,
     batch_size: int = 8,
     lr: float = 1e-4,
-    kv_dim: int = 128,
-    alibi_slope: float = 0.0625,
     use_delta_rule: bool = True,
     skip_baseline: bool = False,
     skip_infini: bool = False,
@@ -189,8 +187,6 @@ def run_experiment(
     print_flush(f"Sequence length: {seq_length}")
     print_flush(f"Epochs: {num_epochs}")
     print_flush(f"Learning rate: {lr}")
-    print_flush(f"KV dim (Infini): {kv_dim}")
-    print_flush(f"ALiBi slope: {alibi_slope}")
     print_flush(f"Delta rule: {use_delta_rule}")
     print_flush(f"Skip baseline: {skip_baseline}")
     print_flush(f"Skip infini: {skip_infini}")
@@ -295,7 +291,7 @@ def run_experiment(
         del pythia_model
         clear_gpu_cache(device)
 
-    # ===== 2. Infini-Pythia (1層目Infini + ALiBi) =====
+    # ===== 2. Infini-Pythia (1層目Infini + RoPE) =====
     if skip_infini:
         print_flush("\n" + "=" * 70)
         print_flush("2. INFINI-PYTHIA - SKIPPED")
@@ -303,10 +299,10 @@ def run_experiment(
         results["infini"] = None
     else:
         print_flush("\n" + "=" * 70)
-        print_flush("2. INFINI-PYTHIA (1層目Infini + MLA ALiBi)")
+        print_flush("2. INFINI-PYTHIA (1層目Infini + RoPE)")
         print_flush("=" * 70)
         print_flush("  Layer 0: Infini-Attention (NoPE, compressive memory)")
-        print_flush("  Layer 1-5: MLA with ALiBi")
+        print_flush("  Layer 1-5: Standard Pythia (RoPE)")
 
         infini_model = InfiniPythiaModel(
             vocab_size=config.vocab_size,
@@ -314,9 +310,8 @@ def run_experiment(
             num_layers=config.num_layers,
             num_heads=config.num_attention_heads,
             intermediate_size=config.intermediate_size,
-            kv_dim=kv_dim,
-            q_compressed=False,
-            alibi_slope=alibi_slope,
+            max_position_embeddings=config.max_position_embeddings,
+            rotary_pct=config.rotary_pct,
             use_delta_rule=use_delta_rule,
         )
         infini_model = infini_model.to(device)
@@ -324,11 +319,10 @@ def run_experiment(
         param_info = infini_model.num_parameters()
         print_flush(f"\n  Total parameters: {param_info['total']:,}")
         print_flush(f"  Infini layer: {param_info['infini_layer']:,}")
-        print_flush(f"  MLA layers: {param_info['mla_layers']:,}")
+        print_flush(f"  Pythia layers: {param_info['pythia_layers']:,}")
 
-        cache_info = infini_model.kv_cache_info(seq_length)
-        print_flush(f"  KV Cache reduction: {cache_info['reduction_percent']:.1f}%")
-        print_flush(f"  Infini memory: {cache_info['infini_memory_bytes']:,} bytes (fixed)")
+        memory_info = infini_model.memory_info()
+        print_flush(f"  Infini memory: {memory_info['total_memory_bytes']:,} bytes (fixed)")
 
         optimizer = torch.optim.AdamW(infini_model.parameters(), lr=lr)
 
@@ -468,12 +462,6 @@ def main() -> None:
         "--lr", type=float, default=config.learning_rate, help="Learning rate"
     )
     parser.add_argument(
-        "--kv-dim", type=int, default=128, help="KV compression dimension"
-    )
-    parser.add_argument(
-        "--alibi-slope", type=float, default=0.0625, help="ALiBi slope (uniform)"
-    )
-    parser.add_argument(
         "--no-delta-rule", action="store_true", help="Disable delta rule for Infini"
     )
     parser.add_argument(
@@ -490,8 +478,6 @@ def main() -> None:
         num_epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
-        kv_dim=args.kv_dim,
-        alibi_slope=args.alibi_slope,
         use_delta_rule=not args.no_delta_rule,
         skip_baseline=args.skip_baseline,
         skip_infini=args.skip_infini,
