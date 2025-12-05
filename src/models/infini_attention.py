@@ -378,8 +378,8 @@ class MultiMemoryInfiniAttention(nn.Module):
         # Memory banks: list of (memory, memory_norm) pairs
         # Each memory: [num_heads, head_dim, head_dim]
         # Each memory_norm: [num_heads, head_dim]
-        self.memories = None
-        self.memory_norms = None
+        self.memories: Optional[list[torch.Tensor]] = None
+        self.memory_norms: Optional[list[torch.Tensor]] = None
 
         # Current bank index and segment counter
         self.register_buffer('current_bank', torch.tensor(0))
@@ -471,7 +471,10 @@ class MultiMemoryInfiniAttention(nn.Module):
         if self.memories is None or self.memory_norms is None:
             self.reset_memory(k.device)
 
-        bank_idx = self.current_bank.item()
+        # Type assertion for mypy (reset_memory ensures these are not None)
+        assert self.memories is not None and self.memory_norms is not None
+
+        bank_idx = int(self.current_bank.item())
         memory = self.memories[bank_idx]
         memory_norm = self.memory_norms[bank_idx]
 

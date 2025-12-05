@@ -17,7 +17,7 @@ Infini-Attentionのメモリは訓練中に蓄積され、
 長距離依存関係の学習に貢献する。
 """
 
-from typing import Optional, Dict
+from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -75,6 +75,7 @@ class InfiniPythiaModel(nn.Module):
         self.embed_in = nn.Embedding(vocab_size, hidden_size)
 
         # Layer 0: Infini-Attention (NoPE)
+        self.infini_layer: Union[InfiniAttentionLayer, MultiMemoryInfiniAttentionLayer]
         if num_memory_banks > 1:
             # Multi-Memory Bank version
             self.infini_layer = MultiMemoryInfiniAttentionLayer(
@@ -173,7 +174,7 @@ class InfiniPythiaModel(nn.Module):
 
         return logits
 
-    def num_parameters(self) -> Dict[str, int]:
+    def num_parameters(self) -> dict[str, int]:
         """Count parameters"""
         total = sum(p.numel() for p in self.parameters())
         embedding = self.embed_in.weight.numel()
@@ -219,7 +220,7 @@ class InfiniPythiaModel(nn.Module):
             "num_memory_banks": num_banks,
         }
 
-    def get_bank_weights(self) -> torch.Tensor:
+    def get_bank_weights(self) -> Optional[torch.Tensor]:
         """Multi-Memory版の場合、バンク重みを取得"""
         if self.num_memory_banks > 1:
             return self.infini_layer.attention.get_bank_weights()
