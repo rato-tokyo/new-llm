@@ -72,7 +72,8 @@ def train_model_ka(
         total_loss = 0.0
         total_tokens = 0
 
-        for batch in train_loader:
+        num_batches = len(train_loader)
+        for batch_idx, batch in enumerate(train_loader):
             input_ids, labels = batch
             input_ids = input_ids.to(device)
             labels = labels.to(device)
@@ -92,6 +93,12 @@ def train_model_ka(
 
             total_loss += loss.item() * labels.numel()
             total_tokens += labels.numel()
+
+            # Progress log every 10%
+            if (batch_idx + 1) % max(1, num_batches // 10) == 0:
+                pct = (batch_idx + 1) / num_batches * 100
+                current_ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+                print_flush(f"      [{pct:5.1f}%] batch {batch_idx+1}/{num_batches}, ppl={current_ppl:.1f}")
 
         train_loss = total_loss / total_tokens
         train_ppl = torch.exp(torch.tensor(train_loss)).item()

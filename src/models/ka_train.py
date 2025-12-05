@@ -23,6 +23,42 @@ import torch.nn.functional as F
 from src.utils.rope import RotaryEmbedding
 
 
+def ka_loop_with_grad(
+    attn_weights: torch.Tensor,
+    value: torch.Tensor,
+) -> torch.Tensor:
+    """
+    勾配が正しく流れるKAループ
+
+    A[0] = V[0]
+    A[i] = renormalize(weights[:i]) @ A[:i]
+
+    注: JIT scriptを使わず、torch.catで結果を構築して勾配を保持
+    """
+    batch_size, num_heads, seq_len, head_dim = value.shape
+
+    # A[0] = V[0]
+    outputs = [value[:, :, 0:1, :]]  # [batch, heads, 1, head_dim]
+
+    for i in range(1, seq_len):
+        # 過去のAを結合
+        past_a = torch.cat(outputs, dim=2)  # [batch, heads, i, head_dim]
+
+        # weights[:i] を取得して再正規化
+        past_weights = attn_weights[:, :, i, :i]  # [batch, heads, i]
+        past_weights_sum = past_weights.sum(dim=-1, keepdim=True)
+        past_weights_normalized = past_weights / (past_weights_sum + 1e-8)
+
+        # A[i] = normalized_weights @ A[:i]
+        weights_expanded = past_weights_normalized.unsqueeze(2)  # [batch, heads, 1, i]
+        new_a = (weights_expanded @ past_a)  # [batch, heads, 1, head_dim]
+
+        outputs.append(new_a)
+
+    # 全てを結合
+    return torch.cat(outputs, dim=2)  # [batch, heads, seq_len, head_dim]
+
+
 class KATrainAttention(nn.Module):
     """
     学習時からKAキャッシュを使用するAttention
@@ -97,27 +133,9 @@ class KATrainAttention(nn.Module):
         # KA方式（全てA統一、現在位置のVは不使用）
         # A[0] = V[0]  (ブートストラップ: 最初のトークンはVで初期化)
         # A[i] = renormalize(weights[:i]) @ A[:i]  (過去のAのみ)
-
-        attn_output = torch.zeros_like(value)
-
-        for i in range(seq_len):
-            if i == 0:
-                # 最初のトークン: Vで初期化（他に参照できるAがない）
-                attn_output[:, :, i, :] = value[:, :, i, :]
-            else:
-                # 過去のAのみ使用（現在位置のVは使わない）
-                # weights[:i] を再正規化
-                past_weights = attn_weights[:, :, i, :i]  # [batch, heads, i]
-                past_weights_sum = past_weights.sum(dim=-1, keepdim=True)
-                past_weights_normalized = past_weights / (past_weights_sum + 1e-8)
-
-                # A[i] = normalized_weights @ A[:i]
-                # past_weights_normalized: [batch, heads, i] -> [batch, heads, 1, i]
-                # attn_output[:, :, :i, :]: [batch, heads, i, head_dim]
-                # result: [batch, heads, 1, head_dim] -> squeeze -> [batch, heads, head_dim]
-                past_a = attn_output[:, :, :i, :]  # [batch, heads, i, head_dim]
-                weights_expanded = past_weights_normalized.unsqueeze(2)  # [batch, heads, 1, i]
-                attn_output[:, :, i, :] = (weights_expanded @ past_a).squeeze(2)
+        #
+        # 勾配が正しく流れるループを使用
+        attn_output = ka_loop_with_grad(attn_weights, value)
 
         # Output projection
         attn_output = attn_output.transpose(1, 2).contiguous()
