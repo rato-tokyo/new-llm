@@ -112,7 +112,12 @@ class KATrainAttention(nn.Module):
                 past_weights_normalized = past_weights / (past_weights_sum + 1e-8)
 
                 # A[i] = normalized_weights @ A[:i]
-                attn_output[:, :, i, :] = (past_weights_normalized @ attn_output[:, :, :i, :]).squeeze(2)
+                # past_weights_normalized: [batch, heads, i] -> [batch, heads, 1, i]
+                # attn_output[:, :, :i, :]: [batch, heads, i, head_dim]
+                # result: [batch, heads, 1, head_dim] -> squeeze -> [batch, heads, head_dim]
+                past_a = attn_output[:, :, :i, :]  # [batch, heads, i, head_dim]
+                weights_expanded = past_weights_normalized.unsqueeze(2)  # [batch, heads, 1, i]
+                attn_output[:, :, i, :] = (weights_expanded @ past_a).squeeze(2)
 
         # Output projection
         attn_output = attn_output.transpose(1, 2).contiguous()
