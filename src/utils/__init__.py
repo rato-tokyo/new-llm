@@ -17,21 +17,6 @@ from .evaluation import (
     evaluate_ppl,
     evaluate_position_wise_ppl,
     evaluate_reversal_curse,
-    analyze_qk_stats,
-    QKStats,
-    QKStatsCollector,
-)
-from .rope import (
-    RotaryEmbedding,
-    CustomRotaryEmbedding,
-    RoPEConfig,
-    apply_rotary_pos_emb,
-    create_rope_from_config,
-    standard_rope_config,
-    custom_frequencies_config,
-    custom_list_config,
-    linear_frequency_config,
-    exponential_frequency_config,
 )
 
 __all__ = [
@@ -54,18 +39,4 @@ __all__ = [
     'evaluate_ppl',
     'evaluate_position_wise_ppl',
     'evaluate_reversal_curse',
-    'analyze_qk_stats',
-    'QKStats',
-    'QKStatsCollector',
-    # RoPE utilities
-    'RotaryEmbedding',
-    'CustomRotaryEmbedding',
-    'RoPEConfig',
-    'apply_rotary_pos_emb',
-    'create_rope_from_config',
-    'standard_rope_config',
-    'custom_frequencies_config',
-    'custom_list_config',
-    'linear_frequency_config',
-    'exponential_frequency_config',
 ]
