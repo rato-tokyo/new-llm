@@ -22,7 +22,7 @@ class PythiaConfig:
     learning_rate = 1e-4            # 学習率
     batch_size = 8                  # バッチサイズ
     num_epochs = 30                 # 最大エポック数
-    early_stopping_patience = 3     # Early Stopping: 何エポック改善しなければ停止
+    # NOTE: early_stopping_patience is in src/config/experiment_defaults.py
 
     # ========== トークナイザー ==========
     tokenizer_name = "EleutherAI/pythia-70m"

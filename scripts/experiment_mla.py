@@ -16,65 +16,29 @@ import time
 from typing import Any
 
 import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader
 
 # Add project root to path
 sys.path.insert(0, ".")
 
 from config.pythia import PythiaConfig  # noqa: E402
-from src.config.experiment_defaults import (  # noqa: E402
-    EARLY_STOPPING_PATIENCE,
-    GRADIENT_CLIP,
-)
+from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE  # noqa: E402
 from src.models.pythia import PythiaModel  # noqa: E402
 from src.models.mla_pythia import MLAPythiaModel  # noqa: E402
 from src.data.reversal_pairs import get_reversal_pairs  # noqa: E402
 from src.utils.io import print_flush  # noqa: E402
 from src.utils.seed import set_seed  # noqa: E402
-from src.utils.training import prepare_data_loaders, get_device, get_tokenizer  # noqa: E402
+from src.utils.training import (  # noqa: E402
+    prepare_data_loaders,
+    get_device,
+    get_tokenizer,
+    train_epoch,
+    evaluate,
+)
 from src.utils.evaluation import (  # noqa: E402
-    evaluate_ppl,
     evaluate_position_wise_ppl,
     evaluate_reversal_curse,
 )
 from src.utils.device import clear_gpu_cache  # noqa: E402
-
-
-def train_epoch(
-    model: nn.Module,
-    train_loader: DataLoader,
-    optimizer: torch.optim.Optimizer,
-    device: torch.device,
-) -> float:
-    """Train for one epoch. Returns train PPL."""
-    model.train()
-    total_loss = 0.0
-    total_tokens = 0
-
-    for batch in train_loader:
-        input_ids, labels = batch
-        input_ids = input_ids.to(device)
-        labels = labels.to(device)
-
-        optimizer.zero_grad()
-        logits = model(input_ids)
-
-        loss = nn.functional.cross_entropy(
-            logits.view(-1, logits.size(-1)),
-            labels.view(-1),
-        )
-
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), GRADIENT_CLIP)
-        optimizer.step()
-
-        total_loss += loss.item() * labels.numel()
-        total_tokens += labels.numel()
-
-    avg_loss = total_loss / total_tokens
-    ppl = torch.exp(torch.tensor(avg_loss)).item()
-    return ppl
 
 
 def run_experiment(
@@ -158,9 +122,9 @@ def run_experiment(
         for epoch in range(1, num_epochs + 1):
             start_time = time.time()
 
-            train_ppl = train_epoch(pythia_model, train_loader, optimizer, device)
-            val_ppl_result = evaluate_ppl(pythia_model, val_loader, device)
-            val_ppl = float(val_ppl_result) if isinstance(val_ppl_result, (int, float)) else val_ppl_result["ppl"]
+            train_loss = train_epoch(pythia_model, train_loader, optimizer, device)
+            train_ppl = torch.exp(torch.tensor(train_loss)).item()
+            _, val_ppl = evaluate(pythia_model, val_loader, device)
             elapsed = time.time() - start_time
 
             improved = val_ppl < best_val_ppl
@@ -245,9 +209,9 @@ def run_experiment(
     for epoch in range(1, num_epochs + 1):
         start_time = time.time()
 
-        train_ppl = train_epoch(mla_model, train_loader, optimizer, device)
-        val_ppl_result = evaluate_ppl(mla_model, val_loader, device)
-        val_ppl = float(val_ppl_result) if isinstance(val_ppl_result, (int, float)) else val_ppl_result["ppl"]
+        train_loss = train_epoch(mla_model, train_loader, optimizer, device)
+        train_ppl = torch.exp(torch.tensor(train_loss)).item()
+        _, val_ppl = evaluate(mla_model, val_loader, device)
         elapsed = time.time() - start_time
 
         improved = val_ppl < best_val_ppl

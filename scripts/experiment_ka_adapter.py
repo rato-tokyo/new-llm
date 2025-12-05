@@ -36,7 +36,13 @@ from src.config.experiment_defaults import (
 from src.models.ka_adapter import KAAdapterPythiaModel
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
-from src.utils.training import prepare_data_loaders, get_device, get_tokenizer
+from src.utils.training import (
+    prepare_data_loaders,
+    get_device,
+    get_tokenizer,
+    train_epoch as _train_epoch,
+    evaluate,
+)
 from src.utils.evaluation import evaluate_reversal_curse
 from src.data.reversal_pairs import get_reversal_pairs
 
@@ -61,51 +67,12 @@ def train_base_model(
     print_flush("  Training base model (all parameters)...")
 
     for epoch in range(1, num_epochs + 1):
-        model.train()
-        total_loss = 0.0
-        total_tokens = 0
+        # Train using common utility
+        train_loss = _train_epoch(model, train_loader, optimizer, device)
+        train_ppl = torch.exp(torch.tensor(train_loss)).item()
 
-        for batch in train_loader:
-            input_ids, labels = batch
-            input_ids = input_ids.to(device)
-            labels = labels.to(device)
-
-            optimizer.zero_grad()
-            logits = model(input_ids)
-            loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)),
-                labels.view(-1),
-            )
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), GRADIENT_CLIP)
-            optimizer.step()
-
-            total_loss += loss.item() * labels.numel()
-            total_tokens += labels.numel()
-
-        train_ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
-
-        # Validate
-        model.eval()
-        val_loss = 0.0
-        val_tokens = 0
-
-        with torch.no_grad():
-            for batch in val_loader:
-                input_ids, labels = batch
-                input_ids = input_ids.to(device)
-                labels = labels.to(device)
-
-                logits = model(input_ids)
-                loss = F.cross_entropy(
-                    logits.view(-1, logits.size(-1)),
-                    labels.view(-1),
-                    reduction="sum",
-                )
-                val_loss += loss.item()
-                val_tokens += labels.numel()
-
-        val_ppl = torch.exp(torch.tensor(val_loss / val_tokens)).item()
+        # Validate using common utility
+        _, val_ppl = evaluate(model, val_loader, device)
 
         improved = val_ppl < best_val_ppl
         if improved:
@@ -141,8 +108,14 @@ def train_adapter_only(
     device: torch.device,
     num_epochs: int,
     lr: float,
+    adapter_loss_weight: float = 1.0,
 ) -> Dict[str, Any]:
-    """Train only adapter parameters (base model frozen)"""
+    """
+    Train only adapter parameters (base model frozen)
+
+    高速化版: 並列forward + Adapter損失で学習。
+    自己回帰ループを回避し、約128倍高速。
+    """
     model = model.to(device)
 
     # Freeze base model, keep only adapter trainable
@@ -155,58 +128,65 @@ def train_adapter_only(
     param_info = model.num_parameters()
     print_flush(f"  Adapter parameters: {param_info['adapter']:,}")
     print_flush(f"  Trainable parameters: {param_info['trainable']:,}")
+    print_flush(f"  Adapter loss weight: {adapter_loss_weight}")
 
     best_val_ppl = float("inf")
     best_epoch = 0
     best_adapter_state = {}
     patience_counter = 0
 
-    print_flush("  Training adapter only (base frozen)...")
+    num_batches = len(train_loader)
+    print_flush(f"  Training adapter (parallel mode)... ({num_batches} batches/epoch)")
 
     for epoch in range(1, num_epochs + 1):
         model.train()
-        total_loss = 0.0
+        total_lm_loss = 0.0
+        total_adapter_loss = 0.0
         total_tokens = 0
+        epoch_start = time.time()
 
-        for batch in train_loader:
+        for batch_idx, batch in enumerate(train_loader):
             input_ids, labels = batch
             input_ids = input_ids.to(device)
             labels = labels.to(device)
 
-            batch_size, seq_len = input_ids.shape
-
             optimizer.zero_grad()
 
-            # Train with KA adapter cache (autoregressive)
-            cache = None
-            all_logits = []
+            # 並列forward + Adapter損失
+            logits, adapter_loss = model.forward_adapter_training(input_ids)
 
-            for t in range(seq_len):
-                if t == 0:
-                    token_input = input_ids[:, :1]
-                else:
-                    token_input = input_ids[:, t:t+1]
-
-                logits, cache = model.forward_with_cache(
-                    token_input, cache, use_ka_adapter=True
-                )
-                all_logits.append(logits)
-
-            all_logits = torch.cat(all_logits, dim=1)
-            loss = F.cross_entropy(
-                all_logits.view(-1, all_logits.size(-1)),
+            # 言語モデル損失
+            lm_loss = F.cross_entropy(
+                logits.view(-1, logits.size(-1)),
                 labels.view(-1),
             )
-            loss.backward()
+
+            # 合計損失
+            total_loss = lm_loss + adapter_loss_weight * adapter_loss
+            total_loss.backward()
+
             torch.nn.utils.clip_grad_norm_(adapter_params, GRADIENT_CLIP)
             optimizer.step()
 
-            total_loss += loss.item() * labels.numel()
+            total_lm_loss += lm_loss.item() * labels.numel()
+            total_adapter_loss += adapter_loss.item()
             total_tokens += labels.numel()
 
-        train_ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+            # Progress log every 100 batches
+            if (batch_idx + 1) % 100 == 0 or batch_idx == 0:
+                elapsed = time.time() - epoch_start
+                current_ppl = torch.exp(torch.tensor(total_lm_loss / total_tokens)).item()
+                avg_adapter = total_adapter_loss / (batch_idx + 1)
+                print_flush(f"    Epoch {epoch}: batch {batch_idx + 1}/{num_batches} "
+                           f"ppl={current_ppl:.1f} adapter_loss={avg_adapter:.4f} [{elapsed:.1f}s]")
 
-        # Validate with KA adapter
+        epoch_time = time.time() - epoch_start
+        train_ppl = torch.exp(torch.tensor(total_lm_loss / total_tokens)).item()
+        avg_adapter_loss = total_adapter_loss / num_batches
+        print_flush(f"    Epoch {epoch}: done [{epoch_time:.1f}s] ppl={train_ppl:.1f} adapter={avg_adapter_loss:.4f}")
+
+        # Validate with KA adapter (autoregressive - for accurate evaluation)
+        print_flush(f"    Epoch {epoch}: validating with KA cache...")
         val_ppl = evaluate_with_cache(
             model, val_loader, device, use_ka_adapter=True
         )["ppl"]
@@ -226,7 +206,7 @@ def train_adapter_only(
             patience_counter += 1
             marker = ""
 
-        print_flush(f"    Epoch {epoch:2d}: train_ppl={train_ppl:.1f} val_ppl={val_ppl:.1f} {marker}")
+        print_flush(f"    Epoch {epoch:2d}: val_ppl={val_ppl:.1f} {marker}")
 
         if patience_counter >= EARLY_STOPPING_PATIENCE:
             print_flush("    -> Early stop")
@@ -252,6 +232,7 @@ def evaluate_with_cache(
     val_loader: DataLoader,
     device: torch.device,
     use_ka_adapter: bool,
+    verbose: bool = False,
 ) -> Dict[str, float]:
     """Evaluate model with KV or KA adapter cache"""
     model.eval()
@@ -259,8 +240,9 @@ def evaluate_with_cache(
     total_loss = 0.0
     total_tokens = 0
     total_time = 0.0
+    num_batches = len(val_loader)
 
-    for batch in val_loader:
+    for batch_idx, batch in enumerate(val_loader):
         input_ids, labels = batch
         input_ids = input_ids.to(device)
         labels = labels.to(device)
@@ -294,6 +276,10 @@ def evaluate_with_cache(
         )
         total_loss += loss.item()
         total_tokens += labels.numel()
+
+        # Progress log every 20 batches if verbose
+        if verbose and ((batch_idx + 1) % 20 == 0 or batch_idx == 0):
+            print_flush(f"      Eval: batch {batch_idx + 1}/{num_batches}")
 
     avg_loss = total_loss / total_tokens
     ppl = torch.exp(torch.tensor(avg_loss)).item()

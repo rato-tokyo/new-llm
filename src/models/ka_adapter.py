@@ -421,6 +421,79 @@ class KAAdapterPythiaModel(nn.Module):
 
         return input_ids
 
+    def forward_adapter_training(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        並列Adapter学習用forward
+
+        通常の並列forward + Adapter損失を返す。
+        Adapter(A) が V に近づくように学習。
+
+        Returns:
+            logits: 通常のlogits
+            adapter_loss: Adapter(A) と V の MSE損失
+        """
+        batch_size, seq_len = input_ids.shape
+        position_ids = torch.arange(seq_len, device=input_ids.device).unsqueeze(0).expand(batch_size, -1)
+
+        hidden_states = self.embed_in(input_ids)
+
+        total_adapter_loss = 0.0
+        num_layers = 0
+
+        for i in range(self.num_layers):
+            residual = hidden_states
+            hidden_states = self.input_layernorms[i](hidden_states)
+
+            # 並列計算でQ, K, V, Aを全て計算
+            attn = self.attentions[i]
+            qkv = attn.query_key_value(hidden_states)
+            qkv = qkv.view(batch_size, seq_len, 3, attn.num_heads, attn.head_dim)
+            qkv = qkv.permute(2, 0, 3, 1, 4)
+            query, key, value = qkv[0], qkv[1], qkv[2]
+
+            query, key = attn._apply_rotary(query, key, position_ids)
+
+            # Attention計算
+            attn_weights = torch.matmul(query, key.transpose(-1, -2)) * attn.scale
+
+            # 因果マスク
+            causal_mask = torch.triu(
+                torch.ones(seq_len, seq_len, device=hidden_states.device) * float("-inf"),
+                diagonal=1
+            )
+            attn_weights = attn_weights + causal_mask
+            attn_weights = F.softmax(attn_weights, dim=-1)
+
+            # Attention Output (A)
+            attn_output = torch.matmul(attn_weights, value)  # [batch, heads, seq, head_dim]
+
+            # Adapter損失: Adapter(A) が V に近づくように
+            # ただし、最初のトークンはキャッシュがないので除外
+            if seq_len > 1:
+                adapted_a = attn.adapter(attn_output[:, :, :-1, :])  # 過去のA
+                target_v = value[:, :, 1:, :]  # 次のステップのV
+                layer_loss = F.mse_loss(adapted_a, target_v.detach())
+                total_adapter_loss += layer_loss
+                num_layers += 1
+
+            attn_output = attn_output.transpose(1, 2).contiguous()
+            attn_output = attn_output.view(batch_size, seq_len, self.hidden_size)
+            attn_output = attn.dense(attn_output)
+
+            mlp_output = self.mlps[i](hidden_states)
+            hidden_states = residual + attn_output + mlp_output
+
+        hidden_states = self.final_layer_norm(hidden_states)
+        logits = self.embed_out(hidden_states)
+
+        adapter_loss = total_adapter_loss / max(num_layers, 1)
+
+        return logits, adapter_loss
+
     def num_parameters(self) -> dict:
         total = sum(p.numel() for p in self.parameters())
         adapter = sum(p.numel() for n, p in self.named_parameters() if "adapter" in n)

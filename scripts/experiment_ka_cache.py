@@ -29,14 +29,17 @@ from torch.utils.data import DataLoader
 sys.path.insert(0, ".")
 
 from config.pythia import PythiaConfig
-from src.config.experiment_defaults import (
-    EARLY_STOPPING_PATIENCE,
-    GRADIENT_CLIP,
-)
+from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE
 from src.models.ka_cache import KACachePythiaModel
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
-from src.utils.training import prepare_data_loaders, get_device, get_tokenizer
+from src.utils.training import (
+    prepare_data_loaders,
+    get_device,
+    get_tokenizer,
+    train_epoch as _train_epoch,
+    evaluate,
+)
 from src.utils.device import clear_gpu_cache
 from src.utils.evaluation import evaluate_reversal_curse
 from src.data.reversal_pairs import get_reversal_pairs
@@ -63,52 +66,12 @@ def train_model(
     print_flush(f"\n  Training {model_name}...")
 
     for epoch in range(1, num_epochs + 1):
-        # Train
-        model.train()
-        total_loss = 0.0
-        total_tokens = 0
+        # Train using common utility
+        train_loss = _train_epoch(model, train_loader, optimizer, device)
+        train_ppl = torch.exp(torch.tensor(train_loss)).item()
 
-        for batch in train_loader:
-            input_ids, labels = batch
-            input_ids = input_ids.to(device)
-            labels = labels.to(device)
-
-            optimizer.zero_grad()
-            logits = model(input_ids)
-            loss = F.cross_entropy(
-                logits.view(-1, logits.size(-1)),
-                labels.view(-1),
-            )
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), GRADIENT_CLIP)
-            optimizer.step()
-
-            total_loss += loss.item() * labels.numel()
-            total_tokens += labels.numel()
-
-        train_ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
-
-        # Validate
-        model.eval()
-        val_loss = 0.0
-        val_tokens = 0
-
-        with torch.no_grad():
-            for batch in val_loader:
-                input_ids, labels = batch
-                input_ids = input_ids.to(device)
-                labels = labels.to(device)
-
-                logits = model(input_ids)
-                loss = F.cross_entropy(
-                    logits.view(-1, logits.size(-1)),
-                    labels.view(-1),
-                    reduction="sum",
-                )
-                val_loss += loss.item()
-                val_tokens += labels.numel()
-
-        val_ppl = torch.exp(torch.tensor(val_loss / val_tokens)).item()
+        # Validate using common utility
+        _, val_ppl = evaluate(model, val_loader, device)
 
         improved = val_ppl < best_val_ppl
         if improved:
