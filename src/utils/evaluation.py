@@ -457,7 +457,7 @@ def evaluate_position_wise_ppl(
             labels = labels.to(device)
 
             if return_recon_loss:
-                logits, _ = model(input_ids, return_reconstruction_loss=False)
+                logits, _ = model(input_ids, return_reconstruction_loss=True)
             else:
                 output = model(input_ids)
                 if isinstance(output, tuple):

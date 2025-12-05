@@ -1,0 +1,104 @@
+remote: Enumerating objects: 21, done.
+remote: Counting objects: 100% (21/21), done.
+remote: Compressing objects: 100% (1/1), done.
+remote: Total 11 (delta 9), reused 11 (delta 9), pack-reused 0 (from 0)
+Unpacking objects: 100% (11/11), 4.78 KiB | 979.00 KiB/s, done.
+From https://github.com/rato-tokyo/new-llm
+ * branch            main       -> FETCH_HEAD
+   2557617..4388283  main       -> origin/main
+Updating 2557617..4388283
+Fast-forward
+ CLAUDE.md                                     |  26 ++-
+ docs/experiments/position_encoding_results.md | 296 +++++++++++++++++++++++++-
+ scripts/experiment_position.py                |  20 +-
+ src/utils/evaluation.py                       |  24 +++
+ 4 files changed, 356 insertions(+), 10 deletions(-)
+Device: cuda (NVIDIA L4, 23.8GB)
+======================================================================
+POSITION ENCODING EXPERIMENT
+======================================================================
+Samples: 5,000
+Sequence length: 128
+Epochs: 6
+Learning rate: 0.0001
+Position types: ['rope']
+RoPE rotary_pct: 1.0
+RoPE base: 5000
+ALiBi slope: 0.0625
+======================================================================
+
+[Data] Loading Pile data...
+Preparing data: 5,000 samples, seq_len=128
+Downloading Pile dataset: 640,128 tokens
+  Loading tokenizer: EleutherAI/pythia-70m
+tokenizer_config.json: 100% 396/396 [00:00<00:00, 2.90MB/s]
+tokenizer.json: 2.11MB [00:00, 65.1MB/s]
+special_tokens_map.json: 100% 99.0/99.0 [00:00<00:00, 621kB/s]
+  Loading dataset (streaming)...
+README.md: 100% 776/776 [00:00<00:00, 7.59MB/s]
+Resolving data files: 100% 30/30 [00:00<00:00, 131.89it/s]
+  Tokenizing...
+  Saved 640,128 tokens to cache: cache/pile_tokens/pile_640128.pt
+  Added 330 reversal pair samples to training only
+  Train: 4,830 samples (Pile: 4,500)
+  Val: 500 samples (Pile only, no reversal pairs)
+
+======================================================================
+1. ROPE (2D)
+======================================================================
+
+  Position encoding: RoPE (2D)
+  Total parameters: 70,420,480
+
+  Training RoPE (2D)...
+    Epoch  1: train_ppl=560.9 val_ppl=349.5 [43.1s] *
+    Epoch  2: train_ppl=139.4 val_ppl=197.4 [44.4s] *
+    Epoch  3: train_ppl=72.8 val_ppl=146.7 [45.0s] *
+    Epoch  4: train_ppl=44.3 val_ppl=120.3 [44.6s] *
+    Epoch  5: train_ppl=28.7 val_ppl=109.5 [45.1s] *
+    Epoch  6: train_ppl=19.0 val_ppl=105.4 [44.5s] *
+  Best: epoch 6, ppl=105.4
+
+  Position-wise PPL:
+    Position 0-16: 143.7
+    Position 16-32: 105.6
+    Position 32-64: 104.6
+    Position 64-96: 101.7
+    Position 96-128: 102.5
+
+  Reversal Curse evaluation:
+    Forward PPL: 1.7
+    Backward PPL: 681.7
+    Reversal Ratio: 0.002
+    Reversal Gap: +680.0
+
+  Q, K Statistics (Massive Values):
+    Overall Q: max=8.79, mean=0.85, std=1.10
+    Overall K: max=9.30, mean=0.81, std=1.04
+
+    Layer-wise statistics:
+    | Layer | Q max | Q mean | Q std | K max | K mean | K std |
+    |-------|-------|--------|-------|-------|--------|-------|
+    | 0 | 6.18 | 0.65 | 0.89 | 6.72 | 0.64 | 0.86 |
+    | 1 | 6.47 | 0.85 | 1.10 | 9.30 | 0.78 | 1.01 |
+    | 2 | 8.05 | 0.86 | 1.10 | 8.10 | 0.81 | 1.04 |
+    | 3 | 8.63 | 0.85 | 1.09 | 8.87 | 0.82 | 1.06 |
+    | 4 | 8.79 | 0.92 | 1.17 | 8.02 | 0.87 | 1.11 |
+    | 5 | 7.82 | 0.98 | 1.25 | 6.99 | 0.93 | 1.18 |
+
+    Frequency band analysis (rotary_dim=64, head_dim=64):
+      RoPE applied: dims 0-63
+        High-freq (dims 0-31):  Q=8.79, K=9.26
+        Low-freq (dims 32-63): Q=8.53, K=9.30
+      Q low/high ratio: 0.97x
+      K low/high ratio: 1.00x
+
+======================================================================
+SUMMARY
+======================================================================
+
+| Position Encoding | PPL | Epoch | Params |
+|-------------------|-----|-------|--------|
+| RoPE (2D) | 105.4 | 6 | 70,420,480 |
+
+DONE

@@ -18,7 +18,7 @@ Usage:
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import torch
 import torch.nn as nn
@@ -239,7 +239,7 @@ class ALiBiPositionEncoding(PositionEncoding):
     def __init__(self, slope: float = 0.0625) -> None:
         super().__init__()
         self.slope = slope
-        self._cache: dict[int, torch.Tensor] = {}
+        self._cache: Dict[int, torch.Tensor] = {}
 
     def _build_alibi_bias_causal(
         self,
