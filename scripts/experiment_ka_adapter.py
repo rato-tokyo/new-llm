@@ -17,8 +17,11 @@ Usage:
 """
 
 import argparse
+import hashlib
+import os
 import sys
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import torch
@@ -27,6 +30,9 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 
 sys.path.insert(0, ".")
+
+# Cache directory for pretrained models
+CACHE_DIR = Path("checkpoints")
 
 from config.pythia import PythiaConfig
 from src.config.experiment_defaults import (
@@ -45,6 +51,51 @@ from src.utils.training import (
 )
 from src.utils.evaluation import evaluate_reversal_curse
 from src.data.reversal_pairs import get_reversal_pairs
+
+
+def get_cache_path(
+    num_samples: int,
+    seq_length: int,
+    num_epochs: int,
+    lr: float,
+    adapter_bottleneck: int,
+) -> Path:
+    """
+    Generate cache path based on experiment parameters.
+
+    パラメータが同じ場合は同じキャッシュを使用。
+    """
+    # Create hash from parameters
+    params_str = f"samples={num_samples}_seq={seq_length}_epochs={num_epochs}_lr={lr}_bottleneck={adapter_bottleneck}"
+    params_hash = hashlib.md5(params_str.encode()).hexdigest()[:8]
+
+    CACHE_DIR.mkdir(exist_ok=True)
+    return CACHE_DIR / f"ka_adapter_base_{params_hash}.pt"
+
+
+def save_checkpoint(
+    model: nn.Module,
+    path: Path,
+    metadata: Dict[str, Any],
+) -> None:
+    """Save model checkpoint with metadata."""
+    checkpoint = {
+        "model_state_dict": model.state_dict(),
+        "metadata": metadata,
+    }
+    torch.save(checkpoint, path)
+    print_flush(f"  Checkpoint saved: {path}")
+
+
+def load_checkpoint(
+    model: nn.Module,
+    path: Path,
+    device: torch.device,
+) -> Dict[str, Any]:
+    """Load model checkpoint and return metadata."""
+    checkpoint = torch.load(path, map_location=device)
+    model.load_state_dict(checkpoint["model_state_dict"])
+    return checkpoint.get("metadata", {})
 
 
 def train_base_model(
@@ -303,11 +354,22 @@ def run_experiment(
     adapter_bottleneck: int = 64,
     skip_adapter_training: bool = False,
     pretrained_path: Optional[str] = None,
+    no_cache: bool = False,
 ) -> Dict[str, Any]:
     """Run KA adapter experiment"""
     set_seed(42)
     device = get_device()
     config = PythiaConfig()
+
+    # Determine cache path
+    cache_path = get_cache_path(
+        num_samples=num_samples,
+        seq_length=seq_length,
+        num_epochs=num_epochs,
+        lr=lr,
+        adapter_bottleneck=adapter_bottleneck,
+    )
+    use_cache = not no_cache and cache_path.exists() and pretrained_path is None
 
     print_flush("=" * 70)
     print_flush("KA CACHE ADAPTER EXPERIMENT (案1)")
@@ -318,6 +380,8 @@ def run_experiment(
     print_flush(f"Adapter epochs: {adapter_epochs}")
     print_flush(f"Adapter bottleneck: {adapter_bottleneck}")
     print_flush(f"Skip adapter training: {skip_adapter_training}")
+    print_flush(f"Cache path: {cache_path}")
+    print_flush(f"Use cached base model: {use_cache}")
     print_flush("=" * 70)
 
     # Prepare data
@@ -349,17 +413,31 @@ def run_experiment(
 
     results = {}
 
-    # Phase 1: Train base model (or load pretrained)
+    # Phase 1: Train base model (or load from cache/pretrained)
     print_flush("\n" + "=" * 70)
     print_flush("PHASE 1: BASE MODEL TRAINING")
     print_flush("=" * 70)
 
     if pretrained_path:
+        # Load from explicit pretrained path
         print_flush(f"  Loading pretrained model from {pretrained_path}...")
-        model.load_state_dict(torch.load(pretrained_path))
+        model.load_state_dict(torch.load(pretrained_path, map_location=device))
         model = model.to(device)
         results["base_training"] = {"loaded_from": pretrained_path}
+    elif use_cache:
+        # Load from auto-cache
+        print_flush(f"  Loading cached base model from {cache_path}...")
+        metadata = load_checkpoint(model, cache_path, device)
+        model = model.to(device)
+        results["base_training"] = {
+            "loaded_from": str(cache_path),
+            "cached_ppl": metadata.get("best_val_ppl"),
+            "cached_epoch": metadata.get("best_epoch"),
+        }
+        print_flush(f"  Cached PPL: {metadata.get('best_val_ppl', 'N/A')}")
+        print_flush(f"  Cached epoch: {metadata.get('best_epoch', 'N/A')}")
     else:
+        # Train from scratch
         base_result = train_base_model(
             model=model,
             train_loader=train_loader,
@@ -373,6 +451,21 @@ def run_experiment(
             "best_val_ppl": base_result["best_val_ppl"],
             "best_epoch": base_result["best_epoch"],
         }
+
+        # Auto-save to cache
+        if not no_cache:
+            save_checkpoint(
+                model=model,
+                path=cache_path,
+                metadata={
+                    "best_val_ppl": base_result["best_val_ppl"],
+                    "best_epoch": base_result["best_epoch"],
+                    "num_samples": num_samples,
+                    "seq_length": seq_length,
+                    "num_epochs": num_epochs,
+                    "lr": lr,
+                },
+            )
 
     # Evaluate KV cache (baseline)
     print_flush("\n" + "=" * 70)
@@ -486,6 +579,7 @@ def main() -> None:
     parser.add_argument("--adapter-bottleneck", type=int, default=64, help="Adapter bottleneck dimension")
     parser.add_argument("--skip-adapter-training", action="store_true", help="Skip adapter training")
     parser.add_argument("--pretrained-path", type=str, default=None, help="Path to pretrained model")
+    parser.add_argument("--no-cache", action="store_true", help="Disable auto-caching of base model")
     args = parser.parse_args()
 
     run_experiment(
@@ -499,6 +593,7 @@ def main() -> None:
         adapter_bottleneck=args.adapter_bottleneck,
         skip_adapter_training=args.skip_adapter_training,
         pretrained_path=args.pretrained_path,
+        no_cache=args.no_cache,
     )
 
     print_flush("\nDONE")
