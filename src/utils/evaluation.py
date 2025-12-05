@@ -164,9 +164,25 @@ class QKStatsCollector:
         all_q_max = max(s.q_max for s in stats.values())
         all_k_max = max(s.k_max for s in stats.values())
 
+        # 全レイヤーでの平均（レイヤー平均の平均）
+        all_q_mean = sum(s.q_mean for s in stats.values()) / len(stats)
+        all_k_mean = sum(s.k_mean for s in stats.values()) / len(stats)
+
+        # 全レイヤーでの標準偏差（レイヤー平均の平均）
+        all_q_std = sum(s.q_std for s in stats.values()) / len(stats)
+        all_k_std = sum(s.k_std for s in stats.values()) / len(stats)
+
         # レイヤーごとの最大値
         layer_q_max = {idx: s.q_max for idx, s in stats.items()}
         layer_k_max = {idx: s.k_max for idx, s in stats.items()}
+
+        # レイヤーごとの平均
+        layer_q_mean = {idx: s.q_mean for idx, s in stats.items()}
+        layer_k_mean = {idx: s.k_mean for idx, s in stats.items()}
+
+        # レイヤーごとの標準偏差
+        layer_q_std = {idx: s.q_std for idx, s in stats.items()}
+        layer_k_std = {idx: s.k_std for idx, s in stats.items()}
 
         # 次元ごとの分析（高周波 vs 低周波）
         first_layer_stats = stats.get(0)
@@ -210,8 +226,16 @@ class QKStatsCollector:
         return {
             "all_q_max": all_q_max,
             "all_k_max": all_k_max,
+            "all_q_mean": all_q_mean,
+            "all_k_mean": all_k_mean,
+            "all_q_std": all_q_std,
+            "all_k_std": all_k_std,
             "layer_q_max": layer_q_max,
             "layer_k_max": layer_k_max,
+            "layer_q_mean": layer_q_mean,
+            "layer_k_mean": layer_k_mean,
+            "layer_q_std": layer_q_std,
+            "layer_k_std": layer_k_std,
             "dim_analysis": dim_analysis,
             "per_layer": stats,
         }

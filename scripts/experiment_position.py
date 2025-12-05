@@ -162,16 +162,20 @@ def train_model(
     qk_stats = analyze_qk_stats(model, val_loader, device, num_batches=10)
 
     if qk_stats:
-        print_flush(f"    Overall Q max: {qk_stats['all_q_max']:.2f}")
-        print_flush(f"    Overall K max: {qk_stats['all_k_max']:.2f}")
+        print_flush(f"    Overall Q: max={qk_stats['all_q_max']:.2f}, mean={qk_stats['all_q_mean']:.2f}, std={qk_stats['all_q_std']:.2f}")
+        print_flush(f"    Overall K: max={qk_stats['all_k_max']:.2f}, mean={qk_stats['all_k_mean']:.2f}, std={qk_stats['all_k_std']:.2f}")
 
-        print_flush("\n    Layer-wise max values:")
-        print_flush("    | Layer | Q max | K max |")
-        print_flush("    |-------|-------|-------|")
+        print_flush("\n    Layer-wise statistics:")
+        print_flush("    | Layer | Q max | Q mean | Q std | K max | K mean | K std |")
+        print_flush("    |-------|-------|--------|-------|-------|--------|-------|")
         for layer_idx in sorted(qk_stats['layer_q_max'].keys()):
             q_max = qk_stats['layer_q_max'][layer_idx]
+            q_mean = qk_stats['layer_q_mean'][layer_idx]
+            q_std = qk_stats['layer_q_std'][layer_idx]
             k_max = qk_stats['layer_k_max'][layer_idx]
-            print_flush(f"    | {layer_idx} | {q_max:.2f} | {k_max:.2f} |")
+            k_mean = qk_stats['layer_k_mean'][layer_idx]
+            k_std = qk_stats['layer_k_std'][layer_idx]
+            print_flush(f"    | {layer_idx} | {q_max:.2f} | {q_mean:.2f} | {q_std:.2f} | {k_max:.2f} | {k_mean:.2f} | {k_std:.2f} |")
 
         if qk_stats.get('dim_analysis'):
             dim = qk_stats['dim_analysis']
@@ -219,7 +223,7 @@ def run_experiment(
     batch_size: int = 8,
     lr: float = 1e-4,
     pos_types: List[str] = ["rope", "alibi", "none"],
-    rotary_pct: float = 0.25,
+    rotary_pct: float = 1.0,
     rope3d_pct: float = 0.25,
     alibi_slope: float = 0.0625,
     rope_base: int = 10000,
@@ -380,7 +384,7 @@ def main() -> None:
         help="Position encoding types to compare",
     )
     parser.add_argument(
-        "--rotary-pct", type=float, default=0.25, help="RoPE rotary percentage"
+        "--rotary-pct", type=float, default=1.0, help="RoPE rotary percentage (default: 1.0 = all dims)"
     )
     parser.add_argument(
         "--rope3d-pct", type=float, default=0.25, help="RoPE3D rotary percentage"

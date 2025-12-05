@@ -34,7 +34,7 @@ KV Cache: K(512) + V(512) = 1024      KV Cache: c_kv(128) = 128
 | Layers | 6 | 6 |
 | Attention Heads | 8 | 8 |
 | intermediate_size | 2048 | 2048 |
-| Position Encoding | RoPE (25%) | ALiBi (統一スロープ) |
+| Position Encoding | RoPE (100%) | ALiBi (統一スロープ) |
 | KV Cache削減 | 0% | 87.5% |
 
 ### 実験の実行
@@ -191,6 +191,30 @@ score = Q @ W_UK^T @ c_kv^T - m * distance_matrix
 # RoPEの場合（不可能）
 score = (R_q @ Q) @ (R_k @ c_kv @ W_UK)^T
         ↑ 回転行列が位置依存のため事前計算不可
+```
+
+---
+
+## 🔄 RoPE設定方針
+
+### rotary_pct = 1.0 をデフォルトとする
+
+**理由**:
+1. **パススルー領域の排除**: rotary_pct=0.25では48次元がRoPE未適用となり、周波数帯域分析が不完全になる
+2. **純粋な比較**: 全次元にRoPEを適用することで、高周波/低周波の純粋な比較が可能
+3. **PPLへの影響なし**: rotary_pct=0.25と1.0でPPLはほぼ同等（実験で確認済み）
+
+**設定例**:
+```python
+# デフォルト: rotary_pct=1.0（全64次元にRoPE適用）
+pos_config = PositionEncodingConfig(
+    type="rope",
+    rotary_pct=1.0,  # 100% = 全次元
+)
+
+# 高周波: dims 0-31
+# 低周波: dims 32-63
+# パススルー: なし
 ```
 
 ---
