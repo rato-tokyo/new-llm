@@ -195,7 +195,6 @@ class PythiaLayer(nn.Module):
 
         # Layer norms
         self.input_layernorm = nn.LayerNorm(hidden_size)
-        self.post_attention_layernorm = nn.LayerNorm(hidden_size)
 
         # Attention
         self.attention = PythiaAttention(

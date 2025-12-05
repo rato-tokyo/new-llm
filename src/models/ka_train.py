@@ -5,11 +5,8 @@ KA Training Model (案2)
 推論時も同じ方式を使うことでtrain-inference mismatchを解消。
 
 方式:
-  位置 i での Attention Output 計算:
-    A[i] = softmax(Q[i] @ K[:i]^T) @ [A[1:i-1], V[i]]
-
-  - 過去トークン (1 to i-1): Attention Output (A) を使用
-  - 現在トークン (i): Value (V) を使用
+  A[0] = V[0]                                   (ブートストラップ)
+  A[i] = renormalize(weights[:i]) @ A[:i]       (過去のAのみ、現在のVは不使用)
 
 注意:
   この方式では誤差が再帰的に蓄積する。
@@ -22,6 +19,8 @@ from typing import Optional, List, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from src.utils.rope import RotaryEmbedding
 
 
 class KATrainAttention(nn.Module):
@@ -43,51 +42,19 @@ class KATrainAttention(nn.Module):
         self.hidden_size = hidden_size
         self.num_heads = num_heads
         self.head_dim = hidden_size // num_heads
-        self.rotary_dim = int(self.head_dim * rotary_pct)
         self.scale = self.head_dim ** -0.5
 
         # Query, Key, Value projections
         self.query_key_value = nn.Linear(hidden_size, 3 * hidden_size)
         self.dense = nn.Linear(hidden_size, hidden_size)
 
-        # RoPE
-        inv_freq = 1.0 / (base ** (torch.arange(0, self.rotary_dim, 2).float() / self.rotary_dim))
-        self.register_buffer("inv_freq", inv_freq)
-        self._init_rope_cache(max_position_embeddings)
-
-    def _init_rope_cache(self, max_len: int) -> None:
-        t = torch.arange(max_len, device=self.inv_freq.device, dtype=self.inv_freq.dtype)
-        freqs = torch.einsum("i,j->ij", t, self.inv_freq)
-        emb = torch.cat((freqs, freqs), dim=-1)
-        self.register_buffer("cos_cached", emb.cos())
-        self.register_buffer("sin_cached", emb.sin())
-        self.max_seq_len_cached = max_len
-
-    def _apply_rotary(
-        self,
-        q: torch.Tensor,
-        k: torch.Tensor,
-        position_ids: torch.Tensor,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """Apply RoPE to query and key"""
-        seq_len = int(position_ids.max().item()) + 1
-        if seq_len > self.max_seq_len_cached:
-            self._init_rope_cache(seq_len)
-
-        cos = self.cos_cached[position_ids].unsqueeze(1)
-        sin = self.sin_cached[position_ids].unsqueeze(1)
-
-        q_rot, q_pass = q[..., :self.rotary_dim], q[..., self.rotary_dim:]
-        k_rot, k_pass = k[..., :self.rotary_dim], k[..., self.rotary_dim:]
-
-        def rotate_half(x: torch.Tensor) -> torch.Tensor:
-            x1, x2 = x[..., :x.shape[-1]//2], x[..., x.shape[-1]//2:]
-            return torch.cat((-x2, x1), dim=-1)
-
-        q_rot = q_rot * cos + rotate_half(q_rot) * sin
-        k_rot = k_rot * cos + rotate_half(k_rot) * sin
-
-        return torch.cat([q_rot, q_pass], dim=-1), torch.cat([k_rot, k_pass], dim=-1)
+        # RoPE (shared implementation)
+        self.rope = RotaryEmbedding(
+            head_dim=self.head_dim,
+            rotary_pct=rotary_pct,
+            max_position_embeddings=max_position_embeddings,
+            base=base,
+        )
 
     def forward_parallel_ka(
         self,
@@ -113,7 +80,7 @@ class KATrainAttention(nn.Module):
         query, key, value = qkv[0], qkv[1], qkv[2]
 
         # Apply RoPE
-        query, key = self._apply_rotary(query, key, position_ids)
+        query, key = self.rope(query, key, position_ids)
 
         # Attention weights (full causal)
         attn_weights = torch.matmul(query, key.transpose(-1, -2)) * self.scale
@@ -175,7 +142,7 @@ class KATrainAttention(nn.Module):
         query, key, value = qkv[0], qkv[1], qkv[2]
 
         # Apply RoPE
-        query, key = self._apply_rotary(query, key, position_ids)
+        query, key = self.rope(query, key, position_ids)
 
         # Handle KA cache
         if ka_cache is not None:
@@ -244,7 +211,7 @@ class KATrainAttention(nn.Module):
         qkv = qkv.permute(2, 0, 3, 1, 4)
         query, key, value = qkv[0], qkv[1], qkv[2]
 
-        query, key = self._apply_rotary(query, key, position_ids)
+        query, key = self.rope(query, key, position_ids)
 
         if kv_cache is not None:
             cached_k, cached_v = kv_cache
