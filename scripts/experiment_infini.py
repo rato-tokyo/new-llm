@@ -9,7 +9,8 @@ Pythia (RoPE) vs Infini-Pythia (1層目Infini + MLA ALiBi) の比較。
 
 Usage:
     python3 scripts/experiment_infini.py --samples 5000 --epochs 30
-    python3 scripts/experiment_infini.py --samples 5000 --skip-baseline
+    python3 scripts/experiment_infini.py --skip-baseline   # Infini only
+    python3 scripts/experiment_infini.py --skip-infini     # Pythia baseline only
     python3 scripts/experiment_infini.py --seq-length 512  # longer context
 """
 
@@ -173,6 +174,7 @@ def run_experiment(
     alibi_slope: float = 0.0625,
     use_delta_rule: bool = True,
     skip_baseline: bool = False,
+    skip_infini: bool = False,
 ) -> dict[str, Any]:
     """Run Infini-Attention experiment."""
     set_seed(42)
@@ -191,6 +193,7 @@ def run_experiment(
     print_flush(f"ALiBi slope: {alibi_slope}")
     print_flush(f"Delta rule: {use_delta_rule}")
     print_flush(f"Skip baseline: {skip_baseline}")
+    print_flush(f"Skip infini: {skip_infini}")
     print_flush("=" * 70)
 
     print_flush("\n[Data] Loading Pile data...")
@@ -293,86 +296,92 @@ def run_experiment(
         clear_gpu_cache(device)
 
     # ===== 2. Infini-Pythia (1層目Infini + ALiBi) =====
-    print_flush("\n" + "=" * 70)
-    print_flush(f"2. INFINI-PYTHIA (1層目Infini + MLA ALiBi)")
-    print_flush("=" * 70)
-    print_flush("  Layer 0: Infini-Attention (NoPE, compressive memory)")
-    print_flush("  Layer 1-5: MLA with ALiBi")
+    if skip_infini:
+        print_flush("\n" + "=" * 70)
+        print_flush("2. INFINI-PYTHIA - SKIPPED")
+        print_flush("=" * 70)
+        results["infini"] = None
+    else:
+        print_flush("\n" + "=" * 70)
+        print_flush("2. INFINI-PYTHIA (1層目Infini + MLA ALiBi)")
+        print_flush("=" * 70)
+        print_flush("  Layer 0: Infini-Attention (NoPE, compressive memory)")
+        print_flush("  Layer 1-5: MLA with ALiBi")
 
-    infini_model = InfiniPythiaModel(
-        vocab_size=config.vocab_size,
-        hidden_size=config.hidden_size,
-        num_layers=config.num_layers,
-        num_heads=config.num_attention_heads,
-        intermediate_size=config.intermediate_size,
-        kv_dim=kv_dim,
-        q_compressed=False,
-        alibi_slope=alibi_slope,
-        use_delta_rule=use_delta_rule,
-    )
-    infini_model = infini_model.to(device)
+        infini_model = InfiniPythiaModel(
+            vocab_size=config.vocab_size,
+            hidden_size=config.hidden_size,
+            num_layers=config.num_layers,
+            num_heads=config.num_attention_heads,
+            intermediate_size=config.intermediate_size,
+            kv_dim=kv_dim,
+            q_compressed=False,
+            alibi_slope=alibi_slope,
+            use_delta_rule=use_delta_rule,
+        )
+        infini_model = infini_model.to(device)
 
-    param_info = infini_model.num_parameters()
-    print_flush(f"\n  Total parameters: {param_info['total']:,}")
-    print_flush(f"  Infini layer: {param_info['infini_layer']:,}")
-    print_flush(f"  MLA layers: {param_info['mla_layers']:,}")
+        param_info = infini_model.num_parameters()
+        print_flush(f"\n  Total parameters: {param_info['total']:,}")
+        print_flush(f"  Infini layer: {param_info['infini_layer']:,}")
+        print_flush(f"  MLA layers: {param_info['mla_layers']:,}")
 
-    cache_info = infini_model.kv_cache_info(seq_length)
-    print_flush(f"  KV Cache reduction: {cache_info['reduction_percent']:.1f}%")
-    print_flush(f"  Infini memory: {cache_info['infini_memory_bytes']:,} bytes (fixed)")
+        cache_info = infini_model.kv_cache_info(seq_length)
+        print_flush(f"  KV Cache reduction: {cache_info['reduction_percent']:.1f}%")
+        print_flush(f"  Infini memory: {cache_info['infini_memory_bytes']:,} bytes (fixed)")
 
-    optimizer = torch.optim.AdamW(infini_model.parameters(), lr=lr)
+        optimizer = torch.optim.AdamW(infini_model.parameters(), lr=lr)
 
-    print_flush("\n[Infini] Training...")
-    best_val_ppl, best_epoch = train_infini_model(
-        infini_model,
-        train_loader,
-        val_loader,
-        optimizer,
-        device,
-        num_epochs,
-        reset_memory_per_epoch=True,
-    )
+        print_flush("\n[Infini] Training...")
+        best_val_ppl, best_epoch = train_infini_model(
+            infini_model,
+            train_loader,
+            val_loader,
+            optimizer,
+            device,
+            num_epochs,
+            reset_memory_per_epoch=True,
+        )
 
-    print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
+        print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
 
-    # Final gate values
-    gate_values = infini_model.get_infini_gate_values()
-    print_flush(f"\n  Final gate values (per head):")
-    for i, g in enumerate(gate_values):
-        print_flush(f"    Head {i}: {g.item():.3f}")
+        # Final gate values
+        gate_values = infini_model.get_infini_gate_values()
+        print_flush(f"\n  Final gate values (per head):")
+        for i, g in enumerate(gate_values):
+            print_flush(f"    Head {i}: {g.item():.3f}")
 
-    print_flush("\n  Position-wise PPL:")
-    infini_model.reset_memory()
-    infini_pos_ppl = evaluate_position_wise_ppl(
-        infini_model, val_loader, device, return_recon_loss=False
-    )
-    for pos_range, ppl in infini_pos_ppl.items():
-        print_flush(f"    Position {pos_range}: {ppl:.1f}")
+        print_flush("\n  Position-wise PPL:")
+        infini_model.reset_memory()
+        infini_pos_ppl = evaluate_position_wise_ppl(
+            infini_model, val_loader, device, return_recon_loss=False
+        )
+        for pos_range, ppl in infini_pos_ppl.items():
+            print_flush(f"    Position {pos_range}: {ppl:.1f}")
 
-    # Reversal Curse evaluation
-    print_flush("\n  Reversal Curse evaluation:")
-    tokenizer = get_tokenizer(config.tokenizer_name)
-    reversal_pairs = get_reversal_pairs()
-    infini_model.reset_memory()
-    infini_reversal = evaluate_reversal_curse(
-        infini_model, tokenizer, reversal_pairs, device
-    )
-    print_flush(f"    Forward PPL: {infini_reversal['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {infini_reversal['backward_ppl']:.1f}")
-    print_flush(f"    Reversal Ratio: {infini_reversal['reversal_ratio']:.3f}")
-    print_flush(f"    Reversal Gap: {infini_reversal['reversal_gap']:+.1f}")
+        # Reversal Curse evaluation
+        print_flush("\n  Reversal Curse evaluation:")
+        tokenizer = get_tokenizer(config.tokenizer_name)
+        reversal_pairs = get_reversal_pairs()
+        infini_model.reset_memory()
+        infini_reversal = evaluate_reversal_curse(
+            infini_model, tokenizer, reversal_pairs, device
+        )
+        print_flush(f"    Forward PPL: {infini_reversal['forward_ppl']:.1f}")
+        print_flush(f"    Backward PPL: {infini_reversal['backward_ppl']:.1f}")
+        print_flush(f"    Reversal Ratio: {infini_reversal['reversal_ratio']:.3f}")
+        print_flush(f"    Reversal Gap: {infini_reversal['reversal_gap']:+.1f}")
 
-    results["infini"] = {
-        "best_val_ppl": best_val_ppl,
-        "best_epoch": best_epoch,
-        "position_wise_ppl": infini_pos_ppl,
-        "reversal_curse": infini_reversal,
-        "final_gate_values": gate_values.tolist(),
-    }
+        results["infini"] = {
+            "best_val_ppl": best_val_ppl,
+            "best_epoch": best_epoch,
+            "position_wise_ppl": infini_pos_ppl,
+            "reversal_curse": infini_reversal,
+            "final_gate_values": gate_values.tolist(),
+        }
 
-    del infini_model
-    clear_gpu_cache(device)
+        del infini_model
+        clear_gpu_cache(device)
 
     # ===== Summary =====
     print_flush("\n" + "=" * 70)
@@ -388,12 +397,13 @@ def run_experiment(
             f"{results['pythia']['best_epoch']} |"
         )
 
-    print_flush(
-        f"| Infini-Pythia | {results['infini']['best_val_ppl']:.1f} | "
-        f"{results['infini']['best_epoch']} |"
-    )
+    if results["infini"] is not None:
+        print_flush(
+            f"| Infini-Pythia | {results['infini']['best_val_ppl']:.1f} | "
+            f"{results['infini']['best_epoch']} |"
+        )
 
-    if results["pythia"] is not None:
+    if results["pythia"] is not None and results["infini"] is not None:
         diff = results["infini"]["best_val_ppl"] - results["pythia"]["best_val_ppl"]
         print_flush(f"\nDifference: {diff:+.1f} ppl")
 
@@ -469,6 +479,9 @@ def main() -> None:
     parser.add_argument(
         "--skip-baseline", action="store_true", help="Skip Pythia baseline"
     )
+    parser.add_argument(
+        "--skip-infini", action="store_true", help="Skip Infini-Pythia (run baseline only)"
+    )
     args = parser.parse_args()
 
     run_experiment(
@@ -481,6 +494,7 @@ def main() -> None:
         alibi_slope=args.alibi_slope,
         use_delta_rule=not args.no_delta_rule,
         skip_baseline=args.skip_baseline,
+        skip_infini=args.skip_infini,
     )
 
     print_flush("\nDONE")
