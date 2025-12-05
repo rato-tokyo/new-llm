@@ -253,12 +253,162 @@ python3 scripts/experiment_infini.py --memory-only --skip-baseline
 
 ---
 
+## Long Context Training 実験
+
+**追加実験日時**: 2025-12-05
+
+### 設定
+
+長文ドキュメント対応のTruncated BPTT訓練と評価を実施。
+
+| パラメータ | 値 |
+|-----------|-----|
+| 訓練ドキュメント | 45 |
+| 検証ドキュメント | 5 |
+| ドキュメントあたりトークン数 | 4,096 |
+| セグメント長 | 256 |
+| セグメント数/ドキュメント | 16 |
+| 総訓練トークン | 184,320 (45 × 4,096) |
+
+### 訓練方式
+
+- **Truncated BPTT**: セグメントごとにbackprop、ドキュメント境界でメモリリセット
+- **メモリ管理**: セグメント間でメモリを継続、ドキュメント間でリセット
+
+### 結果サマリー
+
+#### 訓練結果
+
+| モデル | Best Val PPL | Best Epoch | 備考 |
+|--------|-------------|------------|------|
+| Pythia (RoPE) | 1388.4 | 3 | Early stop (epoch 4) |
+| Infini-Pythia | **1317.6** | 4 | Early stop (epoch 5) |
+
+**差分: -70.9 PPL (5.1%改善)**
+
+### 学習曲線
+
+#### Pythia (RoPE baseline)
+
+| Epoch | Train PPL | Val PPL | 備考 |
+|-------|-----------|---------|------|
+| 1 | 2151.3 | 1851.9 | * |
+| 2 | 456.9 | 1470.1 | * |
+| 3 | 204.5 | **1388.4** | * Best |
+| 4 | 110.7 | 1396.5 | Early stop |
+
+#### Infini-Pythia
+
+| Epoch | Train PPL | Val PPL | Gate | 備考 |
+|-------|-----------|---------|------|------|
+| 1 | 2148.6 | 1801.9 | 0.501 | * |
+| 2 | 450.6 | 1487.0 | 0.500 | * |
+| 3 | 201.1 | 1368.7 | 0.497 | * |
+| 4 | 109.7 | **1317.6** | 0.494 | * Best |
+| 5 | 66.1 | 1334.9 | 0.491 | Early stop |
+
+### Gate値の分析
+
+| Head | Gate値 | 解釈 |
+|------|--------|------|
+| 0 | 0.489 | Memory 48.9%, Local 51.1% |
+| 1 | 0.492 | Memory 49.2%, Local 50.8% |
+| 2 | 0.493 | Memory 49.3%, Local 50.7% |
+| 3 | 0.490 | Memory 49.0%, Local 51.0% |
+| 4 | 0.491 | Memory 49.1%, Local 50.9% |
+| 5 | 0.490 | Memory 49.0%, Local 51.0% |
+| 6 | 0.493 | Memory 49.3%, Local 50.7% |
+| 7 | 0.490 | Memory 49.0%, Local 51.0% |
+
+**平均**: 0.491 (Memory 49.1%, Local 50.9%)
+
+**観察**: ほぼ50:50のバランス。前回の通常訓練（0.460）よりMemory比率が高い。
+
+### Long Context 評価結果
+
+**評価設定**:
+- 50ドキュメント × 4,096トークン = 204,800トークン
+- ドキュメントごとにメモリリセット
+- セグメントごとにメモリ更新
+
+#### 結果比較
+
+| モデル | Total PPL | Seg 0 | Seg 1 | Seg 2 | Last (Seg 15) |
+|--------|-----------|-------|-------|-------|---------------|
+| Pythia | 55981.3 | 56158.1 | 55935.4 | 55761.6 | 56238.2 |
+| Infini (with memory) | **121.1** | 106.6 | 125.3 | 130.8 | 112.9 |
+| Infini (without memory) | 121.1 | 106.6 | 125.3 | 130.8 | 112.9 |
+
+### 重大な問題点
+
+#### 1. Pythiaの異常なPPL (55981)
+
+訓練PPLは110程度まで下がったにもかかわらず、Long Context評価で55981という異常値を示した。
+
+**考えられる原因**:
+- **訓練データと評価データの分布不一致**: 訓練は45ドキュメント、評価は別の50ドキュメント
+- **ドキュメント分割の問題**: Pileデータを連続で分割しているため、訓練と評価で異なる領域を使用
+- **過学習**: 訓練ドキュメントに過学習し、評価ドキュメントで汎化失敗
+
+#### 2. Infiniの「with memory」と「without memory」が同一
+
+両者のPPLが完全一致（121.1）している。
+
+**考えられる原因**:
+- 評価時のメモリ更新が正しく機能していない可能性
+- または、メモリが有効に活用されていない
+
+### Reversal Curse 評価
+
+| モデル | Forward PPL | Backward PPL | Ratio | Gap |
+|--------|-------------|--------------|-------|-----|
+| Pythia | 32313.2 | 26516.1 | 1.219 | -5797.1 |
+| Infini | 30103.8 | 19812.5 | **1.519** | -10291.3 |
+
+**観察**:
+- Forward > Backward という異常な結果（通常はBackwardの方が高い）
+- **Ratioが1.0より大きい**: 逆方向の方が得意という矛盾
+- Long Context訓練でReversal Curse評価の基準が変化した可能性
+
+### 分析と考察
+
+#### 良い点
+
+1. **Infini-PythiaがPythiaを上回った**: Val PPL 1317.6 vs 1388.4 (5.1%改善)
+2. **Long Context評価でInfiniが圧倒的優位**: 121 vs 55981
+3. **学習が安定**: 両モデルとも収束
+
+#### 問題点
+
+1. **Pythiaの評価PPL異常**: 訓練PPL(110)と評価PPL(55981)の乖離が大きすぎる
+2. **メモリ有無で差がない**: Infiniのメモリ機能が評価時に効いていない可能性
+3. **Reversal Curse異常**: Forward > Backward の逆転現象
+
+### 今後の調査項目
+
+1. **データ分割の確認**: 訓練と評価で同じドキュメントを使用していないか
+2. **メモリ更新ロジックの検証**: `update_memory=True/False`が正しく機能しているか
+3. **標準評価との比較**: Long Context訓練後のモデルを通常の評価方法でも検証
+
+### 実行コマンド
+
+```bash
+python3 scripts/experiment_infini.py \
+    --long-context-train \
+    --long-context \
+    --num-long-docs 50 \
+    --tokens-per-doc 4096
+```
+
+---
+
 ## 次のステップ（提案）
 
 1. **より長いシーケンス長での実験**: seq_length=512, 1024
 2. **複数層へのInfini-Attention導入**: Layer 0-1, Layer 0-2 など
 3. **より大規模データでの検証**: samples=10,000以上
 4. **Delta Rule無効時との比較**: `--no-delta-rule`オプション
+5. **Long Context訓練の問題調査**: データ分割とメモリ更新ロジックの検証
 
 ---
 
@@ -270,4 +420,7 @@ python3 scripts/experiment_infini.py --samples 5000 --seq-length 256 --epochs 30
 
 # Memory-Only実験
 python3 scripts/experiment_infini.py --memory-only --skip-baseline
+
+# Long Context訓練・評価
+python3 scripts/experiment_infini.py --long-context-train --long-context --num-long-docs 50 --tokens-per-doc 4096
 ```
