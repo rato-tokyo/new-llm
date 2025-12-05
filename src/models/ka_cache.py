@@ -16,7 +16,7 @@ KAキャッシュの仕組み:
 """
 
 from dataclasses import dataclass
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Union
 
 import torch
 import torch.nn as nn
@@ -26,8 +26,8 @@ import torch.nn.functional as F
 @dataclass
 class KACache:
     """KAキャッシュのデータ構造"""
-    keys: List[torch.Tensor]  # [num_layers] each: [batch, heads, cached_len, head_dim]
-    attention_outputs: List[torch.Tensor]  # [num_layers] each: [batch, heads, cached_len, head_dim]
+    keys: List[Optional[torch.Tensor]]  # [num_layers] each: [batch, heads, cached_len, head_dim]
+    attention_outputs: List[Optional[torch.Tensor]]  # [num_layers] each: [batch, heads, cached_len, head_dim]
 
     @classmethod
     def empty(cls, num_layers: int) -> "KACache":
@@ -42,8 +42,8 @@ class KACache:
 @dataclass
 class KVCache:
     """標準KVキャッシュのデータ構造"""
-    keys: List[torch.Tensor]  # [num_layers] each: [batch, heads, cached_len, head_dim]
-    values: List[torch.Tensor]  # [num_layers] each: [batch, heads, cached_len, head_dim]
+    keys: List[Optional[torch.Tensor]]  # [num_layers] each: [batch, heads, cached_len, head_dim]
+    values: List[Optional[torch.Tensor]]  # [num_layers] each: [batch, heads, cached_len, head_dim]
 
     @classmethod
     def empty(cls, num_layers: int) -> "KVCache":
@@ -101,7 +101,7 @@ class KACacheAttention(nn.Module):
         position_ids: torch.Tensor,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """Apply RoPE to query and key"""
-        seq_len = position_ids.max().item() + 1
+        seq_len = int(position_ids.max().item()) + 1
         if seq_len > self.max_seq_len_cached:
             self._init_rope_cache(seq_len)
 
