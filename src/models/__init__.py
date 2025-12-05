@@ -15,6 +15,7 @@ from .position_encoding import (
     NoPositionEncoding,
     RotaryPositionEncoding,
     ALiBiPositionEncoding,
+    LearnablePositionEncoding,
     create_position_encoding,
 )
 from .unified_pythia import UnifiedPythiaModel
@@ -35,6 +36,7 @@ __all__ = [
     'NoPositionEncoding',
     'RotaryPositionEncoding',
     'ALiBiPositionEncoding',
+    'LearnablePositionEncoding',
     'create_position_encoding',
     # Unified model
     'UnifiedPythiaModel',

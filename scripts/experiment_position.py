@@ -3,7 +3,7 @@
 Position Encoding Experiment
 
 位置エンコーディングの比較実験。
-RoPE, ALiBi, NoPE を統一モデルで比較。
+RoPE, ALiBi, NoPE, Learnable を統一モデルで比較。
 
 Usage:
     # 全種類比較
@@ -15,6 +15,10 @@ Usage:
 
     # ALiBi slope変更
     python3 scripts/experiment_position.py --pos-types alibi --alibi-slope 0.125
+
+    # Learnable position encoding
+    python3 scripts/experiment_position.py --pos-types learnable --learnable-nonlinear gelu
+    python3 scripts/experiment_position.py --pos-types rope learnable --learnable-dim 32
 """
 
 import argparse
@@ -54,6 +58,7 @@ POS_ENCODING_NAMES = {
     "rope": "RoPE (25%)",
     "alibi": "ALiBi",
     "none": "NoPE (None)",
+    "learnable": "Learnable (K only)",
 }
 
 
@@ -67,6 +72,8 @@ def train_model(
     lr: float,
     rotary_pct: float,
     alibi_slope: float,
+    learnable_dim: int | None = None,
+    learnable_nonlinear: str = "gelu",
 ) -> dict[str, Any]:
     """Train a model with specified position encoding."""
     pos_name = POS_ENCODING_NAMES.get(pos_type, pos_type)
@@ -77,6 +84,8 @@ def train_model(
         type=pos_type,
         rotary_pct=rotary_pct,
         alibi_slope=alibi_slope,
+        learnable_dim=learnable_dim,
+        learnable_nonlinear=learnable_nonlinear,
         max_position_embeddings=config.max_position_embeddings,
     )
 
@@ -170,6 +179,8 @@ def run_experiment(
     pos_types: List[str] = ["rope", "alibi", "none"],
     rotary_pct: float = 0.25,
     alibi_slope: float = 0.0625,
+    learnable_dim: int | None = None,
+    learnable_nonlinear: str = "gelu",
 ) -> dict[str, Any]:
     """Run position encoding comparison experiment."""
     set_seed(42)
@@ -187,6 +198,9 @@ def run_experiment(
     print_flush(f"Position types: {pos_types}")
     print_flush(f"RoPE rotary_pct: {rotary_pct}")
     print_flush(f"ALiBi slope: {alibi_slope}")
+    if "learnable" in pos_types:
+        print_flush(f"Learnable dim: {learnable_dim or 'full head_dim'}")
+        print_flush(f"Learnable nonlinear: {learnable_nonlinear}")
     print_flush("=" * 70)
 
     print_flush("\n[Data] Loading Pile data...")
@@ -216,6 +230,8 @@ def run_experiment(
             lr=lr,
             rotary_pct=rotary_pct,
             alibi_slope=alibi_slope,
+            learnable_dim=learnable_dim,
+            learnable_nonlinear=learnable_nonlinear,
         )
         results[pos_type] = result
 
@@ -317,7 +333,7 @@ def main() -> None:
         "--pos-types",
         nargs="+",
         default=["rope", "alibi", "none"],
-        choices=["rope", "alibi", "none"],
+        choices=["rope", "alibi", "none", "learnable"],
         help="Position encoding types to compare",
     )
     parser.add_argument(
@@ -325,6 +341,19 @@ def main() -> None:
     )
     parser.add_argument(
         "--alibi-slope", type=float, default=0.0625, help="ALiBi slope (uniform)"
+    )
+    parser.add_argument(
+        "--learnable-dim",
+        type=int,
+        default=None,
+        help="Learnable position encoding dimension (default: full head_dim)",
+    )
+    parser.add_argument(
+        "--learnable-nonlinear",
+        type=str,
+        default="gelu",
+        choices=["gelu", "relu", "tanh", "none"],
+        help="Learnable position encoding nonlinearity",
     )
     args = parser.parse_args()
 
@@ -337,6 +366,8 @@ def main() -> None:
         pos_types=args.pos_types,
         rotary_pct=args.rotary_pct,
         alibi_slope=args.alibi_slope,
+        learnable_dim=args.learnable_dim,
+        learnable_nonlinear=args.learnable_nonlinear,
     )
 
     print_flush("\nDONE")

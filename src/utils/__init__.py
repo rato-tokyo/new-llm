@@ -14,7 +14,18 @@ from .training import (
     get_tokenizer,
 )
 from .evaluation import evaluate_ppl, evaluate_position_wise_ppl, evaluate_reversal_curse
-from .rope import RotaryEmbedding, apply_rotary_pos_emb
+from .rope import (
+    RotaryEmbedding,
+    CustomRotaryEmbedding,
+    RoPEConfig,
+    apply_rotary_pos_emb,
+    create_rope_from_config,
+    standard_rope_config,
+    custom_frequencies_config,
+    custom_list_config,
+    linear_frequency_config,
+    exponential_frequency_config,
+)
 
 __all__ = [
     # Device utilities
@@ -38,5 +49,13 @@ __all__ = [
     'evaluate_reversal_curse',
     # RoPE utilities
     'RotaryEmbedding',
+    'CustomRotaryEmbedding',
+    'RoPEConfig',
     'apply_rotary_pos_emb',
+    'create_rope_from_config',
+    'standard_rope_config',
+    'custom_frequencies_config',
+    'custom_list_config',
+    'linear_frequency_config',
+    'exponential_frequency_config',
 ]
