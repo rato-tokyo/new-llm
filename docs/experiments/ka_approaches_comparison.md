@@ -49,20 +49,23 @@ KAキャッシュ:     K, A をキャッシュ（Vの代わりにAttention Outpu
 
 ---
 
-### 案2: KA Training（学習時からKA）
+### 案2: KA Training（学習時からKA、全てA統一）
 
 **ファイル**: `src/models/ka_train.py`, `scripts/experiment_ka_train.py`
 
 ```
 学習時・推論時ともに:
-  A[i] = softmax(Q[i] @ K[:i]^T) @ [A[1:i-1], V[i]]
-                                    ↑過去はA  ↑現在はV
+  A[0] = V[0]                                   (ブートストラップ)
+  A[i] = renormalize(weights[:i]) @ A[:i]       (過去のAのみ、現在のVは不使用)
 ```
+
+**仮説**: Attention OutputはResidual Connectionで加算されるため、現在位置のVを直接使用する必要はない。
 
 **特徴**:
 - 学習と推論で同じ計算グラフ（一貫性あり）
 - モデルがKA方式に最適化される
 - 追加パラメータなし
+- **現在位置のVを使わない**（全てAで統一）
 
 **問題点**:
 - 誤差の再帰的蓄積（後述）

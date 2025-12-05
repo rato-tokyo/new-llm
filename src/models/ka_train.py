@@ -97,10 +97,12 @@ class KATrainAttention(nn.Module):
         """
         並列KA計算（学習用）
 
-        KAキャッシュ方式をシミュレート:
-          A[i] = weights @ [A[1:i-1], V[i]]
+        全トークンでAを使用する方式（Vは使わない）:
+          A[0] = V[0]                   (最初だけV、ブートストラップ)
+          A[i] = weights[:i] @ A[:i]    (過去のAのみ使用、現在のVは不使用)
 
-        効率的な並列計算のため、autoregressiveループを使用。
+        仮説: Attention OutputはResidual Connectionで加算されるため、
+        現在位置のVを直接使用する必要はない。
         """
         batch_size, seq_len, _ = hidden_states.shape
 
@@ -116,7 +118,8 @@ class KATrainAttention(nn.Module):
         # Attention weights (full causal)
         attn_weights = torch.matmul(query, key.transpose(-1, -2)) * self.scale
 
-        # Causal mask
+        # Causal mask: 現在位置も見えないようにする (diagonal=0 ではなく diagonal=1 のまま)
+        # ただし、過去位置のみを使うため、weightsを再正規化
         causal_mask = torch.triu(
             torch.ones(seq_len, seq_len, device=hidden_states.device) * float("-inf"),
             diagonal=1
@@ -124,23 +127,25 @@ class KATrainAttention(nn.Module):
         attn_weights = attn_weights + causal_mask
         attn_weights = F.softmax(attn_weights, dim=-1)
 
-        # KA方式: autoregressiveに計算
-        # A[0] = weights[0, 0] * V[0]
-        # A[1] = weights[1, 0] * A[0] + weights[1, 1] * V[1]
-        # A[i] = sum(weights[i, j] * A[j] for j < i) + weights[i, i] * V[i]
+        # KA方式（全てA統一、現在位置のVは不使用）
+        # A[0] = V[0]  (ブートストラップ: 最初のトークンはVで初期化)
+        # A[i] = renormalize(weights[:i]) @ A[:i]  (過去のAのみ)
 
         attn_output = torch.zeros_like(value)
 
         for i in range(seq_len):
             if i == 0:
-                # 最初のトークン: Vのみ使用
-                attn_output[:, :, i, :] = attn_weights[:, :, i, i:i+1] @ value[:, :, i:i+1, :]
-                attn_output[:, :, i, :] = attn_output[:, :, i, :].squeeze(2)
+                # 最初のトークン: Vで初期化（他に参照できるAがない）
+                attn_output[:, :, i, :] = value[:, :, i, :]
             else:
-                # 過去トークン: A使用、現在トークン: V使用
-                past_contribution = attn_weights[:, :, i, :i] @ attn_output[:, :, :i, :]
-                current_contribution = attn_weights[:, :, i, i:i+1] * value[:, :, i, :]
-                attn_output[:, :, i, :] = past_contribution.squeeze(2) + current_contribution
+                # 過去のAのみ使用（現在位置のVは使わない）
+                # weights[:i] を再正規化
+                past_weights = attn_weights[:, :, i, :i]  # [batch, heads, i]
+                past_weights_sum = past_weights.sum(dim=-1, keepdim=True)
+                past_weights_normalized = past_weights / (past_weights_sum + 1e-8)
+
+                # A[i] = normalized_weights @ A[:i]
+                attn_output[:, :, i, :] = (past_weights_normalized @ attn_output[:, :, :i, :]).squeeze(2)
 
         # Output projection
         attn_output = attn_output.transpose(1, 2).contiguous()
@@ -155,7 +160,12 @@ class KATrainAttention(nn.Module):
         position_ids: torch.Tensor,
         ka_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        """KAキャッシュを使用したforward（推論用）"""
+        """
+        KAキャッシュを使用したforward（推論用）
+
+        全てAを使用する方式（現在のVは不使用）:
+          A[i] = renormalize(weights[:cached_len]) @ cached_A
+        """
         batch_size, seq_len, _ = hidden_states.shape
 
         # QKV projection
@@ -190,16 +200,18 @@ class KATrainAttention(nn.Module):
         attn_weights = attn_weights + causal_mask
         attn_weights = F.softmax(attn_weights, dim=-1)
 
-        # KA-Attention
-        if cached_a is not None:
+        # KA-Attention（全てA、現在のVは不使用）
+        if cached_a is not None and cached_len > 0:
+            # 過去のAのみ使用（現在位置のVは使わない）
             weights_for_cached = attn_weights[..., :cached_len]
-            weights_for_current = attn_weights[..., cached_len:]
 
-            cached_contribution = torch.matmul(weights_for_cached, cached_a)
-            current_contribution = torch.matmul(weights_for_current, value)
+            # 再正規化
+            weights_sum = weights_for_cached.sum(dim=-1, keepdim=True)
+            weights_normalized = weights_for_cached / (weights_sum + 1e-8)
 
-            attn_output = cached_contribution + current_contribution
+            attn_output = torch.matmul(weights_normalized, cached_a)
         else:
+            # 最初のトークン: Vを使用（ブートストラップ）
             attn_output = torch.matmul(attn_weights, value)
 
         # Update KA cache
