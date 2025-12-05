@@ -3,7 +3,7 @@
 Position Encoding Experiment
 
 位置エンコーディングの比較実験。
-RoPE, ALiBi, NoPE, Learnable を統一モデルで比較。
+RoPE (2D), RoPE3D (3D), ALiBi, NoPE, Learnable を統一モデルで比較。
 
 Usage:
     # 全種類比較
@@ -12,6 +12,12 @@ Usage:
     # 特定の位置エンコーディングのみ
     python3 scripts/experiment_position.py --pos-types rope alibi
     python3 scripts/experiment_position.py --pos-types none
+
+    # RoPE vs RoPE3D 比較
+    python3 scripts/experiment_position.py --pos-types rope rope3d
+
+    # RoPE3D のみ（RoPEをスキップ）
+    python3 scripts/experiment_position.py --pos-types rope rope3d --skip rope
 
     # ALiBi slope変更
     python3 scripts/experiment_position.py --pos-types alibi --alibi-slope 0.125
@@ -55,7 +61,8 @@ from src.utils.device import clear_gpu_cache  # noqa: E402
 
 # Position encoding display names
 POS_ENCODING_NAMES = {
-    "rope": "RoPE (25%)",
+    "rope": "RoPE (2D)",
+    "rope3d": "RoPE3D (3D)",
     "alibi": "ALiBi",
     "none": "NoPE (None)",
     "learnable": "Learnable (K only)",
@@ -71,6 +78,7 @@ def train_model(
     num_epochs: int,
     lr: float,
     rotary_pct: float,
+    rope3d_pct: float,
     alibi_slope: float,
     learnable_dim: int | None = None,
     learnable_nonlinear: str = "gelu",
@@ -83,6 +91,7 @@ def train_model(
     pos_config = PositionEncodingConfig(
         type=pos_type,
         rotary_pct=rotary_pct,
+        rope3d_pct=rope3d_pct,
         alibi_slope=alibi_slope,
         learnable_dim=learnable_dim,
         learnable_nonlinear=learnable_nonlinear,
@@ -178,6 +187,7 @@ def run_experiment(
     lr: float = 1e-4,
     pos_types: List[str] = ["rope", "alibi", "none"],
     rotary_pct: float = 0.25,
+    rope3d_pct: float = 0.25,
     alibi_slope: float = 0.0625,
     learnable_dim: int | None = None,
     learnable_nonlinear: str = "gelu",
@@ -197,6 +207,8 @@ def run_experiment(
     print_flush(f"Learning rate: {lr}")
     print_flush(f"Position types: {pos_types}")
     print_flush(f"RoPE rotary_pct: {rotary_pct}")
+    if "rope3d" in pos_types:
+        print_flush(f"RoPE3D rotary_pct: {rope3d_pct}")
     print_flush(f"ALiBi slope: {alibi_slope}")
     if "learnable" in pos_types:
         print_flush(f"Learnable dim: {learnable_dim or 'full head_dim'}")
@@ -229,6 +241,7 @@ def run_experiment(
             num_epochs=num_epochs,
             lr=lr,
             rotary_pct=rotary_pct,
+            rope3d_pct=rope3d_pct,
             alibi_slope=alibi_slope,
             learnable_dim=learnable_dim,
             learnable_nonlinear=learnable_nonlinear,
@@ -333,11 +346,14 @@ def main() -> None:
         "--pos-types",
         nargs="+",
         default=["rope", "alibi", "none"],
-        choices=["rope", "alibi", "none", "learnable"],
+        choices=["rope", "rope3d", "alibi", "none", "learnable"],
         help="Position encoding types to compare",
     )
     parser.add_argument(
         "--rotary-pct", type=float, default=0.25, help="RoPE rotary percentage"
+    )
+    parser.add_argument(
+        "--rope3d-pct", type=float, default=0.25, help="RoPE3D rotary percentage"
     )
     parser.add_argument(
         "--alibi-slope", type=float, default=0.0625, help="ALiBi slope (uniform)"
@@ -355,7 +371,20 @@ def main() -> None:
         choices=["gelu", "relu", "tanh", "none"],
         help="Learnable position encoding nonlinearity",
     )
+    parser.add_argument(
+        "--skip",
+        nargs="+",
+        default=[],
+        choices=["rope", "rope3d", "alibi", "none", "learnable"],
+        help="Position encoding types to skip (bypass)",
+    )
     args = parser.parse_args()
+
+    # Remove skipped types from pos_types
+    pos_types = [pt for pt in args.pos_types if pt not in args.skip]
+    if not pos_types:
+        print("Error: All position types were skipped. Nothing to run.")
+        return
 
     run_experiment(
         num_samples=args.samples,
@@ -363,8 +392,9 @@ def main() -> None:
         num_epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
-        pos_types=args.pos_types,
+        pos_types=pos_types,
         rotary_pct=args.rotary_pct,
+        rope3d_pct=args.rope3d_pct,
         alibi_slope=args.alibi_slope,
         learnable_dim=args.learnable_dim,
         learnable_nonlinear=args.learnable_nonlinear,

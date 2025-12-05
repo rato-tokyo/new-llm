@@ -27,7 +27,8 @@ import torch.nn as nn
 class PositionEncodingType(Enum):
     """位置エンコーディングの種類"""
     NONE = "none"     # 位置情報なし
-    ROPE = "rope"     # Rotary Position Embedding
+    ROPE = "rope"     # Rotary Position Embedding (2D)
+    ROPE3D = "rope3d" # Rotary Position Embedding (3D)
     ALIBI = "alibi"   # Attention with Linear Biases
     LEARNABLE = "learnable"  # Learnable Position Encoding (K only)
 
@@ -35,11 +36,14 @@ class PositionEncodingType(Enum):
 @dataclass
 class PositionEncodingConfig:
     """位置エンコーディングの設定"""
-    type: str = "rope"  # "none", "rope", "alibi", "learnable"
+    type: str = "rope"  # "none", "rope", "rope3d", "alibi", "learnable"
 
     # RoPE parameters
     rotary_pct: float = 0.25  # RoPEを適用する次元の割合
     rope_base: int = 10000    # RoPE base frequency
+
+    # RoPE3D parameters
+    rope3d_pct: float = 0.25  # RoPE3Dを適用する次元の割合
 
     # ALiBi parameters
     alibi_slope: float = 0.0625  # ALiBi slope (unified)
@@ -467,6 +471,186 @@ class LearnablePositionEncoding(PositionEncoding):
         return False
 
 
+class Rotary3DPositionEncoding(PositionEncoding):
+    """
+    3D Rotary Position Embedding (RoPE3D)
+
+    3次元回転を位置エンコーディングに使用。
+    回転軸は (1,1,1)/√3 の斜め方向で、全3次元が均等に更新される。
+
+    ロドリゲスの回転公式を使用:
+    R(θ) = I + sin(θ) * K + (1 - cos(θ)) * K²
+
+    ここで K は回転軸の外積行列。
+    """
+
+    def __init__(
+        self,
+        head_dim: int,
+        rotary_pct: float = 0.25,
+        max_position_embeddings: int = 2048,
+        base: int = 10000,
+    ) -> None:
+        super().__init__()
+        self.head_dim = head_dim
+        # 3の倍数に調整（3次元グループ）
+        rotary_dim_raw = int(head_dim * rotary_pct)
+        self.num_groups = rotary_dim_raw // 3
+        self.rotary_dim = self.num_groups * 3  # 3の倍数
+        self.max_position_embeddings = max_position_embeddings
+        self.base = base
+
+        # 回転軸: (1, 1, 1) / √3（正規化）
+        axis = torch.tensor([1.0, 1.0, 1.0])
+        axis = axis / axis.norm()
+        self.register_buffer("rotation_axis", axis)
+
+        # 外積行列 K を事前計算
+        # K = [[0, -kz, ky], [kz, 0, -kx], [-ky, kx, 0]]
+        K = torch.zeros(3, 3)
+        K[0, 1] = -axis[2]
+        K[0, 2] = axis[1]
+        K[1, 0] = axis[2]
+        K[1, 2] = -axis[0]
+        K[2, 0] = -axis[1]
+        K[2, 1] = axis[0]
+        self.register_buffer("K_matrix", K)
+
+        # K² を事前計算
+        K2 = torch.matmul(K, K)
+        self.register_buffer("K2_matrix", K2)
+
+        # 各3次元グループの周波数（RoPE同様に指数的に減少）
+        inv_freq = 1.0 / (base ** (torch.arange(0, self.num_groups).float() / self.num_groups))
+        self.register_buffer("inv_freq", inv_freq)
+
+        # 回転行列のキャッシュ
+        self._set_rotation_cache(max_position_embeddings)
+
+    def _compute_rotation_matrix(self, angle: torch.Tensor) -> torch.Tensor:
+        """
+        ロドリゲスの回転公式で3x3回転行列を計算
+
+        R(θ) = I + sin(θ) * K + (1 - cos(θ)) * K²
+
+        Args:
+            angle: 回転角 [num_groups] or scalar
+
+        Returns:
+            rotation_matrix: [num_groups, 3, 3] or [3, 3]
+        """
+        if angle.dim() == 0:
+            angle = angle.unsqueeze(0)
+
+        sin_angle = torch.sin(angle)  # [num_groups]
+        cos_angle = torch.cos(angle)  # [num_groups]
+
+        # I + sin(θ) * K + (1 - cos(θ)) * K²
+        # Broadcasting: [num_groups, 1, 1] * [3, 3]
+        identity = torch.eye(3, device=angle.device, dtype=angle.dtype)
+        R = (
+            identity.unsqueeze(0)
+            + sin_angle.view(-1, 1, 1) * self.K_matrix.unsqueeze(0)
+            + (1 - cos_angle).view(-1, 1, 1) * self.K2_matrix.unsqueeze(0)
+        )
+        return R  # [num_groups, 3, 3]
+
+    def _set_rotation_cache(self, seq_len: int) -> None:
+        """各位置の回転行列をキャッシュ"""
+        self.max_seq_len_cached = seq_len
+
+        # positions: [seq_len]
+        positions = torch.arange(seq_len, device=self.inv_freq.device, dtype=self.inv_freq.dtype)
+
+        # angles: [seq_len, num_groups] = positions @ inv_freq
+        angles = torch.outer(positions, self.inv_freq)  # [seq_len, num_groups]
+
+        # 各位置、各グループの回転行列を計算
+        # [seq_len, num_groups, 3, 3]
+        rotation_matrices = []
+        for pos in range(seq_len):
+            R = self._compute_rotation_matrix(angles[pos])  # [num_groups, 3, 3]
+            rotation_matrices.append(R.unsqueeze(0))
+
+        rotation_cache = torch.cat(rotation_matrices, dim=0)  # [seq_len, num_groups, 3, 3]
+        self.register_buffer("rotation_cache", rotation_cache)
+
+    def _apply_rotation(self, x: torch.Tensor, seq_len: int) -> torch.Tensor:
+        """
+        3D回転を適用
+
+        Args:
+            x: [batch, heads, seq, head_dim]
+            seq_len: シーケンス長
+
+        Returns:
+            rotated: [batch, heads, seq, head_dim]
+        """
+        if seq_len > self.max_seq_len_cached:
+            self._set_rotation_cache(seq_len)
+
+        batch, heads, seq, dim = x.shape
+
+        # rotary部分とpass-through部分に分割
+        x_rot = x[..., :self.rotary_dim]  # [batch, heads, seq, rotary_dim]
+        x_pass = x[..., self.rotary_dim:]
+
+        # 3次元グループに reshape
+        # [batch, heads, seq, num_groups, 3]
+        x_grouped = x_rot.view(batch, heads, seq, self.num_groups, 3)
+
+        # 回転行列を適用
+        # rotation_cache: [seq_len, num_groups, 3, 3]
+        # x_grouped: [batch, heads, seq, num_groups, 3]
+        # 結果: [batch, heads, seq, num_groups, 3]
+
+        # einsum: 各位置のグループに対応する回転行列を適用
+        # "s g i j, b h s g j -> b h s g i"
+        rotated = torch.einsum(
+            "sgij,bhsgj->bhsgi",
+            self.rotation_cache[:seq_len],
+            x_grouped
+        )
+
+        # 元の形状に戻す
+        rotated = rotated.view(batch, heads, seq, self.rotary_dim)
+
+        # pass-through部分と結合
+        return torch.cat([rotated, x_pass], dim=-1)
+
+    def apply_to_qk(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        seq_len: int,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """Q, K両方に3D回転を適用"""
+        query_rotated = self._apply_rotation(query, seq_len)
+        key_rotated = self._apply_rotation(key, seq_len)
+        return query_rotated, key_rotated
+
+    def apply_to_scores(
+        self,
+        attn_scores: torch.Tensor,
+        seq_len: int,
+    ) -> torch.Tensor:
+        """Causal maskのみ適用"""
+        device = attn_scores.device
+        causal_mask = torch.triu(
+            torch.ones(seq_len, seq_len, device=device) * float("-inf"),
+            diagonal=1
+        )
+        return attn_scores + causal_mask
+
+    @property
+    def modifies_qk(self) -> bool:
+        return True
+
+    @property
+    def adds_score_bias(self) -> bool:
+        return False
+
+
 def create_position_encoding(
     config: PositionEncodingConfig,
     head_dim: int,
@@ -489,6 +673,13 @@ def create_position_encoding(
         return RotaryPositionEncoding(
             head_dim=head_dim,
             rotary_pct=config.rotary_pct,
+            max_position_embeddings=config.max_position_embeddings,
+            base=config.rope_base,
+        )
+    elif pos_type == PositionEncodingType.ROPE3D:
+        return Rotary3DPositionEncoding(
+            head_dim=head_dim,
+            rotary_pct=config.rope3d_pct,
             max_position_embeddings=config.max_position_embeddings,
             base=config.rope_base,
         )
