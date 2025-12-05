@@ -173,11 +173,17 @@ def train_model(
 
         if qk_stats.get('dim_analysis'):
             dim = qk_stats['dim_analysis']
-            print_flush("\n    Frequency band analysis (high freq = early dims, low freq = late dims):")
-            print_flush(f"      Q high-freq max: {dim['q_high_freq_max']:.2f}")
-            print_flush(f"      Q low-freq max:  {dim['q_low_freq_max']:.2f}")
-            print_flush(f"      K high-freq max: {dim['k_high_freq_max']:.2f}")
-            print_flush(f"      K low-freq max:  {dim['k_low_freq_max']:.2f}")
+            rotary_dim = dim.get('rotary_dim', 16)
+            head_dim = dim.get('head_dim', 64)
+            rotary_half = rotary_dim // 2
+
+            print_flush(f"\n    Frequency band analysis (rotary_dim={rotary_dim}, head_dim={head_dim}):")
+            print_flush(f"      RoPE applied: dims 0-{rotary_dim-1}")
+            print_flush(f"        High-freq (dims 0-{rotary_half-1}):  Q={dim['q_high_freq_max']:.2f}, K={dim['k_high_freq_max']:.2f}")
+            print_flush(f"        Low-freq (dims {rotary_half}-{rotary_dim-1}): Q={dim['q_low_freq_max']:.2f}, K={dim['k_low_freq_max']:.2f}")
+
+            if rotary_dim < head_dim:
+                print_flush(f"      Passthrough (dims {rotary_dim}-{head_dim-1}): Q={dim['q_passthrough_max']:.2f}, K={dim['k_passthrough_max']:.2f}")
 
             # Massive Values比率（低周波/高周波）
             if dim['q_high_freq_max'] > 0:

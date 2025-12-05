@@ -146,9 +146,12 @@ class QKStatsCollector:
 
         return result
 
-    def get_summary(self) -> Dict[str, Any]:
+    def get_summary(self, rotary_dim: Optional[int] = None) -> Dict[str, Any]:
         """
         全レイヤーのサマリーを取得
+
+        Args:
+            rotary_dim: RoPEが適用される次元数。指定しない場合はhead_dim全体を使用。
 
         Returns:
             Dict with summary statistics
@@ -166,12 +169,10 @@ class QKStatsCollector:
         layer_k_max = {idx: s.k_max for idx, s in stats.items()}
 
         # 次元ごとの分析（高周波 vs 低周波）
-        # RoPEの場合: 前半の次元が高周波、後半が低周波
         first_layer_stats = stats.get(0)
         dim_analysis = {}
         if first_layer_stats and first_layer_stats.q_dim_max:
             head_dim = len(first_layer_stats.q_dim_max)
-            half = head_dim // 2
 
             # 全レイヤーで次元ごとの最大値を集計
             all_q_dim_max = [0.0] * head_dim
@@ -181,11 +182,27 @@ class QKStatsCollector:
                     all_q_dim_max[d] = max(all_q_dim_max[d], s.q_dim_max[d])
                     all_k_dim_max[d] = max(all_k_dim_max[d], s.k_dim_max[d])
 
+            # RoPEが適用される次元内で高周波/低周波を分析
+            # rotary_dim内: 前半が高周波、後半が低周波
+            # rotary_dim外: パススルー（位置情報なし）
+            if rotary_dim is None:
+                rotary_dim = head_dim
+
+            rotary_half = rotary_dim // 2
+
             dim_analysis = {
-                "q_high_freq_max": max(all_q_dim_max[:half]),  # 前半（高周波）
-                "q_low_freq_max": max(all_q_dim_max[half:]),   # 後半（低周波）
-                "k_high_freq_max": max(all_k_dim_max[:half]),
-                "k_low_freq_max": max(all_k_dim_max[half:]),
+                # RoPE適用範囲内での高周波/低周波
+                "q_high_freq_max": max(all_q_dim_max[:rotary_half]) if rotary_half > 0 else 0.0,
+                "q_low_freq_max": max(all_q_dim_max[rotary_half:rotary_dim]) if rotary_dim > rotary_half else 0.0,
+                "k_high_freq_max": max(all_k_dim_max[:rotary_half]) if rotary_half > 0 else 0.0,
+                "k_low_freq_max": max(all_k_dim_max[rotary_half:rotary_dim]) if rotary_dim > rotary_half else 0.0,
+                # パススルー部分（RoPE未適用）
+                "q_passthrough_max": max(all_q_dim_max[rotary_dim:]) if rotary_dim < head_dim else 0.0,
+                "k_passthrough_max": max(all_k_dim_max[rotary_dim:]) if rotary_dim < head_dim else 0.0,
+                # メタ情報
+                "rotary_dim": rotary_dim,
+                "head_dim": head_dim,
+                # 全次元のmax値
                 "q_dim_max": all_q_dim_max,
                 "k_dim_max": all_k_dim_max,
             }
@@ -223,6 +240,13 @@ def analyze_qk_stats(
     # モデル情報を取得
     num_layers = len(model.layers)
     head_dim = model.head_dim
+
+    # rotary_dimを位置エンコーディングから取得
+    rotary_dim = None
+    first_layer = model.layers[0]
+    pos_encoding = first_layer.attention.pos_encoding
+    if hasattr(pos_encoding, 'rotary_dim'):
+        rotary_dim = pos_encoding.rotary_dim
 
     # コレクターを作成
     collector = QKStatsCollector(model, num_layers, head_dim)
@@ -277,8 +301,8 @@ def analyze_qk_stats(
                 input_ids = input_ids.to(device)
                 model(input_ids)
 
-        # 統計を取得
-        summary = collector.get_summary()
+        # 統計を取得（rotary_dimを渡して正しい周波数帯域分析を行う）
+        summary = collector.get_summary(rotary_dim=rotary_dim)
 
     finally:
         # フックを削除
