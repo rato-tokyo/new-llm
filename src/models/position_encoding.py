@@ -335,6 +335,7 @@ class LearnablePositionEncoding(PositionEncoding):
         )
 
         # 非線形関数の選択
+        self.nonlinear: nn.Module
         if nonlinear == "gelu":
             self.nonlinear = nn.GELU()
         elif nonlinear == "relu":
