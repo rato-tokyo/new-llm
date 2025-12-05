@@ -5,11 +5,11 @@ Infini-Attention Experiment
 1層目: Infini-Attention (NoPE, compressive memory)
 2層目以降: MLA with ALiBi
 
-MLA-Pythia (ALiBi全層) vs Infini-Pythia (1層目Infini + ALiBi) の比較。
+Pythia (RoPE) vs Infini-Pythia (1層目Infini + MLA ALiBi) の比較。
 
 Usage:
     python3 scripts/experiment_infini.py --samples 5000 --epochs 30
-    python3 scripts/experiment_infini.py --samples 5000 --skip-mla
+    python3 scripts/experiment_infini.py --samples 5000 --skip-baseline
     python3 scripts/experiment_infini.py --seq-length 512  # longer context
 """
 
@@ -25,7 +25,7 @@ sys.path.insert(0, ".")
 
 from config.pythia import PythiaConfig  # noqa: E402
 from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE  # noqa: E402
-from src.models.mla_pythia import MLAPythiaModel  # noqa: E402
+from src.models.pythia import PythiaModel  # noqa: E402
 from src.models.infini_pythia import InfiniPythiaModel  # noqa: E402
 from src.data.reversal_pairs import get_reversal_pairs  # noqa: E402
 from src.utils.io import print_flush  # noqa: E402
@@ -164,15 +164,15 @@ def train_infini_model(
 
 
 def run_experiment(
-    num_samples: int = 10000,
-    seq_length: int = 128,
+    num_samples: int = 5000,
+    seq_length: int = 256,
     num_epochs: int = 30,
     batch_size: int = 8,
     lr: float = 1e-4,
     kv_dim: int = 128,
     alibi_slope: float = 0.0625,
     use_delta_rule: bool = True,
-    skip_mla: bool = False,
+    skip_baseline: bool = False,
 ) -> dict[str, Any]:
     """Run Infini-Attention experiment."""
     set_seed(42)
@@ -187,10 +187,10 @@ def run_experiment(
     print_flush(f"Sequence length: {seq_length}")
     print_flush(f"Epochs: {num_epochs}")
     print_flush(f"Learning rate: {lr}")
-    print_flush(f"KV dim: {kv_dim} (from {config.hidden_size})")
+    print_flush(f"KV dim (Infini): {kv_dim}")
     print_flush(f"ALiBi slope: {alibi_slope}")
     print_flush(f"Delta rule: {use_delta_rule}")
-    print_flush(f"Skip MLA baseline: {skip_mla}")
+    print_flush(f"Skip baseline: {skip_baseline}")
     print_flush("=" * 70)
 
     print_flush("\n[Data] Loading Pile data...")
@@ -204,35 +204,34 @@ def run_experiment(
 
     results: dict[str, Any] = {}
 
-    # ===== 1. MLA-Pythia Baseline (ALiBi全層) =====
-    if skip_mla:
+    # ===== 1. Pythia Baseline (RoPE) =====
+    if skip_baseline:
         print_flush("\n" + "=" * 70)
-        print_flush("1. MLA-PYTHIA (ALiBi全層) - SKIPPED")
+        print_flush("1. PYTHIA (RoPE) - SKIPPED")
         print_flush("=" * 70)
-        results["mla"] = None
+        results["pythia"] = None
     else:
         print_flush("\n" + "=" * 70)
-        print_flush(f"1. MLA-PYTHIA (kv_dim={kv_dim}, ALiBi全層)")
+        print_flush("1. PYTHIA (RoPE baseline)")
         print_flush("=" * 70)
 
-        mla_model = MLAPythiaModel(
+        pythia_model = PythiaModel(
             vocab_size=config.vocab_size,
             hidden_size=config.hidden_size,
             num_layers=config.num_layers,
             num_heads=config.num_attention_heads,
             intermediate_size=config.intermediate_size,
-            kv_dim=kv_dim,
-            q_compressed=False,
-            alibi_slope=alibi_slope,
+            max_position_embeddings=config.max_position_embeddings,
+            rotary_pct=config.rotary_pct,
         )
-        mla_model = mla_model.to(device)
+        pythia_model = pythia_model.to(device)
 
-        param_info = mla_model.num_parameters()
+        param_info = pythia_model.num_parameters()
         print_flush(f"  Total parameters: {param_info['total']:,}")
 
-        optimizer = torch.optim.AdamW(mla_model.parameters(), lr=lr)
+        optimizer = torch.optim.AdamW(pythia_model.parameters(), lr=lr)
 
-        print_flush("\n[MLA] Training...")
+        print_flush("\n[Pythia] Training...")
         best_val_ppl = float("inf")
         best_epoch = 0
         patience_counter = 0
@@ -240,9 +239,9 @@ def run_experiment(
         for epoch in range(1, num_epochs + 1):
             start_time = time.time()
 
-            train_loss = train_epoch(mla_model, train_loader, optimizer, device)
+            train_loss = train_epoch(pythia_model, train_loader, optimizer, device)
             train_ppl = torch.exp(torch.tensor(train_loss)).item()
-            _, val_ppl = evaluate(mla_model, val_loader, device)
+            _, val_ppl = evaluate(pythia_model, val_loader, device)
             elapsed = time.time() - start_time
 
             improved = val_ppl < best_val_ppl
@@ -267,30 +266,30 @@ def run_experiment(
         print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
 
         print_flush("\n  Position-wise PPL:")
-        mla_pos_ppl = evaluate_position_wise_ppl(mla_model, val_loader, device)
-        for pos_range, ppl in mla_pos_ppl.items():
+        pythia_pos_ppl = evaluate_position_wise_ppl(pythia_model, val_loader, device)
+        for pos_range, ppl in pythia_pos_ppl.items():
             print_flush(f"    Position {pos_range}: {ppl:.1f}")
 
         # Reversal Curse evaluation
         print_flush("\n  Reversal Curse evaluation:")
         tokenizer = get_tokenizer(config.tokenizer_name)
         reversal_pairs = get_reversal_pairs()
-        mla_reversal = evaluate_reversal_curse(
-            mla_model, tokenizer, reversal_pairs, device
+        pythia_reversal = evaluate_reversal_curse(
+            pythia_model, tokenizer, reversal_pairs, device
         )
-        print_flush(f"    Forward PPL: {mla_reversal['forward_ppl']:.1f}")
-        print_flush(f"    Backward PPL: {mla_reversal['backward_ppl']:.1f}")
-        print_flush(f"    Reversal Ratio: {mla_reversal['reversal_ratio']:.3f}")
-        print_flush(f"    Reversal Gap: {mla_reversal['reversal_gap']:+.1f}")
+        print_flush(f"    Forward PPL: {pythia_reversal['forward_ppl']:.1f}")
+        print_flush(f"    Backward PPL: {pythia_reversal['backward_ppl']:.1f}")
+        print_flush(f"    Reversal Ratio: {pythia_reversal['reversal_ratio']:.3f}")
+        print_flush(f"    Reversal Gap: {pythia_reversal['reversal_gap']:+.1f}")
 
-        results["mla"] = {
+        results["pythia"] = {
             "best_val_ppl": best_val_ppl,
             "best_epoch": best_epoch,
-            "position_wise_ppl": mla_pos_ppl,
-            "reversal_curse": mla_reversal,
+            "position_wise_ppl": pythia_pos_ppl,
+            "reversal_curse": pythia_reversal,
         }
 
-        del mla_model
+        del pythia_model
         clear_gpu_cache(device)
 
     # ===== 2. Infini-Pythia (1層目Infini + ALiBi) =====
@@ -383,10 +382,10 @@ def run_experiment(
     print_flush("\n| Model | PPL | Epoch |")
     print_flush("|-------|-----|-------|")
 
-    if results["mla"] is not None:
+    if results["pythia"] is not None:
         print_flush(
-            f"| MLA (ALiBi全層) | {results['mla']['best_val_ppl']:.1f} | "
-            f"{results['mla']['best_epoch']} |"
+            f"| Pythia (RoPE) | {results['pythia']['best_val_ppl']:.1f} | "
+            f"{results['pythia']['best_epoch']} |"
         )
 
     print_flush(
@@ -394,25 +393,25 @@ def run_experiment(
         f"{results['infini']['best_epoch']} |"
     )
 
-    if results["mla"] is not None:
-        diff = results["infini"]["best_val_ppl"] - results["mla"]["best_val_ppl"]
+    if results["pythia"] is not None:
+        diff = results["infini"]["best_val_ppl"] - results["pythia"]["best_val_ppl"]
         print_flush(f"\nDifference: {diff:+.1f} ppl")
 
         print_flush("\n" + "=" * 70)
         print_flush("POSITION-WISE PPL")
         print_flush("=" * 70)
 
-        mla_pos = results["mla"]["position_wise_ppl"]
+        pythia_pos = results["pythia"]["position_wise_ppl"]
         infini_pos = results["infini"]["position_wise_ppl"]
 
-        print_flush("\n| Position | MLA | Infini | Diff |")
-        print_flush("|----------|-----|--------|------|")
-        for pos_range in mla_pos:
-            mla_val = mla_pos[pos_range]
+        print_flush("\n| Position | Pythia | Infini | Diff |")
+        print_flush("|----------|--------|--------|------|")
+        for pos_range in pythia_pos:
+            pythia_val = pythia_pos[pos_range]
             infini_val = infini_pos[pos_range]
-            pos_diff = infini_val - mla_val
+            pos_diff = infini_val - pythia_val
             print_flush(
-                f"| {pos_range} | {mla_val:.1f} | {infini_val:.1f} | {pos_diff:+.1f} |"
+                f"| {pos_range} | {pythia_val:.1f} | {infini_val:.1f} | {pos_diff:+.1f} |"
             )
 
         # Reversal Curse comparison
@@ -420,16 +419,16 @@ def run_experiment(
         print_flush("REVERSAL CURSE")
         print_flush("=" * 70)
 
-        mla_rev = results["mla"]["reversal_curse"]
+        pythia_rev = results["pythia"]["reversal_curse"]
         infini_rev = results["infini"]["reversal_curse"]
 
         print_flush("\n| Model | Forward PPL | Backward PPL | Ratio | Gap |")
         print_flush("|-------|-------------|--------------|-------|-----|")
         print_flush(
-            f"| MLA | {mla_rev['forward_ppl']:.1f} | "
-            f"{mla_rev['backward_ppl']:.1f} | "
-            f"{mla_rev['reversal_ratio']:.3f} | "
-            f"{mla_rev['reversal_gap']:+.1f} |"
+            f"| Pythia | {pythia_rev['forward_ppl']:.1f} | "
+            f"{pythia_rev['backward_ppl']:.1f} | "
+            f"{pythia_rev['reversal_ratio']:.3f} | "
+            f"{pythia_rev['reversal_gap']:+.1f} |"
         )
         print_flush(
             f"| Infini | {infini_rev['forward_ppl']:.1f} | "
@@ -468,7 +467,7 @@ def main() -> None:
         "--no-delta-rule", action="store_true", help="Disable delta rule for Infini"
     )
     parser.add_argument(
-        "--skip-mla", action="store_true", help="Skip MLA baseline"
+        "--skip-baseline", action="store_true", help="Skip Pythia baseline"
     )
     args = parser.parse_args()
 
@@ -481,7 +480,7 @@ def main() -> None:
         kv_dim=args.kv_dim,
         alibi_slope=args.alibi_slope,
         use_delta_rule=not args.no_delta_rule,
-        skip_mla=args.skip_mla,
+        skip_baseline=args.skip_baseline,
     )
 
     print_flush("\nDONE")
