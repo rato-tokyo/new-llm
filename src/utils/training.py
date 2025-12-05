@@ -414,7 +414,7 @@ def prepare_long_document_data(
 
     segments_per_document = tokens_per_document // segment_length
 
-    print_flush(f"Preparing long document data:")
+    print_flush("Preparing long document data:")
     print_flush(f"  Documents: {num_documents}")
     print_flush(f"  Tokens per document: {tokens_per_document:,}")
     print_flush(f"  Segment length: {segment_length}")
@@ -449,6 +449,76 @@ def prepare_long_document_data(
     print_flush(f"  Val documents: {len(val_documents)}")
 
     return train_documents, val_documents
+
+
+def train_long_documents(
+    model: nn.Module,
+    documents: list,
+    optimizer: torch.optim.Optimizer,
+    device: torch.device,
+    has_reset_memory: bool = False,
+    grad_clip: float = 1.0,
+) -> float:
+    """
+    Train model on long documents with Truncated BPTT.
+
+    For each document:
+    - Reset memory at document boundary
+    - Process segments sequentially
+    - Update memory after each segment
+    - Backprop and optimizer step per segment (truncated BPTT)
+
+    Args:
+        model: Model to train
+        documents: List of documents, each is list of (input_ids, labels) segments
+        optimizer: Optimizer
+        device: Device
+        has_reset_memory: Whether model has reset_memory method (Infini)
+        grad_clip: Gradient clipping value
+
+    Returns:
+        Average loss over all segments
+    """
+    model.train()
+
+    total_loss = 0.0
+    total_segments = 0
+
+    for document in documents:
+        # Reset memory at document boundary
+        if has_reset_memory:
+            model.reset_memory()
+
+        for input_ids, labels in document:
+            input_ids = input_ids.unsqueeze(0).to(device)  # [1, seq_len]
+            labels = labels.unsqueeze(0).to(device)
+
+            optimizer.zero_grad()
+
+            # Forward pass with memory update
+            if has_reset_memory:
+                logits = model(input_ids, update_memory=True)
+            else:
+                logits = model(input_ids)
+
+            # Calculate loss
+            loss = nn.functional.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                labels.view(-1),
+            )
+
+            # Backward and optimize (per segment - Truncated BPTT)
+            loss.backward()
+
+            if grad_clip > 0:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip)
+
+            optimizer.step()
+
+            total_loss += loss.item()
+            total_segments += 1
+
+    return total_loss / total_segments if total_segments > 0 else 0.0
 
 
 @torch.no_grad()

@@ -34,6 +34,7 @@ from src.utils.seed import set_seed  # noqa: E402
 from src.utils.training import (  # noqa: E402
     prepare_data_loaders,
     prepare_long_document_data,
+    train_long_documents,
     evaluate_long_documents,
     get_device,
     get_tokenizer,
@@ -177,6 +178,7 @@ def run_experiment(
     skip_baseline: bool = False,
     skip_infini: bool = False,
     long_context_eval: bool = False,
+    long_context_train: bool = False,
     num_long_documents: int = 50,
     tokens_per_document: int = 4096,
 ) -> dict[str, Any]:
@@ -197,18 +199,36 @@ def run_experiment(
     print_flush(f"Memory only: {memory_only}")
     print_flush(f"Skip baseline: {skip_baseline}")
     print_flush(f"Skip infini: {skip_infini}")
+    if long_context_train:
+        print_flush(f"Long context TRAIN: {num_long_documents} docs × {tokens_per_document} tokens")
     if long_context_eval:
         print_flush(f"Long context eval: {num_long_documents} docs × {tokens_per_document} tokens")
     print_flush("=" * 70)
 
-    print_flush("\n[Data] Loading Pile data...")
-    train_loader, val_loader = prepare_data_loaders(
-        num_samples=num_samples,
-        seq_length=seq_length,
-        tokenizer_name=config.tokenizer_name,
-        val_split=0.1,
-        batch_size=batch_size,
-    )
+    # Prepare data based on training mode
+    train_loader = None
+    val_loader = None
+    train_documents = None
+    val_documents = None
+
+    if long_context_train:
+        print_flush("\n[Data] Loading long document data...")
+        train_documents, val_documents = prepare_long_document_data(
+            num_documents=num_long_documents,
+            tokens_per_document=tokens_per_document,
+            segment_length=seq_length,
+            tokenizer_name=config.tokenizer_name,
+            val_split=0.1,
+        )
+    else:
+        print_flush("\n[Data] Loading Pile data...")
+        train_loader, val_loader = prepare_data_loaders(
+            num_samples=num_samples,
+            seq_length=seq_length,
+            tokenizer_name=config.tokenizer_name,
+            val_split=0.1,
+            batch_size=batch_size,
+        )
 
     results: dict[str, Any] = {}
 
@@ -247,9 +267,24 @@ def run_experiment(
         for epoch in range(1, num_epochs + 1):
             start_time = time.time()
 
-            train_loss = train_epoch(pythia_model, train_loader, optimizer, device)
-            train_ppl = torch.exp(torch.tensor(train_loss)).item()
-            _, val_ppl = evaluate(pythia_model, val_loader, device)
+            if long_context_train:
+                # Long document training (Truncated BPTT)
+                train_loss = train_long_documents(
+                    pythia_model, train_documents, optimizer, device,
+                    has_reset_memory=False,
+                )
+                train_ppl = torch.exp(torch.tensor(train_loss)).item()
+                # Evaluate on long documents
+                val_result = evaluate_long_documents(
+                    pythia_model, val_documents, device,
+                    update_memory=False, has_reset_memory=False,
+                )
+                val_ppl = val_result["total_ppl"]
+            else:
+                train_loss = train_epoch(pythia_model, train_loader, optimizer, device)
+                train_ppl = torch.exp(torch.tensor(train_loss)).item()
+                _, val_ppl = evaluate(pythia_model, val_loader, device)
+
             elapsed = time.time() - start_time
 
             improved = val_ppl < best_val_ppl
@@ -273,8 +308,11 @@ def run_experiment(
 
         print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
 
-        print_flush("\n  Position-wise PPL:")
-        pythia_pos_ppl = evaluate_position_wise_ppl(pythia_model, val_loader, device)
+        # Position-wise PPL (only for standard training)
+        pythia_pos_ppl = {}
+        if not long_context_train and val_loader is not None:
+            print_flush("\n  Position-wise PPL:")
+            pythia_pos_ppl = evaluate_position_wise_ppl(pythia_model, val_loader, device)
         for pos_range, ppl in pythia_pos_ppl.items():
             print_flush(f"    Position {pos_range}: {ppl:.1f}")
 
@@ -340,15 +378,64 @@ def run_experiment(
         optimizer = torch.optim.AdamW(infini_model.parameters(), lr=lr)
 
         print_flush("\n[Infini] Training...")
-        best_val_ppl, best_epoch = train_infini_model(
-            infini_model,
-            train_loader,
-            val_loader,
-            optimizer,
-            device,
-            num_epochs,
-            reset_memory_per_epoch=True,
-        )
+
+        if long_context_train:
+            # Long document training with proper memory management
+            best_val_ppl = float("inf")
+            best_epoch = 0
+            patience_counter = 0
+
+            for epoch in range(1, num_epochs + 1):
+                start_time = time.time()
+
+                # Train on long documents (Truncated BPTT)
+                train_loss = train_long_documents(
+                    infini_model, train_documents, optimizer, device,
+                    has_reset_memory=True,
+                )
+                train_ppl = torch.exp(torch.tensor(train_loss)).item()
+
+                # Evaluate on long documents with memory
+                val_result = evaluate_long_documents(
+                    infini_model, val_documents, device,
+                    update_memory=True, has_reset_memory=True,
+                )
+                val_ppl = val_result["total_ppl"]
+
+                elapsed = time.time() - start_time
+
+                improved = val_ppl < best_val_ppl
+                if improved:
+                    best_val_ppl = val_ppl
+                    best_epoch = epoch
+                    patience_counter = 0
+                    marker = "*"
+                else:
+                    patience_counter += 1
+                    marker = ""
+
+                gate_values = infini_model.get_infini_gate_values()
+                gate_mean = gate_values.mean().item()
+
+                print_flush(
+                    f"  Epoch {epoch:2d}: train_ppl={train_ppl:.1f} val_ppl={val_ppl:.1f} "
+                    f"gate={gate_mean:.3f} [{elapsed:.1f}s] {marker}"
+                )
+
+                if patience_counter >= EARLY_STOPPING_PATIENCE:
+                    print_flush("  -> Early stop")
+                    break
+        else:
+            # Standard training
+            best_val_ppl, best_epoch = train_infini_model(
+                infini_model,
+                train_loader,
+                val_loader,
+                optimizer,
+                device,
+                num_epochs,
+                reset_memory_per_epoch=True,
+            )
 
         print_flush(f"  Best: epoch {best_epoch}, ppl={best_val_ppl:.1f}")
 
@@ -358,13 +445,16 @@ def run_experiment(
         for i, g in enumerate(gate_values):
             print_flush(f"    Head {i}: {g.item():.3f}")
 
-        print_flush("\n  Position-wise PPL:")
-        infini_model.reset_memory()
-        infini_pos_ppl = evaluate_position_wise_ppl(
-            infini_model, val_loader, device, return_recon_loss=False
-        )
-        for pos_range, ppl in infini_pos_ppl.items():
-            print_flush(f"    Position {pos_range}: {ppl:.1f}")
+        # Position-wise PPL (only for standard training)
+        infini_pos_ppl = {}
+        if not long_context_train and val_loader is not None:
+            print_flush("\n  Position-wise PPL:")
+            infini_model.reset_memory()
+            infini_pos_ppl = evaluate_position_wise_ppl(
+                infini_model, val_loader, device, return_recon_loss=False
+            )
+            for pos_range, ppl in infini_pos_ppl.items():
+                print_flush(f"    Position {pos_range}: {ppl:.1f}")
 
         # Reversal Curse evaluation
         print_flush("\n  Reversal Curse evaluation:")
@@ -625,12 +715,16 @@ def main() -> None:
         help="Enable long context evaluation (proper memory reset per document)"
     )
     parser.add_argument(
+        "--long-context-train", action="store_true",
+        help="Train on long documents with proper memory management (Truncated BPTT)"
+    )
+    parser.add_argument(
         "--num-long-docs", type=int, default=50,
-        help="Number of long documents for evaluation"
+        help="Number of long documents for training/evaluation"
     )
     parser.add_argument(
         "--tokens-per-doc", type=int, default=4096,
-        help="Tokens per document for long context evaluation"
+        help="Tokens per document for long context training/evaluation"
     )
     args = parser.parse_args()
 
@@ -645,6 +739,7 @@ def main() -> None:
         skip_baseline=args.skip_baseline,
         skip_infini=args.skip_infini,
         long_context_eval=args.long_context,
+        long_context_train=args.long_context_train,
         num_long_documents=args.num_long_docs,
         tokens_per_document=args.tokens_per_doc,
     )
