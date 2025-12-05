@@ -5,7 +5,8 @@ Default experiment configuration values.
 """
 
 # Early stopping
-EARLY_STOPPING_PATIENCE = 3
+# NOTE: Do not change this value without explicit user approval
+EARLY_STOPPING_PATIENCE = 1
 
 # Gradient clipping
 GRADIENT_CLIP = 1.0

@@ -1,21 +1,21 @@
 """
-KA Cache (Key-Attention Output Cache) for Inference
+KA Cache with Adapter
 
-推論時にKVキャッシュの代わりにKAキャッシュを使用する実装。
-学習は不要で、既存のモデルをそのまま使用可能。
+Adapter方式のKAキャッシュ実装。
+既存モデルの重みを凍結し、A→V変換用のAdapterのみを学習する。
 
-KAキャッシュの仕組み:
-  - 標準: K, V をキャッシュ
-  - KA: K, A (Attention Output) をキャッシュ
+方式:
+  1. 既存モデルでK, Q, Vを計算（凍結）
+  2. Attention Output (A) を計算
+  3. 推論時: 過去のAをAdapterで変換してVの代わりに使用
+     A[i] = weights @ [Adapter(A[1:i-1]), V[i]]
 
-推論時の計算:
-  Token i の Attention Output A[i] を計算する際:
-  - 過去トークン (1 to i-1): キャッシュされた A[1:i-1] を使用
-  - 現在トークン (i): V[i] を使用
-  - A[i] = weights @ [A[1:i-1], V[i]]
+Adapterアーキテクチャ:
+  - Bottleneck構造: dim → bottleneck → dim
+  - 残差接続: output = A + Adapter(A)
+  - 小パラメータ（bottleneck=64がデフォルト）
 """
 
-from dataclasses import dataclass
 from typing import Optional, List, Tuple
 
 import torch
@@ -23,43 +23,46 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-@dataclass
-class KACache:
-    """KAキャッシュのデータ構造"""
-    keys: List[Optional[torch.Tensor]]  # [num_layers] each: [batch, heads, cached_len, head_dim]
-    attention_outputs: List[Optional[torch.Tensor]]  # [num_layers] each: [batch, heads, cached_len, head_dim]
-
-    @classmethod
-    def empty(cls, num_layers: int) -> "KACache":
-        return cls(keys=[None] * num_layers, attention_outputs=[None] * num_layers)
-
-    def get_seq_len(self) -> int:
-        if self.keys[0] is None:
-            return 0
-        return self.keys[0].shape[2]
-
-
-@dataclass
-class KVCache:
-    """標準KVキャッシュのデータ構造"""
-    keys: List[Optional[torch.Tensor]]  # [num_layers] each: [batch, heads, cached_len, head_dim]
-    values: List[Optional[torch.Tensor]]  # [num_layers] each: [batch, heads, cached_len, head_dim]
-
-    @classmethod
-    def empty(cls, num_layers: int) -> "KVCache":
-        return cls(keys=[None] * num_layers, values=[None] * num_layers)
-
-    def get_seq_len(self) -> int:
-        if self.keys[0] is None:
-            return 0
-        return self.keys[0].shape[2]
-
-
-class KACacheAttention(nn.Module):
+class KAAdapter(nn.Module):
     """
-    KAキャッシュを使用するAttention
+    A→V変換用のAdapter
 
-    推論時にKVキャッシュの代わりにKAキャッシュを使用。
+    Bottleneck構造で少パラメータでAをVに近づける。
+    """
+
+    def __init__(self, dim: int, bottleneck: int = 64):
+        super().__init__()
+        self.down = nn.Linear(dim, bottleneck)
+        self.up = nn.Linear(bottleneck, dim)
+        self.layer_norm = nn.LayerNorm(dim)
+
+        # 初期化: 小さい値で開始（残差接続のため）
+        nn.init.normal_(self.down.weight, std=0.01)
+        nn.init.zeros_(self.down.bias)
+        nn.init.normal_(self.up.weight, std=0.01)
+        nn.init.zeros_(self.up.bias)
+
+    def forward(self, a: torch.Tensor) -> torch.Tensor:
+        """
+        A (Attention Output) をV-likeな表現に変換
+
+        Args:
+            a: [batch, heads, seq, head_dim]
+
+        Returns:
+            transformed: [batch, heads, seq, head_dim]
+        """
+        # Bottleneck変換
+        delta = self.up(F.gelu(self.down(a)))
+        # 残差接続 + LayerNorm
+        return self.layer_norm(a + delta)
+
+
+class KAAdapterAttention(nn.Module):
+    """
+    Adapter付きKAキャッシュAttention
+
+    既存のAttention重みは凍結し、Adapterのみ学習可能。
     """
 
     def __init__(
@@ -69,6 +72,7 @@ class KACacheAttention(nn.Module):
         rotary_pct: float = 0.25,
         max_position_embeddings: int = 2048,
         base: int = 10000,
+        adapter_bottleneck: int = 64,
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -77,9 +81,12 @@ class KACacheAttention(nn.Module):
         self.rotary_dim = int(self.head_dim * rotary_pct)
         self.scale = self.head_dim ** -0.5
 
-        # Query, Key, Value projections
+        # Query, Key, Value projections (will be frozen)
         self.query_key_value = nn.Linear(hidden_size, 3 * hidden_size)
         self.dense = nn.Linear(hidden_size, hidden_size)
+
+        # Adapter (trainable)
+        self.adapter = KAAdapter(self.head_dim, adapter_bottleneck)
 
         # RoPE
         inv_freq = 1.0 / (base ** (torch.arange(0, self.rotary_dim, 2).float() / self.rotary_dim))
@@ -105,14 +112,12 @@ class KACacheAttention(nn.Module):
         if seq_len > self.max_seq_len_cached:
             self._init_rope_cache(seq_len)
 
-        cos = self.cos_cached[position_ids].unsqueeze(1)  # [batch, 1, seq, dim]
+        cos = self.cos_cached[position_ids].unsqueeze(1)
         sin = self.sin_cached[position_ids].unsqueeze(1)
 
-        # Split rotary and pass-through
         q_rot, q_pass = q[..., :self.rotary_dim], q[..., self.rotary_dim:]
         k_rot, k_pass = k[..., :self.rotary_dim], k[..., self.rotary_dim:]
 
-        # Rotate
         def rotate_half(x: torch.Tensor) -> torch.Tensor:
             x1, x2 = x[..., :x.shape[-1]//2], x[..., x.shape[-1]//2:]
             return torch.cat((-x2, x1), dim=-1)
@@ -128,19 +133,16 @@ class KACacheAttention(nn.Module):
         position_ids: torch.Tensor,
         kv_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        """標準KVキャッシュを使用したforward"""
+        """Standard KV cache forward (for baseline comparison)"""
         batch_size, seq_len, _ = hidden_states.shape
 
-        # QKV projection
         qkv = self.query_key_value(hidden_states)
         qkv = qkv.view(batch_size, seq_len, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)
         query, key, value = qkv[0], qkv[1], qkv[2]
 
-        # Apply RoPE
         query, key = self._apply_rotary(query, key, position_ids)
 
-        # Update KV cache
         if kv_cache is not None:
             cached_k, cached_v = kv_cache
             key = torch.cat([cached_k, key], dim=2)
@@ -148,49 +150,41 @@ class KACacheAttention(nn.Module):
 
         new_kv_cache = (key, value)
 
-        # Attention
         total_len = key.shape[2]
         attn_weights = torch.matmul(query, key.transpose(-1, -2)) * self.scale
 
-        # Causal mask
         causal_mask = torch.triu(
             torch.ones(seq_len, total_len, device=hidden_states.device) * float("-inf"),
             diagonal=total_len - seq_len + 1
         )
         attn_weights = attn_weights + causal_mask
-
         attn_weights = F.softmax(attn_weights, dim=-1)
-        attn_output = torch.matmul(attn_weights, value)
 
-        # Output
+        attn_output = torch.matmul(attn_weights, value)
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.view(batch_size, seq_len, self.hidden_size)
         output = self.dense(attn_output)
 
         return output, new_kv_cache
 
-    def forward_with_ka_cache(
+    def forward_with_ka_adapter(
         self,
         hidden_states: torch.Tensor,
         position_ids: torch.Tensor,
         ka_cache: Optional[Tuple[torch.Tensor, torch.Tensor]] = None,
     ) -> Tuple[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
-        """KAキャッシュを使用したforward"""
+        """KA cache with Adapter forward"""
         batch_size, seq_len, _ = hidden_states.shape
 
-        # QKV projection
         qkv = self.query_key_value(hidden_states)
         qkv = qkv.view(batch_size, seq_len, 3, self.num_heads, self.head_dim)
         qkv = qkv.permute(2, 0, 3, 1, 4)
         query, key, value = qkv[0], qkv[1], qkv[2]
 
-        # Apply RoPE
         query, key = self._apply_rotary(query, key, position_ids)
 
-        # Handle KA cache
         if ka_cache is not None:
             cached_k, cached_a = ka_cache
-            # Concatenate keys
             full_key = torch.cat([cached_k, key], dim=2)
             cached_len = cached_k.shape[2]
         else:
@@ -200,10 +194,8 @@ class KACacheAttention(nn.Module):
 
         total_len = full_key.shape[2]
 
-        # Attention scores
         attn_weights = torch.matmul(query, full_key.transpose(-1, -2)) * self.scale
 
-        # Causal mask
         causal_mask = torch.triu(
             torch.ones(seq_len, total_len, device=hidden_states.device) * float("-inf"),
             diagonal=total_len - seq_len + 1
@@ -211,27 +203,24 @@ class KACacheAttention(nn.Module):
         attn_weights = attn_weights + causal_mask
         attn_weights = F.softmax(attn_weights, dim=-1)
 
-        # KA-Attention: use cached A for past tokens, V for current token
-        # attn_output[i] = sum(weights[i,j] * (A[j] if j < cached_len else V[j]))
+        # KA-Attention with Adapter
         if cached_a is not None:
-            # Split weights for cached (A) and current (V)
-            weights_for_cached = attn_weights[..., :cached_len]  # [batch, heads, seq, cached_len]
-            weights_for_current = attn_weights[..., cached_len:]  # [batch, heads, seq, seq_len]
+            weights_for_cached = attn_weights[..., :cached_len]
+            weights_for_current = attn_weights[..., cached_len:]
+
+            # Apply adapter to cached A
+            adapted_a = self.adapter(cached_a)
 
             # Compute attention output
-            # Past tokens: use cached Attention Output
-            cached_contribution = torch.matmul(weights_for_cached, cached_a)
-            # Current tokens: use Value
+            cached_contribution = torch.matmul(weights_for_cached, adapted_a)
             current_contribution = torch.matmul(weights_for_current, value)
 
             attn_output = cached_contribution + current_contribution
         else:
-            # No cache, use V directly (first token)
             attn_output = torch.matmul(attn_weights, value)
 
-        # Update KA cache: store K and A (not V)
-        # A for current position = attn_output (per-head)
-        new_a = attn_output  # [batch, heads, seq_len, head_dim]
+        # Update KA cache
+        new_a = attn_output
         if cached_a is not None:
             new_cached_a = torch.cat([cached_a, new_a], dim=2)
         else:
@@ -239,7 +228,6 @@ class KACacheAttention(nn.Module):
 
         new_ka_cache = (full_key, new_cached_a)
 
-        # Output projection
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.view(batch_size, seq_len, self.hidden_size)
         output = self.dense(attn_output)
@@ -247,11 +235,11 @@ class KACacheAttention(nn.Module):
         return output, new_ka_cache
 
 
-class KACachePythiaModel(nn.Module):
+class KAAdapterPythiaModel(nn.Module):
     """
-    KAキャッシュ推論対応のPythiaモデル
+    Adapter付きKAキャッシュPythiaモデル
 
-    標準のPythiaModelと同じ構造だが、KVキャッシュとKAキャッシュの両方に対応。
+    既存モデルの重みを凍結し、Adapterのみ学習可能。
     """
 
     def __init__(
@@ -263,6 +251,7 @@ class KACachePythiaModel(nn.Module):
         intermediate_size: int = 2048,
         max_position_embeddings: int = 2048,
         rotary_pct: float = 0.25,
+        adapter_bottleneck: int = 64,
     ):
         super().__init__()
 
@@ -271,17 +260,19 @@ class KACachePythiaModel(nn.Module):
         self.num_layers = num_layers
         self.num_heads = num_heads
         self.head_dim = hidden_size // num_heads
+        self.adapter_bottleneck = adapter_bottleneck
 
         # Embedding
         self.embed_in = nn.Embedding(vocab_size, hidden_size)
 
-        # Attention layers
+        # Attention layers with adapters
         self.attentions = nn.ModuleList([
-            KACacheAttention(
+            KAAdapterAttention(
                 hidden_size=hidden_size,
                 num_heads=num_heads,
                 rotary_pct=rotary_pct,
                 max_position_embeddings=max_position_embeddings,
+                adapter_bottleneck=adapter_bottleneck,
             )
             for _ in range(num_layers)
         ])
@@ -301,10 +292,7 @@ class KACachePythiaModel(nn.Module):
             nn.LayerNorm(hidden_size) for _ in range(num_layers)
         ])
 
-        # Final layer norm
         self.final_layer_norm = nn.LayerNorm(hidden_size)
-
-        # LM Head
         self.embed_out = nn.Linear(hidden_size, vocab_size, bias=False)
 
         self._init_weights()
@@ -321,6 +309,21 @@ class KACachePythiaModel(nn.Module):
                 nn.init.ones_(module.weight)
                 nn.init.zeros_(module.bias)
 
+    def freeze_base_model(self) -> None:
+        """Freeze all parameters except adapters"""
+        for name, param in self.named_parameters():
+            if "adapter" not in name:
+                param.requires_grad = False
+
+    def unfreeze_all(self) -> None:
+        """Unfreeze all parameters"""
+        for param in self.parameters():
+            param.requires_grad = True
+
+    def get_adapter_parameters(self) -> List[nn.Parameter]:
+        """Get only adapter parameters (for optimizer)"""
+        return [p for n, p in self.named_parameters() if "adapter" in n]
+
     def forward(
         self,
         input_ids: torch.Tensor,
@@ -336,7 +339,6 @@ class KACachePythiaModel(nn.Module):
             residual = hidden_states
             hidden_states = self.input_layernorms[i](hidden_states)
 
-            # Parallel attention and MLP
             attn_output, _ = self.attentions[i].forward_with_kv_cache(hidden_states, position_ids, None)
             mlp_output = self.mlps[i](hidden_states)
 
@@ -351,9 +353,9 @@ class KACachePythiaModel(nn.Module):
         self,
         input_ids: torch.Tensor,
         cache: Optional[List] = None,
-        use_ka_cache: bool = False,
+        use_ka_adapter: bool = False,
     ) -> Tuple[torch.Tensor, List]:
-        """Forward with cache (KV or KA)"""
+        """Forward with cache (KV or KA with Adapter)"""
         batch_size, seq_len = input_ids.shape
 
         if cache is None:
@@ -373,9 +375,8 @@ class KACachePythiaModel(nn.Module):
             residual = hidden_states
             hidden_states = self.input_layernorms[i](hidden_states)
 
-            # Use KA or KV cache
-            if use_ka_cache:
-                attn_output, layer_cache = self.attentions[i].forward_with_ka_cache(
+            if use_ka_adapter:
+                attn_output, layer_cache = self.attentions[i].forward_with_ka_adapter(
                     hidden_states, position_ids, cache[i]
                 )
             else:
@@ -398,23 +399,20 @@ class KACachePythiaModel(nn.Module):
         self,
         input_ids: torch.Tensor,
         max_new_tokens: int = 50,
-        use_ka_cache: bool = False,
+        use_ka_adapter: bool = False,
         temperature: float = 1.0,
     ) -> torch.Tensor:
-        """Generate tokens with KV or KA cache"""
+        """Generate tokens with KV or KA adapter cache"""
         cache = None
 
         for _ in range(max_new_tokens):
             if cache is None:
-                # First forward: process all input tokens
-                logits, cache = self.forward_with_cache(input_ids, None, use_ka_cache)
+                logits, cache = self.forward_with_cache(input_ids, None, use_ka_adapter)
             else:
-                # Subsequent forwards: only process last token
                 logits, cache = self.forward_with_cache(
-                    input_ids[:, -1:], cache, use_ka_cache
+                    input_ids[:, -1:], cache, use_ka_adapter
                 )
 
-            # Sample next token
             next_logits = logits[:, -1, :] / temperature
             probs = F.softmax(next_logits, dim=-1)
             next_token = torch.multinomial(probs, num_samples=1)
@@ -425,4 +423,10 @@ class KACachePythiaModel(nn.Module):
 
     def num_parameters(self) -> dict:
         total = sum(p.numel() for p in self.parameters())
-        return {"total": total}
+        adapter = sum(p.numel() for n, p in self.named_parameters() if "adapter" in n)
+        trainable = sum(p.numel() for p in self.parameters() if p.requires_grad)
+        return {
+            "total": total,
+            "adapter": adapter,
+            "trainable": trainable,
+        }
