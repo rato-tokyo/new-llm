@@ -63,6 +63,7 @@ class InfiniPythiaModel(nn.Module):
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
+        self.num_heads = num_heads
         self.memory_only = memory_only
 
         # Embedding
@@ -182,14 +183,13 @@ class InfiniPythiaModel(nn.Module):
     def memory_info(self) -> dict[str, int]:
         """Infini-Attentionのメモリ情報を計算"""
         # Infini layer: メモリは固定サイズ (num_heads, head_dim, head_dim)
-        num_heads = 8  # assuming 8 heads
-        head_dim = self.hidden_size // num_heads
+        head_dim = self.hidden_size // self.num_heads
 
         # M matrix: [num_heads, head_dim, head_dim]
-        m_matrix_size = num_heads * head_dim * head_dim * 4  # float32
+        m_matrix_size = self.num_heads * head_dim * head_dim * 4  # float32
 
         # z vector: [num_heads, head_dim]
-        z_vector_size = num_heads * head_dim * 4
+        z_vector_size = self.num_heads * head_dim * 4
 
         return {
             "m_matrix_bytes": m_matrix_size,
