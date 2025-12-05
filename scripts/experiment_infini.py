@@ -181,6 +181,8 @@ def run_experiment(
     long_context_train: bool = False,
     num_long_documents: int = 50,
     tokens_per_document: int = 4096,
+    num_memory_banks: int = 1,
+    segments_per_bank: int = 4,
 ) -> dict[str, Any]:
     """Run Infini-Attention experiment."""
     set_seed(42)
@@ -197,6 +199,8 @@ def run_experiment(
     print_flush(f"Learning rate: {lr}")
     print_flush(f"Delta rule: {use_delta_rule}")
     print_flush(f"Memory only: {memory_only}")
+    if num_memory_banks > 1:
+        print_flush(f"Multi-Memory: {num_memory_banks} banks, {segments_per_bank} segments/bank")
     print_flush(f"Skip baseline: {skip_baseline}")
     print_flush(f"Skip infini: {skip_infini}")
     if long_context_train:
@@ -347,10 +351,15 @@ def run_experiment(
         results["infini"] = None
     else:
         print_flush("\n" + "=" * 70)
-        print_flush("2. INFINI-PYTHIA (1層目Infini + RoPE)")
+        if num_memory_banks > 1:
+            print_flush(f"2. MULTI-MEMORY INFINI-PYTHIA ({num_memory_banks} banks)")
+        else:
+            print_flush("2. INFINI-PYTHIA (1層目Infini + RoPE)")
         print_flush("=" * 70)
         if memory_only:
             print_flush("  Layer 0: Infini-Attention (NoPE, MEMORY ONLY - no local attention)")
+        elif num_memory_banks > 1:
+            print_flush(f"  Layer 0: Multi-Memory Infini-Attention ({num_memory_banks} banks)")
         else:
             print_flush("  Layer 0: Infini-Attention (NoPE, compressive memory)")
         print_flush("  Layer 1-5: Standard Pythia (RoPE)")
@@ -365,6 +374,8 @@ def run_experiment(
             rotary_pct=config.rotary_pct,
             use_delta_rule=use_delta_rule,
             memory_only=memory_only,
+            num_memory_banks=num_memory_banks,
+            segments_per_bank=segments_per_bank,
         )
         infini_model = infini_model.to(device)
 
@@ -374,6 +385,8 @@ def run_experiment(
         print_flush(f"  Pythia layers: {param_info['pythia_layers']:,}")
 
         memory_info = infini_model.memory_info()
+        if num_memory_banks > 1:
+            print_flush(f"  Memory banks: {memory_info['num_memory_banks']}")
         print_flush(f"  Infini memory: {memory_info['total_memory_bytes']:,} bytes (fixed)")
 
         optimizer = torch.optim.AdamW(infini_model.parameters(), lr=lr)
@@ -549,6 +562,8 @@ def run_experiment(
                 rotary_pct=config.rotary_pct,
                 use_delta_rule=use_delta_rule,
                 memory_only=memory_only,
+                num_memory_banks=num_memory_banks,
+                segments_per_bank=segments_per_bank,
             ).to(device)
             # Load trained weights
             infini_model.load_state_dict(results["infini"]["model_state_dict"])
@@ -731,6 +746,14 @@ def main() -> None:
         "--tokens-per-doc", type=int, default=4096,
         help="Tokens per document for long context training/evaluation"
     )
+    parser.add_argument(
+        "--num-memory-banks", type=int, default=1,
+        help="Number of memory banks (1=standard, 2+=multi-memory)"
+    )
+    parser.add_argument(
+        "--segments-per-bank", type=int, default=4,
+        help="Number of segments per memory bank before switching"
+    )
     args = parser.parse_args()
 
     run_experiment(
@@ -747,6 +770,8 @@ def main() -> None:
         long_context_train=args.long_context_train,
         num_long_documents=args.num_long_docs,
         tokens_per_document=args.tokens_per_doc,
+        num_memory_banks=args.num_memory_banks,
+        segments_per_bank=args.segments_per_bank,
     )
 
     print_flush("\nDONE")

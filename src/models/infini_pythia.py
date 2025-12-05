@@ -22,7 +22,7 @@ from typing import Optional, Dict
 import torch
 import torch.nn as nn
 
-from src.models.infini_attention import InfiniAttentionLayer
+from src.models.infini_attention import InfiniAttentionLayer, MultiMemoryInfiniAttentionLayer
 from src.models.pythia import PythiaLayer
 
 
@@ -45,6 +45,8 @@ class InfiniPythiaModel(nn.Module):
         rotary_pct: float = 0.25,
         use_delta_rule: bool = True,
         memory_only: bool = False,
+        num_memory_banks: int = 1,
+        segments_per_bank: int = 4,
     ):
         """
         Args:
@@ -57,6 +59,8 @@ class InfiniPythiaModel(nn.Module):
             rotary_pct: RoPEを適用する次元の割合
             use_delta_rule: Infini-AttentionでDelta Ruleを使用するか
             memory_only: Memory Attentionのみ使用（Local Attentionなし）
+            num_memory_banks: メモリバンク数（1=通常、2以上=Multi-Memory）
+            segments_per_bank: 各バンクに蓄積するセグメント数
         """
         super().__init__()
 
@@ -65,18 +69,32 @@ class InfiniPythiaModel(nn.Module):
         self.num_layers = num_layers
         self.num_heads = num_heads
         self.memory_only = memory_only
+        self.num_memory_banks = num_memory_banks
 
         # Embedding
         self.embed_in = nn.Embedding(vocab_size, hidden_size)
 
         # Layer 0: Infini-Attention (NoPE)
-        self.infini_layer = InfiniAttentionLayer(
-            hidden_size=hidden_size,
-            num_heads=num_heads,
-            intermediate_size=intermediate_size,
-            use_delta_rule=use_delta_rule,
-            memory_only=memory_only,
-        )
+        if num_memory_banks > 1:
+            # Multi-Memory Bank version
+            self.infini_layer = MultiMemoryInfiniAttentionLayer(
+                hidden_size=hidden_size,
+                num_heads=num_heads,
+                intermediate_size=intermediate_size,
+                num_memory_banks=num_memory_banks,
+                segments_per_bank=segments_per_bank,
+                use_delta_rule=use_delta_rule,
+                memory_only=memory_only,
+            )
+        else:
+            # Standard single memory version
+            self.infini_layer = InfiniAttentionLayer(
+                hidden_size=hidden_size,
+                num_heads=num_heads,
+                intermediate_size=intermediate_size,
+                use_delta_rule=use_delta_rule,
+                memory_only=memory_only,
+            )
 
         # Layers 1-(num_layers-1): Standard Pythia (RoPE)
         self.pythia_layers = nn.ModuleList([
@@ -191,8 +209,18 @@ class InfiniPythiaModel(nn.Module):
         # z vector: [num_heads, head_dim]
         z_vector_size = self.num_heads * head_dim * 4
 
+        # For multi-memory, multiply by number of banks
+        num_banks = self.num_memory_banks
+
         return {
-            "m_matrix_bytes": m_matrix_size,
-            "z_vector_bytes": z_vector_size,
-            "total_memory_bytes": m_matrix_size + z_vector_size,
+            "m_matrix_bytes": m_matrix_size * num_banks,
+            "z_vector_bytes": z_vector_size * num_banks,
+            "total_memory_bytes": (m_matrix_size + z_vector_size) * num_banks,
+            "num_memory_banks": num_banks,
         }
+
+    def get_bank_weights(self) -> torch.Tensor:
+        """Multi-Memory版の場合、バンク重みを取得"""
+        if self.num_memory_banks > 1:
+            return self.infini_layer.attention.get_bank_weights()
+        return None
