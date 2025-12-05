@@ -169,13 +169,13 @@ class InfiniAttention(nn.Module):
             memory_update = torch.einsum('bhsd,bhse->hde', sigma_k, v)
             memory_update = memory_update / (k.size(0) * k.size(2))
 
-        # Update memory
-        self.memory = self.memory + memory_update
+        # Update memory (detach to prevent gradient accumulation across batches)
+        self.memory = (self.memory + memory_update).detach()
 
         # Update normalization term: z = z + sum(σ(K))
         z_update = sigma_k.sum(dim=(0, 2))  # [heads, head_dim]
         z_update = z_update / k.size(0)  # normalize by batch
-        self.memory_norm = self.memory_norm + z_update
+        self.memory_norm = (self.memory_norm + z_update).detach()
 
     def forward(
         self,

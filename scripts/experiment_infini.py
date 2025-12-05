@@ -8,8 +8,9 @@ Infini-Attention Experiment
 MLA-Pythia (ALiBi全層) vs Infini-Pythia (1層目Infini + ALiBi) の比較。
 
 Usage:
-    python3 scripts/experiment_infini.py --samples 10000 --epochs 30
-    python3 scripts/experiment_infini.py --samples 10000 --skip-mla
+    python3 scripts/experiment_infini.py --samples 5000 --epochs 30
+    python3 scripts/experiment_infini.py --samples 5000 --skip-mla
+    python3 scripts/experiment_infini.py --seq-length 512  # longer context
 """
 
 import argparse
@@ -446,8 +447,8 @@ def main() -> None:
     config = PythiaConfig()
 
     parser = argparse.ArgumentParser(description="Infini-Attention Experiment")
-    parser.add_argument("--samples", type=int, default=10000, help="Number of samples")
-    parser.add_argument("--seq-length", type=int, default=128, help="Sequence length")
+    parser.add_argument("--samples", type=int, default=5000, help="Number of samples")
+    parser.add_argument("--seq-length", type=int, default=256, help="Sequence length (longer is better for Infini)")
     parser.add_argument(
         "--epochs", type=int, default=config.num_epochs, help="Number of epochs"
     )
