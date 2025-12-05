@@ -21,6 +21,7 @@ from .position_encoding import (
 from .unified_pythia import UnifiedPythiaModel
 from .ka_cache import KACachePythiaModel, KACache, KVCache
 from .ka_adapter import KAAdapterPythiaModel, KAAdapter, KAAdapterAttention
+from .ka_train import KATrainPythiaModel, KATrainAttention
 
 __all__ = [
     # Legacy models
@@ -49,4 +50,7 @@ __all__ = [
     'KAAdapterPythiaModel',
     'KAAdapter',
     'KAAdapterAttention',
+    # KA train (案2)
+    'KATrainPythiaModel',
+    'KATrainAttention',
 ]
