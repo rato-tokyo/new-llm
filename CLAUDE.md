@@ -163,6 +163,41 @@ score = (R_q @ Q) @ (R_k @ c_kv @ W_UK)^T
 
 ---
 
+## 📊 Reversal Curse 評価
+
+### 概要
+
+Reversal Curseは「A is B」を学習したモデルが「B is A」も推論できるかを測定する指標。
+
+### 正しい実験設計
+
+```
+訓練データ:
+  - Pile（一般テキスト）
+  - 順方向文のみ: "The capital of France is Paris"
+
+評価データ:
+  - 順方向: "The capital of France is Paris" → 低PPL期待
+  - 逆方向: "Paris is the capital of France" → 高PPL（Reversal Curse）
+```
+
+### 指標
+
+| 指標 | 定義 | 解釈 |
+|------|------|------|
+| Forward PPL | 順方向文のPPL | 訓練データに含まれるため低い |
+| Backward PPL | 逆方向文のPPL | 訓練データに含まれないため高い |
+| Reversal Ratio | Forward / Backward | 1.0に近いほど良い |
+| Reversal Gap | Backward - Forward | 0に近いほど良い |
+
+### 実装
+
+- 訓練データ: `prepare_data_loaders(include_reversal_pairs=True)`
+- 順方向文は10回繰り返して訓練データに追加
+- 評価: `evaluate_reversal_curse(model, tokenizer, pairs, device)`
+
+---
+
 ## 🔧 開発環境
 
 ### Lint/Type Check

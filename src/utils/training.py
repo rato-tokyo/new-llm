@@ -22,6 +22,7 @@ def prepare_data_loaders(
     tokenizer_name: str,
     val_split: float = 0.1,
     batch_size: int = 32,
+    include_reversal_pairs: bool = True,
 ) -> Tuple[DataLoader, DataLoader]:
     """
     Prepare training and validation DataLoaders from Pile.
@@ -32,6 +33,7 @@ def prepare_data_loaders(
         tokenizer_name: Tokenizer name
         val_split: Validation split ratio
         batch_size: Batch size
+        include_reversal_pairs: Include forward sentences from reversal pairs in training
 
     Returns:
         train_loader, val_loader
@@ -43,7 +45,7 @@ def prepare_data_loaders(
     total_tokens_needed = num_samples * seq_length
     tokens = load_pile_tokens_cached(total_tokens_needed + seq_length, tokenizer_name)
 
-    # Create samples
+    # Create samples from Pile
     all_input_ids_list = []
     all_labels_list = []
 
@@ -54,12 +56,29 @@ def prepare_data_loaders(
         all_input_ids_list.append(input_ids)
         all_labels_list.append(labels)
 
+    # Add reversal pairs (forward direction only) to training data
+    if include_reversal_pairs:
+        reversal_samples = _create_reversal_training_samples(
+            tokenizer_name, seq_length
+        )
+        if reversal_samples:
+            rev_inputs, rev_labels = reversal_samples
+            all_input_ids_list.extend(rev_inputs)
+            all_labels_list.extend(rev_labels)
+            print_flush(f"  Added {len(rev_inputs)} reversal pair samples to training")
+
     all_input_ids = torch.stack(all_input_ids_list)
     all_labels = torch.stack(all_labels_list)
 
+    # Shuffle before split to mix reversal pairs with Pile data
+    total_samples = len(all_input_ids)
+    perm = torch.randperm(total_samples)
+    all_input_ids = all_input_ids[perm]
+    all_labels = all_labels[perm]
+
     # Split
-    val_size = int(num_samples * val_split)
-    train_size = num_samples - val_size
+    val_size = int(num_samples * val_split)  # Use original num_samples for val size
+    train_size = total_samples - val_size
 
     train_dataset = TensorDataset(all_input_ids[:train_size], all_labels[:train_size])
     val_dataset = TensorDataset(all_input_ids[train_size:], all_labels[train_size:])
@@ -71,6 +90,69 @@ def prepare_data_loaders(
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     return train_loader, val_loader
+
+
+def _create_reversal_training_samples(
+    tokenizer_name: str,
+    seq_length: int,
+    repeat_count: int = 10,
+) -> Optional[Tuple[list, list]]:
+    """
+    Create training samples from reversal pairs (forward direction only).
+
+    各ペアを複数回繰り返して訓練データに含める。
+
+    Args:
+        tokenizer_name: Tokenizer name
+        seq_length: Sequence length
+        repeat_count: Number of times to repeat each sentence
+
+    Returns:
+        (input_ids_list, labels_list) or None if import fails
+    """
+    try:
+        from src.data.reversal_pairs import get_training_sentences
+        from transformers import AutoTokenizer
+    except ImportError:
+        return None
+
+    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
+    sentences = get_training_sentences(include_backward=False)  # Forward only
+
+    input_ids_list = []
+    labels_list = []
+
+    for sentence in sentences:
+        # Tokenize
+        tokens = tokenizer.encode(sentence, add_special_tokens=False)
+
+        # Pad or truncate to seq_length
+        if len(tokens) < seq_length:
+            # Pad with EOS token
+            pad_token = tokenizer.eos_token_id or 0
+            tokens = tokens + [pad_token] * (seq_length - len(tokens))
+        else:
+            tokens = tokens[:seq_length]
+
+        tokens_tensor = torch.tensor(tokens)
+
+        # Create input/label pairs (shift by 1)
+        input_ids = tokens_tensor[:-1]
+        labels = tokens_tensor[1:]
+
+        # Pad to seq_length if needed
+        if len(input_ids) < seq_length:
+            pad_token = tokenizer.eos_token_id or 0
+            pad_len = seq_length - len(input_ids)
+            input_ids = torch.cat([input_ids, torch.full((pad_len,), pad_token)])
+            labels = torch.cat([labels, torch.full((pad_len,), pad_token)])
+
+        # Repeat each sentence multiple times for better learning
+        for _ in range(repeat_count):
+            input_ids_list.append(input_ids[:seq_length])
+            labels_list.append(labels[:seq_length])
+
+    return input_ids_list, labels_list
 
 
 def train_epoch(
