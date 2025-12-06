@@ -63,6 +63,8 @@ def evaluate_ppl_standard(model, documents: list, device: torch.device, segment_
 
     各ドキュメントをsegment_lengthで分割し、各セグメントを独立に評価。
     これはオリジナルPythiaの標準的な評価方法。
+
+    ⚠️ 問題: position_idsが各セグメントで0から始まるため、高PPLになる
     """
     model.eval()
 
@@ -84,6 +86,48 @@ def evaluate_ppl_standard(model, documents: list, device: torch.device, segment_
                 labels = segment[1:].unsqueeze(0)
 
                 outputs = model(input_ids, labels=labels)
+                loss = outputs.loss
+
+                total_loss += loss.item() * labels.numel()
+                total_tokens += labels.numel()
+
+    ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+    return ppl
+
+
+def evaluate_ppl_with_position_ids(model, documents: list, device: torch.device, segment_length: int):
+    """
+    正しいposition_idsを使用したPPL評価
+
+    各セグメントで正しいposition_idsを渡すことで、
+    文書内の位置情報を保持する。
+    """
+    model.eval()
+
+    total_loss = 0.0
+    total_tokens = 0
+
+    with torch.no_grad():
+        for doc in documents:
+            doc = doc.to(device)
+
+            for start in range(0, len(doc) - 1, segment_length):
+                end = min(start + segment_length, len(doc))
+                segment = doc[start:end]
+
+                if len(segment) < 2:
+                    continue
+
+                input_ids = segment[:-1].unsqueeze(0)
+                labels = segment[1:].unsqueeze(0)
+
+                # 正しいposition_idsを設定（文書内の実際の位置）
+                position_ids = torch.arange(
+                    start, start + len(segment) - 1,
+                    device=device
+                ).unsqueeze(0)
+
+                outputs = model(input_ids, labels=labels, position_ids=position_ids)
                 loss = outputs.loss
 
                 total_loss += loss.item() * labels.numel()
@@ -171,21 +215,22 @@ def main():
     print_flush("EVALUATION RESULTS")
     print_flush("=" * 70)
 
-    # Method 1: Segment-based (same as parallel adapter training)
-    print_flush("\n1. Segment-based evaluation (segment_length=256):")
-    ppl_segment = evaluate_ppl_standard(model, documents, device, args.seq_length)
-    print_flush(f"   PPL: {ppl_segment:.1f}")
+    # Method 1: Segment-based WITHOUT position_ids (problematic)
+    print_flush("\n1. Segment-based WITHOUT position_ids (position resets each segment):")
+    ppl_no_pos = evaluate_ppl_standard(model, documents, device, args.seq_length)
+    print_flush(f"   PPL: {ppl_no_pos:.1f}")
+    print_flush("   ⚠️ This is problematic - position_ids reset to 0 for each segment")
 
-    # Method 2: Full context (up to 2048)
-    print_flush("\n2. Full context evaluation (max_length=2048):")
+    # Method 2: Segment-based WITH correct position_ids
+    print_flush("\n2. Segment-based WITH correct position_ids:")
+    ppl_with_pos = evaluate_ppl_with_position_ids(model, documents, device, args.seq_length)
+    print_flush(f"   PPL: {ppl_with_pos:.1f}")
+    print_flush("   ✓ This preserves document position information")
+
+    # Method 3: Full context (up to 2048)
+    print_flush("\n3. Full context evaluation (max_length=2048):")
     ppl_full = evaluate_ppl_full_context(model, documents, device, max_length=2048)
     print_flush(f"   PPL: {ppl_full:.1f}")
-
-    # Method 3: Full document (4096 tokens, beyond context limit)
-    print_flush("\n3. Full document evaluation (4096 tokens, truncated to 2048):")
-    # This is essentially the same as method 2 since we truncate
-    # But let's show what happens if we try to process 4096 tokens
-    print_flush("   Note: Pythia-70m has max context of 2048, so 4096 tokens would be truncated")
 
     # Summary
     print_flush("\n" + "=" * 70)
@@ -193,7 +238,8 @@ def main():
     print_flush("=" * 70)
     print_flush("| Method | PPL |")
     print_flush("|--------|-----|")
-    print_flush(f"| Segment-based (256 tokens) | {ppl_segment:.1f} |")
+    print_flush(f"| Segment (no position_ids) | {ppl_no_pos:.1f} |")
+    print_flush(f"| Segment (with position_ids) | {ppl_with_pos:.1f} |")
     print_flush(f"| Full context (2048 tokens) | {ppl_full:.1f} |")
 
     print_flush("\n" + "=" * 70)
@@ -201,14 +247,27 @@ def main():
     print_flush("=" * 70)
     print_flush("| Model | PPL |")
     print_flush("|-------|-----|")
-    print_flush(f"| Original Pythia-70m (segment=256) | {ppl_segment:.1f} |")
-    print_flush(f"| Parallel Adapter (after training) | 514.1 |")
+    print_flush(f"| Original Pythia (no position_ids) | {ppl_no_pos:.1f} |")
+    print_flush(f"| Original Pythia (with position_ids) | {ppl_with_pos:.1f} |")
+    print_flush(f"| Parallel Adapter (trained, no pos) | 514.1 |")
 
-    if ppl_segment < 514.1:
-        print_flush(f"\n⚠️ WARNING: Original Pythia is BETTER than Parallel Adapter!")
-        print_flush(f"   Difference: {514.1 - ppl_segment:.1f} PPL worse")
+    print_flush("\n" + "=" * 70)
+    print_flush("ANALYSIS")
+    print_flush("=" * 70)
+
+    if ppl_with_pos < 100:
+        print_flush(f"✓ Original Pythia with correct position_ids: PPL {ppl_with_pos:.1f} (normal)")
     else:
-        print_flush(f"\n✓ Parallel Adapter improved PPL by {ppl_segment - 514.1:.1f}")
+        print_flush(f"⚠️ Original Pythia with position_ids still high: PPL {ppl_with_pos:.1f}")
+
+    print_flush(f"\nPosition ID impact: {ppl_no_pos:.1f} -> {ppl_with_pos:.1f} ({ppl_no_pos/ppl_with_pos:.1f}x improvement)")
+
+    if ppl_with_pos < 514.1:
+        print_flush(f"\n⚠️ IMPORTANT: Parallel Adapter (PPL 514.1) is WORSE than")
+        print_flush(f"   Original Pythia with correct position_ids (PPL {ppl_with_pos:.1f})")
+        print_flush(f"   This means the training/evaluation method needs fixing!")
+    else:
+        print_flush(f"\n✓ Parallel Adapter improved over baseline")
 
     print_flush("\nDONE")
 
