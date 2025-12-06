@@ -147,8 +147,6 @@ class ContinuousLM(nn.Module):
             generated_ids: [batch, seq_len + max_new_tokens]
         """
         self.eval()
-        device = input_ids.device
-        batch_size = input_ids.shape[0]
 
         # 初期トークンを処理
         with torch.no_grad():
