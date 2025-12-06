@@ -30,7 +30,6 @@ from config.pythia import PythiaConfig  # noqa: E402
 from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE  # noqa: E402
 from src.models.pythia import PythiaModel  # noqa: E402
 from src.models.infini_pythia import InfiniPythiaModel  # noqa: E402
-from src.models.full_infini import FullInfiniModel  # noqa: E402
 from src.data.reversal_pairs import get_reversal_pairs  # noqa: E402
 from src.utils.io import print_flush  # noqa: E402
 from src.utils.seed import set_seed  # noqa: E402
@@ -178,7 +177,6 @@ def run_experiment(
     segments_per_bank: int = 4,
     use_alibi: bool = False,
     alibi_scale: float = 1.0,
-    all_infini: bool = False,
 ) -> dict[str, Any]:
     """Run Infini-Attention experiment."""
     set_seed(42)
@@ -187,9 +185,7 @@ def run_experiment(
     config = PythiaConfig()
 
     print_flush("=" * 70)
-    if all_infini:
-        print_flush("FULL INFINI-ATTENTION EXPERIMENT (All Layers)")
-    elif use_alibi:
+    if use_alibi:
         print_flush("INFINI-ATTENTION EXPERIMENT (Memory-Only + ALiBi)")
     else:
         print_flush("INFINI-ATTENTION EXPERIMENT (Memory-Only)")
@@ -199,8 +195,6 @@ def run_experiment(
     print_flush(f"Epochs: {num_epochs}")
     print_flush(f"Learning rate: {lr}")
     print_flush(f"Delta rule: {use_delta_rule}")
-    if all_infini:
-        print_flush(f"All Infini: enabled ({config.num_layers} layers)")
     if use_alibi:
         print_flush(f"ALiBi: enabled (scale={alibi_scale})")
     if num_memory_banks > 1:
@@ -342,7 +336,7 @@ def run_experiment(
         del pythia_model
         clear_gpu_cache(device)
 
-    # ===== 2. Infini-Pythia (Memory-Only) or Full Infini =====
+    # ===== 2. Infini-Pythia (Memory-Only) =====
     if skip_infini:
         print_flush("\n" + "=" * 70)
         print_flush("2. INFINI - SKIPPED")
@@ -350,70 +344,43 @@ def run_experiment(
         results["infini"] = None
     else:
         print_flush("\n" + "=" * 70)
-        if all_infini:
-            print_flush(f"2. FULL INFINI ({config.num_layers} Layers)")
-            print_flush("=" * 70)
-            print_flush(f"  Layer 0-{config.num_layers-1}: Infini-Attention (Memory Only)")
-            if use_alibi:
-                print_flush("  Position encoding: ALiBi")
-            else:
-                print_flush("  Position encoding: None (NoPE)")
-
-            infini_model = FullInfiniModel(
-                vocab_size=config.vocab_size,
-                hidden_size=config.hidden_size,
-                num_layers=config.num_layers,
-                num_heads=config.num_attention_heads,
-                intermediate_size=config.intermediate_size,
-                use_delta_rule=use_delta_rule,
-                num_memory_banks=num_memory_banks,
-                segments_per_bank=segments_per_bank,
-                use_alibi=use_alibi,
-                alibi_scale=alibi_scale,
-            )
+        if use_alibi:
+            print_flush("2. INFINI-PYTHIA (Memory-Only + ALiBi)")
+        elif num_memory_banks > 1:
+            print_flush(f"2. INFINI-PYTHIA ({num_memory_banks} Memory Banks)")
         else:
-            if use_alibi:
-                print_flush("2. INFINI-PYTHIA (Memory-Only + ALiBi)")
-            elif num_memory_banks > 1:
-                print_flush(f"2. INFINI-PYTHIA ({num_memory_banks} Memory Banks)")
-            else:
-                print_flush("2. INFINI-PYTHIA (Memory-Only)")
-            print_flush("=" * 70)
-            if use_alibi:
-                print_flush("  Layer 0: Infini-Attention (ALiBi, Memory Only)")
-            else:
-                print_flush("  Layer 0: Infini-Attention (NoPE, Memory Only)")
-            print_flush("  Layer 1-5: Standard Pythia (RoPE)")
+            print_flush("2. INFINI-PYTHIA (Memory-Only)")
+        print_flush("=" * 70)
+        if use_alibi:
+            print_flush("  Layer 0: Infini-Attention (ALiBi, Memory Only)")
+        else:
+            print_flush("  Layer 0: Infini-Attention (NoPE, Memory Only)")
+        print_flush("  Layer 1-5: Standard Pythia (RoPE)")
 
-            infini_model = InfiniPythiaModel(
-                vocab_size=config.vocab_size,
-                hidden_size=config.hidden_size,
-                num_layers=config.num_layers,
-                num_heads=config.num_attention_heads,
-                intermediate_size=config.intermediate_size,
-                max_position_embeddings=config.max_position_embeddings,
-                rotary_pct=config.rotary_pct,
-                use_delta_rule=use_delta_rule,
-                num_memory_banks=num_memory_banks,
-                segments_per_bank=segments_per_bank,
-                use_alibi=use_alibi,
-                alibi_scale=alibi_scale,
-            )
+        infini_model = InfiniPythiaModel(
+            vocab_size=config.vocab_size,
+            hidden_size=config.hidden_size,
+            num_layers=config.num_layers,
+            num_heads=config.num_attention_heads,
+            intermediate_size=config.intermediate_size,
+            max_position_embeddings=config.max_position_embeddings,
+            rotary_pct=config.rotary_pct,
+            use_delta_rule=use_delta_rule,
+            num_memory_banks=num_memory_banks,
+            segments_per_bank=segments_per_bank,
+            use_alibi=use_alibi,
+            alibi_scale=alibi_scale,
+        )
 
         infini_model = infini_model.to(device)
 
         param_info = infini_model.num_parameters()
         print_flush(f"\n  Total parameters: {param_info['total']:,}")
-        if all_infini:
-            print_flush(f"  Infini layers: {param_info['infini_layers']:,}")
-        else:
-            print_flush(f"  Infini layer: {param_info['infini_layer']:,}")
-            print_flush(f"  Pythia layers: {param_info['pythia_layers']:,}")
+        print_flush(f"  Infini layer: {param_info['infini_layer']:,}")
+        print_flush(f"  Pythia layers: {param_info['pythia_layers']:,}")
 
         memory_info = infini_model.memory_info()
-        if all_infini:
-            print_flush(f"  Total memory: {memory_info['total_bytes']:,} bytes ({config.num_layers} layers)")
-        elif num_memory_banks > 1:
+        if num_memory_banks > 1:
             print_flush(f"  Memory banks: {memory_info['num_banks']}")
             print_flush(f"  Infini memory: {memory_info['total_bytes']:,} bytes (fixed)")
         else:
@@ -572,34 +539,20 @@ def run_experiment(
             clear_gpu_cache(device)
 
         if results.get("infini") is not None:
-            if all_infini:
-                infini_model = FullInfiniModel(
-                    vocab_size=config.vocab_size,
-                    hidden_size=config.hidden_size,
-                    num_layers=config.num_layers,
-                    num_heads=config.num_attention_heads,
-                    intermediate_size=config.intermediate_size,
-                    use_delta_rule=use_delta_rule,
-                    num_memory_banks=num_memory_banks,
-                    segments_per_bank=segments_per_bank,
-                    use_alibi=use_alibi,
-                    alibi_scale=alibi_scale,
-                ).to(device)
-            else:
-                infini_model = InfiniPythiaModel(
-                    vocab_size=config.vocab_size,
-                    hidden_size=config.hidden_size,
-                    num_layers=config.num_layers,
-                    num_heads=config.num_attention_heads,
-                    intermediate_size=config.intermediate_size,
-                    max_position_embeddings=config.max_position_embeddings,
-                    rotary_pct=config.rotary_pct,
-                    use_delta_rule=use_delta_rule,
-                    num_memory_banks=num_memory_banks,
-                    segments_per_bank=segments_per_bank,
-                    use_alibi=use_alibi,
-                    alibi_scale=alibi_scale,
-                ).to(device)
+            infini_model = InfiniPythiaModel(
+                vocab_size=config.vocab_size,
+                hidden_size=config.hidden_size,
+                num_layers=config.num_layers,
+                num_heads=config.num_attention_heads,
+                intermediate_size=config.intermediate_size,
+                max_position_embeddings=config.max_position_embeddings,
+                rotary_pct=config.rotary_pct,
+                use_delta_rule=use_delta_rule,
+                num_memory_banks=num_memory_banks,
+                segments_per_bank=segments_per_bank,
+                use_alibi=use_alibi,
+                alibi_scale=alibi_scale,
+            ).to(device)
             infini_model.load_state_dict(results["infini"]["model_state_dict"])
             infini_model.eval()
 
@@ -790,10 +743,6 @@ def main() -> None:
         "--alibi-scale", type=float, default=1.0,
         help="ALiBi slope scale factor (larger = stronger decay)"
     )
-    parser.add_argument(
-        "--all-infini", action="store_true",
-        help="Use Infini-Attention for all layers (no RoPE)"
-    )
     args = parser.parse_args()
 
     run_experiment(
@@ -813,7 +762,6 @@ def main() -> None:
         segments_per_bank=args.segments_per_bank,
         use_alibi=args.alibi,
         alibi_scale=args.alibi_scale,
-        all_infini=args.all_infini,
     )
 
     print_flush("\nDONE")
