@@ -297,6 +297,123 @@ pythia_model.load_state_dict(results["pythia"]["model_state_dict"])
 result = evaluate_long_documents(pythia_model, ...)
 ```
 
+### 4. PPL評価方法によるPPL異常値（重要）
+
+**セグメント分割評価で異常に高いPPL（10,000+）が出る原因と対策。**
+
+#### 問題の発見経緯
+
+Pythia-70mの公式WikiText-2 PPLは約32-35だが、セグメント分割評価では14,000+になった。
+
+#### 原因: コンテキストなしでの予測
+
+```python
+# ❌ 問題のある評価方法（セグメント分割、非重複）
+for start in range(0, seq_len, segment_length):
+    segment = tokens[start:end]
+    input_ids = segment[:-1].unsqueeze(0)  # 各セグメントが独立
+    labels = segment[1:].unsqueeze(0)
+    outputs = model(input_ids, labels=labels)
+    # → 各セグメントの最初のトークンを予測する際、コンテキストがない
+    # → 「文書の途中」を「文書の先頭」として扱うため高PPL
+```
+
+#### 正しい評価方法: Sliding Window
+
+```python
+# ✅ 正しい評価方法（Sliding Window）
+stride = 512
+context_length = 2048
+
+for start in range(0, seq_len - 1, stride):
+    end = min(start + context_length, seq_len)
+    input_ids = tokens[start:end].unsqueeze(0)
+
+    # 最初のstride個はコンテキスト（loss計算しない）
+    labels = input_ids.clone()
+    labels[0, :stride] = -100  # -100はloss計算から除外
+
+    outputs = model(input_ids, labels=labels)
+```
+
+#### PPL比較（WikiText-2での実測値）
+
+| 評価方法 | PPL | 解釈 |
+|----------|-----|------|
+| Sliding window (stride=512) | **40.96** | ✓ 正常（公式値に近い） |
+| Simple non-overlapping (2048) | 15,885 | ❌ コンテキストなし問題 |
+| Segment-based (256 tokens) | 14,204 | ❌ コンテキストなし問題 |
+
+#### 教訓
+
+1. **PPL評価は必ずSliding window方式を使用**
+2. **異常に高いPPL（1000+）が出たら評価方法を疑う**
+3. **訓練時と評価時で異なる方法を使うと比較が不正確になる**
+4. **Pythia-70mのWikiText-2 PPLは約32-35が正常**
+
+---
+
+## 🔧 Pretrained LLMへのInfini-Attention導入
+
+### アプローチ比較
+
+| 方式 | 説明 | 結果 |
+|------|------|------|
+| **Case C: Layer 0置き換え** | Layer 0をInfini Layerに完全置き換え | ❌ RoPE損失、後続レイヤー不適合 |
+| **Parallel Adapter（推奨）** | Layer 0に並列でInfini Adapterを追加 | ✓ 既存性能維持しながらメモリ追加 |
+
+### Parallel Adapter アーキテクチャ
+
+```
+Input Embedding
+      ↓
+┌─────┴─────┐
+│  Original │  Infini Adapter
+│  Layer 0  │  (Memory)
+└─────┬─────┘      │
+      ↓            ↓
+    Output + α × Infini_Output
+      ↓
+Layer 1-5 (unchanged)
+```
+
+### 使用方法
+
+```python
+from src.models.infini_adapter import create_pythia_with_parallel_infini
+
+# モデル作成
+model = create_pythia_with_parallel_infini(
+    model_name="EleutherAI/pythia-70m",
+    use_delta_rule=True,
+    use_alibi=False,
+    initial_alpha=0.0,  # 0から学習開始
+    freeze_base_model=True,  # ベースモデルはfreeze
+)
+
+# 訓練後
+print(f"Learned alpha: {model.get_alpha()}")  # 学習されたalpha値
+
+# メモリ操作
+model.reset_memory()
+state = model.get_memory_state()
+model.set_memory_state(state)
+```
+
+### 訓練スクリプト
+
+```bash
+# Parallel Adapter訓練
+python3 scripts/train_parallel_adapter.py --num-docs 100 --epochs 50
+
+# WikiText-2での評価
+python3 scripts/evaluate_wikitext.py --parallel-adapter parallel_adapter.pt
+```
+
+### 発見: alphaが負になる
+
+実験で`alpha = -0.1561`に学習された。これは元のLayer 0出力から**減算**していることを意味し、「ノイズ除去」的な役割を学習した可能性がある。
+
 ---
 
 ## 📁 File Structure
@@ -338,6 +455,9 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-06 | **PPL評価方法の教訓追加**: Sliding window方式が正しい、セグメント分割は高PPLになる |
+| 2025-12-06 | **Parallel Adapter実装**: Pretrained LLMにInfini-Attentionを並列挿入する方式 |
+| 2025-12-06 | **WikiText-2評価スクリプト追加**: 標準ベンチマークでの正確なPPL評価 |
 | 2025-12-06 | **メモリ転送API追加**: get_memory_state/set_memory_stateで圧縮メモリを別PCに転送可能 |
 | 2025-12-06 | **モデルファクトリ追加**: create_model()でシンプルにモデル作成 |
 | 2025-12-06 | **実験スクリプト統一**: experiment.pyに統合、experiment_runner.py追加 |
