@@ -177,6 +177,63 @@ def evaluate_parallel_adapter(
     return ppl
 
 
+def evaluate_parallel_adapter_sliding_window(
+    model,
+    tokens: torch.Tensor,
+    device: torch.device,
+    context_length: int = 2048,
+    stride: int = 512,
+):
+    """
+    並列Adapter用のSliding window評価
+
+    Infini-Attentionのメモリを活用しながらSliding window方式で評価。
+    メモリはリセットせず、連続的に蓄積していく。
+    """
+    model.eval()
+
+    total_loss = 0.0
+    total_tokens = 0
+    num_windows = 0
+
+    tokens = tokens.to(device)
+    seq_len = len(tokens)
+
+    # メモリリセット（最初のみ）
+    model.reset_memory()
+
+    with torch.no_grad():
+        for start in range(0, seq_len - 1, stride):
+            end = min(start + context_length, seq_len)
+            input_ids = tokens[start:end].unsqueeze(0)
+
+            # ターゲットの開始位置（strideより前はコンテキスト）
+            target_start = min(stride, end - start - 1)
+
+            if target_start <= 0:
+                continue
+
+            # labels: 最初のtarget_start個は-100（無視）、残りは予測対象
+            labels = input_ids.clone()
+            labels[0, :target_start] = -100
+
+            outputs = model(input_ids, labels=labels)
+            loss = outputs.loss
+
+            # 実際に計算されたトークン数
+            num_target_tokens = (labels != -100).sum().item()
+            if num_target_tokens > 0:
+                total_loss += loss.item() * num_target_tokens
+                total_tokens += num_target_tokens
+                num_windows += 1
+
+    ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+    print_flush(f"  Windows evaluated: {num_windows}")
+    print_flush(f"  Tokens evaluated: {total_tokens:,}")
+
+    return ppl
+
+
 def main():
     parser = argparse.ArgumentParser(description="WikiText-2 PPL Evaluation")
 
@@ -273,22 +330,32 @@ def main():
         adapter_model.infini_adapter.load_state_dict(checkpoint["infini_adapter_state_dict"])
         print_flush(f"  Loaded alpha: {adapter_model.get_alpha():.4f}")
 
-        # Evaluate with memory
-        print_flush("\n4. Parallel Adapter evaluation (with memory, 256 segments):")
-        ppl_adapter = evaluate_parallel_adapter(
+        # Evaluate with Sliding window (same as baseline)
+        print_flush("\n4. Parallel Adapter - Sliding window evaluation:")
+        ppl_adapter_sliding = evaluate_parallel_adapter_sliding_window(
+            adapter_model, tokens, device,
+            context_length=args.context_length,
+            stride=args.stride,
+        )
+        print_flush(f"   PPL: {ppl_adapter_sliding:.2f}")
+
+        # Evaluate with memory (segment-based, like training)
+        print_flush("\n5. Parallel Adapter - Segment-based (256 tokens, like training):")
+        ppl_adapter_segment = evaluate_parallel_adapter(
             adapter_model, tokens, device,
             segment_length=256,
         )
-        print_flush(f"   PPL: {ppl_adapter:.2f}")
+        print_flush(f"   PPL: {ppl_adapter_segment:.2f}")
 
-        # Also evaluate without memory reset (alpha=0 baseline)
-        print_flush("\n5. Parallel Adapter with alpha=0 (baseline check):")
+        # Also evaluate with alpha=0 (baseline check)
+        print_flush("\n6. Parallel Adapter with alpha=0 - Sliding window (baseline check):")
         original_alpha = adapter_model.get_alpha()
         adapter_model.set_alpha(0.0)
         adapter_model.reset_memory()
-        ppl_alpha0 = evaluate_parallel_adapter(
+        ppl_alpha0 = evaluate_parallel_adapter_sliding_window(
             adapter_model, tokens, device,
-            segment_length=256,
+            context_length=args.context_length,
+            stride=args.stride,
         )
         print_flush(f"   PPL: {ppl_alpha0:.2f}")
         adapter_model.set_alpha(original_alpha)
@@ -307,8 +374,10 @@ def main():
     print_flush(f"| Pythia-70m (sliding window, stride={args.stride}) | {ppl_sliding:.2f} |")
     print_flush(f"| Pythia-70m (simple, {args.context_length} tokens) | {ppl_simple:.2f} |")
     print_flush(f"| Pythia-70m (segment, 256 tokens) | {ppl_segment:.2f} |")
-    if ppl_adapter is not None:
-        print_flush(f"| Parallel Adapter (with memory) | {ppl_adapter:.2f} |")
+    if args.parallel_adapter:
+        print_flush(f"| Parallel Adapter (sliding window) | {ppl_adapter_sliding:.2f} |")
+        print_flush(f"| Parallel Adapter (segment, 256) | {ppl_adapter_segment:.2f} |")
+        print_flush(f"| Parallel Adapter (alpha=0, sliding) | {ppl_alpha0:.2f} |")
 
     print_flush("\n" + "=" * 70)
     print_flush("REFERENCE")
@@ -320,6 +389,32 @@ def main():
         print_flush("\n⚠️ WARNING: PPL is higher than expected. Check evaluation method.")
     else:
         print_flush(f"\n✓ PPL {ppl_sliding:.2f} is in expected range")
+
+    # =====================================================================
+    # Analysis
+    # =====================================================================
+    if args.parallel_adapter:
+        print_flush("\n" + "=" * 70)
+        print_flush("ANALYSIS")
+        print_flush("=" * 70)
+
+        # Compare sliding window results
+        print_flush(f"\nSliding window comparison:")
+        print_flush(f"  Original Pythia:    {ppl_sliding:.2f}")
+        print_flush(f"  Parallel Adapter:   {ppl_adapter_sliding:.2f}")
+        print_flush(f"  Adapter (alpha=0):  {ppl_alpha0:.2f}")
+
+        if abs(ppl_alpha0 - ppl_sliding) < 1.0:
+            print_flush("  ✓ alpha=0 matches baseline (sanity check passed)")
+        else:
+            print_flush(f"  ⚠️ alpha=0 differs from baseline by {abs(ppl_alpha0 - ppl_sliding):.2f}")
+
+        if ppl_adapter_sliding < ppl_sliding:
+            improvement = ppl_sliding - ppl_adapter_sliding
+            print_flush(f"\n  ✓ Parallel Adapter IMPROVED PPL by {improvement:.2f}")
+        else:
+            degradation = ppl_adapter_sliding - ppl_sliding
+            print_flush(f"\n  ⚠️ Parallel Adapter DEGRADED PPL by {degradation:.2f}")
 
     print_flush("\nDONE")
 
