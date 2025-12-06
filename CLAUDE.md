@@ -95,6 +95,53 @@ python3 scripts/experiment_infini.py --long-context-train --long-context
 python3 scripts/experiment_infini.py --all-infini --samples 10000 --seq-length 512 --epochs 50 --skip-baseline
 ```
 
+### Multi-Memory Infini-Attention (Attention-based Selection)
+
+複数の独立したメモリをAttention-based方式で動的に選択・混合。
+
+```
+Multi-Memory Infini-Pythia:
+Token Embedding (512-dim)
+       ↓
+Layer 0: MultiMemoryInfiniAttentionLayer
+  ├─ Memory 0, 1, 2, ... (独立したメモリ)
+  ├─ 関連度: phi(Q) @ z_i
+  └─ Softmax重み付け混合
+       ↓
+Layer 1-5: PythiaLayer (RoPE)
+       ↓
+Output Head (512 → vocab)
+```
+
+**特徴**:
+- 各メモリは独立して更新（ラウンドロビン）
+- クエリとメモリのz（正規化項）との内積で関連度計算
+- Softmax重み付けで全メモリを混合
+- 追加パラメータなし（学習が安定）
+
+```bash
+# Multi-Memory実験（4メモリ）
+python3 scripts/experiment_multi_memory.py --num-memories 4
+
+# 8メモリで実験
+python3 scripts/experiment_multi_memory.py --num-memories 8 --samples 10000
+
+# ベースラインスキップ
+python3 scripts/experiment_multi_memory.py --skip-baseline --num-memories 4
+```
+
+```python
+from src.models.multi_memory_pythia import MultiMemoryInfiniPythiaModel
+
+model = MultiMemoryInfiniPythiaModel(
+    vocab_size=50304,
+    hidden_size=512,
+    num_layers=6,
+    num_heads=8,
+    num_memories=4,  # 独立したメモリ数
+)
+```
+
 ### Full Infini Model (全層)
 
 全層でInfini-Attentionを使用するモデル。計算量O(n²) → O(n×d²)に削減。
@@ -244,7 +291,9 @@ new-llm/
 │   │   ├── pythia.py               # PythiaModel (RoPE)
 │   │   ├── infini_attention.py     # InfiniAttention, InfiniAttentionLayer
 │   │   ├── infini_pythia.py        # InfiniPythiaModel (1層Infini + RoPE)
-│   │   └── full_infini.py          # FullInfiniModel (全層Infini)
+│   │   ├── full_infini.py          # FullInfiniModel (全層Infini)
+│   │   ├── multi_memory_attention.py  # MultiMemoryInfiniAttention
+│   │   └── multi_memory_pythia.py  # MultiMemoryInfiniPythiaModel
 │   └── utils/
 │       ├── training.py             # 共通学習ユーティリティ
 │       ├── evaluation.py           # 評価関数
@@ -262,6 +311,7 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-06 | **Multi-Memory Attention追加**: Attention-based選択で複数メモリを動的混合 |
 | 2025-12-06 | **Full Infini Model追加**: 全層Infini-Attention、O(n²)→O(n×d²)計算量削減 |
 | 2025-12-06 | **ALiBi位置エンコーディング追加**: 線形化近似でALiBiをメモリに組み込み |
 | 2025-12-05 | **Memory-Onlyに集中**: Local Attention削除、コード簡素化 |
