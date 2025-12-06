@@ -393,7 +393,6 @@ def main():
 
     # Model settings
     parser.add_argument("--model", default="EleutherAI/pythia-70m", help="Base model")
-    parser.add_argument("--alibi", action="store_true", help="Use ALiBi")
 
     # Training settings
     parser.add_argument("--distill-epochs", type=int, default=10, help="Distillation epochs")
@@ -426,7 +425,6 @@ def main():
     print_flush("=" * 70)
     print_flush(f"Model: {args.model}")
     print_flush(f"Device: {device}")
-    print_flush(f"ALiBi: {args.alibi}")
     print_flush(f"Segment length: {args.segment_length}")
     print_flush()
     print_flush("Stage 1 (Distillation):")
@@ -455,7 +453,6 @@ def main():
     model = PythiaWithDistillableInfini(
         base_model=base_model,
         use_delta_rule=True,
-        use_alibi=args.alibi,
     )
     model = model.to(device)
 
@@ -637,7 +634,6 @@ def main():
         "infini_layer_state_dict": model.infini_layer.state_dict(),
         "config": {
             "model_name": args.model,
-            "use_alibi": args.alibi,
             "distill_epochs": args.distill_epochs,
             "finetune_epochs": args.finetune_epochs,
             "layer0_lr_scale": args.layer0_lr_scale,
