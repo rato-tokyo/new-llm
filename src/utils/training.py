@@ -369,20 +369,6 @@ def get_device() -> torch.device:
     return device
 
 
-def get_tokenizer(tokenizer_name: str) -> Any:
-    """
-    Get tokenizer by name.
-
-    Args:
-        tokenizer_name: Tokenizer name (e.g., "EleutherAI/pythia-70m")
-
-    Returns:
-        Tokenizer instance
-    """
-    from transformers import AutoTokenizer
-    return AutoTokenizer.from_pretrained(tokenizer_name)
-
-
 def prepare_long_document_data(
     num_documents: int,
     tokens_per_document: int,

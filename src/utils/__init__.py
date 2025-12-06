@@ -11,8 +11,8 @@ from .training import (
     evaluate,
     train_model,
     get_device,
-    get_tokenizer,
 )
+from .tokenizer_utils import get_tokenizer
 from .evaluation import (
     evaluate_ppl,
     evaluate_position_wise_ppl,

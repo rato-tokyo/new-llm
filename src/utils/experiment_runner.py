@@ -21,9 +21,9 @@ from src.utils.device import clear_gpu_cache
 from src.utils.evaluation import evaluate_position_wise_ppl, evaluate_reversal_curse
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
+from src.utils.tokenizer_utils import get_tokenizer
 from src.utils.training import (
     get_device,
-    get_tokenizer,
     prepare_data_loaders,
 )
 

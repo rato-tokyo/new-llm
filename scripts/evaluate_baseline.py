@@ -2,8 +2,7 @@
 """
 Baseline PPL Evaluation Script
 
-オリジナルPythia-70m（Infiniなし）の長文PPLを測定し、
-ベースラインを確立する。
+オリジナルPythia-70mの長文PPLを測定し、ベースラインを確立する。
 
 Usage:
     python3 scripts/evaluate_baseline.py --num-docs 10 --tokens-per-doc 4096
@@ -15,46 +14,13 @@ import sys
 sys.path.insert(0, ".")
 
 import torch
-from transformers import AutoTokenizer, GPTNeoXForCausalLM
+from transformers import GPTNeoXForCausalLM
 
+from src.utils.data_loading import load_long_documents_from_pile
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
+from src.utils.tokenizer_utils import get_tokenizer
 from src.utils.training import get_device
-
-
-def load_long_documents(tokenizer, num_docs: int, tokens_per_doc: int):
-    """長文データをロード"""
-    from datasets import load_dataset
-
-    print_flush(f"Loading {num_docs} long documents ({tokens_per_doc} tokens each)...")
-
-    dataset = load_dataset(
-        "monology/pile-uncopyrighted",
-        split="train",
-        streaming=True,
-    )
-
-    documents = []
-    current_tokens = []
-
-    for example in dataset:
-        text = example["text"]
-        tokens = tokenizer.encode(text, add_special_tokens=False)
-        current_tokens.extend(tokens)
-
-        while len(current_tokens) >= tokens_per_doc:
-            doc = current_tokens[:tokens_per_doc]
-            documents.append(torch.tensor(doc, dtype=torch.long))
-            current_tokens = current_tokens[tokens_per_doc:]
-
-            if len(documents) >= num_docs:
-                break
-
-        if len(documents) >= num_docs:
-            break
-
-    print_flush(f"Loaded {len(documents)} documents")
-    return documents
 
 
 def evaluate_ppl_standard(model, documents: list, device: torch.device, segment_length: int):
@@ -193,12 +159,10 @@ def main():
     print_flush(f"Segment length: {args.seq_length}")
 
     # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer = get_tokenizer(args.model)
 
     # Load documents
-    documents = load_long_documents(tokenizer, args.num_docs, args.tokens_per_doc)
+    documents = load_long_documents_from_pile(tokenizer, args.num_docs, args.tokens_per_doc)
 
     # Load original model
     print_flush("\nLoading original Pythia-70m...")
@@ -243,31 +207,10 @@ def main():
     print_flush(f"| Full context (2048 tokens) | {ppl_full:.1f} |")
 
     print_flush("\n" + "=" * 70)
-    print_flush("COMPARISON WITH PARALLEL ADAPTER")
-    print_flush("=" * 70)
-    print_flush("| Model | PPL |")
-    print_flush("|-------|-----|")
-    print_flush(f"| Original Pythia (no position_ids) | {ppl_no_pos:.1f} |")
-    print_flush(f"| Original Pythia (with position_ids) | {ppl_with_pos:.1f} |")
-    print_flush("| Parallel Adapter (trained, no pos) | 514.1 |")
-
-    print_flush("\n" + "=" * 70)
     print_flush("ANALYSIS")
     print_flush("=" * 70)
-
-    if ppl_with_pos < 100:
-        print_flush(f"✓ Original Pythia with correct position_ids: PPL {ppl_with_pos:.1f} (normal)")
-    else:
-        print_flush(f"⚠️ Original Pythia with position_ids still high: PPL {ppl_with_pos:.1f}")
-
-    print_flush(f"\nPosition ID impact: {ppl_no_pos:.1f} -> {ppl_with_pos:.1f} ({ppl_no_pos/ppl_with_pos:.1f}x improvement)")
-
-    if ppl_with_pos < 514.1:
-        print_flush("\n⚠️ IMPORTANT: Parallel Adapter (PPL 514.1) is WORSE than")
-        print_flush(f"   Original Pythia with correct position_ids (PPL {ppl_with_pos:.1f})")
-        print_flush("   This means the training/evaluation method needs fixing!")
-    else:
-        print_flush("\n✓ Parallel Adapter improved over baseline")
+    print_flush(f"Position ID impact: {ppl_no_pos:.1f} -> {ppl_with_pos:.1f} "
+                f"({ppl_no_pos/ppl_with_pos:.1f}x improvement)")
 
     print_flush("\nDONE")
 

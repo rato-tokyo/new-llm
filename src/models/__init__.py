@@ -2,18 +2,91 @@
 
 Pythia-70M based experimental architectures.
 Infini-Attention for compressive memory.
+
+## Quick Start
+
+```python
+from src.models import create_model
+
+# 標準Pythia
+model = create_model("pythia")
+
+# Infini-Pythia (1層目Infini + 5層Pythia)
+model = create_model("infini")
+
+# Multi-Memory (4メモリ)
+model = create_model("multi_memory", num_memories=8)
+
+# Hierarchical Memory
+model = create_model("hierarchical", num_memories=4)
+```
+
+## Layer-based Construction
+
+```python
+from src.models import TransformerLM
+from src.models.layers import InfiniLayer, PythiaLayer
+
+# カスタムアーキテクチャ
+layers = [
+    InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
+    InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
+    *[PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048) for _ in range(4)]
+]
+model = TransformerLM(layers=layers)
+```
 """
 
-from typing import Literal, Optional
+from typing import Any, Literal, Optional
 
 from config.pythia import PythiaConfig
-from .pythia import PythiaModel
-from .infini_attention import InfiniAttention, InfiniAttentionLayer
-from .infini_pythia import InfiniPythiaModel
-from .multi_memory_attention import MultiMemoryInfiniAttention, MultiMemoryInfiniAttentionLayer
-from .multi_memory_pythia import MultiMemoryInfiniPythiaModel
-from .hierarchical_memory import HierarchicalMemoryAttention, HierarchicalMemoryAttentionLayer
-from .hierarchical_pythia import HierarchicalMemoryPythiaModel
+
+# Core model
+from .model import (
+    TransformerLM,
+    create_pythia_layers,
+    create_infini_pythia_layers,
+    create_multi_memory_pythia_layers,
+    create_hierarchical_pythia_layers,
+)
+
+# Layer types
+from .layers import (
+    BaseLayer,
+    PythiaLayer,
+    PythiaAttention,
+    InfiniLayer,
+    InfiniAttention,
+    MultiMemoryLayer,
+    MultiMemoryAttention,
+    HierarchicalLayer,
+    HierarchicalAttention,
+)
+
+# Building blocks
+from .base_components import (
+    PythiaMLP,
+    EmbeddingLayer,
+    OutputHead,
+    BaseTransformerLayer,
+    init_weights,
+    count_parameters,
+)
+from .memory_utils import (
+    elu_plus_one,
+    causal_linear_attention,
+    MemoryStateMixin,
+    create_memory_matrix,
+    create_memory_norm,
+    retrieve_from_memory,
+    update_memory_delta_rule,
+    update_memory_simple,
+)
+from .position_encoding import (
+    RotaryEmbedding,
+    rotate_half,
+    apply_rotary_pos_emb,
+)
 
 # Type alias for model types
 ModelTypeLiteral = Literal["pythia", "infini", "multi_memory", "hierarchical"]
@@ -29,7 +102,7 @@ def create_model(
     # Infini-specific settings
     num_memory_banks: int = 1,
     segments_per_bank: int = 4,
-):
+) -> TransformerLM:
     """
     Create a model by type.
 
@@ -42,7 +115,7 @@ def create_model(
         segments_per_bank: Segments per bank (infini only)
 
     Returns:
-        Model instance
+        TransformerLM instance
 
     Examples:
         # Standard Pythia
@@ -57,53 +130,48 @@ def create_model(
         # Hierarchical with custom config
         config = PythiaConfig()
         model = create_model("hierarchical", config, num_memories=4)
+
+        # Custom layer construction
+        from src.models import TransformerLM
+        from src.models.layers import InfiniLayer, PythiaLayer
+        layers = [InfiniLayer(...), PythiaLayer(...), ...]
+        model = TransformerLM(layers=layers)
     """
     if config is None:
         config = PythiaConfig()
 
+    common_kwargs: dict[str, Any] = {
+        "num_layers": config.num_layers,
+        "hidden_size": config.hidden_size,
+        "num_heads": config.num_attention_heads,
+        "intermediate_size": config.intermediate_size,
+        "rotary_pct": config.rotary_pct,
+        "max_position_embeddings": config.max_position_embeddings,
+    }
+
     if model_type == "pythia":
-        return PythiaModel(
-            vocab_size=config.vocab_size,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            num_heads=config.num_attention_heads,
-            intermediate_size=config.intermediate_size,
-            max_position_embeddings=config.max_position_embeddings,
-            rotary_pct=config.rotary_pct,
-        )
+        layers = create_pythia_layers(**common_kwargs)
 
     elif model_type == "infini":
-        return InfiniPythiaModel(
-            vocab_size=config.vocab_size,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            num_heads=config.num_attention_heads,
-            intermediate_size=config.intermediate_size,
-            use_delta_rule=use_delta_rule,
+        layers = create_infini_pythia_layers(
+            **common_kwargs,
             num_memory_banks=num_memory_banks,
             segments_per_bank=segments_per_bank,
+            use_delta_rule=use_delta_rule,
         )
 
     elif model_type == "multi_memory":
-        return MultiMemoryInfiniPythiaModel(
-            vocab_size=config.vocab_size,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            num_heads=config.num_attention_heads,
-            intermediate_size=config.intermediate_size,
-            use_delta_rule=use_delta_rule,
+        layers = create_multi_memory_pythia_layers(
+            **common_kwargs,
             num_memories=num_memories,
+            use_delta_rule=use_delta_rule,
         )
 
     elif model_type == "hierarchical":
-        return HierarchicalMemoryPythiaModel(
-            vocab_size=config.vocab_size,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            num_heads=config.num_attention_heads,
-            intermediate_size=config.intermediate_size,
-            use_delta_rule=use_delta_rule,
+        layers = create_hierarchical_pythia_layers(
+            **common_kwargs,
             num_fine_memories=num_memories,
+            use_delta_rule=use_delta_rule,
         )
 
     else:
@@ -112,21 +180,56 @@ def create_model(
             f"Available: pythia, infini, multi_memory, hierarchical"
         )
 
+    return TransformerLM(
+        layers=layers,
+        vocab_size=config.vocab_size,
+        hidden_size=config.hidden_size,
+    )
+
 
 __all__ = [
     # Factory function
     'create_model',
     'ModelTypeLiteral',
-    # Core models
-    'PythiaModel',
-    'InfiniPythiaModel',
-    'MultiMemoryInfiniPythiaModel',
-    'HierarchicalMemoryPythiaModel',
-    # Infini-Attention
+
+    # Core model
+    'TransformerLM',
+    'create_pythia_layers',
+    'create_infini_pythia_layers',
+    'create_multi_memory_pythia_layers',
+    'create_hierarchical_pythia_layers',
+
+    # Layer types
+    'BaseLayer',
+    'PythiaLayer',
+    'PythiaAttention',
+    'InfiniLayer',
     'InfiniAttention',
-    'InfiniAttentionLayer',
-    'MultiMemoryInfiniAttention',
-    'MultiMemoryInfiniAttentionLayer',
-    'HierarchicalMemoryAttention',
-    'HierarchicalMemoryAttentionLayer',
+    'MultiMemoryLayer',
+    'MultiMemoryAttention',
+    'HierarchicalLayer',
+    'HierarchicalAttention',
+
+    # Building blocks
+    'PythiaMLP',
+    'EmbeddingLayer',
+    'OutputHead',
+    'BaseTransformerLayer',
+    'init_weights',
+    'count_parameters',
+
+    # Memory utilities
+    'elu_plus_one',
+    'causal_linear_attention',
+    'MemoryStateMixin',
+    'create_memory_matrix',
+    'create_memory_norm',
+    'retrieve_from_memory',
+    'update_memory_delta_rule',
+    'update_memory_simple',
+
+    # Position encoding
+    'RotaryEmbedding',
+    'rotate_half',
+    'apply_rotary_pos_emb',
 ]

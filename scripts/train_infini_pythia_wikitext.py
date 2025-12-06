@@ -3,7 +3,6 @@
 Infini-Pythia WikiText-2 Training Script
 
 Layer 0をInfini-Attentionに置き換えたPythiaモデルをWikiText-2でスクラッチ訓練。
-Parallel Adapterと異なり、αパラメータなしで強制的にメモリを使用。
 
 Usage:
     python3 scripts/train_infini_pythia_wikitext.py --epochs 30
@@ -156,7 +155,7 @@ def main():
         vocab_size=config.vocab_size,
         hidden_size=config.hidden_size,
         num_layers=config.num_layers,
-        num_heads=config.num_heads,
+        num_heads=config.num_attention_heads,
         intermediate_size=config.intermediate_size,
         max_position_embeddings=config.max_position_embeddings,
         rotary_pct=config.rotary_pct,
@@ -237,7 +236,7 @@ def main():
             "vocab_size": config.vocab_size,
             "hidden_size": config.hidden_size,
             "num_layers": config.num_layers,
-            "num_heads": config.num_heads,
+            "num_heads": config.num_attention_heads,
             "intermediate_size": config.intermediate_size,
         },
         "pre_training_ppl": pre_ppl,

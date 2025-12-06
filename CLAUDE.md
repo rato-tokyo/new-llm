@@ -383,179 +383,37 @@ for start in range(0, seq_len - 1, stride):
 
 ---
 
-## 🔧 Pretrained LLMへのInfini-Attention導入
+## 🔧 Pretrained LLMへのInfini-Attention導入（失敗）
 
-### アプローチ比較
+**⚠️ Layer置き換え方式は全て失敗。詳細は `docs/experiments/2025-12-06_distill_finetune_failure.md` を参照。**
+
+### 試行したアプローチと結果
 
 | 方式 | 説明 | 結果 |
 |------|------|------|
-| **Case C: Layer 0置き換え** | Layer 0をInfini Layerに完全置き換え | ❌ RoPE損失、後続レイヤー不適合 |
-| **Parallel Adapter（推奨）** | Layer 0に並列でInfini Adapterを追加 | ✓ 既存性能維持しながらメモリ追加 |
+| Layer 0置き換え | Layer 0をInfini Layerに完全置き換え | ❌ RoPE損失、PPL大幅劣化 |
+| 2段階訓練（蒸留+Fine-tune） | 蒸留後にFull Fine-tune | ❌ PPL 44→1237（28倍劣化） |
+| Parallel Adapter | 並列でInfini追加 | ❌ alphaが学習されない |
 
-### Parallel Adapter アーキテクチャ
+### 失敗の根本原因
 
-```
-Input Embedding
-      ↓
-┌─────┴─────┐
-│  Original │  Infini Adapter
-│  Layer 0  │  (Memory)
-└─────┬─────┘      │
-      ↓            ↓
-    Output + α × Infini_Output
-      ↓
-Layer 1-5 (unchanged)
-```
+1. **RoPE情報の喪失**: Linear Attention (NoPE)は位置情報を持たない
+2. **後続レイヤーとの不整合**: Layer 1-5はRoPE付き入力を前提に訓練されている
+3. **蒸留の限界**: 出力を模倣しても内部表現は複製できない
 
-### 使用方法
+### 既存研究の知見
 
-```python
-from src.models.infini_adapter import create_pythia_with_parallel_infini
+- **Google Infini-Attention**: **全レイヤー**を置換 + 30K steps継続事前訓練で成功
+- **Hugging Face実験**: Llama 3 8Bでの単一レイヤー置換は失敗
+- **結論**: 単一レイヤー置換は技術的に困難。全レイヤー置換かスクラッチ訓練が必要
 
-# モデル作成（Full Fine-tune 必須）
-model = create_pythia_with_parallel_infini(
-    model_name="EleutherAI/pythia-70m",
-    use_delta_rule=True,
-    initial_alpha=0.0,  # 0から学習開始
-    freeze_base_model=False,  # 全レイヤー訓練（必須）
-)
+### 推奨アプローチ
 
-# 訓練後
-print(f"Learned alpha: {model.get_alpha()}")  # 学習されたalpha値
-
-# メモリ操作
-model.reset_memory()
-state = model.get_memory_state()
-model.set_memory_state(state)
-```
-
-### 訓練スクリプト
-
-```bash
-# WikiText-2 Full Fine-tuning（推奨）
-python3 scripts/train_parallel_adapter_wikitext.py --method sliding --epochs 30
-
-# WikiText-2での評価
-python3 scripts/evaluate_wikitext.py --parallel-adapter parallel_adapter_wikitext_sliding_full.pt
-```
-
----
-
-## 🎓 2段階訓練: 蒸留 + Fine-tuning
-
-**alphaが小さくなる問題を解決するための新しいアプローチ。**
-
-### 問題: Full Fine-tuningでalphaが小さい
-
-```
-Parallel Adapter (Full Fine-tune):
-  Epoch 1: alpha=0.0002  # ほぼゼロ
-  → モデルがInfini出力をほとんど使わない
-```
-
-Pretrained Pythiaは既に「動く」ため、Infiniを使わない方向に最適化される。
-
-### 解決策: 2段階訓練
-
-```
-Stage 1: Knowledge Distillation
-  - Infini LayerがオリジナルLayer 0の出力を模倣
-  - MSE Lossで訓練
-  - 元のモデルとの整合性を確保
-
-Stage 2: Full Fine-tuning with Layer-wise LR
-  - 全レイヤーを訓練
-  - Layer 0（Infini）に高い学習率を設定
-  - LM lossで最適化
-```
-
-### 使用方法
-
-```bash
-# 基本的な使い方
-python3 scripts/train_infini_distill_finetune.py --distill-epochs 10 --finetune-epochs 20
-
-# Layer 0の学習率を2倍に
-python3 scripts/train_infini_distill_finetune.py --layer0-lr-scale 2.0
-
-# 他のレイヤーの学習率を0.5倍に（Layer 0優先）
-python3 scripts/train_infini_distill_finetune.py --layer0-lr-scale 2.0 --other-lr-scale 0.5
-
-# 蒸留のみ
-python3 scripts/train_infini_distill_finetune.py --distill-epochs 10 --finetune-epochs 0
-```
-
-### パラメータ
-
-| パラメータ | デフォルト | 説明 |
-|------------|------------|------|
-| `--distill-epochs` | 10 | 蒸留エポック数 |
-| `--finetune-epochs` | 20 | Fine-tuningエポック数 |
-| `--distill-lr` | 1e-4 | 蒸留学習率 |
-| `--finetune-lr` | 1e-5 | Fine-tuning基本学習率 |
-| `--layer0-lr-scale` | 1.0 | Layer 0の学習率倍率 |
-| `--other-lr-scale` | 1.0 | 他レイヤーの学習率倍率 |
-
-### 仕組み
-
-```
-Stage 1 (Distillation):
-  オリジナルLayer 0 → ターゲット出力
-  Infini Layer     → 予測出力
-  Loss = MSE(予測, ターゲット)
-
-Stage 2 (Fine-tuning):
-  パラメータグループ:
-    - layer0_infini:  lr = base_lr × layer0_lr_scale
-    - embeddings:     lr = base_lr × other_lr_scale
-    - layers_1_to_n:  lr = base_lr × other_lr_scale
-    - final:          lr = base_lr × other_lr_scale
-```
-
----
-
-### 重要な教訓: 部分的微調整は機能しない
-
-**Adapter のみの訓練（部分的微調整）は機能しない。必ず全レイヤーの Full Fine-tune が必要。**
-
-#### 問題
-
-```python
-# ❌ 部分的微調整（Adapter のみ訓練）
-model = create_pythia_with_parallel_infini(
-    freeze_base_model=True,  # ベースモデル凍結
-)
-# → 後続レイヤーが新しい出力分布に適応できず、PPL が大幅に劣化
-# → 実験結果: Baseline 40.96 → Adapter only 391.74（350+ 劣化）
-```
-
-#### 原因
-
-```
-Adapter のみ訓練:
-Layer 0 出力 + α × Infini出力 → Layer 1-5（固定、適応不可）
-                                    ↓
-                              出力分布の不整合 → 高PPL
-```
-
-Pretrained Pythia の Layer 1-5 は、元の Layer 0 出力分布を前提に訓練されている。
-Infini Adapter が出力を変更すると、後続レイヤーが対応できない。
-
-#### 正しい方法
-
-```python
-# ✅ Full Fine-tune（全レイヤー訓練）
-model = create_pythia_with_parallel_infini(
-    freeze_base_model=False,  # 全レイヤー訓練可能
-)
-# → Layer 1-5 が新しい出力分布に適応可能
-```
-
-#### 教訓まとめ
-
-1. **Pretrained LLM への Adapter 追加は Full Fine-tune が必須**
-2. **部分的微調整では後続レイヤーの適応が不可能**
-3. **スクラッチ訓練と Pretrained 適応は根本的に異なる**
+| アプローチ | 説明 |
+|------------|------|
+| **スクラッチ訓練** | 最初からInfiniアーキテクチャで訓練（本プロジェクトのInfiniPythia） |
+| **RoPE Scaling** | YaRN等の既存手法で長文対応 |
+| **全レイヤー置換** | 大規模継続事前訓練が必要（計算コスト大） |
 
 ---
 
@@ -598,10 +456,9 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-06 | **Layer置き換え方式を削除**: 蒸留+Fine-tune等すべて失敗、スクラッチ訓練に集中 |
 | 2025-12-06 | **シングルヘッドメモリ導入**: memory_head_dim=512でLinear Attentionの表現力を最大化、ALiBi版削除 |
-| 2025-12-06 | **部分的微調整は機能しない**: Adapter のみ訓練は NG、Full Fine-tune 必須 |
 | 2025-12-06 | **PPL評価方法の教訓追加**: Sliding window方式が正しい、セグメント分割は高PPLになる |
-| 2025-12-06 | **Parallel Adapter実装**: Pretrained LLMにInfini-Attentionを並列挿入する方式 |
 | 2025-12-06 | **WikiText-2評価スクリプト追加**: 標準ベンチマークでの正確なPPL評価 |
 | 2025-12-06 | **メモリ転送API追加**: get_memory_state/set_memory_stateで圧縮メモリを別PCに転送可能 |
 | 2025-12-06 | **モデルファクトリ追加**: create_model()でシンプルにモデル作成 |
