@@ -67,134 +67,61 @@ model = InfiniPythiaModel(
 )
 ```
 
-### 実験の実行
+### 統一実験スクリプト
+
+全モデルを統一スクリプトで実験可能。
 
 ```bash
-# 標準実験（両モデル比較）
-python3 scripts/experiment_infini.py --samples 5000 --epochs 30
+# 全モデル比較
+python3 scripts/experiment.py --models pythia infini multi_memory hierarchical
 
 # Infiniのみ
-python3 scripts/experiment_infini.py --skip-baseline
+python3 scripts/experiment.py --models infini
 
-# Baselineのみ
-python3 scripts/experiment_infini.py --skip-infini
+# Multi-MemoryとHierarchical比較
+python3 scripts/experiment.py --models multi_memory hierarchical --num-memories 4
 
-# Multi-Memory Bank
-python3 scripts/experiment_infini.py --num-memory-banks 2 --segments-per-bank 4
+# ALiBi付きInfini
+python3 scripts/experiment.py --models infini --alibi
 
-# ALiBi位置エンコーディング
-python3 scripts/experiment_infini.py --alibi --skip-baseline
-
-# ALiBi (強い減衰)
-python3 scripts/experiment_infini.py --alibi --alibi-scale 2.0 --skip-baseline
-
-# Long Context訓練・評価
-python3 scripts/experiment_infini.py --long-context-train --long-context
-```
-
-### Multi-Memory Infini-Attention (Attention-based Selection)
-
-複数の独立したメモリをAttention-based方式で動的に選択・混合。
-
-```
-Multi-Memory Infini-Pythia:
-Token Embedding (512-dim)
-       ↓
-Layer 0: MultiMemoryInfiniAttentionLayer
-  ├─ Memory 0, 1, 2, ... (独立したメモリ)
-  ├─ 関連度: phi(Q) @ z_i
-  └─ Softmax重み付け混合
-       ↓
-Layer 1-5: PythiaLayer (RoPE)
-       ↓
-Output Head (512 → vocab)
-```
-
-**特徴**:
-- 各メモリは独立して更新（ラウンドロビン）
-- クエリとメモリのz（正規化項）との内積で関連度計算
-- Softmax重み付けで全メモリを混合
-- 追加パラメータなし（学習が安定）
-
-```bash
-# Multi-Memory実験（4メモリ）
-python3 scripts/experiment_multi_memory.py --num-memories 4
+# 設定カスタマイズ
+python3 scripts/experiment.py --models infini --samples 10000 --epochs 50 --lr 5e-5
 
 # 8メモリで実験
-python3 scripts/experiment_multi_memory.py --num-memories 8 --samples 10000
-
-# ベースラインスキップ
-python3 scripts/experiment_multi_memory.py --skip-baseline --num-memories 4
+python3 scripts/experiment.py --models hierarchical --num-memories 8
 ```
+
+### モデルタイプ
+
+| タイプ | 説明 |
+|--------|------|
+| `pythia` | 標準Pythia (RoPE) |
+| `infini` | Infini-Pythia (1層目Infini + RoPE) |
+| `multi_memory` | Multi-Memory (複数独立メモリ) |
+| `hierarchical` | Hierarchical (階層的メモリ) |
+
+### プログラムからの使用
 
 ```python
-from src.models.multi_memory_pythia import MultiMemoryInfiniPythiaModel
-
-model = MultiMemoryInfiniPythiaModel(
-    vocab_size=50304,
-    hidden_size=512,
-    num_layers=6,
-    num_heads=8,
-    num_memories=4,  # 独立したメモリ数
-)
-```
-
-### Hierarchical Memory (学習可能な展開判断)
-
-階層的メモリシステム：粗粒度メモリで検索し、必要に応じて細粒度メモリに展開。
-
-```
-Hierarchical Memory Pythia:
-Token Embedding (512-dim)
-       ↓
-Layer 0: HierarchicalMemoryAttentionLayer
-  ├─ Fine memories: [M_0, M_1, ...] (常に保持)
-  ├─ Coarse memory: sum(fine) (動的生成)
-  ├─ Expansion gate: 出力から展開を判断（学習可能）
-  └─ Soft decision: prob * fine + (1-prob) * coarse
-       ↓
-Layer 1-5: PythiaLayer (RoPE)
-       ↓
-Output Head (512 → vocab)
-```
-
-**特徴**:
-- 細粒度メモリを常に保持（ストレージ想定）
-- 粗粒度メモリは加算で動的生成
-- 展開判断は学習可能なゲート（MLP）
-- Soft decisionで学習が安定
-
-**メモリの加法性**:
-```
-C = A + B  (統合は可能)
-A, B → C  (展開は不可能、事前保存が必要)
-```
-
-```bash
-# 階層メモリ実験
-python3 scripts/experiment_hierarchical.py --num-fine-memories 4
-
-# 8メモリで実験
-python3 scripts/experiment_hierarchical.py --num-fine-memories 8
-
-# 階層メモリのみ
-python3 scripts/experiment_hierarchical.py --skip-baseline --skip-multi
-```
-
-```python
-from src.models.hierarchical_pythia import HierarchicalMemoryPythiaModel
-
-model = HierarchicalMemoryPythiaModel(
-    vocab_size=50304,
-    hidden_size=512,
-    num_layers=6,
-    num_heads=8,
-    num_fine_memories=4,  # 細粒度メモリ数
+from src.utils.experiment_runner import (
+    ExperimentConfig,
+    ModelType,
+    run_experiment,
 )
 
-# メモリ保存/復元
-state = model.get_memory_state()
-model.set_memory_state(state)
+# 設定
+config = ExperimentConfig(
+    num_samples=5000,
+    seq_length=256,
+    num_epochs=30,
+    num_memories=4,
+)
+
+# 実験実行
+results = run_experiment(
+    model_types=[ModelType.INFINI, ModelType.HIERARCHICAL],
+    exp_config=config,
+)
 ```
 
 ---
@@ -292,7 +219,7 @@ new-llm/
 ├── config/
 │   └── pythia.py                   # PythiaConfig
 ├── scripts/
-│   └── experiment_infini.py        # Infini-Attention実験
+│   └── experiment.py               # 統一実験スクリプト
 ├── src/
 │   ├── data/
 │   │   └── reversal_pairs.py       # Reversal Curse評価データ
@@ -305,6 +232,7 @@ new-llm/
 │   │   ├── hierarchical_memory.py  # HierarchicalMemoryAttention
 │   │   └── hierarchical_pythia.py  # HierarchicalMemoryPythiaModel
 │   └── utils/
+│       ├── experiment_runner.py    # 統一実験ランナー
 │       ├── training.py             # 共通学習ユーティリティ
 │       ├── evaluation.py           # 評価関数
 │       ├── device.py               # デバイス管理
@@ -321,6 +249,7 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-06 | **実験スクリプト統一**: experiment.pyに統合、experiment_runner.py追加 |
 | 2025-12-06 | **Hierarchical Memory追加**: 学習可能な展開判断、Coarse-to-Fine検索 |
 | 2025-12-06 | **Multi-Memory Attention追加**: Attention-based選択で複数メモリを動的混合 |
 | 2025-12-06 | **ALiBi位置エンコーディング追加**: 線形化近似でALiBiをメモリに組み込み |

@@ -107,8 +107,8 @@ class HierarchicalMemoryAttention(nn.Module):
         if self.fine_memories is None or self.fine_memory_norms is None:
             raise RuntimeError("Memory not initialized")
 
-        M_coarse = sum(self.fine_memories)
-        z_coarse = sum(self.fine_memory_norms)
+        M_coarse = torch.stack(self.fine_memories).sum(dim=0)
+        z_coarse = torch.stack(self.fine_memory_norms).sum(dim=0)
         return M_coarse, z_coarse
 
     def _retrieve_from_memory(
