@@ -94,24 +94,6 @@ Examples:
         help="Number of memories (for multi_memory and hierarchical)"
     )
 
-    # Long context settings
-    parser.add_argument(
-        "--long-context-train", action="store_true",
-        help="Train on long documents"
-    )
-    parser.add_argument(
-        "--long-context-eval", action="store_true",
-        help="Evaluate on long context"
-    )
-    parser.add_argument(
-        "--num-long-docs", type=int, default=50,
-        help="Number of long documents"
-    )
-    parser.add_argument(
-        "--tokens-per-doc", type=int, default=4096,
-        help="Tokens per document for long context"
-    )
-
     args = parser.parse_args()
 
     # Parse model types
@@ -130,10 +112,6 @@ Examples:
         lr=args.lr,
         use_delta_rule=not args.no_delta_rule,
         num_memories=args.num_memories,
-        long_context_train=args.long_context_train,
-        long_context_eval=args.long_context_eval,
-        num_long_documents=args.num_long_docs,
-        tokens_per_document=args.tokens_per_doc,
     )
 
     # Run experiment

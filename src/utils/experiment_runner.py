@@ -53,12 +53,6 @@ class ExperimentConfig:
     use_delta_rule: bool = True
     num_memories: int = 4  # Multi-Memory / Hierarchical用
 
-    # Long context
-    long_context_train: bool = False
-    long_context_eval: bool = False
-    num_long_documents: int = 50
-    tokens_per_document: int = 4096
-
     # Multi-Memory Bank (Infini用)
     num_memory_banks: int = 1
     segments_per_bank: int = 4

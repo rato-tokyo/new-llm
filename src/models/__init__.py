@@ -66,9 +66,6 @@ from .layers import (
 # Building blocks
 from .base_components import (
     PythiaMLP,
-    EmbeddingLayer,
-    OutputHead,
-    BaseTransformerLayer,
     init_weights,
     count_parameters,
 )
@@ -212,9 +209,6 @@ __all__ = [
 
     # Building blocks
     'PythiaMLP',
-    'EmbeddingLayer',
-    'OutputHead',
-    'BaseTransformerLayer',
     'init_weights',
     'count_parameters',
 
