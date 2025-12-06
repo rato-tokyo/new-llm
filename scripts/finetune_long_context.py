@@ -21,7 +21,8 @@ sys.path.insert(0, ".")
 import torch
 from transformers import AutoTokenizer
 
-from src.models.infini_adapter import create_pythia_with_infini, InfiniAdapterLayer
+from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE
+from src.models.infini_adapter import InfiniAdapterLayer, create_pythia_with_infini
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
 from src.utils.training import get_device
@@ -62,16 +63,51 @@ def load_long_documents(tokenizer, num_docs: int, tokens_per_doc: int):
     return documents
 
 
+def evaluate_long_context(model, documents: list, device: torch.device, segment_length: int):
+    """長文でのPPLを評価"""
+    model.eval()
+    model.use_infini_layer(True)
+
+    total_loss = 0.0
+    total_tokens = 0
+
+    with torch.no_grad():
+        for doc in documents:
+            doc = doc.to(device)
+            model.reset_memory()
+
+            for start in range(0, len(doc) - 1, segment_length):
+                end = min(start + segment_length, len(doc))
+                segment = doc[start:end]
+
+                if len(segment) < 2:
+                    continue
+
+                input_ids = segment[:-1].unsqueeze(0)
+                labels = segment[1:].unsqueeze(0)
+
+                outputs = model(input_ids, labels=labels)
+                loss = outputs.loss
+
+                total_loss += loss.item() * labels.numel()
+                total_tokens += labels.numel()
+
+    ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+    return ppl
+
+
 def train_long_context(
     model,
-    documents: list,
+    train_docs: list,
+    val_docs: list,
     device: torch.device,
     num_epochs: int,
     segment_length: int,
     lr: float,
     unfreeze_all: bool = False,
+    patience: int = EARLY_STOPPING_PATIENCE,
 ):
-    """長文でEnd-to-end訓練"""
+    """長文でEnd-to-end訓練（Train/Val分割 + Early Stopping）"""
 
     # Decide what to train
     if unfreeze_all:
@@ -86,29 +122,33 @@ def train_long_context(
         print_flush("  Training: Infini Layer only")
 
     print_flush(f"\nLong-Context Finetuning:")
-    print_flush(f"  Documents: {len(documents)}")
+    print_flush(f"  Train documents: {len(train_docs)}")
+    print_flush(f"  Val documents: {len(val_docs)}")
     print_flush(f"  Epochs: {num_epochs}")
     print_flush(f"  Segment length: {segment_length}")
     print_flush(f"  Learning rate: {lr}")
+    print_flush(f"  Early stopping patience: {patience}")
 
     # Enable Infini Layer
     model.use_infini_layer(True)
 
-    best_ppl = float("inf")
+    best_val_ppl = float("inf")
     best_state = None
+    patience_counter = 0
 
     for epoch in range(1, num_epochs + 1):
         start_time = time.time()
-        model.train()
 
+        # Training
+        model.train()
         total_loss = 0.0
         total_tokens = 0
 
         # Shuffle documents
-        indices = torch.randperm(len(documents))
+        indices = torch.randperm(len(train_docs))
 
         for doc_idx in indices:
-            doc = documents[doc_idx].to(device)
+            doc = train_docs[doc_idx].to(device)
 
             # Reset memory for each document
             model.reset_memory()
@@ -137,53 +177,34 @@ def train_long_context(
                 total_loss += loss.item() * labels.numel()
                 total_tokens += labels.numel()
 
-        avg_ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+        train_ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+
+        # Validation
+        val_ppl = evaluate_long_context(model, val_docs, device, segment_length)
+
         elapsed = time.time() - start_time
 
-        improved = avg_ppl < best_ppl
+        # Check for improvement
+        improved = val_ppl < best_val_ppl
         if improved:
-            best_ppl = avg_ppl
+            best_val_ppl = val_ppl
             best_state = {k: v.cpu().clone() for k, v in model.infini_layer.state_dict().items()}
+            patience_counter = 0
             marker = "*"
         else:
+            patience_counter += 1
             marker = ""
 
-        print_flush(f"  Epoch {epoch:2d}: ppl={avg_ppl:.1f} ({elapsed:.1f}s) {marker}")
+        print_flush(
+            f"  Epoch {epoch:2d}: train_ppl={train_ppl:.1f} val_ppl={val_ppl:.1f} ({elapsed:.1f}s) {marker}"
+        )
 
-    return best_ppl, best_state
+        # Early stopping
+        if patience_counter >= patience:
+            print_flush(f"  Early stopping at epoch {epoch} (patience={patience})")
+            break
 
-
-def evaluate_long_context(model, documents: list, device: torch.device, segment_length: int):
-    """長文でのPPLを評価"""
-    model.eval()
-    model.use_infini_layer(True)
-
-    total_loss = 0.0
-    total_tokens = 0
-
-    with torch.no_grad():
-        for doc in documents[:20]:  # Subset for evaluation
-            doc = doc.to(device)
-            model.reset_memory()
-
-            for start in range(0, len(doc) - 1, segment_length):
-                end = min(start + segment_length, len(doc))
-                segment = doc[start:end]
-
-                if len(segment) < 2:
-                    continue
-
-                input_ids = segment[:-1].unsqueeze(0)
-                labels = segment[1:].unsqueeze(0)
-
-                outputs = model(input_ids, labels=labels)
-                loss = outputs.loss
-
-                total_loss += loss.item() * labels.numel()
-                total_tokens += labels.numel()
-
-    ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
-    return ppl
+    return best_val_ppl, best_state
 
 
 def main():
@@ -194,8 +215,11 @@ def main():
     parser.add_argument("--num-docs", type=int, default=100, help="Number of documents")
     parser.add_argument("--tokens-per-doc", type=int, default=4096, help="Tokens per document")
     parser.add_argument("--seq-length", type=int, default=256, help="Segment length")
-    parser.add_argument("--epochs", type=int, default=5, help="Number of epochs")
+    parser.add_argument("--epochs", type=int, default=50, help="Max number of epochs")
     parser.add_argument("--lr", type=float, default=1e-5, help="Learning rate")
+    parser.add_argument(
+        "--patience", type=int, default=EARLY_STOPPING_PATIENCE, help="Early stopping patience"
+    )
     parser.add_argument("--unfreeze-all", action="store_true", help="Unfreeze all parameters")
     parser.add_argument("--alibi", action="store_true", help="Use ALiBi")
     parser.add_argument("--output", default="finetuned_infini.pt", help="Output path")
@@ -262,12 +286,14 @@ def main():
     print_flush("\n" + "=" * 70)
     best_ppl, best_state = train_long_context(
         model=model,
-        documents=train_docs,
+        train_docs=train_docs,
+        val_docs=val_docs,
         device=device,
         num_epochs=args.epochs,
         segment_length=args.seq_length,
         lr=args.lr,
         unfreeze_all=args.unfreeze_all,
+        patience=args.patience,
     )
 
     # Load best weights
@@ -310,8 +336,8 @@ def main():
     print_flush("\n" + "=" * 70)
     print_flush("SUMMARY")
     print_flush("=" * 70)
-    print_flush(f"| Metric | Value |")
-    print_flush(f"|--------|-------|")
+    print_flush("| Metric | Value |")
+    print_flush("|--------|-------|")
     print_flush(f"| PPL (before finetuning) | {pre_ppl:.1f} |")
     print_flush(f"| PPL (after finetuning) | {post_ppl:.1f} |")
     print_flush(f"| Improvement | {pre_ppl - post_ppl:+.1f} |")

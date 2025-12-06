@@ -20,6 +20,7 @@ sys.path.insert(0, ".")
 import torch
 from transformers import AutoTokenizer
 
+from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE
 from src.models.infini_adapter import create_pythia_with_infini
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
@@ -56,45 +57,78 @@ def load_pile_data(tokenizer, num_samples: int, seq_length: int):
     return samples
 
 
-def train_distillation(
-    model,
-    samples: list,
-    device: torch.device,
-    num_epochs: int,
-    batch_size: int,
-    lr: float,
-):
-    """蒸留訓練"""
-    optimizer = torch.optim.AdamW(model.infini_layer.parameters(), lr=lr)
+def evaluate_distillation_loss(model, samples: list, device: torch.device, batch_size: int):
+    """蒸留損失を評価（検証用）"""
+    model.eval()
+    model.infini_layer.reset_memory(device)
 
-    print_flush(f"\nDistillation Training:")
-    print_flush(f"  Samples: {len(samples)}")
-    print_flush(f"  Epochs: {num_epochs}")
-    print_flush(f"  Batch size: {batch_size}")
-    print_flush(f"  Learning rate: {lr}")
+    total_loss = 0.0
+    num_batches = 0
 
-    best_loss = float("inf")
-    best_state = None
-
-    for epoch in range(1, num_epochs + 1):
-        start_time = time.time()
-        model.infini_layer.reset_memory(device)
-
-        total_loss = 0.0
-        num_batches = 0
-
-        # Shuffle samples
-        indices = torch.randperm(len(samples))
-
+    with torch.no_grad():
         for i in range(0, len(samples), batch_size):
-            batch_indices = indices[i:i + batch_size]
-            batch = [samples[idx] for idx in batch_indices]
+            batch = samples[i : i + batch_size]
 
             # Pad batch
             max_len = max(s.size(0) for s in batch)
             padded = torch.zeros(len(batch), max_len, dtype=torch.long, device=device)
             for j, s in enumerate(batch):
-                padded[j, :s.size(0)] = s.to(device)
+                padded[j, : s.size(0)] = s.to(device)
+
+            loss = model.compute_distillation_loss(padded)
+            total_loss += loss.item()
+            num_batches += 1
+
+    return total_loss / num_batches
+
+
+def train_distillation(
+    model,
+    train_samples: list,
+    val_samples: list,
+    device: torch.device,
+    num_epochs: int,
+    batch_size: int,
+    lr: float,
+    patience: int = EARLY_STOPPING_PATIENCE,
+):
+    """蒸留訓練（Train/Val分割 + Early Stopping）"""
+    optimizer = torch.optim.AdamW(model.infini_layer.parameters(), lr=lr)
+
+    print_flush(f"\nDistillation Training:")
+    print_flush(f"  Train samples: {len(train_samples)}")
+    print_flush(f"  Val samples: {len(val_samples)}")
+    print_flush(f"  Epochs: {num_epochs}")
+    print_flush(f"  Batch size: {batch_size}")
+    print_flush(f"  Learning rate: {lr}")
+    print_flush(f"  Early stopping patience: {patience}")
+
+    best_val_loss = float("inf")
+    best_state = None
+    patience_counter = 0
+
+    for epoch in range(1, num_epochs + 1):
+        start_time = time.time()
+
+        # Training
+        model.train()
+        model.infini_layer.reset_memory(device)
+
+        train_loss = 0.0
+        num_batches = 0
+
+        # Shuffle samples
+        indices = torch.randperm(len(train_samples))
+
+        for i in range(0, len(train_samples), batch_size):
+            batch_indices = indices[i : i + batch_size]
+            batch = [train_samples[idx] for idx in batch_indices]
+
+            # Pad batch
+            max_len = max(s.size(0) for s in batch)
+            padded = torch.zeros(len(batch), max_len, dtype=torch.long, device=device)
+            for j, s in enumerate(batch):
+                padded[j, : s.size(0)] = s.to(device)
 
             optimizer.zero_grad()
 
@@ -105,23 +139,37 @@ def train_distillation(
             torch.nn.utils.clip_grad_norm_(model.infini_layer.parameters(), 1.0)
             optimizer.step()
 
-            total_loss += loss.item()
+            train_loss += loss.item()
             num_batches += 1
 
-        avg_loss = total_loss / num_batches
+        avg_train_loss = train_loss / num_batches
+
+        # Validation
+        val_loss = evaluate_distillation_loss(model, val_samples, device, batch_size)
+
         elapsed = time.time() - start_time
 
-        improved = avg_loss < best_loss
+        # Check for improvement
+        improved = val_loss < best_val_loss
         if improved:
-            best_loss = avg_loss
+            best_val_loss = val_loss
             best_state = {k: v.cpu().clone() for k, v in model.infini_layer.state_dict().items()}
+            patience_counter = 0
             marker = "*"
         else:
+            patience_counter += 1
             marker = ""
 
-        print_flush(f"  Epoch {epoch:2d}: loss={avg_loss:.6f} ({elapsed:.1f}s) {marker}")
+        print_flush(
+            f"  Epoch {epoch:2d}: train={avg_train_loss:.6f} val={val_loss:.6f} ({elapsed:.1f}s) {marker}"
+        )
 
-    return best_loss, best_state
+        # Early stopping
+        if patience_counter >= patience:
+            print_flush(f"  Early stopping at epoch {epoch} (patience={patience})")
+            break
+
+    return best_val_loss, best_state
 
 
 def evaluate_model(model, samples: list, device: torch.device, use_infini: bool):
@@ -156,9 +204,10 @@ def main():
     parser.add_argument("--model", default="EleutherAI/pythia-70m", help="Base model")
     parser.add_argument("--samples", type=int, default=5000, help="Number of samples")
     parser.add_argument("--seq-length", type=int, default=256, help="Sequence length")
-    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
+    parser.add_argument("--epochs", type=int, default=50, help="Max number of epochs")
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--patience", type=int, default=EARLY_STOPPING_PATIENCE, help="Early stopping patience")
     parser.add_argument("--alibi", action="store_true", help="Use ALiBi")
     parser.add_argument("--output", default="distilled_layer0.pt", help="Output path")
 
@@ -182,6 +231,12 @@ def main():
     # Load data
     samples = load_pile_data(tokenizer, args.samples, args.seq_length)
 
+    # Split into train/val
+    val_size = max(100, len(samples) // 10)
+    train_samples = samples[:-val_size]
+    val_samples = samples[-val_size:]
+    print_flush(f"Train: {len(train_samples)}, Val: {len(val_samples)}")
+
     # Create model
     print_flush("\nCreating model...")
     model = create_pythia_with_infini(
@@ -201,11 +256,13 @@ def main():
     print_flush("\n" + "=" * 70)
     best_loss, best_state = train_distillation(
         model=model,
-        samples=samples,
+        train_samples=train_samples,
+        val_samples=val_samples,
         device=device,
         num_epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
+        patience=args.patience,
     )
 
     # Load best weights
@@ -218,18 +275,21 @@ def main():
 
     # Save
     print_flush(f"\nSaving to {args.output}...")
-    torch.save({
-        "infini_layer_state_dict": best_state,
-        "config": {
-            "hidden_size": model.config.hidden_size,
-            "num_heads": model.config.num_attention_heads,
-            "intermediate_size": model.config.intermediate_size,
-            "use_alibi": args.alibi,
+    torch.save(
+        {
+            "infini_layer_state_dict": best_state,
+            "config": {
+                "hidden_size": model.config.hidden_size,
+                "num_heads": model.config.num_attention_heads,
+                "intermediate_size": model.config.intermediate_size,
+                "use_alibi": args.alibi,
+            },
+            "distillation_loss": best_loss,
+            "original_ppl": original_ppl,
+            "infini_ppl": infini_ppl,
         },
-        "distillation_loss": best_loss,
-        "original_ppl": original_ppl,
-        "infini_ppl": infini_ppl,
-    }, args.output)
+        args.output,
+    )
 
     # Summary
     print_flush("\n" + "=" * 70)
@@ -239,7 +299,7 @@ def main():
     print_flush(f"|-------|-----|")
     print_flush(f"| Original Layer 0 | {original_ppl:.1f} |")
     print_flush(f"| Infini Layer (distilled) | {infini_ppl:.1f} |")
-    print_flush(f"| Distillation Loss | {best_loss:.6f} |")
+    print_flush(f"| Distillation Loss (val) | {best_loss:.6f} |")
 
     ppl_diff = infini_ppl - original_ppl
     print_flush(f"\nPPL difference: {ppl_diff:+.1f}")
