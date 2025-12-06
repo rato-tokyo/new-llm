@@ -2,13 +2,20 @@
 Evaluation utilities for experiments.
 
 共通の評価関数を提供する。
+
+PPL評価方法:
+1. Sliding Window (推奨): HuggingFace標準方式
+2. Segment-based: セグメント分割方式（Infini-Attention訓練用）
+3. Document-based: ドキュメント単位でメモリリセット
 """
 
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+
+from src.utils.io import print_flush
 
 
 def evaluate_ppl(
@@ -292,3 +299,185 @@ def _compute_sentence_loss(
     )
 
     return loss.item()
+
+
+# =============================================================================
+# Token-level PPL Evaluation Methods
+# =============================================================================
+
+
+def evaluate_ppl_sliding_window(
+    model: nn.Module,
+    tokens: torch.Tensor,
+    device: torch.device,
+    context_length: int = 2048,
+    stride: int = 512,
+    verbose: bool = True,
+) -> float:
+    """
+    Sliding window方式でPPL評価（HuggingFace推奨）
+
+    Args:
+        model: 評価するモデル（HuggingFace形式）
+        tokens: 1D tensor of tokens
+        device: デバイス
+        context_length: コンテキスト長
+        stride: スライド幅
+        verbose: 詳細出力
+
+    Returns:
+        PPL値
+    """
+    model.eval()
+
+    total_loss = 0.0
+    total_tokens = 0
+    num_windows = 0
+
+    tokens = tokens.to(device)
+    seq_len = len(tokens)
+
+    with torch.no_grad():
+        for start in range(0, seq_len - 1, stride):
+            end = min(start + context_length, seq_len)
+            input_ids = tokens[start:end].unsqueeze(0)
+
+            # ターゲットの開始位置（strideより前はコンテキスト）
+            target_start = min(stride, end - start - 1)
+
+            if target_start <= 0:
+                continue
+
+            # labels: 最初のtarget_start個は-100（無視）、残りは予測対象
+            labels = input_ids.clone()
+            labels[0, :target_start] = -100
+
+            outputs = model(input_ids, labels=labels)
+            loss = outputs.loss
+
+            # 実際に計算されたトークン数
+            num_target_tokens = (labels != -100).sum().item()
+            if num_target_tokens > 0:
+                total_loss += loss.item() * num_target_tokens
+                total_tokens += num_target_tokens
+                num_windows += 1
+
+    ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+
+    if verbose:
+        print_flush(f"  Windows evaluated: {num_windows}")
+        print_flush(f"  Tokens evaluated: {total_tokens:,}")
+
+    return ppl
+
+
+def evaluate_ppl_segment(
+    model: nn.Module,
+    tokens: torch.Tensor,
+    device: torch.device,
+    segment_length: int = 256,
+    reset_memory_fn: Optional[Callable] = None,
+) -> float:
+    """
+    セグメント分割方式でPPL評価
+
+    Infini-Attention訓練時と同じ評価方法。
+    メモリ付きモデルの場合はreset_memory_fnを指定。
+
+    Args:
+        model: 評価するモデル
+        tokens: 1D tensor of tokens
+        device: デバイス
+        segment_length: セグメント長
+        reset_memory_fn: メモリリセット関数（オプション）
+
+    Returns:
+        PPL値
+    """
+    model.eval()
+
+    total_loss = 0.0
+    total_tokens = 0
+
+    tokens = tokens.to(device)
+    seq_len = len(tokens)
+
+    # メモリリセット（存在する場合）
+    if reset_memory_fn is not None:
+        reset_memory_fn()
+
+    with torch.no_grad():
+        for start in range(0, seq_len - 1, segment_length):
+            end = min(start + segment_length, seq_len)
+            segment = tokens[start:end]
+
+            if len(segment) < 2:
+                continue
+
+            input_ids = segment[:-1].unsqueeze(0)
+            labels = segment[1:].unsqueeze(0)
+
+            outputs = model(input_ids, labels=labels)
+            loss = outputs.loss
+
+            total_loss += loss.item() * labels.numel()
+            total_tokens += labels.numel()
+
+    ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+    return ppl
+
+
+def evaluate_ppl_documents(
+    model: nn.Module,
+    documents: list[torch.Tensor],
+    device: torch.device,
+    segment_length: int = 256,
+    reset_memory_fn: Optional[Callable] = None,
+) -> float:
+    """
+    ドキュメント単位でPPL評価（メモリリセット付き）
+
+    各ドキュメントの開始時にメモリをリセット。
+    長文評価でInfini-Attentionのメモリ効果を測定する際に使用。
+
+    Args:
+        model: 評価するモデル
+        documents: List of 1D tensors
+        device: デバイス
+        segment_length: セグメント長
+        reset_memory_fn: メモリリセット関数（オプション）
+
+    Returns:
+        PPL値
+    """
+    model.eval()
+
+    total_loss = 0.0
+    total_tokens = 0
+
+    with torch.no_grad():
+        for doc in documents:
+            doc = doc.to(device)
+
+            # ドキュメント開始時にメモリリセット
+            if reset_memory_fn is not None:
+                reset_memory_fn()
+
+            for start in range(0, len(doc) - 1, segment_length):
+                end = min(start + segment_length, len(doc))
+                segment = doc[start:end]
+
+                if len(segment) < 2:
+                    continue
+
+                input_ids = segment[:-1].unsqueeze(0)
+                labels = segment[1:].unsqueeze(0)
+
+                outputs = model(input_ids, labels=labels)
+                loss = outputs.loss
+
+                total_loss += loss.item() * labels.numel()
+                total_tokens += labels.numel()
+
+    ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+    return ppl

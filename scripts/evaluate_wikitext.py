@@ -16,222 +16,15 @@ import sys
 sys.path.insert(0, ".")
 
 import torch
-from datasets import load_dataset
-from transformers import AutoTokenizer, GPTNeoXForCausalLM
+from transformers import GPTNeoXForCausalLM
 
 from src.models.infini_adapter import create_pythia_with_parallel_infini
+from src.utils.data_loading import load_wikitext2
+from src.utils.evaluation import evaluate_ppl_segment, evaluate_ppl_sliding_window
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
+from src.utils.tokenizer_utils import get_tokenizer
 from src.utils.training import get_device
-
-
-def load_wikitext2(tokenizer, split: str = "test"):
-    """WikiText-2データをロード"""
-    print_flush(f"Loading WikiText-2 ({split})...")
-
-    dataset = load_dataset("wikitext", "wikitext-2-raw-v1", split=split)
-
-    # 全テキストを連結
-    text = "\n\n".join(dataset["text"])
-
-    # トークン化
-    tokens = tokenizer.encode(text, add_special_tokens=False)
-    print_flush(f"  Total tokens: {len(tokens):,}")
-
-    return torch.tensor(tokens, dtype=torch.long)
-
-
-def evaluate_ppl_sliding_window(
-    model,
-    tokens: torch.Tensor,
-    device: torch.device,
-    context_length: int = 2048,
-    stride: int = 512,
-):
-    """
-    Sliding window方式でPPL評価
-
-    HuggingFace推奨の評価方法：
-    - context_lengthのウィンドウをstrideずつスライド
-    - 重複部分はコンテキストとして使用し、stride部分のみlossを計算
-    """
-    model.eval()
-
-    total_loss = 0.0
-    total_tokens = 0
-    num_windows = 0
-
-    tokens = tokens.to(device)
-    seq_len = len(tokens)
-
-    with torch.no_grad():
-        for start in range(0, seq_len - 1, stride):
-            end = min(start + context_length, seq_len)
-            input_ids = tokens[start:end].unsqueeze(0)
-
-            # ターゲットの開始位置（strideより前はコンテキスト）
-            target_start = min(stride, end - start - 1)
-
-            if target_start <= 0:
-                continue
-
-            # labels: 最初のtarget_start個は-100（無視）、残りは予測対象
-            labels = input_ids.clone()
-            labels[0, :target_start] = -100
-
-            outputs = model(input_ids, labels=labels)
-            loss = outputs.loss
-
-            # 実際に計算されたトークン数
-            num_target_tokens = (labels != -100).sum().item()
-            if num_target_tokens > 0:
-                total_loss += loss.item() * num_target_tokens
-                total_tokens += num_target_tokens
-                num_windows += 1
-
-    ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
-    print_flush(f"  Windows evaluated: {num_windows}")
-    print_flush(f"  Tokens evaluated: {total_tokens:,}")
-
-    return ppl
-
-
-def evaluate_ppl_simple(
-    model,
-    tokens: torch.Tensor,
-    device: torch.device,
-    context_length: int = 2048,
-):
-    """
-    シンプルなPPL評価（非重複セグメント）
-    """
-    model.eval()
-
-    total_loss = 0.0
-    total_tokens = 0
-
-    tokens = tokens.to(device)
-    seq_len = len(tokens)
-
-    with torch.no_grad():
-        for start in range(0, seq_len - 1, context_length):
-            end = min(start + context_length, seq_len)
-            segment = tokens[start:end]
-
-            if len(segment) < 2:
-                continue
-
-            input_ids = segment[:-1].unsqueeze(0)
-            labels = segment[1:].unsqueeze(0)
-
-            outputs = model(input_ids, labels=labels)
-            loss = outputs.loss
-
-            total_loss += loss.item() * labels.numel()
-            total_tokens += labels.numel()
-
-    ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
-    return ppl
-
-
-def evaluate_parallel_adapter(
-    model,
-    tokens: torch.Tensor,
-    device: torch.device,
-    segment_length: int = 256,
-):
-    """
-    並列Adapter用の評価（メモリリセット付き、セグメント分割）
-
-    訓練時と同じ評価方法を使用。
-    """
-    model.eval()
-
-    total_loss = 0.0
-    total_tokens = 0
-
-    tokens = tokens.to(device)
-    seq_len = len(tokens)
-
-    # メモリリセット
-    model.reset_memory()
-
-    with torch.no_grad():
-        for start in range(0, seq_len - 1, segment_length):
-            end = min(start + segment_length, seq_len)
-            segment = tokens[start:end]
-
-            if len(segment) < 2:
-                continue
-
-            input_ids = segment[:-1].unsqueeze(0)
-            labels = segment[1:].unsqueeze(0)
-
-            outputs = model(input_ids, labels=labels)
-            loss = outputs.loss
-
-            total_loss += loss.item() * labels.numel()
-            total_tokens += labels.numel()
-
-    ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
-    return ppl
-
-
-def evaluate_parallel_adapter_sliding_window(
-    model,
-    tokens: torch.Tensor,
-    device: torch.device,
-    context_length: int = 2048,
-    stride: int = 512,
-):
-    """
-    並列Adapter用のSliding window評価
-
-    Infini-Attentionのメモリを活用しながらSliding window方式で評価。
-    メモリはリセットせず、連続的に蓄積していく。
-    """
-    model.eval()
-
-    total_loss = 0.0
-    total_tokens = 0
-    num_windows = 0
-
-    tokens = tokens.to(device)
-    seq_len = len(tokens)
-
-    # メモリリセット（最初のみ）
-    model.reset_memory()
-
-    with torch.no_grad():
-        for start in range(0, seq_len - 1, stride):
-            end = min(start + context_length, seq_len)
-            input_ids = tokens[start:end].unsqueeze(0)
-
-            # ターゲットの開始位置（strideより前はコンテキスト）
-            target_start = min(stride, end - start - 1)
-
-            if target_start <= 0:
-                continue
-
-            # labels: 最初のtarget_start個は-100（無視）、残りは予測対象
-            labels = input_ids.clone()
-            labels[0, :target_start] = -100
-
-            outputs = model(input_ids, labels=labels)
-            loss = outputs.loss
-
-            # 実際に計算されたトークン数
-            num_target_tokens = (labels != -100).sum().item()
-            if num_target_tokens > 0:
-                total_loss += loss.item() * num_target_tokens
-                total_tokens += num_target_tokens
-                num_windows += 1
-
-    ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
-    print_flush(f"  Windows evaluated: {num_windows}")
-    print_flush(f"  Tokens evaluated: {total_tokens:,}")
-
-    return ppl
 
 
 def main():
@@ -255,12 +48,8 @@ def main():
     print_flush(f"Context length: {args.context_length}")
     print_flush(f"Stride: {args.stride}")
 
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(args.model)
-    if tokenizer.pad_token is None:
-        tokenizer.pad_token = tokenizer.eos_token
-
-    # Load WikiText-2
+    # Load tokenizer and data
+    tokenizer = get_tokenizer(args.model)
     tokens = load_wikitext2(tokenizer, split="test")
 
     # =====================================================================
@@ -286,17 +75,17 @@ def main():
 
     # Method 2: Simple non-overlapping
     print_flush("\n2. Simple non-overlapping evaluation:")
-    ppl_simple = evaluate_ppl_simple(
+    ppl_simple = evaluate_ppl_segment(
         original_model, tokens, device,
-        context_length=args.context_length,
+        segment_length=args.context_length,
     )
     print_flush(f"   PPL: {ppl_simple:.2f}")
 
     # Method 3: Segment-based (like parallel adapter training)
     print_flush("\n3. Segment-based evaluation (256 tokens, like training):")
-    ppl_segment = evaluate_ppl_simple(
+    ppl_segment = evaluate_ppl_segment(
         original_model, tokens, device,
-        context_length=256,
+        segment_length=256,
     )
     print_flush(f"   PPL: {ppl_segment:.2f}")
 
@@ -332,7 +121,8 @@ def main():
 
         # Evaluate with Sliding window (same as baseline)
         print_flush("\n4. Parallel Adapter - Sliding window evaluation:")
-        ppl_adapter_sliding = evaluate_parallel_adapter_sliding_window(
+        adapter_model.reset_memory()
+        ppl_adapter_sliding = evaluate_ppl_sliding_window(
             adapter_model, tokens, device,
             context_length=args.context_length,
             stride=args.stride,
@@ -341,9 +131,10 @@ def main():
 
         # Evaluate with memory (segment-based, like training)
         print_flush("\n5. Parallel Adapter - Segment-based (256 tokens, like training):")
-        ppl_adapter_segment = evaluate_parallel_adapter(
+        ppl_adapter_segment = evaluate_ppl_segment(
             adapter_model, tokens, device,
             segment_length=256,
+            reset_memory_fn=adapter_model.reset_memory,
         )
         print_flush(f"   PPL: {ppl_adapter_segment:.2f}")
 
@@ -352,7 +143,7 @@ def main():
         original_alpha = adapter_model.get_alpha()
         adapter_model.set_alpha(0.0)
         adapter_model.reset_memory()
-        ppl_alpha0 = evaluate_parallel_adapter_sliding_window(
+        ppl_alpha0 = evaluate_ppl_sliding_window(
             adapter_model, tokens, device,
             context_length=args.context_length,
             stride=args.stride,
