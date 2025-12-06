@@ -229,6 +229,7 @@ class SelectiveOutputLM(nn.Module):
         """
         self.eval()
         device = input_ids.device
+        batch_size = input_ids.size(0)
 
         # 初期処理
         with torch.no_grad():
@@ -243,8 +244,8 @@ class SelectiveOutputLM(nn.Module):
         while output_count < max_new_tokens and total_steps < max_new_tokens * (self.max_skip + 1):
             total_steps += 1
 
-            # 最後の位置のゲート確率
-            gate_prob = gate_probs[:, -1, 0].item()
+            # 最後の位置のゲート確率（バッチ平均）
+            gate_prob = gate_probs[:, -1, 0].mean().item()
 
             if gate_prob > threshold or consecutive_skips >= self.max_skip:
                 # 出力
@@ -268,7 +269,7 @@ class SelectiveOutputLM(nn.Module):
                 consecutive_skips += 1
 
                 # ダミートークン（使わないが形式上必要）
-                dummy_token = torch.zeros(input_ids.size(0), 1, dtype=torch.long, device=device)
+                dummy_token = torch.zeros(batch_size, 1, dtype=torch.long, device=device)
 
                 with torch.no_grad():
                     logits, gate_probs, prev_hidden = self.forward(
