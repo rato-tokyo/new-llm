@@ -235,8 +235,9 @@ class SelectiveOutputLM(nn.Module):
         """
         batch_size, seq_len = labels.shape
 
-        # gate_probを連続的な重みとして使用
-        gate_probs_squeezed = gate_probs.squeeze(-1)  # [batch, seq_len]
+        # gate_probを連続的な重みとして使用（detachでLM lossからの勾配を遮断）
+        # gate_probはgate_lossのみで学習される
+        gate_probs_squeezed = gate_probs.squeeze(-1).detach()  # [batch, seq_len]
 
         # LM Loss計算（gate_probで重み付け）
         # Shift for next-token prediction
