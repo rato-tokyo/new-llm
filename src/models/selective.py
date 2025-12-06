@@ -207,6 +207,85 @@ class SelectiveOutputLM(nn.Module):
 
         return gate_loss
 
+    def compute_selective_loss(
+        self,
+        logits: torch.Tensor,
+        gate_probs: torch.Tensor,
+        labels: torch.Tensor,
+        threshold: float = 0.5,
+        gate_loss_weight: float = 0.1,
+    ) -> tuple[torch.Tensor, dict]:
+        """
+        訓練-評価一貫性を保った損失計算
+
+        訓練時と評価時で同じthresholdを使用し、出力位置のみでLM lossを計算。
+        これにより訓練と評価の条件が揃う。
+
+        Args:
+            logits: [batch, seq_len, vocab_size]
+            gate_probs: [batch, seq_len, 1]
+            labels: [batch, seq_len]
+            threshold: 出力閾値（訓練・評価で同じ値を使用）
+            gate_loss_weight: ゲート損失の重み
+
+        Returns:
+            total_loss: LM loss + gate_loss_weight * gate_loss
+            stats: 訓練統計
+        """
+        batch_size, seq_len = labels.shape
+        device = logits.device
+
+        # 出力マスク: gate_prob > threshold の位置のみ出力
+        gate_probs_squeezed = gate_probs.squeeze(-1)  # [batch, seq_len]
+        output_mask = (gate_probs_squeezed > threshold).float()  # [batch, seq_len]
+
+        # LM Loss計算（出力位置のみ）
+        # Shift for next-token prediction
+        shift_logits = logits[:, :-1, :].contiguous()  # [batch, seq_len-1, vocab]
+        shift_labels = labels[:, 1:].contiguous()  # [batch, seq_len-1]
+        shift_mask = output_mask[:, :-1].contiguous()  # [batch, seq_len-1]
+
+        # Per-token cross entropy
+        loss_fct = nn.CrossEntropyLoss(reduction='none')
+        per_token_loss = loss_fct(
+            shift_logits.view(-1, self.vocab_size),
+            shift_labels.view(-1)
+        ).view(batch_size, seq_len - 1)  # [batch, seq_len-1]
+
+        # 出力位置のlossのみ平均
+        masked_loss = per_token_loss * shift_mask
+        num_output_tokens = shift_mask.sum()
+
+        if num_output_tokens > 0:
+            lm_loss = masked_loss.sum() / num_output_tokens
+        else:
+            # 出力トークンがない場合、全体の平均を使用（まれなケース）
+            lm_loss = per_token_loss.mean()
+
+        # Gate Loss（エントロピーベース）
+        gate_loss = self.compute_gate_loss(logits, gate_probs, labels)
+
+        # Total Loss
+        total_loss = lm_loss + gate_loss_weight * gate_loss
+
+        # 統計情報
+        with torch.no_grad():
+            output_ratio = output_mask.mean().item()
+            skip_ratio = 1.0 - output_ratio
+            avg_gate_prob = gate_probs_squeezed.mean().item()
+
+        stats = {
+            "lm_loss": lm_loss.item(),
+            "gate_loss": gate_loss.item(),
+            "total_loss": total_loss.item(),
+            "output_ratio": output_ratio,
+            "skip_ratio": skip_ratio,
+            "avg_gate_prob": avg_gate_prob,
+            "num_output_tokens": num_output_tokens.item(),
+        }
+
+        return total_loss, stats
+
     def generate_selective(
         self,
         input_ids: torch.Tensor,

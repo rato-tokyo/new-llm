@@ -194,6 +194,38 @@ python3 scripts/experiment.py --models infini --samples 10000 --epochs 50 --lr 5
 **実験でランダムデータ（torch.randint等）を使用することは絶対に禁止。**
 必ず実データ（Pile）を使用すること。
 
+### 訓練-評価一貫性（Training-Evaluation Consistency）
+
+**訓練時と評価時の条件は必ず揃える。**
+
+```python
+# ❌ 悪い例: 訓練と評価で条件が異なる
+# 訓練: 全トークンでloss計算
+# 評価: threshold=0.5でスキップあり
+def train():
+    loss = criterion(logits, labels)  # 全位置でloss
+
+def evaluate():
+    if gate_prob > 0.5:  # スキップ判定
+        output(token)
+
+# ✅ 良い例: 訓練と評価で同じ条件
+# 訓練: threshold=0.5でスキップ、出力位置のみloss計算
+# 評価: threshold=0.5でスキップ
+def train():
+    output_mask = gate_prob > 0.5
+    loss = (losses * output_mask).sum() / output_mask.sum()
+
+def evaluate():
+    if gate_prob > 0.5:
+        output(token)
+```
+
+**原則**:
+1. 推論時に使用する特殊な動作（スキップ、選択的出力など）は訓練時にも適用する
+2. 訓練時のみ使用するテクニック（Teacher Forcing等）は評価時に無効化する
+3. ハイパーパラメータ（threshold等）は訓練・評価で同じ値を使用する
+
 ---
 
 ## ⚠️ 過去のバグと教訓
@@ -281,6 +313,8 @@ for start in range(0, seq_len - 1, stride):
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-07 | **訓練-評価一貫性ポリシー追加**: 訓練時と評価時の条件を揃えることを必須化 |
+| 2025-12-06 | **SelectiveOutputLM追加**: 学習可能ゲートによる選択的出力モデル |
 | 2025-12-06 | **レイヤーベースアーキテクチャに移行**: TransformerLM + 4レイヤータイプ、コード31%削減 |
 | 2025-12-06 | **Layer置き換え方式を削除**: 蒸留+Fine-tune等すべて失敗、スクラッチ訓練に集中 |
 | 2025-12-06 | **シングルヘッドメモリ導入**: memory_head_dim=512でLinear Attentionの表現力を最大化 |
