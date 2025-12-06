@@ -233,7 +233,6 @@ class SelectiveOutputLM(nn.Module):
             stats: 訓練統計
         """
         batch_size, seq_len = labels.shape
-        device = logits.device
 
         # 出力マスク: gate_prob > threshold の位置のみ出力
         gate_probs_squeezed = gate_probs.squeeze(-1)  # [batch, seq_len]
