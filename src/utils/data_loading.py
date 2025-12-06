@@ -6,8 +6,6 @@ Unified Data Loading Utilities
 - WikiText-2: 標準ベンチマーク
 """
 
-from typing import Optional
-
 import torch
 from datasets import load_dataset
 from transformers import PreTrainedTokenizer

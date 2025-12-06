@@ -90,7 +90,7 @@ def main():
 
     # Check embedding weights
     embed_weights = model.gpt_neox.embed_in.weight
-    print_flush(f"  Embedding weight stats:")
+    print_flush("  Embedding weight stats:")
     print_flush(f"    Mean: {embed_weights.mean().item():.6f}")
     print_flush(f"    Std:  {embed_weights.std().item():.6f}")
     print_flush(f"    Min:  {embed_weights.min().item():.6f}")

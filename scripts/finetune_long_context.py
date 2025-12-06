@@ -22,7 +22,7 @@ import torch
 from transformers import AutoTokenizer
 
 from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE
-from src.models.infini_adapter import InfiniAdapterLayer, create_pythia_with_infini
+from src.models.infini_adapter import create_pythia_with_infini
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
 from src.utils.training import get_device
@@ -121,7 +121,7 @@ def train_long_context(
         optimizer = torch.optim.AdamW(model.infini_layer.parameters(), lr=lr)
         print_flush("  Training: Infini Layer only")
 
-    print_flush(f"\nLong-Context Finetuning:")
+    print_flush("\nLong-Context Finetuning:")
     print_flush(f"  Train documents: {len(train_docs)}")
     print_flush(f"  Val documents: {len(val_docs)}")
     print_flush(f"  Epochs: {num_epochs}")

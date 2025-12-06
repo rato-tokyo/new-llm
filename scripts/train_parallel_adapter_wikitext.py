@@ -523,7 +523,7 @@ def main():
     print_flush("=" * 70)
     print_flush("| Method | Pre-PPL | Test PPL (sliding) | Alpha |")
     print_flush("|--------|---------|-------------------|-------|")
-    print_flush(f"| Original Pythia | 40.96 | 40.96 | - |")
+    print_flush("| Original Pythia | 40.96 | 40.96 | - |")
 
     if "sliding" in results:
         r = results["sliding"]

@@ -95,7 +95,7 @@ def train_distillation(
     """蒸留訓練（Train/Val分割 + Early Stopping）"""
     optimizer = torch.optim.AdamW(model.infini_layer.parameters(), lr=lr)
 
-    print_flush(f"\nDistillation Training:")
+    print_flush("\nDistillation Training:")
     print_flush(f"  Train samples: {len(train_samples)}")
     print_flush(f"  Val samples: {len(val_samples)}")
     print_flush(f"  Epochs: {num_epochs}")
@@ -295,8 +295,8 @@ def main():
     print_flush("\n" + "=" * 70)
     print_flush("SUMMARY")
     print_flush("=" * 70)
-    print_flush(f"| Model | PPL |")
-    print_flush(f"|-------|-----|")
+    print_flush("| Model | PPL |")
+    print_flush("|-------|-----|")
     print_flush(f"| Original Layer 0 | {original_ppl:.1f} |")
     print_flush(f"| Infini Layer (distilled) | {infini_ppl:.1f} |")
     print_flush(f"| Distillation Loss (val) | {best_loss:.6f} |")

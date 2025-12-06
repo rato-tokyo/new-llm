@@ -131,7 +131,7 @@ def train_parallel_adapter(
     trainable = sum(p.numel() for p in trainable_params)
     print_flush(f"  Trainable: {trainable:,} / {total_params:,} ({100*trainable/total_params:.2f}%)")
 
-    print_flush(f"\nParallel Adapter Training:")
+    print_flush("\nParallel Adapter Training:")
     print_flush(f"  Train documents: {len(train_docs)}")
     print_flush(f"  Val documents: {len(val_docs)}")
     print_flush(f"  Epochs: {num_epochs}")

@@ -331,7 +331,7 @@ def evaluate_ppl_sliding_window(
     model.eval()
 
     total_loss = 0.0
-    total_tokens = 0
+    total_tokens: int = 0
     num_windows = 0
 
     tokens = tokens.to(device)
@@ -356,7 +356,7 @@ def evaluate_ppl_sliding_window(
             loss = outputs.loss
 
             # 実際に計算されたトークン数
-            num_target_tokens = (labels != -100).sum().item()
+            num_target_tokens = int((labels != -100).sum().item())
             if num_target_tokens > 0:
                 total_loss += loss.item() * num_target_tokens
                 total_tokens += num_target_tokens

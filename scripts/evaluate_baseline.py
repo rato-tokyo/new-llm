@@ -249,7 +249,7 @@ def main():
     print_flush("|-------|-----|")
     print_flush(f"| Original Pythia (no position_ids) | {ppl_no_pos:.1f} |")
     print_flush(f"| Original Pythia (with position_ids) | {ppl_with_pos:.1f} |")
-    print_flush(f"| Parallel Adapter (trained, no pos) | 514.1 |")
+    print_flush("| Parallel Adapter (trained, no pos) | 514.1 |")
 
     print_flush("\n" + "=" * 70)
     print_flush("ANALYSIS")
@@ -263,11 +263,11 @@ def main():
     print_flush(f"\nPosition ID impact: {ppl_no_pos:.1f} -> {ppl_with_pos:.1f} ({ppl_no_pos/ppl_with_pos:.1f}x improvement)")
 
     if ppl_with_pos < 514.1:
-        print_flush(f"\n⚠️ IMPORTANT: Parallel Adapter (PPL 514.1) is WORSE than")
+        print_flush("\n⚠️ IMPORTANT: Parallel Adapter (PPL 514.1) is WORSE than")
         print_flush(f"   Original Pythia with correct position_ids (PPL {ppl_with_pos:.1f})")
-        print_flush(f"   This means the training/evaluation method needs fixing!")
+        print_flush("   This means the training/evaluation method needs fixing!")
     else:
-        print_flush(f"\n✓ Parallel Adapter improved over baseline")
+        print_flush("\n✓ Parallel Adapter improved over baseline")
 
     print_flush("\nDONE")
 

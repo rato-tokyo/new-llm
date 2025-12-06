@@ -22,7 +22,7 @@ import torch.nn as nn
 from config.pythia import PythiaConfig
 from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE
 from src.models.infini_pythia import InfiniPythiaModel
-from src.utils.data_loading import load_wikitext2, split_tokens
+from src.utils.data_loading import load_wikitext2
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
 from src.utils.tokenizer_utils import get_tokenizer

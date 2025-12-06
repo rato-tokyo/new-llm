@@ -96,7 +96,6 @@ def main():
     # =====================================================================
     # Evaluate Parallel Adapter (if provided)
     # =====================================================================
-    ppl_adapter = None
     if args.parallel_adapter:
         print_flush("\n" + "=" * 70)
         print_flush("PARALLEL ADAPTER")
@@ -190,7 +189,7 @@ def main():
         print_flush("=" * 70)
 
         # Compare sliding window results
-        print_flush(f"\nSliding window comparison:")
+        print_flush("\nSliding window comparison:")
         print_flush(f"  Original Pythia:    {ppl_sliding:.2f}")
         print_flush(f"  Parallel Adapter:   {ppl_adapter_sliding:.2f}")
         print_flush(f"  Adapter (alpha=0):  {ppl_alpha0:.2f}")

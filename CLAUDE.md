@@ -410,6 +410,84 @@ python3 scripts/train_parallel_adapter_wikitext.py --method sliding --epochs 30
 python3 scripts/evaluate_wikitext.py --parallel-adapter parallel_adapter_wikitext_sliding_full.pt
 ```
 
+---
+
+## 🎓 2段階訓練: 蒸留 + Fine-tuning
+
+**alphaが小さくなる問題を解決するための新しいアプローチ。**
+
+### 問題: Full Fine-tuningでalphaが小さい
+
+```
+Parallel Adapter (Full Fine-tune):
+  Epoch 1: alpha=0.0002  # ほぼゼロ
+  → モデルがInfini出力をほとんど使わない
+```
+
+Pretrained Pythiaは既に「動く」ため、Infiniを使わない方向に最適化される。
+
+### 解決策: 2段階訓練
+
+```
+Stage 1: Knowledge Distillation
+  - Infini LayerがオリジナルLayer 0の出力を模倣
+  - MSE Lossで訓練
+  - 元のモデルとの整合性を確保
+
+Stage 2: Full Fine-tuning with Layer-wise LR
+  - 全レイヤーを訓練
+  - Layer 0（Infini）に高い学習率を設定
+  - LM lossで最適化
+```
+
+### 使用方法
+
+```bash
+# 基本的な使い方
+python3 scripts/train_infini_distill_finetune.py --distill-epochs 10 --finetune-epochs 20
+
+# Layer 0の学習率を2倍に
+python3 scripts/train_infini_distill_finetune.py --layer0-lr-scale 2.0
+
+# 他のレイヤーの学習率を0.5倍に（Layer 0優先）
+python3 scripts/train_infini_distill_finetune.py --layer0-lr-scale 2.0 --other-lr-scale 0.5
+
+# 蒸留のみ
+python3 scripts/train_infini_distill_finetune.py --distill-epochs 10 --finetune-epochs 0
+
+# ALiBi付き
+python3 scripts/train_infini_distill_finetune.py --alibi
+```
+
+### パラメータ
+
+| パラメータ | デフォルト | 説明 |
+|------------|------------|------|
+| `--distill-epochs` | 10 | 蒸留エポック数 |
+| `--finetune-epochs` | 20 | Fine-tuningエポック数 |
+| `--distill-lr` | 1e-4 | 蒸留学習率 |
+| `--finetune-lr` | 1e-5 | Fine-tuning基本学習率 |
+| `--layer0-lr-scale` | 1.0 | Layer 0の学習率倍率 |
+| `--other-lr-scale` | 1.0 | 他レイヤーの学習率倍率 |
+
+### 仕組み
+
+```
+Stage 1 (Distillation):
+  オリジナルLayer 0 → ターゲット出力
+  Infini Layer     → 予測出力
+  Loss = MSE(予測, ターゲット)
+
+Stage 2 (Fine-tuning):
+  パラメータグループ:
+    - layer0_infini:  lr = base_lr × layer0_lr_scale
+    - embeddings:     lr = base_lr × other_lr_scale
+    - layers_1_to_n:  lr = base_lr × other_lr_scale
+    - final:          lr = base_lr × other_lr_scale
+```
+
+---
+
 ### 重要な教訓: 部分的微調整は機能しない
 
 **Adapter のみの訓練（部分的微調整）は機能しない。必ず全レイヤーの Full Fine-tune が必要。**
