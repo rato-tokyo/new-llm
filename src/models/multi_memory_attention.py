@@ -314,6 +314,37 @@ class MultiMemoryInfiniAttention(nn.Module):
             "current_memory_idx": self.current_memory_idx.item() if self.current_memory_idx is not None else 0,
         }
 
+    def get_memory_state(self) -> dict:
+        """
+        メモリ状態を取得（転送可能な形式）
+
+        Returns:
+            dict: メモリ状態（CPU上のテンソル）
+        """
+        state = {
+            "memories": [m.cpu().clone() for m in self.memories] if self.memories else None,
+            "memory_norms": [n.cpu().clone() for n in self.memory_norms] if self.memory_norms else None,
+            "current_memory_idx": self.current_memory_idx.cpu().clone(),
+        }
+        return state
+
+    def set_memory_state(self, state: dict, device: Optional[torch.device] = None) -> None:
+        """
+        メモリ状態を設定
+
+        Args:
+            state: get_memory_state()で取得した状態
+            device: 転送先デバイス（Noneの場合はモデルのデバイス）
+        """
+        if device is None:
+            device = self.w_q.weight.device
+
+        if state["memories"] is not None:
+            self.memories = [m.to(device) for m in state["memories"]]
+        if state["memory_norms"] is not None:
+            self.memory_norms = [n.to(device) for n in state["memory_norms"]]
+        self.current_memory_idx = state["current_memory_idx"].to(device)
+
 
 class MultiMemoryInfiniAttentionLayer(nn.Module):
     """
@@ -364,3 +395,11 @@ class MultiMemoryInfiniAttentionLayer(nn.Module):
     def reset_memory(self, device: Optional[torch.device] = None) -> None:
         """メモリをリセット"""
         self.attention.reset_memory(device)
+
+    def get_memory_state(self) -> dict:
+        """メモリ状態を取得"""
+        return self.attention.get_memory_state()
+
+    def set_memory_state(self, state: dict, device: Optional[torch.device] = None) -> None:
+        """メモリ状態を設定"""
+        self.attention.set_memory_state(state, device)

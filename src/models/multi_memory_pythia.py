@@ -178,6 +178,34 @@ class MultiMemoryInfiniPythiaModel(nn.Module):
         """メモリ情報を取得"""
         return self.infini_layer.attention.memory_info()
 
+    def get_memory_state(self) -> dict:
+        """
+        メモリ状態を取得（別PCへの転送用）
+
+        Returns:
+            dict: メモリ状態（CPU上のテンソル）
+
+        Example:
+            # PC Aでメモリを取得
+            state = model.get_memory_state()
+            torch.save(state, "memory.pt")
+
+            # PC Bでメモリを設定
+            state = torch.load("memory.pt")
+            model.set_memory_state(state)
+        """
+        return self.infini_layer.get_memory_state()
+
+    def set_memory_state(self, state: dict) -> None:
+        """
+        メモリ状態を設定
+
+        Args:
+            state: get_memory_state()で取得した状態
+        """
+        device = self.embed_in.weight.device
+        self.infini_layer.set_memory_state(state, device)
+
     def get_memory_weights(self, input_ids: torch.Tensor) -> torch.Tensor:
         """
         デバッグ用: 各メモリの重みを取得

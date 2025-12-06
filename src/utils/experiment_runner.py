@@ -16,10 +16,7 @@ import torch.nn as nn
 from config.pythia import PythiaConfig
 from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE
 from src.data.reversal_pairs import get_reversal_pairs
-from src.models.pythia import PythiaModel
-from src.models.infini_pythia import InfiniPythiaModel
-from src.models.multi_memory_pythia import MultiMemoryInfiniPythiaModel
-from src.models.hierarchical_pythia import HierarchicalMemoryPythiaModel
+from src.models import create_model as model_factory
 from src.utils.device import clear_gpu_cache
 from src.utils.evaluation import evaluate_position_wise_ppl, evaluate_reversal_curse
 from src.utils.io import print_flush
@@ -76,56 +73,17 @@ def create_model(
     config: PythiaConfig,
     exp_config: ExperimentConfig,
 ) -> nn.Module:
-    """モデルを作成"""
-    if model_type == ModelType.PYTHIA:
-        return PythiaModel(
-            vocab_size=config.vocab_size,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            num_heads=config.num_attention_heads,
-            intermediate_size=config.intermediate_size,
-            max_position_embeddings=config.max_position_embeddings,
-            rotary_pct=config.rotary_pct,
-        )
-
-    elif model_type == ModelType.INFINI:
-        return InfiniPythiaModel(
-            vocab_size=config.vocab_size,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            num_heads=config.num_attention_heads,
-            intermediate_size=config.intermediate_size,
-            use_delta_rule=exp_config.use_delta_rule,
-            num_memory_banks=exp_config.num_memory_banks,
-            segments_per_bank=exp_config.segments_per_bank,
-            use_alibi=exp_config.use_alibi,
-            alibi_scale=exp_config.alibi_scale,
-        )
-
-    elif model_type == ModelType.MULTI_MEMORY:
-        return MultiMemoryInfiniPythiaModel(
-            vocab_size=config.vocab_size,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            num_heads=config.num_attention_heads,
-            intermediate_size=config.intermediate_size,
-            use_delta_rule=exp_config.use_delta_rule,
-            num_memories=exp_config.num_memories,
-        )
-
-    elif model_type == ModelType.HIERARCHICAL:
-        return HierarchicalMemoryPythiaModel(
-            vocab_size=config.vocab_size,
-            hidden_size=config.hidden_size,
-            num_layers=config.num_layers,
-            num_heads=config.num_attention_heads,
-            intermediate_size=config.intermediate_size,
-            use_delta_rule=exp_config.use_delta_rule,
-            num_fine_memories=exp_config.num_memories,
-        )
-
-    else:
-        raise ValueError(f"Unknown model type: {model_type}")
+    """モデルを作成（model_factoryに委譲）"""
+    return model_factory(
+        model_type=model_type.value,
+        config=config,
+        use_delta_rule=exp_config.use_delta_rule,
+        num_memories=exp_config.num_memories,
+        num_memory_banks=exp_config.num_memory_banks,
+        segments_per_bank=exp_config.segments_per_bank,
+        use_alibi=exp_config.use_alibi,
+        alibi_scale=exp_config.alibi_scale,
+    )
 
 
 def train_model(

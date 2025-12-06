@@ -67,7 +67,94 @@ model = InfiniPythiaModel(
 )
 ```
 
-### 統一実験スクリプト
+---
+
+## 🏭 モデルファクトリ
+
+`create_model()`でシンプルにモデル作成。
+
+```python
+from src.models import create_model
+
+# 基本的な使い方
+model = create_model("pythia")       # 標準Pythia
+model = create_model("infini")       # Infini-Pythia
+model = create_model("multi_memory") # Multi-Memory
+model = create_model("hierarchical") # Hierarchical
+
+# オプション付き
+model = create_model("infini", use_alibi=True, alibi_scale=1.0)
+model = create_model("multi_memory", num_memories=8)
+model = create_model("hierarchical", num_memories=4, use_delta_rule=False)
+
+# カスタムconfig
+from config.pythia import PythiaConfig
+config = PythiaConfig()
+model = create_model("infini", config, use_alibi=True)
+```
+
+### 利用可能なオプション
+
+| オプション | 対象モデル | デフォルト | 説明 |
+|------------|------------|------------|------|
+| `use_delta_rule` | 全memory系 | `True` | Delta Rule使用 |
+| `num_memories` | multi_memory, hierarchical | `4` | メモリ数 |
+| `num_memory_banks` | infini | `1` | メモリバンク数 |
+| `segments_per_bank` | infini | `4` | バンクあたりセグメント数 |
+| `use_alibi` | infini | `False` | ALiBi有効化 |
+| `alibi_scale` | infini | `1.0` | ALiBiスロープスケール |
+
+---
+
+## 💾 メモリ状態の保存・転送
+
+圧縮メモリを別PCに転送可能。
+
+```python
+import torch
+from src.models import create_model
+
+# ===== PC A =====
+model = create_model("infini")
+model.reset_memory()
+
+# テキスト処理でメモリを蓄積
+for batch in data_loader:
+    _ = model(batch, update_memory=True)
+
+# メモリ状態を保存
+state = model.get_memory_state()
+torch.save(state, "memory.pt")
+
+# ===== PC B =====
+# メモリ状態を読み込み
+state = torch.load("memory.pt")
+model = create_model("infini")
+model.set_memory_state(state)
+
+# メモリが引き継がれた状態で推論
+output = model(input_ids)
+```
+
+### メモリ状態のキー
+
+| モデル | キー |
+|--------|------|
+| `InfiniPythiaModel` | `memories`, `memory_norms`, `current_bank`, `segment_counter` |
+| `MultiMemoryInfiniPythiaModel` | `memories`, `memory_norms`, `current_memory_idx` |
+| `HierarchicalMemoryPythiaModel` | `fine_memories`, `fine_memory_norms`, `current_memory_idx` |
+
+### メモリサイズ
+
+| モデル | サイズ |
+|--------|--------|
+| Infini (1 bank) | ~135 KB |
+| Multi-Memory (4) | ~540 KB |
+| Hierarchical (4) | ~540 KB |
+
+---
+
+## 🧪 統一実験スクリプト
 
 全モデルを統一スクリプトで実験可能。
 
@@ -224,6 +311,7 @@ new-llm/
 │   ├── data/
 │   │   └── reversal_pairs.py       # Reversal Curse評価データ
 │   ├── models/
+│   │   ├── __init__.py             # create_model() ファクトリ
 │   │   ├── pythia.py               # PythiaModel (RoPE)
 │   │   ├── infini_attention.py     # InfiniAttention, InfiniAttentionLayer
 │   │   ├── infini_pythia.py        # InfiniPythiaModel (1層Infini + RoPE)
@@ -240,7 +328,8 @@ new-llm/
 │       └── seed.py                 # シード設定
 ├── docs/
 │   └── experiments/                # 実験結果
-└── CLAUDE.md
+├── CLAUDE.md
+└── README.md
 ```
 
 ---
@@ -249,6 +338,8 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-06 | **メモリ転送API追加**: get_memory_state/set_memory_stateで圧縮メモリを別PCに転送可能 |
+| 2025-12-06 | **モデルファクトリ追加**: create_model()でシンプルにモデル作成 |
 | 2025-12-06 | **実験スクリプト統一**: experiment.pyに統合、experiment_runner.py追加 |
 | 2025-12-06 | **Hierarchical Memory追加**: 学習可能な展開判断、Coarse-to-Fine検索 |
 | 2025-12-06 | **Multi-Memory Attention追加**: Attention-based選択で複数メモリを動的混合 |

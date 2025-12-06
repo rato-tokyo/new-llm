@@ -1,28 +1,31 @@
-# Context-Pythia: KV Cache Compression for Pythia-70M
+# Infini-Pythia: Infinite Context with Compressive Memory
 
-Context-based KV cache compression achieving **50% memory reduction** while maintaining model quality.
+Pythia-70M with Infini-Attention for efficient long-context processing using compressive memory.
 
 ## Overview
 
-Context-Pythia compresses Pythia-70M's KV cache from 512-dim to 256-dim using a learned ContextBlock, reducing memory usage by 50% during inference.
+Infini-Pythia extends Pythia-70M with Infini-Attention, enabling infinite context processing through learned compressive memory. The first layer uses memory-only attention (no positional encoding), while remaining layers use standard RoPE attention.
 
 ```
-Context-Pythia Architecture:
-  Token Embedding (512-dim) ← Pythia-70M
-       ↓
-  ContextBlock: 512 → 256 (50% compression)
-       ↓
-  Layer 0-5: All use context (256-dim) as input
-       ↓
-  Output Head (vocab_size=50304)
+Infini-Pythia Architecture:
+  Token Embedding (512-dim)
+         ↓
+  Layer 0: InfiniAttentionLayer (NoPE, Memory Only)
+    └─ Compressive Memory (linear attention)
+         ↓
+  Layer 1-5: PythiaLayer (RoPE)
+    ├─ Multi-Head Attention
+    └─ MLP
+         ↓
+  Output Head (512 → vocab)
 ```
 
 ## Key Features
 
-- **50% KV Cache Reduction**: context_dim (256) vs hidden_size (512)
-- **OACD Algorithm**: Origin-Anchored Centroid Dispersion for Phase 1 diversity learning
-- **Two-Phase Training**: Phase 1 (OACD) → Phase 2 (Cross-entropy)
-- **Pythia-70M Compatible**: Same tokenizer and data format
+- **Compressive Memory**: O(1) memory for infinite context via linear attention
+- **Delta Rule**: Efficient memory update preventing information overwrite
+- **Memory Transfer**: Save/load memory state across devices
+- **Multiple Memory Variants**: Infini, Multi-Memory, Hierarchical
 
 ## Quick Start
 
@@ -32,41 +35,76 @@ Context-Pythia Architecture:
 pip install torch transformers datasets
 ```
 
-### Phase 1: ContextBlock Training (OACD)
+### Run Experiments
 
 ```bash
-# Train ContextBlock with OACD loss
-python3 scripts/train_phase1_pythia.py --tokens 100000
+# Compare all models
+python3 scripts/experiment.py --models pythia infini multi_memory hierarchical
+
+# Infini only
+python3 scripts/experiment.py --models infini
+
+# Multi-Memory vs Hierarchical
+python3 scripts/experiment.py --models multi_memory hierarchical --num-memories 4
+
+# Infini with ALiBi
+python3 scripts/experiment.py --models infini --alibi
+
+# Custom settings
+python3 scripts/experiment.py --models infini --samples 10000 --epochs 50 --lr 5e-5
 ```
 
-Expected output:
-```
-Phase 1 Training:
-  Iter  1: random init
-  Iter  2: loss=5.37, conv=0%
-  ...
-  Iter 18: loss=1.26, conv=92%
-  → Early stop: conv 92% >= 90%
+### Programmatic Usage
+
+```python
+from src.models import create_model
+
+# Create model
+model = create_model("infini")  # or "multi_memory", "hierarchical", "pythia"
+
+# With options
+model = create_model("infini", use_alibi=True)
+model = create_model("multi_memory", num_memories=8)
+model = create_model("hierarchical", num_memories=4)
+
+# Forward pass with memory update
+output = model(input_ids, update_memory=True)
+
+# Reset memory
+model.reset_memory()
 ```
 
-### Phase 2: Comparison Experiment
+### Memory Transfer
 
-```bash
-# Compare Pythia-70M (baseline) vs Context-Pythia (50% KV compression)
-python3 scripts/experiment_pythia_comparison.py --samples 10000 --epochs 10
+```python
+import torch
+from src.models import create_model
+
+# On PC A: Save memory state
+model = create_model("infini")
+# ... training or processing ...
+state = model.get_memory_state()
+torch.save(state, "memory.pt")
+
+# On PC B: Load memory state
+state = torch.load("memory.pt")
+model = create_model("infini")
+model.set_memory_state(state)
+# Memory is now restored!
 ```
 
-Expected output:
-```
-| Model | Best PPL | KV Cache | Reduction |
-|-------|----------|----------|-----------|
-| Pythia-70M | XXX.X | 96.0 KB | - |
-| Context-Pythia | XXX.X | 48.0 KB | 50% |
-```
+## Model Variants
+
+| Model | Description |
+|-------|-------------|
+| `pythia` | Standard Pythia-70M with RoPE |
+| `infini` | Infini-Pythia (Layer 0: Infini + RoPE) |
+| `multi_memory` | Multiple independent memories with attention-based selection |
+| `hierarchical` | Hierarchical memory with coarse-to-fine retrieval |
 
 ## Architecture Details
 
-### Pythia-70M Specifications
+### Pythia-70M Base
 
 | Component | Value |
 |-----------|-------|
@@ -77,101 +115,80 @@ Expected output:
 | Position Encoding | Rotary (RoPE, 25%) |
 | Vocab Size | 50,304 |
 
-### Context-Pythia Modifications
-
-| Component | Original | Context-Pythia |
-|-----------|----------|----------------|
-| KV dim | 512 | 256 |
-| KV Cache | 100% | 50% |
-| Attention Input | hidden_states | context |
-
-### Training Pipeline
+### Infini-Attention
 
 ```
-Phase 1: OACD (ContextBlock diversity learning)
-  ├─ Train ContextBlock only
-  ├─ OACD loss for diverse context vectors
-  └─ Target: 90%+ convergence rate
-       ↓
-Phase 2: Full Training (ContextBlock frozen)
-  ├─ Freeze ContextBlock
-  ├─ Train Transformer Layers + Output Head
-  └─ Cross-entropy loss
+Memory Update (Delta Rule):
+  M_s = M_{s-1} + σ(K)^T @ (V - retrieved_V)
+
+Memory Retrieval:
+  A_mem = σ(Q) @ M / (σ(Q) @ z)
+
+σ(x) = ELU(x) + 1
 ```
 
-## OACD Algorithm
+### Memory Sizes
 
-Origin-Anchored Centroid Dispersion for learning diverse context representations:
-
-```python
-def oacd_loss(contexts, centroid_weight=0.1):
-    context_mean = contexts.mean(dim=0)
-    deviation = contexts - context_mean
-
-    # Term 1: Maximize dispersion from centroid
-    dispersion_loss = -torch.norm(deviation, p=2) / len(contexts)
-
-    # Term 2: Anchor centroid to origin
-    centroid_loss = torch.norm(context_mean, p=2) ** 2
-
-    return dispersion_loss + centroid_weight * centroid_loss
-```
+| Model | Memory Size |
+|-------|-------------|
+| Infini | ~135 KB |
+| Multi-Memory (4) | ~540 KB |
+| Hierarchical (4) | ~540 KB |
 
 ## Project Structure
 
 ```
 new-llm/
 ├── config/
-│   ├── phase1.py              # Phase 1 settings
-│   └── pythia.py              # Pythia model config
+│   └── pythia.py                   # PythiaConfig
 ├── scripts/
-│   ├── train_phase1_pythia.py         # Phase 1 training
-│   └── experiment_pythia_comparison.py # Phase 2 comparison
+│   └── experiment.py               # Unified experiment script
 ├── src/
+│   ├── data/
+│   │   └── reversal_pairs.py       # Reversal Curse evaluation data
 │   ├── models/
-│   │   ├── pythia.py          # Pythia-70M baseline
-│   │   ├── context_pythia.py  # Context-Pythia (ours)
-│   │   ├── blocks.py          # ContextBlock
-│   │   └── layers.py          # ContextLayer
-│   ├── losses/
-│   │   └── diversity.py       # OACD algorithm
+│   │   ├── __init__.py             # create_model() factory
+│   │   ├── pythia.py               # PythiaModel (RoPE)
+│   │   ├── infini_attention.py     # InfiniAttention, InfiniAttentionLayer
+│   │   ├── infini_pythia.py        # InfiniPythiaModel
+│   │   ├── multi_memory_attention.py
+│   │   ├── multi_memory_pythia.py
+│   │   ├── hierarchical_memory.py
+│   │   └── hierarchical_pythia.py
 │   └── utils/
-│       └── data_pythia.py     # Pile data loader
-├── CLAUDE.md                  # Development guidelines
+│       ├── experiment_runner.py    # Unified experiment runner
+│       ├── training.py             # Training utilities
+│       ├── evaluation.py           # Evaluation functions
+│       └── ...
+├── docs/
+│   └── experiments/                # Experiment results
+├── CLAUDE.md                       # Development guidelines
 └── README.md
 ```
 
-## Configuration
+## Evaluation
 
-### Phase 1 Settings (config/phase1.py)
+### Reversal Curse
 
-```python
-max_iterations = 100         # Max training iterations
-convergence_threshold = 0.03 # MSE threshold
-learning_rate = 0.003        # Learning rate
-batch_size = 5000            # Batch size
-gradient_clip = 2.0          # Gradient clipping
-context_noise = 0.05         # Gaussian noise for convergence
-early_stopping_threshold = 0.9  # Stop at 90% convergence
-```
+Measures if a model trained on "A is B" can also infer "B is A".
 
-### Pythia Settings (config/pythia.py)
+| Metric | Description |
+|--------|-------------|
+| Forward PPL | PPL on training direction |
+| Backward PPL | PPL on reverse direction |
+| Reversal Gap | Backward - Forward (lower is better) |
 
-```python
-vocab_size = 50304
-hidden_size = 512
-context_dim = 256            # 50% compression
-num_layers = 6
-num_attention_heads = 8
-```
+### Position-wise PPL
+
+Evaluates model performance at different sequence positions.
 
 ## Development
 
-See `CLAUDE.md` for detailed guidelines including:
-- Phase 1 specifications (DO NOT DELETE)
-- ContextBlock implementation details
-- Weight initialization (normal_, NOT Xavier)
-- Memory management patterns
+See `CLAUDE.md` for development guidelines including:
+- Model factory pattern
+- Memory transfer API
+- Code quality rules
+- Past bugs and lessons
 
 ## License
 

@@ -302,24 +302,38 @@ class HierarchicalMemoryAttention(nn.Module):
             "total_bytes": per_memory * self.num_fine_memories,
         }
 
-    # メモリ保存/復元API
     def get_memory_state(self) -> dict:
-        """メモリ状態を取得（保存用）"""
+        """
+        メモリ状態を取得（転送可能な形式）
+
+        Returns:
+            dict: メモリ状態（CPU上のテンソル）
+        """
         if self.fine_memories is None or self.fine_memory_norms is None:
-            return {"memories": [], "norms": [], "current_idx": 0}
+            return {"fine_memories": None, "fine_memory_norms": None, "current_memory_idx": torch.tensor(0)}
 
         return {
-            "memories": [m.clone() for m in self.fine_memories],
-            "norms": [z.clone() for z in self.fine_memory_norms],
-            "current_idx": self.current_memory_idx.item(),
+            "fine_memories": [m.cpu().clone() for m in self.fine_memories],
+            "fine_memory_norms": [z.cpu().clone() for z in self.fine_memory_norms],
+            "current_memory_idx": self.current_memory_idx.cpu().clone(),
         }
 
-    def set_memory_state(self, state: dict) -> None:
-        """メモリ状態を復元"""
-        device = self.w_q.weight.device
-        self.fine_memories = [m.to(device) for m in state["memories"]]
-        self.fine_memory_norms = [z.to(device) for z in state["norms"]]
-        self.current_memory_idx = torch.tensor(state["current_idx"], device=device)
+    def set_memory_state(self, state: dict, device: Optional[torch.device] = None) -> None:
+        """
+        メモリ状態を設定
+
+        Args:
+            state: get_memory_state()で取得した状態
+            device: 転送先デバイス（Noneの場合はモデルのデバイス）
+        """
+        if device is None:
+            device = self.w_q.weight.device
+
+        if state["fine_memories"] is not None:
+            self.fine_memories = [m.to(device) for m in state["fine_memories"]]
+        if state["fine_memory_norms"] is not None:
+            self.fine_memory_norms = [z.to(device) for z in state["fine_memory_norms"]]
+        self.current_memory_idx = state["current_memory_idx"].to(device)
 
 
 class HierarchicalMemoryAttentionLayer(nn.Module):
@@ -371,3 +385,11 @@ class HierarchicalMemoryAttentionLayer(nn.Module):
     def reset_memory(self, device: Optional[torch.device] = None) -> None:
         """メモリをリセット"""
         self.attention.reset_memory(device)
+
+    def get_memory_state(self) -> dict:
+        """メモリ状態を取得"""
+        return self.attention.get_memory_state()
+
+    def set_memory_state(self, state: dict, device: Optional[torch.device] = None) -> None:
+        """メモリ状態を設定"""
+        self.attention.set_memory_state(state, device)

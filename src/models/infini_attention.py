@@ -328,6 +328,39 @@ class InfiniAttention(nn.Module):
             "segment_counter": self.segment_counter.item() if self.segment_counter is not None else 0,
         }
 
+    def get_memory_state(self) -> dict:
+        """
+        メモリ状態を取得（転送可能な形式）
+
+        Returns:
+            dict: メモリ状態（CPU上のテンソル）
+        """
+        state = {
+            "memories": [m.cpu().clone() for m in self.memories] if self.memories else None,
+            "memory_norms": [n.cpu().clone() for n in self.memory_norms] if self.memory_norms else None,
+            "current_bank": self.current_bank.cpu().clone(),
+            "segment_counter": self.segment_counter.cpu().clone(),
+        }
+        return state
+
+    def set_memory_state(self, state: dict, device: Optional[torch.device] = None) -> None:
+        """
+        メモリ状態を設定
+
+        Args:
+            state: get_memory_state()で取得した状態
+            device: 転送先デバイス（Noneの場合はモデルのデバイス）
+        """
+        if device is None:
+            device = self.w_q.weight.device
+
+        if state["memories"] is not None:
+            self.memories = [m.to(device) for m in state["memories"]]
+        if state["memory_norms"] is not None:
+            self.memory_norms = [n.to(device) for n in state["memory_norms"]]
+        self.current_bank = state["current_bank"].to(device)
+        self.segment_counter = state["segment_counter"].to(device)
+
 
 class InfiniAttentionALiBi(nn.Module):
     """
@@ -562,6 +595,37 @@ class InfiniAttentionALiBi(nn.Module):
             "alibi_scale": self.alibi_scale,
         }
 
+    def get_memory_state(self) -> dict:
+        """
+        メモリ状態を取得（転送可能な形式）
+
+        Returns:
+            dict: メモリ状態（CPU上のテンソル）
+        """
+        state = {
+            "memory": self.memory.cpu().clone() if self.memory is not None else None,
+            "memory_norm": self.memory_norm.cpu().clone() if self.memory_norm is not None else None,
+            "segment_count": self.segment_count.cpu().clone(),
+        }
+        return state
+
+    def set_memory_state(self, state: dict, device: Optional[torch.device] = None) -> None:
+        """
+        メモリ状態を設定
+
+        Args:
+            state: get_memory_state()で取得した状態
+            device: 転送先デバイス（Noneの場合はモデルのデバイス）
+        """
+        if device is None:
+            device = self.w_q.weight.device
+
+        if state["memory"] is not None:
+            self.memory = state["memory"].to(device)
+        if state["memory_norm"] is not None:
+            self.memory_norm = state["memory_norm"].to(device)
+        self.segment_count = state["segment_count"].to(device)
+
 
 class InfiniAttentionLayer(nn.Module):
     """
@@ -632,3 +696,11 @@ class InfiniAttentionLayer(nn.Module):
     def reset_memory(self, device: Optional[torch.device] = None) -> None:
         """メモリをリセット"""
         self.attention.reset_memory(device)
+
+    def get_memory_state(self) -> dict:
+        """メモリ状態を取得"""
+        return self.attention.get_memory_state()
+
+    def set_memory_state(self, state: dict, device: Optional[torch.device] = None) -> None:
+        """メモリ状態を設定"""
+        self.attention.set_memory_state(state, device)
