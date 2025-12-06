@@ -37,18 +37,12 @@ model = TransformerLM(layers=layers)
 ```
 """
 
-from typing import Any, Literal, Optional
+from typing import Literal, Optional
 
 from config.pythia import PythiaConfig
 
 # Core model
-from .model import (
-    TransformerLM,
-    create_pythia_layers,
-    create_infini_pythia_layers,
-    create_multi_memory_pythia_layers,
-    create_hierarchical_pythia_layers,
-)
+from .model import TransformerLM
 
 # Layer types
 from .layers import (
@@ -124,10 +118,6 @@ def create_model(
         # Multi-Memory with 8 memories
         model = create_model("multi_memory", num_memories=8)
 
-        # Hierarchical with custom config
-        config = PythiaConfig()
-        model = create_model("hierarchical", config, num_memories=4)
-
         # Custom layer construction
         from src.models import TransformerLM
         from src.models.layers import InfiniLayer, PythiaLayer
@@ -137,39 +127,35 @@ def create_model(
     if config is None:
         config = PythiaConfig()
 
-    common_kwargs: dict[str, Any] = {
-        "num_layers": config.num_layers,
-        "hidden_size": config.hidden_size,
-        "num_heads": config.num_attention_heads,
-        "intermediate_size": config.intermediate_size,
-        "rotary_pct": config.rotary_pct,
-        "max_position_embeddings": config.max_position_embeddings,
-    }
+    h = config.hidden_size
+    n = config.num_attention_heads
+    i = config.intermediate_size
+    r = config.rotary_pct
+    m = config.max_position_embeddings
+
+    def pythia_layers(count: int) -> list[BaseLayer]:
+        return [PythiaLayer(h, n, i, r, m) for _ in range(count)]
 
     if model_type == "pythia":
-        layers = create_pythia_layers(**common_kwargs)
+        layers = pythia_layers(config.num_layers)
 
     elif model_type == "infini":
-        layers = create_infini_pythia_layers(
-            **common_kwargs,
-            num_memory_banks=num_memory_banks,
-            segments_per_bank=segments_per_bank,
-            use_delta_rule=use_delta_rule,
-        )
+        layers = [
+            InfiniLayer(h, n, i, num_memory_banks, segments_per_bank, use_delta_rule),
+            *pythia_layers(config.num_layers - 1),
+        ]
 
     elif model_type == "multi_memory":
-        layers = create_multi_memory_pythia_layers(
-            **common_kwargs,
-            num_memories=num_memories,
-            use_delta_rule=use_delta_rule,
-        )
+        layers = [
+            MultiMemoryLayer(h, n, i, num_memories, use_delta_rule),
+            *pythia_layers(config.num_layers - 1),
+        ]
 
     elif model_type == "hierarchical":
-        layers = create_hierarchical_pythia_layers(
-            **common_kwargs,
-            num_fine_memories=num_memories,
-            use_delta_rule=use_delta_rule,
-        )
+        layers = [
+            HierarchicalLayer(h, n, i, num_memories, use_delta_rule),
+            *pythia_layers(config.num_layers - 1),
+        ]
 
     else:
         raise ValueError(
@@ -191,10 +177,6 @@ __all__ = [
 
     # Core model
     'TransformerLM',
-    'create_pythia_layers',
-    'create_infini_pythia_layers',
-    'create_multi_memory_pythia_layers',
-    'create_hierarchical_pythia_layers',
 
     # Layer types
     'BaseLayer',
