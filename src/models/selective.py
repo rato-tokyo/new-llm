@@ -212,37 +212,37 @@ class SelectiveOutputLM(nn.Module):
         logits: torch.Tensor,
         gate_probs: torch.Tensor,
         labels: torch.Tensor,
-        threshold: float = 0.5,
         gate_loss_weight: float = 0.1,
     ) -> tuple[torch.Tensor, dict]:
         """
-        訓練-評価一貫性を保った損失計算
+        連続的重み方式による損失計算
 
-        訓練時と評価時で同じthresholdを使用し、出力位置のみでLM lossを計算。
-        これにより訓練と評価の条件が揃う。
+        gate_probを離散的な判定（> threshold）ではなく、連続的な重みとして使用。
+        これにより:
+        - 全トークンが学習に寄与（勾配が常に流れる）
+        - thresholdハイパーパラメータが不要
+        - 訓練-評価の自然な一貫性
 
         Args:
             logits: [batch, seq_len, vocab_size]
             gate_probs: [batch, seq_len, 1]
             labels: [batch, seq_len]
-            threshold: 出力閾値（訓練・評価で同じ値を使用）
             gate_loss_weight: ゲート損失の重み
 
         Returns:
-            total_loss: LM loss + gate_loss_weight * gate_loss
+            total_loss: weighted LM loss + gate_loss_weight * gate_loss
             stats: 訓練統計
         """
         batch_size, seq_len = labels.shape
 
-        # 出力マスク: gate_prob > threshold の位置のみ出力
+        # gate_probを連続的な重みとして使用
         gate_probs_squeezed = gate_probs.squeeze(-1)  # [batch, seq_len]
-        output_mask = (gate_probs_squeezed > threshold).float()  # [batch, seq_len]
 
-        # LM Loss計算（出力位置のみ）
+        # LM Loss計算（gate_probで重み付け）
         # Shift for next-token prediction
         shift_logits = logits[:, :-1, :].contiguous()  # [batch, seq_len-1, vocab]
         shift_labels = labels[:, 1:].contiguous()  # [batch, seq_len-1]
-        shift_mask = output_mask[:, :-1].contiguous()  # [batch, seq_len-1]
+        shift_weights = gate_probs_squeezed[:, :-1].contiguous()  # [batch, seq_len-1]
 
         # Per-token cross entropy
         loss_fct = nn.CrossEntropyLoss(reduction='none')
@@ -251,14 +251,14 @@ class SelectiveOutputLM(nn.Module):
             shift_labels.view(-1)
         ).view(batch_size, seq_len - 1)  # [batch, seq_len-1]
 
-        # 出力位置のlossのみ平均
-        masked_loss = per_token_loss * shift_mask
-        num_output_tokens = shift_mask.sum()
+        # gate_probで重み付けした平均
+        weighted_loss = per_token_loss * shift_weights
+        weight_sum = shift_weights.sum()
 
-        if num_output_tokens > 0:
-            lm_loss = masked_loss.sum() / num_output_tokens
+        if weight_sum > 0:
+            lm_loss = weighted_loss.sum() / weight_sum
         else:
-            # 出力トークンがない場合、全体の平均を使用（まれなケース）
+            # 重みがない場合、通常の平均を使用（まれなケース）
             lm_loss = per_token_loss.mean()
 
         # Gate Loss（エントロピーベース）
@@ -269,18 +269,17 @@ class SelectiveOutputLM(nn.Module):
 
         # 統計情報
         with torch.no_grad():
-            output_ratio = output_mask.mean().item()
-            skip_ratio = 1.0 - output_ratio
             avg_gate_prob = gate_probs_squeezed.mean().item()
+            # 有効重み（weight_sum / token数）
+            effective_weight = weight_sum.item() / shift_weights.numel()
 
         stats = {
             "lm_loss": lm_loss.item(),
             "gate_loss": gate_loss.item(),
             "total_loss": total_loss.item(),
-            "output_ratio": output_ratio,
-            "skip_ratio": skip_ratio,
             "avg_gate_prob": avg_gate_prob,
-            "num_output_tokens": num_output_tokens.item(),
+            "effective_weight": effective_weight,
+            "weight_sum": weight_sum.item(),
         }
 
         return total_loss, stats

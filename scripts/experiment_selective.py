@@ -7,14 +7,14 @@ Selective Output LM Experiment
 - 確信度が高いときのみトークン出力
 
 実験:
-1. SelectiveOutputLM を訓練（ゲート損失付き、skip-aware training）
-2. 同じthresholdで評価（訓練-評価一貫性）
+1. SelectiveOutputLM を訓練（連続的重み方式）
+2. gate_probで重み付けしたPPLで評価
 3. Pythiaベースラインとの比較
 
-訓練-評価一貫性:
-- 訓練時もthresholdでスキップを判定し、出力位置のみでloss計算
-- 評価時も同じthresholdでスキップを判定
-- これにより訓練と評価の条件が揃う
+連続的重み方式:
+- gate_probを離散的な判定（> threshold）ではなく連続的な重みとして使用
+- 全トークンが学習に寄与（勾配が常に流れる）
+- thresholdハイパーパラメータが不要
 
 Usage:
     # Selective only (default)
@@ -22,9 +22,6 @@ Usage:
 
     # With baseline comparison
     python3 scripts/experiment_selective.py --models pythia selective
-
-    # Custom threshold (used for both training and evaluation)
-    python3 scripts/experiment_selective.py --threshold 0.5
 """
 
 import argparse
@@ -150,18 +147,16 @@ def train_selective(
     device: torch.device,
     num_epochs: int,
     patience: int,
-    threshold: float = 0.5,
     gate_loss_weight: float = 0.1,
     gradient_clip: float = 1.0,
 ) -> tuple[float, int, Optional[dict]]:
     """
-    SelectiveOutputLM訓練（skip-aware training）
+    SelectiveOutputLM訓練（連続的重み方式）
 
-    訓練-評価一貫性を保つため、訓練時もthresholdでスキップを判定し、
-    出力位置のみでLM lossを計算する。
+    gate_probを連続的な重みとして使用し、全トークンが学習に寄与。
+    thresholdハイパーパラメータは不要。
 
     Args:
-        threshold: 出力閾値（訓練・評価で同じ値を使用）
         gate_loss_weight: ゲート損失の重み
     """
     best_val_ppl = float("inf")
@@ -174,11 +169,10 @@ def train_selective(
         model.train()
 
         # 訓練統計
-        epoch_lm_loss = 0.0
+        epoch_weighted_loss = 0.0
+        epoch_weight_sum = 0.0
         epoch_gate_loss = 0.0
-        epoch_output_tokens = 0
-        epoch_total_tokens = 0
-        epoch_skip_ratio_sum = 0.0
+        epoch_gate_prob_sum = 0.0
         batch_count = 0
 
         for batch in train_loader:
@@ -191,10 +185,9 @@ def train_selective(
             # Forward (returns logits, gate_probs, final_hidden)
             logits, gate_probs, _ = model(input_ids, use_selective=False)
 
-            # compute_selective_lossで訓練-評価一貫性を保った損失計算
+            # 連続的重み方式による損失計算
             loss, stats = model.compute_selective_loss(
                 logits, gate_probs, labels,
-                threshold=threshold,
                 gate_loss_weight=gate_loss_weight,
             )
 
@@ -203,25 +196,24 @@ def train_selective(
             optimizer.step()
 
             # 統計収集
-            epoch_lm_loss += stats["lm_loss"] * stats["num_output_tokens"]
+            epoch_weighted_loss += stats["lm_loss"] * stats["weight_sum"]
+            epoch_weight_sum += stats["weight_sum"]
             epoch_gate_loss += stats["gate_loss"]
-            epoch_output_tokens += stats["num_output_tokens"]
-            epoch_total_tokens += labels.numel()
-            epoch_skip_ratio_sum += stats["skip_ratio"]
+            epoch_gate_prob_sum += stats["avg_gate_prob"]
             batch_count += 1
 
         # Epoch統計
-        if epoch_output_tokens > 0:
-            train_ppl = torch.exp(torch.tensor(epoch_lm_loss / epoch_output_tokens)).item()
+        if epoch_weight_sum > 0:
+            train_ppl = torch.exp(torch.tensor(epoch_weighted_loss / epoch_weight_sum)).item()
         else:
             train_ppl = float("inf")
         avg_gate_loss = epoch_gate_loss / batch_count
-        avg_skip_ratio = epoch_skip_ratio_sum / batch_count
+        avg_gate_prob = epoch_gate_prob_sum / batch_count
 
-        # Validation（同じthresholdを使用）
+        # Validation
         model.eval()
-        val_lm_loss = 0.0
-        val_output_tokens = 0
+        val_weighted_loss = 0.0
+        val_weight_sum = 0.0
 
         with torch.no_grad():
             for batch in val_loader:
@@ -231,18 +223,16 @@ def train_selective(
 
                 logits, gate_probs, _ = model(input_ids, use_selective=False)
 
-                # 同じthresholdで評価
                 _, stats = model.compute_selective_loss(
                     logits, gate_probs, labels,
-                    threshold=threshold,
                     gate_loss_weight=gate_loss_weight,
                 )
 
-                val_lm_loss += stats["lm_loss"] * stats["num_output_tokens"]
-                val_output_tokens += stats["num_output_tokens"]
+                val_weighted_loss += stats["lm_loss"] * stats["weight_sum"]
+                val_weight_sum += stats["weight_sum"]
 
-        if val_output_tokens > 0:
-            val_ppl = torch.exp(torch.tensor(val_lm_loss / val_output_tokens)).item()
+        if val_weight_sum > 0:
+            val_ppl = torch.exp(torch.tensor(val_weighted_loss / val_weight_sum)).item()
         else:
             val_ppl = float("inf")
         elapsed = time.time() - start_time
@@ -260,7 +250,7 @@ def train_selective(
 
         print_flush(
             f"  Epoch {epoch:2d}: train={train_ppl:7.1f}, val={val_ppl:7.1f}, "
-            f"skip={avg_skip_ratio:.1%}, gate={avg_gate_loss:.4f} ({elapsed:.1f}s) {marker}"
+            f"gate={avg_gate_prob:.3f}, gate_loss={avg_gate_loss:.4f} ({elapsed:.1f}s) {marker}"
         )
 
         if patience_counter >= patience:
@@ -370,8 +360,8 @@ def main():
     parser.add_argument("--max-skip", type=int, default=3)
     parser.add_argument("--gate-loss-weight", type=float, default=0.1)
     parser.add_argument(
-        "--threshold", type=float, default=0.5,
-        help="Threshold for output decision (used for both training and evaluation)"
+        "--gen-threshold", type=float, default=0.5,
+        help="Threshold for generation only (training uses continuous weighting)"
     )
 
     args = parser.parse_args()
@@ -382,7 +372,7 @@ def main():
 
     # Print experiment info
     print_flush("=" * 70)
-    print_flush("SELECTIVE OUTPUT LM EXPERIMENT (skip-aware training)")
+    print_flush("SELECTIVE OUTPUT LM EXPERIMENT (continuous weighting)")
     print_flush("=" * 70)
     print_flush(f"Models: {args.models}")
     print_flush(f"Samples: {args.samples:,}")
@@ -390,7 +380,7 @@ def main():
     print_flush(f"Epochs: {args.epochs}")
     print_flush(f"Max skip: {args.max_skip}")
     print_flush(f"Gate loss weight: {args.gate_loss_weight}")
-    print_flush(f"Threshold (train & eval): {args.threshold}")
+    print_flush(f"Generation threshold: {args.gen_threshold}")
     print_flush("=" * 70)
 
     # Load data
@@ -461,7 +451,7 @@ def main():
     # =========================================================================
     if "selective" in args.models:
         print_flush("\n" + "=" * 70)
-        print_flush("SELECTIVE OUTPUT LM (skip-aware training)")
+        print_flush("SELECTIVE OUTPUT LM (continuous weighting)")
         print_flush("=" * 70)
 
         model = create_model("selective", config, max_skip=args.max_skip)
@@ -474,11 +464,10 @@ def main():
 
         optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
-        print_flush(f"\n[Selective] Training (threshold={args.threshold})...")
+        print_flush("\n[Selective] Training (continuous weighting)...")
         best_ppl, best_epoch, best_state = train_selective(
             model, train_loader, val_loader, optimizer, device,
             args.epochs, args.patience,
-            threshold=args.threshold,
             gate_loss_weight=args.gate_loss_weight,
             gradient_clip=GRADIENT_CLIP,
         )
@@ -495,10 +484,10 @@ def main():
         print_flush(f"    Range: [{gate_stats['gate_min']:.3f}, {gate_stats['gate_max']:.3f}]")
         print_flush(f"    Gate-Entropy Corr: {gate_stats['gate_entropy_corr']:.3f}")
 
-        # Selective generation evaluation（訓練と同じthresholdを使用）
-        print_flush(f"\n  Selective Generation (threshold={args.threshold}, same as training):")
+        # Selective generation evaluation（生成時のみthreshold使用）
+        print_flush(f"\n  Selective Generation (threshold={args.gen_threshold}):")
         gen_results = evaluate_selective_generation(
-            model, val_loader, device, [args.threshold]
+            model, val_loader, device, [args.gen_threshold]
         )
 
         # Standard evaluation (without selective mode)
@@ -531,7 +520,7 @@ def main():
         results["selective"] = {
             "best_val_ppl": best_ppl,
             "best_epoch": best_epoch,
-            "threshold": args.threshold,
+            "gen_threshold": args.gen_threshold,
             "gate_stats": gate_stats,
             "generation_stats": gen_results,
             "position_wise_ppl": pos_ppl,
@@ -554,10 +543,10 @@ def main():
         print_flush(f"| {model_name} | {r['best_val_ppl']:.1f} | {r['best_epoch']} |")
 
     if "selective" in results:
-        threshold = results["selective"]["threshold"]
-        gen_stats = results["selective"]["generation_stats"].get(threshold, {})
+        gen_threshold = results["selective"]["gen_threshold"]
+        gen_stats = results["selective"]["generation_stats"].get(gen_threshold, {})
         if gen_stats:
-            print_flush(f"\nSelective Generation (threshold={threshold}):")
+            print_flush(f"\nSelective Generation (threshold={gen_threshold}):")
             print_flush(f"  Skip Ratio: {gen_stats.get('skip_ratio', 0):.1%}")
             print_flush(f"  Total Steps: {gen_stats.get('total_steps', 0)}")
 
