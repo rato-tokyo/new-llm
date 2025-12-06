@@ -1,5 +1,11 @@
 """
 Infini-Attention Layer (Memory + Linear Attention)
+
+Features:
+- Single-head memory for expressiveness
+- Delta Rule for memory update
+- Multi-bank support with freeze/unfreeze
+- Memory export/import for sharing between models
 """
 
 from typing import Optional
@@ -20,7 +26,32 @@ class InfiniAttention(nn.Module):
     Features:
     - Single-head memory (memory_head_dim = hidden_size)
     - Delta Rule for memory update
-    - Multi-bank support
+    - Multi-bank support with freeze capability
+    - Memory sharing between models
+
+    Memory Banks:
+    - Each bank can be independently frozen/unfrozen
+    - Frozen banks are read-only (used as knowledge base)
+    - Unfrozen banks are updated during forward pass (working memory)
+
+    Usage:
+        # Create model with 2 memory banks
+        model = create_model("infini", num_memory_banks=2)
+
+        # Write knowledge to bank 0
+        for batch in knowledge_data:
+            model(batch, update_memory=True)
+
+        # Freeze bank 0 as knowledge base
+        model.freeze_memory(bank_indices=[0])
+
+        # Bank 1 remains as working memory
+        # Export frozen knowledge for sharing
+        knowledge = model.export_memory(bank_indices=[0])
+        torch.save(knowledge, "knowledge.pt")
+
+        # Another model can import the knowledge
+        other_model.import_memory(knowledge, bank_indices=[0], freeze=True)
     """
 
     def __init__(
@@ -53,22 +84,48 @@ class InfiniAttention(nn.Module):
 
         self.memories: Optional[list[torch.Tensor]] = None
         self.memory_norms: Optional[list[torch.Tensor]] = None
+        self.frozen_banks: Optional[list[bool]] = None  # Track frozen state per bank
         self.register_buffer('current_bank', torch.tensor(0))
         self.register_buffer('segment_counter', torch.tensor(0))
 
-    def reset_memory(self, device: Optional[torch.device] = None) -> None:
+    def reset_memory(
+        self,
+        device: Optional[torch.device] = None,
+        keep_frozen: bool = True,
+    ) -> None:
+        """
+        Reset memory banks.
+
+        Args:
+            device: Device to create tensors on
+            keep_frozen: If True, only reset unfrozen banks. If False, reset all.
+        """
         if device is None:
             device = self.w_q.weight.device
         dtype = self.w_q.weight.dtype
 
-        self.memories = [
-            torch.zeros(self.memory_head_dim, self.memory_head_dim, device=device, dtype=dtype)
-            for _ in range(self.num_memory_banks)
-        ]
-        self.memory_norms = [
-            torch.zeros(self.memory_head_dim, device=device, dtype=dtype)
-            for _ in range(self.num_memory_banks)
-        ]
+        if self.memories is None or not keep_frozen:
+            # Full reset
+            self.memories = [
+                torch.zeros(self.memory_head_dim, self.memory_head_dim, device=device, dtype=dtype)
+                for _ in range(self.num_memory_banks)
+            ]
+            self.memory_norms = [
+                torch.zeros(self.memory_head_dim, device=device, dtype=dtype)
+                for _ in range(self.num_memory_banks)
+            ]
+            self.frozen_banks = [False] * self.num_memory_banks
+        else:
+            # Reset only unfrozen banks
+            for i in range(self.num_memory_banks):
+                if not self.frozen_banks[i]:
+                    self.memories[i] = torch.zeros(
+                        self.memory_head_dim, self.memory_head_dim, device=device, dtype=dtype
+                    )
+                    self.memory_norms[i] = torch.zeros(
+                        self.memory_head_dim, device=device, dtype=dtype
+                    )
+
         self.current_bank = torch.tensor(0, device=device)
         self.segment_counter = torch.tensor(0, device=device)
 
@@ -107,8 +164,25 @@ class InfiniAttention(nn.Module):
             self.reset_memory(k.device)
 
         assert self.memories is not None and self.memory_norms is not None
+        assert self.frozen_banks is not None
 
         bank_idx = int(self.current_bank.item())
+
+        # Skip frozen banks - find next unfrozen bank
+        if self.frozen_banks[bank_idx]:
+            # Find next unfrozen bank
+            found = False
+            for offset in range(1, self.num_memory_banks + 1):
+                candidate = (bank_idx + offset) % self.num_memory_banks
+                if not self.frozen_banks[candidate]:
+                    bank_idx = candidate
+                    self.current_bank = torch.tensor(bank_idx, device=k.device)
+                    found = True
+                    break
+            if not found:
+                # All banks frozen, skip update
+                return
+
         memory = self.memories[bank_idx]
         memory_norm = self.memory_norms[bank_idx]
         batch_size, seq_len, _ = k.shape
@@ -129,7 +203,139 @@ class InfiniAttention(nn.Module):
             self.segment_counter = self.segment_counter + 1
             if self.segment_counter >= self.segments_per_bank:
                 self.segment_counter = torch.tensor(0, device=k.device)
-                self.current_bank = (self.current_bank + 1) % self.num_memory_banks
+                # Find next unfrozen bank
+                next_bank = (bank_idx + 1) % self.num_memory_banks
+                for _ in range(self.num_memory_banks):
+                    if not self.frozen_banks[next_bank]:
+                        break
+                    next_bank = (next_bank + 1) % self.num_memory_banks
+                self.current_bank = torch.tensor(next_bank, device=k.device)
+
+    # =========================================================================
+    # Freeze / Unfreeze Methods
+    # =========================================================================
+
+    def freeze_memory(self, bank_indices: Optional[list[int]] = None) -> None:
+        """
+        Freeze memory banks (make them read-only).
+
+        Args:
+            bank_indices: List of bank indices to freeze. If None, freeze all.
+        """
+        if self.frozen_banks is None:
+            self.frozen_banks = [False] * self.num_memory_banks
+
+        if bank_indices is None:
+            bank_indices = list(range(self.num_memory_banks))
+
+        for idx in bank_indices:
+            if 0 <= idx < self.num_memory_banks:
+                self.frozen_banks[idx] = True
+
+    def unfreeze_memory(self, bank_indices: Optional[list[int]] = None) -> None:
+        """
+        Unfreeze memory banks (make them writable).
+
+        Args:
+            bank_indices: List of bank indices to unfreeze. If None, unfreeze all.
+        """
+        if self.frozen_banks is None:
+            self.frozen_banks = [False] * self.num_memory_banks
+            return
+
+        if bank_indices is None:
+            bank_indices = list(range(self.num_memory_banks))
+
+        for idx in bank_indices:
+            if 0 <= idx < self.num_memory_banks:
+                self.frozen_banks[idx] = False
+
+    def is_frozen(self, bank_idx: int) -> bool:
+        """Check if a bank is frozen."""
+        if self.frozen_banks is None:
+            return False
+        return self.frozen_banks[bank_idx]
+
+    # =========================================================================
+    # Export / Import Methods for Memory Sharing
+    # =========================================================================
+
+    def export_memory(
+        self,
+        bank_indices: Optional[list[int]] = None,
+    ) -> dict:
+        """
+        Export memory banks for sharing with other models.
+
+        Args:
+            bank_indices: List of bank indices to export. If None, export all.
+
+        Returns:
+            Dictionary containing memory data that can be saved and shared.
+        """
+        if self.memories is None or self.memory_norms is None:
+            raise ValueError("No memory to export. Call forward() first.")
+
+        if bank_indices is None:
+            bank_indices = list(range(self.num_memory_banks))
+
+        return {
+            "memories": {i: self.memories[i].cpu().clone() for i in bank_indices},
+            "memory_norms": {i: self.memory_norms[i].cpu().clone() for i in bank_indices},
+            "hidden_size": self.hidden_size,
+            "memory_head_dim": self.memory_head_dim,
+        }
+
+    def import_memory(
+        self,
+        memory_data: dict,
+        bank_indices: Optional[list[int]] = None,
+        freeze: bool = True,
+    ) -> None:
+        """
+        Import memory from another model or saved state.
+
+        Args:
+            memory_data: Dictionary from export_memory()
+            bank_indices: Target bank indices to import into. If None, use source indices.
+            freeze: Whether to freeze imported banks (recommended for knowledge)
+        """
+        # Validate compatibility
+        if memory_data["hidden_size"] != self.hidden_size:
+            raise ValueError(
+                f"Hidden size mismatch: expected {self.hidden_size}, "
+                f"got {memory_data['hidden_size']}"
+            )
+
+        device = self.w_q.weight.device
+        dtype = self.w_q.weight.dtype
+
+        # Initialize if needed
+        if self.memories is None:
+            self.reset_memory(device)
+
+        assert self.memories is not None and self.memory_norms is not None
+        assert self.frozen_banks is not None
+
+        source_indices = list(memory_data["memories"].keys())
+        if bank_indices is None:
+            bank_indices = source_indices
+
+        if len(bank_indices) != len(source_indices):
+            raise ValueError(
+                f"Bank indices count mismatch: {len(bank_indices)} targets "
+                f"for {len(source_indices)} sources"
+            )
+
+        for src_idx, tgt_idx in zip(source_indices, bank_indices):
+            if tgt_idx >= self.num_memory_banks:
+                raise ValueError(f"Target bank index {tgt_idx} out of range")
+
+            self.memories[tgt_idx] = memory_data["memories"][src_idx].to(device, dtype)
+            self.memory_norms[tgt_idx] = memory_data["memory_norms"][src_idx].to(device, dtype)
+
+            if freeze:
+                self.frozen_banks[tgt_idx] = True
 
     def forward(
         self,
@@ -157,6 +363,7 @@ class InfiniAttention(nn.Module):
         return {
             "memories": [m.cpu().clone() for m in self.memories] if self.memories else None,
             "memory_norms": [n.cpu().clone() for n in self.memory_norms] if self.memory_norms else None,
+            "frozen_banks": self.frozen_banks.copy() if self.frozen_banks else None,
             "current_bank": self.current_bank.cpu().clone(),
             "segment_counter": self.segment_counter.cpu().clone(),
         }
@@ -168,6 +375,10 @@ class InfiniAttention(nn.Module):
             self.memories = [m.to(device) for m in state["memories"]]
         if state["memory_norms"]:
             self.memory_norms = [n.to(device) for n in state["memory_norms"]]
+        if state.get("frozen_banks"):
+            self.frozen_banks = state["frozen_banks"].copy()
+        else:
+            self.frozen_banks = [False] * self.num_memory_banks
         self.current_bank = state["current_bank"].to(device)
         self.segment_counter = state["segment_counter"].to(device)
 
@@ -180,6 +391,8 @@ class InfiniLayer(BaseLayer):
     - Compressive memory (single-head)
     - Linear Attention for local context
     - No position encoding (NoPE)
+    - Freeze/unfreeze memory banks
+    - Export/import memory for sharing
     """
 
     def __init__(
@@ -215,11 +428,33 @@ class InfiniLayer(BaseLayer):
         mlp_output = self.mlp(hidden_states)
         return residual + attn_output + mlp_output
 
-    def reset_memory(self, device: Optional[torch.device] = None) -> None:
-        self.attention.reset_memory(device)
+    def reset_memory(self, device: Optional[torch.device] = None, keep_frozen: bool = True) -> None:
+        self.attention.reset_memory(device, keep_frozen)
 
     def get_memory_state(self) -> dict:
         return self.attention.get_memory_state()
 
     def set_memory_state(self, state: dict, device: Optional[torch.device] = None) -> None:
         self.attention.set_memory_state(state, device)
+
+    # Freeze / Unfreeze
+    def freeze_memory(self, bank_indices: Optional[list[int]] = None) -> None:
+        self.attention.freeze_memory(bank_indices)
+
+    def unfreeze_memory(self, bank_indices: Optional[list[int]] = None) -> None:
+        self.attention.unfreeze_memory(bank_indices)
+
+    def is_frozen(self, bank_idx: int) -> bool:
+        return self.attention.is_frozen(bank_idx)
+
+    # Export / Import
+    def export_memory(self, bank_indices: Optional[list[int]] = None) -> dict:
+        return self.attention.export_memory(bank_indices)
+
+    def import_memory(
+        self,
+        memory_data: dict,
+        bank_indices: Optional[list[int]] = None,
+        freeze: bool = True,
+    ) -> None:
+        self.attention.import_memory(memory_data, bank_indices, freeze)

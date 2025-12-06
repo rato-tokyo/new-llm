@@ -78,11 +78,23 @@ class TransformerLM(nn.Module):
         # Initialize weights
         self.apply(init_weights)
 
-    def reset_memory(self) -> None:
-        """全メモリ系レイヤーのメモリをリセット"""
+    def reset_memory(self, keep_frozen: bool = True) -> None:
+        """
+        全メモリ系レイヤーのメモリをリセット
+
+        Args:
+            keep_frozen: If True, only reset unfrozen banks
+        """
         device = self.embed_in.weight.device
         for layer in self.layers:
-            layer.reset_memory(device)
+            if hasattr(layer, 'reset_memory'):
+                # Check if layer supports keep_frozen parameter
+                import inspect
+                sig = inspect.signature(layer.reset_memory)
+                if 'keep_frozen' in sig.parameters:
+                    layer.reset_memory(device, keep_frozen)
+                else:
+                    layer.reset_memory(device)
 
     def get_memory_state(self) -> dict:
         """
@@ -108,6 +120,91 @@ class TransformerLM(nn.Module):
         device = self.embed_in.weight.device
         for i, state in states.items():
             self.layers[i].set_memory_state(state, device)
+
+    # =========================================================================
+    # Freeze / Unfreeze Methods
+    # =========================================================================
+
+    def freeze_memory(
+        self,
+        bank_indices: Optional[list[int]] = None,
+        layer_indices: Optional[list[int]] = None,
+    ) -> None:
+        """
+        Freeze memory banks in specified layers.
+
+        Args:
+            bank_indices: Bank indices to freeze. If None, freeze all banks.
+            layer_indices: Layer indices. If None, apply to all memory layers.
+        """
+        for i, layer in enumerate(self.layers):
+            if layer_indices is not None and i not in layer_indices:
+                continue
+            if hasattr(layer, 'freeze_memory'):
+                layer.freeze_memory(bank_indices)
+
+    def unfreeze_memory(
+        self,
+        bank_indices: Optional[list[int]] = None,
+        layer_indices: Optional[list[int]] = None,
+    ) -> None:
+        """
+        Unfreeze memory banks in specified layers.
+
+        Args:
+            bank_indices: Bank indices to unfreeze. If None, unfreeze all banks.
+            layer_indices: Layer indices. If None, apply to all memory layers.
+        """
+        for i, layer in enumerate(self.layers):
+            if layer_indices is not None and i not in layer_indices:
+                continue
+            if hasattr(layer, 'unfreeze_memory'):
+                layer.unfreeze_memory(bank_indices)
+
+    # =========================================================================
+    # Export / Import Methods for Memory Sharing
+    # =========================================================================
+
+    def export_memory(
+        self,
+        bank_indices: Optional[list[int]] = None,
+        layer_indices: Optional[list[int]] = None,
+    ) -> dict:
+        """
+        Export memory from specified layers for sharing.
+
+        Args:
+            bank_indices: Bank indices to export. If None, export all.
+            layer_indices: Layer indices. If None, export from all memory layers.
+
+        Returns:
+            dict: {layer_idx: memory_data} that can be saved with torch.save()
+        """
+        exported = {}
+        for i, layer in enumerate(self.layers):
+            if layer_indices is not None and i not in layer_indices:
+                continue
+            if hasattr(layer, 'export_memory'):
+                exported[i] = layer.export_memory(bank_indices)
+        return exported
+
+    def import_memory(
+        self,
+        memory_data: dict,
+        bank_indices: Optional[list[int]] = None,
+        freeze: bool = True,
+    ) -> None:
+        """
+        Import memory from another model or saved state.
+
+        Args:
+            memory_data: Dictionary from export_memory()
+            bank_indices: Target bank indices. If None, use source indices.
+            freeze: Whether to freeze imported banks
+        """
+        for layer_idx, layer_memory in memory_data.items():
+            if layer_idx < len(self.layers) and hasattr(self.layers[layer_idx], 'import_memory'):
+                self.layers[layer_idx].import_memory(layer_memory, bank_indices, freeze)
 
     def forward(
         self,
