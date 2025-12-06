@@ -29,8 +29,6 @@ def create_model(
     # Infini-specific settings
     num_memory_banks: int = 1,
     segments_per_bank: int = 4,
-    use_alibi: bool = False,
-    alibi_scale: float = 1.0,
 ):
     """
     Create a model by type.
@@ -42,8 +40,6 @@ def create_model(
         num_memories: Number of memories (multi_memory, hierarchical only)
         num_memory_banks: Number of memory banks (infini only)
         segments_per_bank: Segments per bank (infini only)
-        use_alibi: Enable ALiBi (infini only)
-        alibi_scale: ALiBi slope scale (infini only)
 
     Returns:
         Model instance
@@ -52,8 +48,8 @@ def create_model(
         # Standard Pythia
         model = create_model("pythia")
 
-        # Infini with ALiBi
-        model = create_model("infini", use_alibi=True)
+        # Infini-Pythia
+        model = create_model("infini")
 
         # Multi-Memory with 8 memories
         model = create_model("multi_memory", num_memories=8)
@@ -86,8 +82,6 @@ def create_model(
             use_delta_rule=use_delta_rule,
             num_memory_banks=num_memory_banks,
             segments_per_bank=segments_per_bank,
-            use_alibi=use_alibi,
-            alibi_scale=alibi_scale,
         )
 
     elif model_type == "multi_memory":

@@ -14,12 +14,12 @@ Infini-Attention Adapter for Pretrained LLMs
    - 既存性能を維持しながらメモリ機能を追加
 """
 
-from typing import Optional, Union
+from typing import Optional
 
 import torch
 import torch.nn as nn
 
-from src.models.infini_attention import InfiniAttention, InfiniAttentionALiBi
+from src.models.infini_attention import InfiniAttention
 
 
 class InfiniAdapterLayer(nn.Module):
@@ -36,17 +36,11 @@ class InfiniAdapterLayer(nn.Module):
         num_heads: int,
         intermediate_size: int,
         use_delta_rule: bool = True,
-        use_alibi: bool = False,
-        alibi_scale: float = 1.0,
         layer_norm_eps: float = 1e-5,
     ):
         super().__init__()
 
         self.hidden_size = hidden_size
-        self.use_alibi = use_alibi
-
-        # Infini-Attention (declare type for mypy)
-        self.attention: Union[InfiniAttention, InfiniAttentionALiBi]
 
         # Layer norms (Pythia style: pre-norm)
         self.input_layernorm = nn.LayerNorm(hidden_size, eps=layer_norm_eps)
@@ -57,19 +51,11 @@ class InfiniAdapterLayer(nn.Module):
         self.post_mlp_dropout = nn.Dropout(0.0)
 
         # Infini-Attention
-        if use_alibi:
-            self.attention = InfiniAttentionALiBi(
-                hidden_size=hidden_size,
-                num_heads=num_heads,
-                use_delta_rule=use_delta_rule,
-                alibi_scale=alibi_scale,
-            )
-        else:
-            self.attention = InfiniAttention(
-                hidden_size=hidden_size,
-                num_heads=num_heads,
-                use_delta_rule=use_delta_rule,
-            )
+        self.attention = InfiniAttention(
+            hidden_size=hidden_size,
+            num_heads=num_heads,
+            use_delta_rule=use_delta_rule,
+        )
 
         # MLP (Pythia style)
         self.mlp = nn.Sequential(
@@ -146,16 +132,12 @@ class PythiaWithInfiniLayer(nn.Module):
         self,
         base_model,
         use_delta_rule: bool = True,
-        use_alibi: bool = False,
-        alibi_scale: float = 1.0,
         freeze_other_layers: bool = True,
     ):
         """
         Args:
             base_model: GPTNeoXForCausalLM instance
             use_delta_rule: Delta Ruleを使用するか
-            use_alibi: ALiBiを使用するか
-            alibi_scale: ALiBiスロープスケール
             freeze_other_layers: Layer 0以外をfreezeするか
         """
         super().__init__()
@@ -169,8 +151,6 @@ class PythiaWithInfiniLayer(nn.Module):
             num_heads=self.config.num_attention_heads,
             intermediate_size=self.config.intermediate_size,
             use_delta_rule=use_delta_rule,
-            use_alibi=use_alibi,
-            alibi_scale=alibi_scale,
             layer_norm_eps=self.config.layer_norm_eps,
         )
 
@@ -314,8 +294,6 @@ class PythiaWithInfiniLayer(nn.Module):
 def create_pythia_with_infini(
     model_name: str = "EleutherAI/pythia-70m",
     use_delta_rule: bool = True,
-    use_alibi: bool = False,
-    alibi_scale: float = 1.0,
     freeze_other_layers: bool = True,
 ) -> PythiaWithInfiniLayer:
     """
@@ -324,8 +302,6 @@ def create_pythia_with_infini(
     Args:
         model_name: HuggingFaceモデル名
         use_delta_rule: Delta Ruleを使用するか
-        use_alibi: ALiBiを使用するか
-        alibi_scale: ALiBiスロープスケール
         freeze_other_layers: Layer 0以外をfreezeするか
 
     Returns:
@@ -338,8 +314,6 @@ def create_pythia_with_infini(
     return PythiaWithInfiniLayer(
         base_model=base_model,
         use_delta_rule=use_delta_rule,
-        use_alibi=use_alibi,
-        alibi_scale=alibi_scale,
         freeze_other_layers=freeze_other_layers,
     )
 
@@ -364,8 +338,6 @@ class InfiniParallelAdapter(nn.Module):
         hidden_size: int,
         num_heads: int,
         use_delta_rule: bool = True,
-        use_alibi: bool = False,
-        alibi_scale: float = 1.0,
         initial_alpha: float = 0.0,
     ):
         """
@@ -373,33 +345,21 @@ class InfiniParallelAdapter(nn.Module):
             hidden_size: 隠れ層次元
             num_heads: アテンションヘッド数
             use_delta_rule: Delta Ruleを使用するか
-            use_alibi: ALiBiを使用するか
-            alibi_scale: ALiBiスロープスケール
             initial_alpha: 初期のalpha値（0だと最初はInfini出力が無効）
         """
         super().__init__()
 
         self.hidden_size = hidden_size
-        self.use_alibi = use_alibi
 
         # Learnable alpha parameter
         self.alpha = nn.Parameter(torch.tensor(initial_alpha))
 
         # Infini-Attention (memory only, no MLP)
-        self.attention: Union[InfiniAttention, InfiniAttentionALiBi]
-        if use_alibi:
-            self.attention = InfiniAttentionALiBi(
-                hidden_size=hidden_size,
-                num_heads=num_heads,
-                use_delta_rule=use_delta_rule,
-                alibi_scale=alibi_scale,
-            )
-        else:
-            self.attention = InfiniAttention(
-                hidden_size=hidden_size,
-                num_heads=num_heads,
-                use_delta_rule=use_delta_rule,
-            )
+        self.attention = InfiniAttention(
+            hidden_size=hidden_size,
+            num_heads=num_heads,
+            use_delta_rule=use_delta_rule,
+        )
 
         # Optional: LayerNorm for stability
         self.layer_norm = nn.LayerNorm(hidden_size)
@@ -455,8 +415,6 @@ class ParallelInfiniLayer(nn.Module):
         hidden_size: int,
         num_heads: int,
         use_delta_rule: bool = True,
-        use_alibi: bool = False,
-        alibi_scale: float = 1.0,
         initial_alpha: float = 0.0,
     ):
         super().__init__()
@@ -466,8 +424,6 @@ class ParallelInfiniLayer(nn.Module):
             hidden_size=hidden_size,
             num_heads=num_heads,
             use_delta_rule=use_delta_rule,
-            use_alibi=use_alibi,
-            alibi_scale=alibi_scale,
             initial_alpha=initial_alpha,
         )
 
@@ -541,8 +497,6 @@ class PythiaWithParallelInfini(nn.Module):
         self,
         base_model,
         use_delta_rule: bool = True,
-        use_alibi: bool = False,
-        alibi_scale: float = 1.0,
         initial_alpha: float = 0.0,
         freeze_base_model: bool = True,
     ):
@@ -550,8 +504,6 @@ class PythiaWithParallelInfini(nn.Module):
         Args:
             base_model: GPTNeoXForCausalLM instance
             use_delta_rule: Delta Ruleを使用するか
-            use_alibi: ALiBiを使用するか
-            alibi_scale: ALiBiスロープスケール
             initial_alpha: 初期のalpha値
             freeze_base_model: ベースモデルをfreezeするか
         """
@@ -569,8 +521,6 @@ class PythiaWithParallelInfini(nn.Module):
             hidden_size=self.config.hidden_size,
             num_heads=self.config.num_attention_heads,
             use_delta_rule=use_delta_rule,
-            use_alibi=use_alibi,
-            alibi_scale=alibi_scale,
             initial_alpha=initial_alpha,
         )
 
@@ -636,8 +586,6 @@ class PythiaWithParallelInfini(nn.Module):
 def create_pythia_with_parallel_infini(
     model_name: str = "EleutherAI/pythia-70m",
     use_delta_rule: bool = True,
-    use_alibi: bool = False,
-    alibi_scale: float = 1.0,
     initial_alpha: float = 0.0,
     freeze_base_model: bool = True,
 ) -> PythiaWithParallelInfini:
@@ -647,8 +595,6 @@ def create_pythia_with_parallel_infini(
     Args:
         model_name: HuggingFaceモデル名
         use_delta_rule: Delta Ruleを使用するか
-        use_alibi: ALiBiを使用するか
-        alibi_scale: ALiBiスロープスケール
         initial_alpha: 初期のalpha値（0だと最初はInfini出力が無効）
         freeze_base_model: ベースモデルをfreezeするか
 
@@ -662,8 +608,6 @@ def create_pythia_with_parallel_infini(
     return PythiaWithParallelInfini(
         base_model=base_model,
         use_delta_rule=use_delta_rule,
-        use_alibi=use_alibi,
-        alibi_scale=alibi_scale,
         initial_alpha=initial_alpha,
         freeze_base_model=freeze_base_model,
     )

@@ -44,27 +44,15 @@ model = InfiniPythiaModel(
 )
 ```
 
-### ALiBi (Attention with Linear Biases)
+### シングルヘッドメモリ（重要）
 
-線形化近似でALiBiを圧縮メモリに組み込む:
-
-```
-メモリ更新 (ALiBi重み付き):
-  M_φ = Σ_i w_i * φ(K_i) * V_i^T
-  z_φ = Σ_i w_i * φ(K_i)
-
-  w_i = exp(-slope * segment_distance)  # 遠いほど小さい重み
-
-メモリ取得:
-  Output = φ(Q) @ M_φ / (φ(Q) @ z_φ)
-```
+Linear Attentionはhead_dimが小さいと機能しない。
+シングルヘッド（memory_head_dim=hidden_size=512）で最大の表現力を確保。
 
 ```python
-# ALiBi付きモデル
-model = InfiniPythiaModel(
-    use_alibi=True,      # ALiBi有効化
-    alibi_scale=1.0,     # スロープスケール（大きいほど減衰が強い）
-)
+# メモリ行列: [memory_head_dim, memory_head_dim] = [512, 512]
+# Q, K, V: Linear(hidden_size → memory_head_dim)
+# Output: Linear(memory_head_dim → hidden_size)
 ```
 
 ---
@@ -83,14 +71,13 @@ model = create_model("multi_memory") # Multi-Memory
 model = create_model("hierarchical") # Hierarchical
 
 # オプション付き
-model = create_model("infini", use_alibi=True, alibi_scale=1.0)
 model = create_model("multi_memory", num_memories=8)
 model = create_model("hierarchical", num_memories=4, use_delta_rule=False)
 
 # カスタムconfig
 from config.pythia import PythiaConfig
 config = PythiaConfig()
-model = create_model("infini", config, use_alibi=True)
+model = create_model("infini", config)
 ```
 
 ### 利用可能なオプション
@@ -101,8 +88,6 @@ model = create_model("infini", config, use_alibi=True)
 | `num_memories` | multi_memory, hierarchical | `4` | メモリ数 |
 | `num_memory_banks` | infini | `1` | メモリバンク数 |
 | `segments_per_bank` | infini | `4` | バンクあたりセグメント数 |
-| `use_alibi` | infini | `False` | ALiBi有効化 |
-| `alibi_scale` | infini | `1.0` | ALiBiスロープスケール |
 
 ---
 
@@ -297,6 +282,54 @@ pythia_model.load_state_dict(results["pythia"]["model_state_dict"])
 result = evaluate_long_documents(pythia_model, ...)
 ```
 
+### 5. Linear Attentionのhead_dim次元数問題（重要）
+
+**head_dimが小さいとLinear Attentionが機能しない。**
+
+#### 問題
+
+```python
+# ❌ 問題: head_dim=64（hidden_size=512 / num_heads=8）
+head_dim = hidden_size // num_heads  # = 64
+
+# メモリ行列: [num_heads, head_dim, head_dim] = [8, 64, 64]
+# → 64次元空間では異なるキーベクトルが直交しやすい
+# → σ(Q) @ σ(K)^T ≈ 0 → メモリから何も取り出せない
+```
+
+#### 原因: キーベクトルの直交性
+
+Linear Attentionでは `σ(K)` を使ってメモリに書き込み、`σ(Q)` で取り出す：
+
+```
+メモリ更新: M = M + σ(K)^T @ V
+メモリ取得: output = σ(Q) @ M / (σ(Q) @ z)
+```
+
+**64次元空間だと**：
+- 異なるトークンのKベクトルが高確率で直交
+- `σ(Q) @ σ(K)^T` がほぼゼロ
+- メモリから有用な情報が取り出せない
+- モデルがメモリを無視する方向に学習 → alphaが小さいまま
+
+#### 解決策: シングルヘッド（memory_head_dim=hidden_size）
+
+```python
+# ✅ 修正: memory_head_dim=hidden_size（シングルヘッド）
+memory_head_dim = hidden_size  # = 512
+
+# メモリ行列: [memory_head_dim, memory_head_dim] = [512, 512]
+# → 512次元空間で十分な表現力を確保
+# → キーベクトル間の類似度が計算可能
+```
+
+#### 教訓
+
+1. **Linear Attentionにはhead_dim >= 256が必要**
+2. **可能ならシングルヘッド（head_dim=hidden_size）を使用**
+3. **alphaが小さいまま → head_dimを疑う**
+4. **マルチヘッドは表現力を犠牲にする**
+
 ### 4. PPL評価方法によるPPL異常値（重要）
 
 **セグメント分割評価で異常に高いPPL（10,000+）が出る原因と対策。**
@@ -454,9 +487,6 @@ python3 scripts/train_infini_distill_finetune.py --layer0-lr-scale 2.0 --other-l
 
 # 蒸留のみ
 python3 scripts/train_infini_distill_finetune.py --distill-epochs 10 --finetune-epochs 0
-
-# ALiBi付き
-python3 scripts/train_infini_distill_finetune.py --alibi
 ```
 
 ### パラメータ
@@ -572,6 +602,7 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-06 | **シングルヘッドメモリ導入**: memory_head_dim=512でLinear Attentionの表現力を最大化、ALiBi版削除 |
 | 2025-12-06 | **部分的微調整は機能しない**: Adapter のみ訓練は NG、Full Fine-tune 必須 |
 | 2025-12-06 | **PPL評価方法の教訓追加**: Sliding window方式が正しい、セグメント分割は高PPLになる |
 | 2025-12-06 | **Parallel Adapter実装**: Pretrained LLMにInfini-Attentionを並列挿入する方式 |

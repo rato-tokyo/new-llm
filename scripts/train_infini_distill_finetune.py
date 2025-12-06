@@ -10,6 +10,8 @@ Stage 2: Full Fine-tuning
   - 全レイヤーを訓練（Layer 0優先的に高学習率）
   - LM lossで最適化
 
+シングルヘッドメモリ（memory_head_dim=hidden_size）で最大の表現力を確保。
+
 Usage:
     # 基本的な使い方
     python3 scripts/train_infini_distill_finetune.py --distill-epochs 10 --finetune-epochs 20
@@ -19,9 +21,6 @@ Usage:
 
     # 蒸留のみ
     python3 scripts/train_infini_distill_finetune.py --distill-epochs 10 --finetune-epochs 0
-
-    # ALiBi付き
-    python3 scripts/train_infini_distill_finetune.py --alibi
 """
 
 import argparse
@@ -56,8 +55,6 @@ class PythiaWithDistillableInfini(nn.Module):
         self,
         base_model,
         use_delta_rule: bool = True,
-        use_alibi: bool = False,
-        alibi_scale: float = 1.0,
     ):
         super().__init__()
 
@@ -67,14 +64,12 @@ class PythiaWithDistillableInfini(nn.Module):
         # オリジナルLayer 0を保持（蒸留のターゲット）
         self.original_layer0 = base_model.gpt_neox.layers[0]
 
-        # Infini Layer作成
+        # Infini Layer作成（シングルヘッドメモリ: memory_head_dim=hidden_size）
         self.infini_layer = InfiniAdapterLayer(
             hidden_size=self.config.hidden_size,
             num_heads=self.config.num_attention_heads,
             intermediate_size=self.config.intermediate_size,
             use_delta_rule=use_delta_rule,
-            use_alibi=use_alibi,
-            alibi_scale=alibi_scale,
             layer_norm_eps=self.config.layer_norm_eps,
         )
 

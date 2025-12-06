@@ -59,11 +59,7 @@ class ExperimentConfig:
     num_long_documents: int = 50
     tokens_per_document: int = 4096
 
-    # ALiBi (Infini用)
-    use_alibi: bool = False
-    alibi_scale: float = 1.0
-
-    # Multi-Memory Bank (Infini用、廃止予定)
+    # Multi-Memory Bank (Infini用)
     num_memory_banks: int = 1
     segments_per_bank: int = 4
 
@@ -81,8 +77,6 @@ def create_model(
         num_memories=exp_config.num_memories,
         num_memory_banks=exp_config.num_memory_banks,
         segments_per_bank=exp_config.segments_per_bank,
-        use_alibi=exp_config.use_alibi,
-        alibi_scale=exp_config.alibi_scale,
     )
 
 

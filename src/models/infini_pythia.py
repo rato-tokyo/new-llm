@@ -15,11 +15,6 @@ Infini-Pythia Model Implementation
 
 Infini-Attentionのメモリは訓練中に蓄積され、
 長距離依存関係の学習に貢献する。
-
-ALiBi版:
-  use_alibi=Trueで、Infini-AttentionにALiBi位置バイアスを適用。
-  メモリ更新時に距離に応じた減衰重みを使用し、
-  位置情報を圧縮メモリに組み込む。
 """
 
 from typing import Optional
@@ -51,8 +46,6 @@ class InfiniPythiaModel(nn.Module):
         use_delta_rule: bool = True,
         num_memory_banks: int = 1,
         segments_per_bank: int = 4,
-        use_alibi: bool = False,
-        alibi_scale: float = 1.0,
     ):
         """
         Args:
@@ -66,8 +59,6 @@ class InfiniPythiaModel(nn.Module):
             use_delta_rule: Infini-AttentionでDelta Ruleを使用するか
             num_memory_banks: メモリバンク数（1=シングル、2以上=マルチ）
             segments_per_bank: 各バンクに蓄積するセグメント数
-            use_alibi: ALiBi位置バイアスを使用するか
-            alibi_scale: ALiBiスロープのスケール係数
         """
         super().__init__()
 
@@ -76,7 +67,6 @@ class InfiniPythiaModel(nn.Module):
         self.num_layers = num_layers
         self.num_heads = num_heads
         self.num_memory_banks = num_memory_banks
-        self.use_alibi = use_alibi
 
         # Embedding
         self.embed_in = nn.Embedding(vocab_size, hidden_size)
@@ -89,8 +79,6 @@ class InfiniPythiaModel(nn.Module):
             num_memory_banks=num_memory_banks,
             segments_per_bank=segments_per_bank,
             use_delta_rule=use_delta_rule,
-            use_alibi=use_alibi,
-            alibi_scale=alibi_scale,
         )
 
         # Layers 1-(num_layers-1): Standard Pythia (RoPE)
@@ -191,8 +179,6 @@ class InfiniPythiaModel(nn.Module):
 
     def get_bank_weights(self) -> Optional[torch.Tensor]:
         """Multi-Memory版の場合、バンク重みを取得"""
-        if self.use_alibi:
-            return None
         return self.infini_layer.attention.get_bank_weights()
 
     def get_memory_state(self) -> dict:

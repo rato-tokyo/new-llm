@@ -16,9 +16,6 @@ Usage:
 
     # 設定カスタマイズ
     python3 scripts/experiment.py --models infini --samples 10000 --epochs 50 --lr 5e-5
-
-    # ALiBi付きInfini
-    python3 scripts/experiment.py --models infini --alibi
 """
 
 import argparse
@@ -67,9 +64,6 @@ Examples:
   # Compare all models
   python3 scripts/experiment.py --models pythia infini multi_memory hierarchical
 
-  # Just Infini with ALiBi
-  python3 scripts/experiment.py --models infini --alibi
-
   # Multi-Memory vs Hierarchical
   python3 scripts/experiment.py --models multi_memory hierarchical --num-memories 8
         """,
@@ -98,16 +92,6 @@ Examples:
     parser.add_argument(
         "--num-memories", type=int, default=4,
         help="Number of memories (for multi_memory and hierarchical)"
-    )
-
-    # ALiBi settings (for infini)
-    parser.add_argument(
-        "--alibi", action="store_true",
-        help="Enable ALiBi position encoding (infini only)"
-    )
-    parser.add_argument(
-        "--alibi-scale", type=float, default=1.0,
-        help="ALiBi slope scale factor"
     )
 
     # Long context settings
@@ -146,8 +130,6 @@ Examples:
         lr=args.lr,
         use_delta_rule=not args.no_delta_rule,
         num_memories=args.num_memories,
-        use_alibi=args.alibi,
-        alibi_scale=args.alibi_scale,
         long_context_train=args.long_context_train,
         long_context_eval=args.long_context_eval,
         num_long_documents=args.num_long_docs,
