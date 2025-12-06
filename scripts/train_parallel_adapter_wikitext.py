@@ -140,9 +140,13 @@ def train_sliding_window(
     stride: int = 512,
     lr: float = 1e-4,
     patience: int = EARLY_STOPPING_PATIENCE,
+    train_all: bool = False,
 ):
     """Sliding window方式で訓練"""
-    trainable_params = list(model.infini_adapter.parameters())
+    if train_all:
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+    else:
+        trainable_params = list(model.infini_adapter.parameters())
     optimizer = torch.optim.AdamW(trainable_params, lr=lr)
 
     total_params = sum(p.numel() for p in model.parameters())
@@ -201,9 +205,14 @@ def train_sliding_window(
         improved = val_ppl < best_val_ppl
         if improved:
             best_val_ppl = val_ppl
-            best_state = {
-                k: v.cpu().clone() for k, v in model.infini_adapter.state_dict().items()
-            }
+            if train_all:
+                best_state = {
+                    k: v.cpu().clone() for k, v in model.state_dict().items()
+                }
+            else:
+                best_state = {
+                    k: v.cpu().clone() for k, v in model.infini_adapter.state_dict().items()
+                }
             patience_counter = 0
             marker = "*"
         else:
@@ -219,7 +228,7 @@ def train_sliding_window(
             print_flush(f"  Early stopping at epoch {epoch}")
             break
 
-    return best_val_ppl, best_state
+    return best_val_ppl, best_state, train_all
 
 
 def train_segment(
@@ -231,9 +240,13 @@ def train_segment(
     segment_length: int = 256,
     lr: float = 1e-4,
     patience: int = EARLY_STOPPING_PATIENCE,
+    train_all: bool = False,
 ):
     """Segment方式で訓練"""
-    trainable_params = list(model.infini_adapter.parameters())
+    if train_all:
+        trainable_params = [p for p in model.parameters() if p.requires_grad]
+    else:
+        trainable_params = list(model.infini_adapter.parameters())
     optimizer = torch.optim.AdamW(trainable_params, lr=lr)
 
     total_params = sum(p.numel() for p in model.parameters())
@@ -289,9 +302,14 @@ def train_segment(
         improved = val_ppl < best_val_ppl
         if improved:
             best_val_ppl = val_ppl
-            best_state = {
-                k: v.cpu().clone() for k, v in model.infini_adapter.state_dict().items()
-            }
+            if train_all:
+                best_state = {
+                    k: v.cpu().clone() for k, v in model.state_dict().items()
+                }
+            else:
+                best_state = {
+                    k: v.cpu().clone() for k, v in model.infini_adapter.state_dict().items()
+                }
             patience_counter = 0
             marker = "*"
         else:
@@ -307,7 +325,7 @@ def train_segment(
             print_flush(f"  Early stopping at epoch {epoch}")
             break
 
-    return best_val_ppl, best_state
+    return best_val_ppl, best_state, train_all
 
 
 def main():
@@ -323,6 +341,8 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--patience", type=int, default=EARLY_STOPPING_PATIENCE, help="Early stopping patience")
     parser.add_argument("--initial-alpha", type=float, default=0.0, help="Initial alpha")
+    parser.add_argument("--unfreeze-base", action="store_true",
+                        help="Unfreeze base model (train all layers)")
 
     args = parser.parse_args()
 
@@ -337,6 +357,7 @@ def main():
     print_flush(f"Method: {args.method}")
     print_flush(f"Epochs: {args.epochs}")
     print_flush(f"Learning rate: {args.lr}")
+    print_flush(f"Unfreeze base model: {args.unfreeze_base}")
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model)
@@ -365,7 +386,7 @@ def main():
             use_delta_rule=True,
             use_alibi=False,
             initial_alpha=args.initial_alpha,
-            freeze_base_model=True,
+            freeze_base_model=not args.unfreeze_base,
         )
         model_sliding = model_sliding.to(device)
 
@@ -378,17 +399,21 @@ def main():
 
         # Train
         print_flush("\nTraining...")
-        best_ppl, best_state = train_sliding_window(
+        best_ppl, best_state, trained_all = train_sliding_window(
             model_sliding, train_tokens, val_tokens, device,
             num_epochs=args.epochs,
             context_length=args.context_length,
             stride=args.stride,
             lr=args.lr,
             patience=args.patience,
+            train_all=args.unfreeze_base,
         )
 
         # Load best state
-        model_sliding.infini_adapter.load_state_dict(best_state)
+        if trained_all:
+            model_sliding.load_state_dict(best_state)
+        else:
+            model_sliding.infini_adapter.load_state_dict(best_state)
 
         # Evaluate on test set
         print_flush("\nEvaluating on test set:")
@@ -399,9 +424,8 @@ def main():
         print_flush(f"  Final alpha: {model_sliding.get_alpha():.4f}")
 
         # Save
-        output_path = "parallel_adapter_wikitext_sliding.pt"
-        torch.save({
-            "infini_adapter_state_dict": best_state,
+        output_path = "parallel_adapter_wikitext_sliding.pt" if not args.unfreeze_base else "parallel_adapter_wikitext_sliding_full.pt"
+        save_dict = {
             "config": {
                 "hidden_size": model_sliding.config.hidden_size,
                 "num_heads": model_sliding.config.num_attention_heads,
@@ -410,11 +434,17 @@ def main():
                 "method": "sliding",
                 "context_length": args.context_length,
                 "stride": args.stride,
+                "train_all": args.unfreeze_base,
             },
             "pre_training_ppl": pre_ppl,
             "post_training_ppl": test_ppl,
             "final_alpha": model_sliding.get_alpha(),
-        }, output_path)
+        }
+        if trained_all:
+            save_dict["model_state_dict"] = best_state
+        else:
+            save_dict["infini_adapter_state_dict"] = best_state
+        torch.save(save_dict, output_path)
         print_flush(f"Saved to {output_path}")
 
         results["sliding"] = {
@@ -440,7 +470,7 @@ def main():
             use_delta_rule=True,
             use_alibi=False,
             initial_alpha=args.initial_alpha,
-            freeze_base_model=True,
+            freeze_base_model=not args.unfreeze_base,
         )
         model_segment = model_segment.to(device)
 
@@ -457,16 +487,20 @@ def main():
 
         # Train
         print_flush("\nTraining...")
-        best_ppl, best_state = train_segment(
+        best_ppl, best_state, trained_all = train_segment(
             model_segment, train_tokens, val_tokens, device,
             num_epochs=args.epochs,
             segment_length=args.segment_length,
             lr=args.lr,
             patience=args.patience,
+            train_all=args.unfreeze_base,
         )
 
         # Load best state
-        model_segment.infini_adapter.load_state_dict(best_state)
+        if trained_all:
+            model_segment.load_state_dict(best_state)
+        else:
+            model_segment.infini_adapter.load_state_dict(best_state)
 
         # Evaluate on test set (both methods)
         print_flush("\nEvaluating on test set:")
@@ -481,9 +515,8 @@ def main():
         print_flush(f"  Final alpha: {model_segment.get_alpha():.4f}")
 
         # Save
-        output_path = "parallel_adapter_wikitext_segment.pt"
-        torch.save({
-            "infini_adapter_state_dict": best_state,
+        output_path = "parallel_adapter_wikitext_segment.pt" if not args.unfreeze_base else "parallel_adapter_wikitext_segment_full.pt"
+        save_dict = {
             "config": {
                 "hidden_size": model_segment.config.hidden_size,
                 "num_heads": model_segment.config.num_attention_heads,
@@ -491,11 +524,17 @@ def main():
                 "initial_alpha": args.initial_alpha,
                 "method": "segment",
                 "segment_length": args.segment_length,
+                "train_all": args.unfreeze_base,
             },
             "pre_training_ppl": pre_ppl_sliding,
             "post_training_ppl": test_ppl_sliding,
             "final_alpha": model_segment.get_alpha(),
-        }, output_path)
+        }
+        if trained_all:
+            save_dict["model_state_dict"] = best_state
+        else:
+            save_dict["infini_adapter_state_dict"] = best_state
+        torch.save(save_dict, output_path)
         print_flush(f"Saved to {output_path}")
 
         results["segment"] = {
