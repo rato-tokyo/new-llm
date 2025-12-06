@@ -6,9 +6,6 @@ Layer 0 Distillation Script
 
 Usage:
     python3 scripts/distill_layer0.py --samples 5000 --epochs 10
-
-    # ALiBi付き
-    python3 scripts/distill_layer0.py --samples 5000 --epochs 10 --alibi
 """
 
 import argparse
@@ -208,7 +205,6 @@ def main():
     parser.add_argument("--batch-size", type=int, default=8, help="Batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--patience", type=int, default=EARLY_STOPPING_PATIENCE, help="Early stopping patience")
-    parser.add_argument("--alibi", action="store_true", help="Use ALiBi")
     parser.add_argument("--output", default="distilled_layer0.pt", help="Output path")
 
     args = parser.parse_args()
@@ -221,7 +217,6 @@ def main():
     print_flush("=" * 70)
     print_flush(f"Model: {args.model}")
     print_flush(f"Device: {device}")
-    print_flush(f"ALiBi: {args.alibi}")
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model)
@@ -242,7 +237,6 @@ def main():
     model = create_pythia_with_infini(
         model_name=args.model,
         use_delta_rule=True,
-        use_alibi=args.alibi,
         freeze_other_layers=True,
     )
     model = model.to(device)
@@ -282,7 +276,6 @@ def main():
                 "hidden_size": model.config.hidden_size,
                 "num_heads": model.config.num_attention_heads,
                 "intermediate_size": model.config.intermediate_size,
-                "use_alibi": args.alibi,
             },
             "distillation_loss": best_loss,
             "original_ppl": original_ppl,

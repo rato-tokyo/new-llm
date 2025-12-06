@@ -21,9 +21,6 @@ Usage:
     # Basic training
     python3 scripts/train_parallel_adapter.py --num-docs 100 --epochs 50
 
-    # With ALiBi
-    python3 scripts/train_parallel_adapter.py --num-docs 100 --epochs 50 --alibi
-
     # Custom initial alpha
     python3 scripts/train_parallel_adapter.py --initial-alpha 0.1
 """
@@ -231,7 +228,6 @@ def main():
         "--patience", type=int, default=EARLY_STOPPING_PATIENCE, help="Early stopping patience"
     )
     parser.add_argument("--initial-alpha", type=float, default=0.0, help="Initial alpha value")
-    parser.add_argument("--alibi", action="store_true", help="Use ALiBi")
     parser.add_argument("--output", default="parallel_adapter.pt", help="Output path")
 
     args = parser.parse_args()
@@ -244,7 +240,6 @@ def main():
     print_flush("=" * 70)
     print_flush(f"Model: {args.model}")
     print_flush(f"Device: {device}")
-    print_flush(f"ALiBi: {args.alibi}")
     print_flush(f"Initial alpha: {args.initial_alpha}")
     print_flush(f"Tokens per document: {args.tokens_per_doc}")
 
@@ -267,7 +262,6 @@ def main():
     model = create_pythia_with_parallel_infini(
         model_name=args.model,
         use_delta_rule=True,
-        use_alibi=args.alibi,
         initial_alpha=args.initial_alpha,
         freeze_base_model=True,
     )
@@ -308,7 +302,6 @@ def main():
         "config": {
             "hidden_size": model.config.hidden_size,
             "num_heads": model.config.num_attention_heads,
-            "use_alibi": args.alibi,
             "initial_alpha": args.initial_alpha,
         },
         "pre_training_ppl": pre_ppl,

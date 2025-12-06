@@ -153,9 +153,6 @@ python3 scripts/experiment.py --models infini
 # Multi-MemoryとHierarchical比較
 python3 scripts/experiment.py --models multi_memory hierarchical --num-memories 4
 
-# ALiBi付きInfini
-python3 scripts/experiment.py --models infini --alibi
-
 # 設定カスタマイズ
 python3 scripts/experiment.py --models infini --samples 10000 --epochs 50 --lr 5e-5
 
@@ -419,7 +416,6 @@ from src.models.infini_adapter import create_pythia_with_parallel_infini
 model = create_pythia_with_parallel_infini(
     model_name="EleutherAI/pythia-70m",
     use_delta_rule=True,
-    use_alibi=False,
     initial_alpha=0.0,  # 0から学習開始
     freeze_base_model=False,  # 全レイヤー訓練（必須）
 )
@@ -612,7 +608,6 @@ new-llm/
 | 2025-12-06 | **実験スクリプト統一**: experiment.pyに統合、experiment_runner.py追加 |
 | 2025-12-06 | **Hierarchical Memory追加**: 学習可能な展開判断、Coarse-to-Fine検索 |
 | 2025-12-06 | **Multi-Memory Attention追加**: Attention-based選択で複数メモリを動的混合 |
-| 2025-12-06 | **ALiBi位置エンコーディング追加**: 線形化近似でALiBiをメモリに組み込み |
 | 2025-12-05 | **Memory-Onlyに集中**: Local Attention削除、コード簡素化 |
 | 2025-12-05 | **Multi-Memory Bank追加**: 複数バンクで情報混合低減 |
 | 2025-12-05 | **Long Context評価バグ修正**: 訓練済み重みをロード |

@@ -367,7 +367,6 @@ def main():
         model_sliding = create_pythia_with_parallel_infini(
             model_name=args.model,
             use_delta_rule=True,
-            use_alibi=False,
             initial_alpha=args.initial_alpha,
             freeze_base_model=False,  # 全レイヤー訓練
         )
@@ -409,7 +408,6 @@ def main():
             "config": {
                 "hidden_size": model_sliding.config.hidden_size,
                 "num_heads": model_sliding.config.num_attention_heads,
-                "use_alibi": False,
                 "initial_alpha": args.initial_alpha,
                 "method": "sliding",
                 "context_length": args.context_length,
@@ -444,7 +442,6 @@ def main():
         model_segment = create_pythia_with_parallel_infini(
             model_name=args.model,
             use_delta_rule=True,
-            use_alibi=False,
             initial_alpha=args.initial_alpha,
             freeze_base_model=False,  # 全レイヤー訓練
         )
@@ -493,7 +490,6 @@ def main():
             "config": {
                 "hidden_size": model_segment.config.hidden_size,
                 "num_heads": model_segment.config.num_attention_heads,
-                "use_alibi": False,
                 "initial_alpha": args.initial_alpha,
                 "method": "segment",
                 "segment_length": args.segment_length,

@@ -47,9 +47,6 @@ python3 scripts/experiment.py --models infini
 # Multi-Memory vs Hierarchical
 python3 scripts/experiment.py --models multi_memory hierarchical --num-memories 4
 
-# Infini with ALiBi
-python3 scripts/experiment.py --models infini --alibi
-
 # Custom settings
 python3 scripts/experiment.py --models infini --samples 10000 --epochs 50 --lr 5e-5
 ```
@@ -63,7 +60,6 @@ from src.models import create_model
 model = create_model("infini")  # or "multi_memory", "hierarchical", "pythia"
 
 # With options
-model = create_model("infini", use_alibi=True)
 model = create_model("multi_memory", num_memories=8)
 model = create_model("hierarchical", num_memories=4)
 

@@ -108,7 +108,6 @@ def main():
         adapter_model = create_pythia_with_parallel_infini(
             model_name=args.model,
             use_delta_rule=True,
-            use_alibi=checkpoint["config"].get("use_alibi", False),
             initial_alpha=checkpoint["config"].get("initial_alpha", 0.0),
             freeze_base_model=True,
         )

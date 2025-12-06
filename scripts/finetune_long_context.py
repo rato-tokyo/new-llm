@@ -221,7 +221,6 @@ def main():
         "--patience", type=int, default=EARLY_STOPPING_PATIENCE, help="Early stopping patience"
     )
     parser.add_argument("--unfreeze-all", action="store_true", help="Unfreeze all parameters")
-    parser.add_argument("--alibi", action="store_true", help="Use ALiBi")
     parser.add_argument("--output", default="finetuned_infini.pt", help="Output path")
 
     args = parser.parse_args()
@@ -254,17 +253,9 @@ def main():
     # Create model
     print_flush("\nCreating model...")
 
-    # Determine ALiBi setting
-    use_alibi = args.alibi
-    if args.distilled:
-        checkpoint = torch.load(args.distilled, map_location="cpu")
-        if "config" in checkpoint:
-            use_alibi = checkpoint["config"].get("use_alibi", args.alibi)
-
     model = create_pythia_with_infini(
         model_name=args.model,
         use_delta_rule=True,
-        use_alibi=use_alibi,
         freeze_other_layers=not args.unfreeze_all,
     )
     model = model.to(device)
@@ -312,7 +303,6 @@ def main():
             "hidden_size": model.config.hidden_size,
             "num_heads": model.config.num_attention_heads,
             "intermediate_size": model.config.intermediate_size,
-            "use_alibi": use_alibi,
         },
         "pre_finetune_ppl": pre_ppl,
         "post_finetune_ppl": post_ppl,

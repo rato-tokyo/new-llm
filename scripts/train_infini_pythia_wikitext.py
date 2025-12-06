@@ -7,7 +7,6 @@ Parallel Adapterと異なり、αパラメータなしで強制的にメモリ�
 
 Usage:
     python3 scripts/train_infini_pythia_wikitext.py --epochs 30
-    python3 scripts/train_infini_pythia_wikitext.py --epochs 30 --alibi
 """
 
 import argparse
@@ -125,7 +124,6 @@ def main():
     parser.add_argument(
         "--patience", type=int, default=EARLY_STOPPING_PATIENCE, help="Early stopping patience"
     )
-    parser.add_argument("--alibi", action="store_true", help="Use ALiBi")
     parser.add_argument("--output", default="infini_pythia_wikitext.pt", help="Output path")
 
     args = parser.parse_args()
@@ -140,7 +138,6 @@ def main():
     print_flush(f"Epochs: {args.epochs}")
     print_flush(f"Learning rate: {args.lr}")
     print_flush(f"Segment length: {args.segment_length}")
-    print_flush(f"ALiBi: {args.alibi}")
 
     # Load tokenizer and data
     tokenizer = get_tokenizer("EleutherAI/pythia-70m")
@@ -164,7 +161,6 @@ def main():
         max_position_embeddings=config.max_position_embeddings,
         rotary_pct=config.rotary_pct,
         use_delta_rule=True,
-        use_alibi=args.alibi,
     )
     model = model.to(device)
 
@@ -243,7 +239,6 @@ def main():
             "num_layers": config.num_layers,
             "num_heads": config.num_heads,
             "intermediate_size": config.intermediate_size,
-            "use_alibi": args.alibi,
         },
         "pre_training_ppl": pre_ppl,
         "post_training_ppl": post_ppl,
