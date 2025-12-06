@@ -117,6 +117,7 @@ class InfiniAttention(nn.Module):
             self.frozen_banks = [False] * self.num_memory_banks
         else:
             # Reset only unfrozen banks
+            assert self.memories is not None and self.memory_norms is not None and self.frozen_banks is not None
             for i in range(self.num_memory_banks):
                 if not self.frozen_banks[i]:
                     self.memories[i] = torch.zeros(

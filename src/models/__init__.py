@@ -41,8 +41,9 @@ from typing import Literal, Optional
 
 from config.pythia import PythiaConfig
 
-# Core model
+# Core models
 from .model import TransformerLM
+from .continuous import ContinuousLM
 
 # Layer types
 from .layers import (
@@ -80,7 +81,7 @@ from .position_encoding import (
 )
 
 # Type alias for model types
-ModelTypeLiteral = Literal["pythia", "infini", "multi_memory", "hierarchical"]
+ModelTypeLiteral = Literal["pythia", "infini", "multi_memory", "hierarchical", "continuous"]
 
 
 def create_model(
@@ -93,12 +94,12 @@ def create_model(
     # Infini-specific settings
     num_memory_banks: int = 1,
     segments_per_bank: int = 4,
-) -> TransformerLM:
+):
     """
     Create a model by type.
 
     Args:
-        model_type: Model type ("pythia", "infini", "multi_memory", "hierarchical")
+        model_type: Model type ("pythia", "infini", "multi_memory", "hierarchical", "continuous")
         config: PythiaConfig (uses default if None)
         use_delta_rule: Use delta rule for memory update (memory models only)
         num_memories: Number of memories (multi_memory, hierarchical only)
@@ -106,23 +107,17 @@ def create_model(
         segments_per_bank: Segments per bank (infini only)
 
     Returns:
-        TransformerLM instance
+        TransformerLM or ContinuousLM instance
 
     Examples:
         # Standard Pythia
         model = create_model("pythia")
 
+        # Continuous representation model
+        model = create_model("continuous")
+
         # Infini-Pythia
         model = create_model("infini")
-
-        # Multi-Memory with 8 memories
-        model = create_model("multi_memory", num_memories=8)
-
-        # Custom layer construction
-        from src.models import TransformerLM
-        from src.models.layers import InfiniLayer, PythiaLayer
-        layers = [InfiniLayer(...), PythiaLayer(...), ...]
-        model = TransformerLM(layers=layers)
     """
     if config is None:
         config = PythiaConfig()
@@ -138,6 +133,19 @@ def create_model(
 
     if model_type == "pythia":
         layers = pythia_layers(config.num_layers)
+        return TransformerLM(
+            layers=layers,
+            vocab_size=config.vocab_size,
+            hidden_size=config.hidden_size,
+        )
+
+    elif model_type == "continuous":
+        layers = pythia_layers(config.num_layers)
+        return ContinuousLM(
+            layers=layers,
+            vocab_size=config.vocab_size,
+            hidden_size=config.hidden_size,
+        )
 
     elif model_type == "infini":
         layers = [
@@ -160,7 +168,7 @@ def create_model(
     else:
         raise ValueError(
             f"Unknown model type: {model_type}. "
-            f"Available: pythia, infini, multi_memory, hierarchical"
+            f"Available: pythia, infini, multi_memory, hierarchical, continuous"
         )
 
     return TransformerLM(
@@ -175,8 +183,9 @@ __all__ = [
     'create_model',
     'ModelTypeLiteral',
 
-    # Core model
+    # Core models
     'TransformerLM',
+    'ContinuousLM',
 
     # Layer types
     'BaseLayer',
