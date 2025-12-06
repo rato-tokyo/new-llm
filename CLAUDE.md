@@ -139,6 +139,64 @@ model = MultiMemoryInfiniPythiaModel(
 )
 ```
 
+### Hierarchical Memory (学習可能な展開判断)
+
+階層的メモリシステム：粗粒度メモリで検索し、必要に応じて細粒度メモリに展開。
+
+```
+Hierarchical Memory Pythia:
+Token Embedding (512-dim)
+       ↓
+Layer 0: HierarchicalMemoryAttentionLayer
+  ├─ Fine memories: [M_0, M_1, ...] (常に保持)
+  ├─ Coarse memory: sum(fine) (動的生成)
+  ├─ Expansion gate: 出力から展開を判断（学習可能）
+  └─ Soft decision: prob * fine + (1-prob) * coarse
+       ↓
+Layer 1-5: PythiaLayer (RoPE)
+       ↓
+Output Head (512 → vocab)
+```
+
+**特徴**:
+- 細粒度メモリを常に保持（ストレージ想定）
+- 粗粒度メモリは加算で動的生成
+- 展開判断は学習可能なゲート（MLP）
+- Soft decisionで学習が安定
+
+**メモリの加法性**:
+```
+C = A + B  (統合は可能)
+A, B → C  (展開は不可能、事前保存が必要)
+```
+
+```bash
+# 階層メモリ実験
+python3 scripts/experiment_hierarchical.py --num-fine-memories 4
+
+# 8メモリで実験
+python3 scripts/experiment_hierarchical.py --num-fine-memories 8
+
+# 階層メモリのみ
+python3 scripts/experiment_hierarchical.py --skip-baseline --skip-multi
+```
+
+```python
+from src.models.hierarchical_pythia import HierarchicalMemoryPythiaModel
+
+model = HierarchicalMemoryPythiaModel(
+    vocab_size=50304,
+    hidden_size=512,
+    num_layers=6,
+    num_heads=8,
+    num_fine_memories=4,  # 細粒度メモリ数
+)
+
+# メモリ保存/復元
+state = model.get_memory_state()
+model.set_memory_state(state)
+```
+
 ---
 
 ## 📊 Reversal Curse 評価
@@ -243,7 +301,9 @@ new-llm/
 │   │   ├── infini_attention.py     # InfiniAttention, InfiniAttentionLayer
 │   │   ├── infini_pythia.py        # InfiniPythiaModel (1層Infini + RoPE)
 │   │   ├── multi_memory_attention.py  # MultiMemoryInfiniAttention
-│   │   └── multi_memory_pythia.py  # MultiMemoryInfiniPythiaModel
+│   │   ├── multi_memory_pythia.py  # MultiMemoryInfiniPythiaModel
+│   │   ├── hierarchical_memory.py  # HierarchicalMemoryAttention
+│   │   └── hierarchical_pythia.py  # HierarchicalMemoryPythiaModel
 │   └── utils/
 │       ├── training.py             # 共通学習ユーティリティ
 │       ├── evaluation.py           # 評価関数
@@ -261,6 +321,7 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-06 | **Hierarchical Memory追加**: 学習可能な展開判断、Coarse-to-Fine検索 |
 | 2025-12-06 | **Multi-Memory Attention追加**: Attention-based選択で複数メモリを動的混合 |
 | 2025-12-06 | **ALiBi位置エンコーディング追加**: 線形化近似でALiBiをメモリに組み込み |
 | 2025-12-05 | **Memory-Onlyに集中**: Local Attention削除、コード簡素化 |
