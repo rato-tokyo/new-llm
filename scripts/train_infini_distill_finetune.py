@@ -27,6 +27,7 @@ Usage:
 import argparse
 import sys
 import time
+from typing import Optional
 
 sys.path.insert(0, ".")
 
@@ -91,7 +92,7 @@ class PythiaWithDistillableInfini(nn.Module):
     def get_distillation_loss(
         self,
         input_ids: torch.Tensor,
-        attention_mask: torch.Tensor = None,
+        attention_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         """
         蒸留損失を計算
@@ -133,8 +134,8 @@ class PythiaWithDistillableInfini(nn.Module):
     def forward(
         self,
         input_ids: torch.Tensor,
-        attention_mask: torch.Tensor = None,
-        labels: torch.Tensor = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        labels: Optional[torch.Tensor] = None,
         **kwargs,
     ):
         """通常のforward（LM loss計算）"""

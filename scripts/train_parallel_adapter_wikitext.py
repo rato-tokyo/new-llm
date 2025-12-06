@@ -22,6 +22,7 @@ Usage:
 import argparse
 import sys
 import time
+from typing import Union
 
 sys.path.insert(0, ".")
 
@@ -64,7 +65,7 @@ def evaluate_sliding_window(
     model.reset_memory()
 
     total_loss = 0.0
-    total_tokens = 0
+    total_tokens: Union[int, float] = 0
 
     tokens = tokens.to(device)
     seq_len = len(tokens)
@@ -165,7 +166,7 @@ def train_sliding_window(
         model.reset_memory()
 
         total_loss = 0.0
-        total_tokens_count = 0
+        total_tokens_count: Union[int, float] = 0
 
         for start in range(0, seq_len - 1, stride):
             end = min(start + context_length, seq_len)
