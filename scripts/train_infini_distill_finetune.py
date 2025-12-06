@@ -220,15 +220,59 @@ class PythiaWithDistillableInfini(nn.Module):
         return param_groups
 
 
-def evaluate_ppl(
+def evaluate_ppl_sliding_window(
+    model: nn.Module,
+    tokens: torch.Tensor,
+    device: torch.device,
+    context_length: int = 2048,
+    stride: int = 512,
+) -> float:
+    """Sliding window方式でPPL評価（HuggingFace標準）"""
+    model.eval()
+    if hasattr(model, "reset_memory"):
+        model.reset_memory()
+
+    total_loss = 0.0
+    total_tokens = 0
+
+    tokens = tokens.to(device)
+    seq_len = len(tokens)
+
+    with torch.no_grad():
+        for start in range(0, seq_len - 1, stride):
+            end = min(start + context_length, seq_len)
+            input_ids = tokens[start:end].unsqueeze(0)
+
+            # 最初のstrideトークンはコンテキスト（loss計算しない）
+            target_start = min(stride, end - start - 1)
+            if target_start <= 0:
+                continue
+
+            labels = input_ids.clone()
+            labels[0, :target_start] = -100
+
+            outputs = model(input_ids, labels=labels)
+            loss = outputs.loss
+
+            num_target_tokens = int((labels != -100).sum().item())
+            if num_target_tokens > 0:
+                total_loss += loss.item() * num_target_tokens
+                total_tokens += num_target_tokens
+
+    ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+    return ppl
+
+
+def evaluate_ppl_segment(
     model: nn.Module,
     tokens: torch.Tensor,
     device: torch.device,
     segment_length: int = 256,
 ) -> float:
-    """セグメント分割でPPL評価"""
+    """セグメント分割でPPL評価（訓練中の比較用）"""
     model.eval()
-    model.reset_memory()
+    if hasattr(model, "reset_memory"):
+        model.reset_memory()
 
     total_loss = 0.0
     total_tokens = 0
@@ -434,8 +478,8 @@ def main():
     print_flush("=" * 70)
 
     model.use_infini_layer(False)  # Use original
-    baseline_ppl = evaluate_ppl(model, val_tokens, device, args.segment_length)
-    print_flush(f"  Baseline Val PPL: {baseline_ppl:.2f}")
+    baseline_ppl = evaluate_ppl_sliding_window(model, val_tokens, device)
+    print_flush(f"  Baseline Val PPL (sliding window): {baseline_ppl:.2f}")
 
     # =========================================================================
     # Stage 1: Knowledge Distillation
@@ -468,9 +512,9 @@ def main():
                 model, train_tokens, distill_optimizer, device, args.segment_length
             )
 
-            # Evaluate with Infini Layer
+            # Evaluate with Infini Layer (segment-based for training monitoring)
             model.use_infini_layer(True)
-            val_ppl = evaluate_ppl(model, val_tokens, device, args.segment_length)
+            val_ppl = evaluate_ppl_segment(model, val_tokens, device, args.segment_length)
 
             elapsed = time.time() - start_time
 
@@ -500,10 +544,10 @@ def main():
         if best_distill_state is not None:
             model.infini_layer.load_state_dict(best_distill_state)
 
-        # Evaluate after distillation
+        # Evaluate after distillation (sliding window for fair comparison)
         model.use_infini_layer(True)
-        post_distill_ppl = evaluate_ppl(model, val_tokens, device, args.segment_length)
-        print_flush(f"\n  Post-Distillation Val PPL: {post_distill_ppl:.2f}")
+        post_distill_ppl = evaluate_ppl_sliding_window(model, val_tokens, device)
+        print_flush(f"\n  Post-Distillation Val PPL (sliding window): {post_distill_ppl:.2f}")
     else:
         post_distill_ppl = None
         print_flush("\nSkipping Stage 1 (distillation)")
@@ -549,8 +593,8 @@ def main():
                 model, train_tokens, finetune_optimizer, device, args.segment_length
             )
 
-            # Evaluate
-            val_ppl = evaluate_ppl(model, val_tokens, device, args.segment_length)
+            # Evaluate (segment-based for training monitoring)
+            val_ppl = evaluate_ppl_segment(model, val_tokens, device, args.segment_length)
 
             elapsed = time.time() - start_time
 
@@ -580,8 +624,9 @@ def main():
         if best_state is not None:
             model.load_state_dict(best_state)
 
-        post_finetune_ppl = evaluate_ppl(model, val_tokens, device, args.segment_length)
-        print_flush(f"\n  Post-Fine-tuning Val PPL: {post_finetune_ppl:.2f}")
+        # Final evaluation with sliding window
+        post_finetune_ppl = evaluate_ppl_sliding_window(model, val_tokens, device)
+        print_flush(f"\n  Post-Fine-tuning Val PPL (sliding window): {post_finetune_ppl:.2f}")
     else:
         post_finetune_ppl = None
         best_val_ppl = post_distill_ppl if post_distill_ppl else float("inf")
