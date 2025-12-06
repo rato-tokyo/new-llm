@@ -288,7 +288,7 @@ def train_pythia_with_early_stopping(
             marker = ""
 
         print_flush(
-            f"  Epoch {epoch:2d}: train_ppl={train_ppl:7.1f}, val_ppl={val_ppl:7.1f} "
+            f"  Epoch {epoch:2d}: train={train_ppl:7.1f}, val={val_ppl:7.1f} "
             f"({elapsed:.1f}s) {marker}"
         )
 

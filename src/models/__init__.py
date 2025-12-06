@@ -44,6 +44,7 @@ from config.pythia import PythiaConfig
 # Core models
 from .model import TransformerLM
 from .continuous import ContinuousLM
+from .selective import SelectiveOutputLM, OutputGate
 
 # Layer types
 from .layers import (
@@ -81,7 +82,7 @@ from .position_encoding import (
 )
 
 # Type alias for model types
-ModelTypeLiteral = Literal["pythia", "infini", "multi_memory", "hierarchical", "continuous"]
+ModelTypeLiteral = Literal["pythia", "infini", "multi_memory", "hierarchical", "continuous", "selective"]
 
 
 def create_model(
@@ -94,20 +95,23 @@ def create_model(
     # Infini-specific settings
     num_memory_banks: int = 1,
     segments_per_bank: int = 4,
+    # Selective output settings
+    max_skip: int = 3,
 ):
     """
     Create a model by type.
 
     Args:
-        model_type: Model type ("pythia", "infini", "multi_memory", "hierarchical", "continuous")
+        model_type: Model type ("pythia", "infini", "multi_memory", "hierarchical", "continuous", "selective")
         config: PythiaConfig (uses default if None)
         use_delta_rule: Use delta rule for memory update (memory models only)
         num_memories: Number of memories (multi_memory, hierarchical only)
         num_memory_banks: Number of memory banks (infini only)
         segments_per_bank: Segments per bank (infini only)
+        max_skip: Max consecutive skips (selective only)
 
     Returns:
-        TransformerLM or ContinuousLM instance
+        TransformerLM, ContinuousLM, or SelectiveOutputLM instance
 
     Examples:
         # Standard Pythia
@@ -115,6 +119,9 @@ def create_model(
 
         # Continuous representation model
         model = create_model("continuous")
+
+        # Selective output model
+        model = create_model("selective", max_skip=3)
 
         # Infini-Pythia
         model = create_model("infini")
@@ -147,6 +154,15 @@ def create_model(
             hidden_size=config.hidden_size,
         )
 
+    elif model_type == "selective":
+        layers = pythia_layers(config.num_layers)
+        return SelectiveOutputLM(
+            layers=layers,
+            vocab_size=config.vocab_size,
+            hidden_size=config.hidden_size,
+            max_skip=max_skip,
+        )
+
     elif model_type == "infini":
         layers = [
             InfiniLayer(h, n, i, num_memory_banks, segments_per_bank, use_delta_rule),
@@ -168,7 +184,7 @@ def create_model(
     else:
         raise ValueError(
             f"Unknown model type: {model_type}. "
-            f"Available: pythia, infini, multi_memory, hierarchical, continuous"
+            f"Available: pythia, infini, multi_memory, hierarchical, continuous, selective"
         )
 
     return TransformerLM(
@@ -186,6 +202,8 @@ __all__ = [
     # Core models
     'TransformerLM',
     'ContinuousLM',
+    'SelectiveOutputLM',
+    'OutputGate',
 
     # Layer types
     'BaseLayer',
