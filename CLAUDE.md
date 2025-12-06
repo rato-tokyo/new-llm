@@ -382,13 +382,13 @@ Layer 1-5 (unchanged)
 ```python
 from src.models.infini_adapter import create_pythia_with_parallel_infini
 
-# モデル作成
+# モデル作成（Full Fine-tune 必須）
 model = create_pythia_with_parallel_infini(
     model_name="EleutherAI/pythia-70m",
     use_delta_rule=True,
     use_alibi=False,
     initial_alpha=0.0,  # 0から学習開始
-    freeze_base_model=True,  # ベースモデルはfreeze
+    freeze_base_model=False,  # 全レイヤー訓練（必須）
 )
 
 # 訓練後
@@ -403,16 +403,55 @@ model.set_memory_state(state)
 ### 訓練スクリプト
 
 ```bash
-# Parallel Adapter訓練
-python3 scripts/train_parallel_adapter.py --num-docs 100 --epochs 50
+# WikiText-2 Full Fine-tuning（推奨）
+python3 scripts/train_parallel_adapter_wikitext.py --method sliding --epochs 30
 
 # WikiText-2での評価
-python3 scripts/evaluate_wikitext.py --parallel-adapter parallel_adapter.pt
+python3 scripts/evaluate_wikitext.py --parallel-adapter parallel_adapter_wikitext_sliding_full.pt
 ```
 
-### 発見: alphaが負になる
+### 重要な教訓: 部分的微調整は機能しない
 
-実験で`alpha = -0.1561`に学習された。これは元のLayer 0出力から**減算**していることを意味し、「ノイズ除去」的な役割を学習した可能性がある。
+**Adapter のみの訓練（部分的微調整）は機能しない。必ず全レイヤーの Full Fine-tune が必要。**
+
+#### 問題
+
+```python
+# ❌ 部分的微調整（Adapter のみ訓練）
+model = create_pythia_with_parallel_infini(
+    freeze_base_model=True,  # ベースモデル凍結
+)
+# → 後続レイヤーが新しい出力分布に適応できず、PPL が大幅に劣化
+# → 実験結果: Baseline 40.96 → Adapter only 391.74（350+ 劣化）
+```
+
+#### 原因
+
+```
+Adapter のみ訓練:
+Layer 0 出力 + α × Infini出力 → Layer 1-5（固定、適応不可）
+                                    ↓
+                              出力分布の不整合 → 高PPL
+```
+
+Pretrained Pythia の Layer 1-5 は、元の Layer 0 出力分布を前提に訓練されている。
+Infini Adapter が出力を変更すると、後続レイヤーが対応できない。
+
+#### 正しい方法
+
+```python
+# ✅ Full Fine-tune（全レイヤー訓練）
+model = create_pythia_with_parallel_infini(
+    freeze_base_model=False,  # 全レイヤー訓練可能
+)
+# → Layer 1-5 が新しい出力分布に適応可能
+```
+
+#### 教訓まとめ
+
+1. **Pretrained LLM への Adapter 追加は Full Fine-tune が必須**
+2. **部分的微調整では後続レイヤーの適応が不可能**
+3. **スクラッチ訓練と Pretrained 適応は根本的に異なる**
 
 ---
 
@@ -455,6 +494,7 @@ new-llm/
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-06 | **部分的微調整は機能しない**: Adapter のみ訓練は NG、Full Fine-tune 必須 |
 | 2025-12-06 | **PPL評価方法の教訓追加**: Sliding window方式が正しい、セグメント分割は高PPLになる |
 | 2025-12-06 | **Parallel Adapter実装**: Pretrained LLMにInfini-Attentionを並列挿入する方式 |
 | 2025-12-06 | **WikiText-2評価スクリプト追加**: 標準ベンチマークでの正確なPPL評価 |

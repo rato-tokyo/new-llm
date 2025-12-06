@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-WikiText-2 Parallel Adapter Training Script
+WikiText-2 Full Fine-tuning Script
 
-WikiText-2で訓練し、同じデータセットで評価することで公平な比較を実現。
+WikiText-2で全レイヤー（Pythia + Infini Adapter）を訓練。
 
-2つの訓練方法:
-1. Sliding window方式: 評価と同じ方法で訓練
-2. Segment-based方式: 従来の方法（比較用）
+重要: Adapter のみの部分的微調整は機能しない。
+      後続レイヤーが新しい出力分布に適応できないため、
+      必ず全レイヤーの Fine-tune が必要。
 
 Usage:
     # Sliding window方式（推奨）
@@ -140,13 +140,10 @@ def train_sliding_window(
     stride: int = 512,
     lr: float = 1e-4,
     patience: int = EARLY_STOPPING_PATIENCE,
-    train_all: bool = False,
 ):
-    """Sliding window方式で訓練"""
-    if train_all:
-        trainable_params = [p for p in model.parameters() if p.requires_grad]
-    else:
-        trainable_params = list(model.infini_adapter.parameters())
+    """Sliding window方式で全レイヤーを訓練"""
+    # 全パラメータを訓練対象に
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=lr)
 
     total_params = sum(p.numel() for p in model.parameters())
@@ -205,14 +202,9 @@ def train_sliding_window(
         improved = val_ppl < best_val_ppl
         if improved:
             best_val_ppl = val_ppl
-            if train_all:
-                best_state = {
-                    k: v.cpu().clone() for k, v in model.state_dict().items()
-                }
-            else:
-                best_state = {
-                    k: v.cpu().clone() for k, v in model.infini_adapter.state_dict().items()
-                }
+            best_state = {
+                k: v.cpu().clone() for k, v in model.state_dict().items()
+            }
             patience_counter = 0
             marker = "*"
         else:
@@ -228,7 +220,7 @@ def train_sliding_window(
             print_flush(f"  Early stopping at epoch {epoch}")
             break
 
-    return best_val_ppl, best_state, train_all
+    return best_val_ppl, best_state
 
 
 def train_segment(
@@ -240,13 +232,10 @@ def train_segment(
     segment_length: int = 256,
     lr: float = 1e-4,
     patience: int = EARLY_STOPPING_PATIENCE,
-    train_all: bool = False,
 ):
-    """Segment方式で訓練"""
-    if train_all:
-        trainable_params = [p for p in model.parameters() if p.requires_grad]
-    else:
-        trainable_params = list(model.infini_adapter.parameters())
+    """Segment方式で全レイヤーを訓練"""
+    # 全パラメータを訓練対象に
+    trainable_params = [p for p in model.parameters() if p.requires_grad]
     optimizer = torch.optim.AdamW(trainable_params, lr=lr)
 
     total_params = sum(p.numel() for p in model.parameters())
@@ -302,14 +291,9 @@ def train_segment(
         improved = val_ppl < best_val_ppl
         if improved:
             best_val_ppl = val_ppl
-            if train_all:
-                best_state = {
-                    k: v.cpu().clone() for k, v in model.state_dict().items()
-                }
-            else:
-                best_state = {
-                    k: v.cpu().clone() for k, v in model.infini_adapter.state_dict().items()
-                }
+            best_state = {
+                k: v.cpu().clone() for k, v in model.state_dict().items()
+            }
             patience_counter = 0
             marker = "*"
         else:
@@ -325,11 +309,11 @@ def train_segment(
             print_flush(f"  Early stopping at epoch {epoch}")
             break
 
-    return best_val_ppl, best_state, train_all
+    return best_val_ppl, best_state
 
 
 def main():
-    parser = argparse.ArgumentParser(description="WikiText-2 Parallel Adapter Training")
+    parser = argparse.ArgumentParser(description="WikiText-2 Full Fine-tuning (Pythia + Infini Adapter)")
 
     parser.add_argument("--model", default="EleutherAI/pythia-70m", help="Base model")
     parser.add_argument("--method", choices=["sliding", "segment", "both"], default="both",
@@ -341,8 +325,6 @@ def main():
     parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
     parser.add_argument("--patience", type=int, default=EARLY_STOPPING_PATIENCE, help="Early stopping patience")
     parser.add_argument("--initial-alpha", type=float, default=0.0, help="Initial alpha")
-    parser.add_argument("--unfreeze-base", action="store_true",
-                        help="Unfreeze base model (train all layers)")
 
     args = parser.parse_args()
 
@@ -350,14 +332,14 @@ def main():
     device = get_device()
 
     print_flush("=" * 70)
-    print_flush("WIKITEXT-2 PARALLEL ADAPTER TRAINING")
+    print_flush("WIKITEXT-2 FULL FINE-TUNING (Pythia + Infini Adapter)")
     print_flush("=" * 70)
     print_flush(f"Model: {args.model}")
     print_flush(f"Device: {device}")
     print_flush(f"Method: {args.method}")
     print_flush(f"Epochs: {args.epochs}")
     print_flush(f"Learning rate: {args.lr}")
-    print_flush(f"Unfreeze base model: {args.unfreeze_base}")
+    print_flush("NOTE: Full fine-tuning enabled (all layers trainable)")
 
     # Load tokenizer
     tokenizer = AutoTokenizer.from_pretrained(args.model)
@@ -376,7 +358,7 @@ def main():
     # =========================================================================
     if args.method in ["sliding", "both"]:
         print_flush("\n" + "=" * 70)
-        print_flush("METHOD 1: SLIDING WINDOW TRAINING")
+        print_flush("METHOD 1: SLIDING WINDOW TRAINING (Full Fine-tune)")
         print_flush("=" * 70)
         print_flush(f"Context length: {args.context_length}")
         print_flush(f"Stride: {args.stride}")
@@ -386,7 +368,7 @@ def main():
             use_delta_rule=True,
             use_alibi=False,
             initial_alpha=args.initial_alpha,
-            freeze_base_model=not args.unfreeze_base,
+            freeze_base_model=False,  # 全レイヤー訓練
         )
         model_sliding = model_sliding.to(device)
 
@@ -399,21 +381,17 @@ def main():
 
         # Train
         print_flush("\nTraining...")
-        best_ppl, best_state, trained_all = train_sliding_window(
+        best_ppl, best_state = train_sliding_window(
             model_sliding, train_tokens, val_tokens, device,
             num_epochs=args.epochs,
             context_length=args.context_length,
             stride=args.stride,
             lr=args.lr,
             patience=args.patience,
-            train_all=args.unfreeze_base,
         )
 
         # Load best state
-        if trained_all:
-            model_sliding.load_state_dict(best_state)
-        else:
-            model_sliding.infini_adapter.load_state_dict(best_state)
+        model_sliding.load_state_dict(best_state)
 
         # Evaluate on test set
         print_flush("\nEvaluating on test set:")
@@ -424,8 +402,9 @@ def main():
         print_flush(f"  Final alpha: {model_sliding.get_alpha():.4f}")
 
         # Save
-        output_path = "parallel_adapter_wikitext_sliding.pt" if not args.unfreeze_base else "parallel_adapter_wikitext_sliding_full.pt"
+        output_path = "parallel_adapter_wikitext_sliding_full.pt"
         save_dict = {
+            "model_state_dict": best_state,
             "config": {
                 "hidden_size": model_sliding.config.hidden_size,
                 "num_heads": model_sliding.config.num_attention_heads,
@@ -434,16 +413,12 @@ def main():
                 "method": "sliding",
                 "context_length": args.context_length,
                 "stride": args.stride,
-                "train_all": args.unfreeze_base,
+                "full_finetune": True,
             },
             "pre_training_ppl": pre_ppl,
             "post_training_ppl": test_ppl,
             "final_alpha": model_sliding.get_alpha(),
         }
-        if trained_all:
-            save_dict["model_state_dict"] = best_state
-        else:
-            save_dict["infini_adapter_state_dict"] = best_state
         torch.save(save_dict, output_path)
         print_flush(f"Saved to {output_path}")
 
@@ -461,7 +436,7 @@ def main():
     # =========================================================================
     if args.method in ["segment", "both"]:
         print_flush("\n" + "=" * 70)
-        print_flush("METHOD 2: SEGMENT-BASED TRAINING")
+        print_flush("METHOD 2: SEGMENT-BASED TRAINING (Full Fine-tune)")
         print_flush("=" * 70)
         print_flush(f"Segment length: {args.segment_length}")
 
@@ -470,7 +445,7 @@ def main():
             use_delta_rule=True,
             use_alibi=False,
             initial_alpha=args.initial_alpha,
-            freeze_base_model=not args.unfreeze_base,
+            freeze_base_model=False,  # 全レイヤー訓練
         )
         model_segment = model_segment.to(device)
 
@@ -487,20 +462,16 @@ def main():
 
         # Train
         print_flush("\nTraining...")
-        best_ppl, best_state, trained_all = train_segment(
+        best_ppl, best_state = train_segment(
             model_segment, train_tokens, val_tokens, device,
             num_epochs=args.epochs,
             segment_length=args.segment_length,
             lr=args.lr,
             patience=args.patience,
-            train_all=args.unfreeze_base,
         )
 
         # Load best state
-        if trained_all:
-            model_segment.load_state_dict(best_state)
-        else:
-            model_segment.infini_adapter.load_state_dict(best_state)
+        model_segment.load_state_dict(best_state)
 
         # Evaluate on test set (both methods)
         print_flush("\nEvaluating on test set:")
@@ -515,8 +486,9 @@ def main():
         print_flush(f"  Final alpha: {model_segment.get_alpha():.4f}")
 
         # Save
-        output_path = "parallel_adapter_wikitext_segment.pt" if not args.unfreeze_base else "parallel_adapter_wikitext_segment_full.pt"
+        output_path = "parallel_adapter_wikitext_segment_full.pt"
         save_dict = {
+            "model_state_dict": best_state,
             "config": {
                 "hidden_size": model_segment.config.hidden_size,
                 "num_heads": model_segment.config.num_attention_heads,
@@ -524,16 +496,12 @@ def main():
                 "initial_alpha": args.initial_alpha,
                 "method": "segment",
                 "segment_length": args.segment_length,
-                "train_all": args.unfreeze_base,
+                "full_finetune": True,
             },
             "pre_training_ppl": pre_ppl_sliding,
             "post_training_ppl": test_ppl_sliding,
             "final_alpha": model_segment.get_alpha(),
         }
-        if trained_all:
-            save_dict["model_state_dict"] = best_state
-        else:
-            save_dict["infini_adapter_state_dict"] = best_state
         torch.save(save_dict, output_path)
         print_flush(f"Saved to {output_path}")
 
