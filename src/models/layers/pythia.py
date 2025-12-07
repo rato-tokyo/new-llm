@@ -32,10 +32,14 @@ class PythiaAttention(nn.Module):
         self.query_key_value = nn.Linear(hidden_size, 3 * hidden_size)
         self.dense = nn.Linear(hidden_size, hidden_size)
 
-        self.rotary_emb = RotaryEmbedding(
-            self.rotary_dim,
-            max_position_embeddings=max_position_embeddings,
-        )
+        # NoPE: rotary_dim=0の場合はRoPEを使わない
+        if self.rotary_dim > 0:
+            self.rotary_emb = RotaryEmbedding(
+                self.rotary_dim,
+                max_position_embeddings=max_position_embeddings,
+            )
+        else:
+            self.rotary_emb = None
         self.scale = self.head_dim ** -0.5
 
     def forward(
@@ -51,17 +55,19 @@ class PythiaAttention(nn.Module):
         qkv = qkv.permute(2, 0, 3, 1, 4)
         query, key, value = qkv[0], qkv[1], qkv[2]
 
-        cos, sin = self.rotary_emb(query, seq_len)
-        cos = cos.squeeze(0).squeeze(0).unsqueeze(0).unsqueeze(0)
-        sin = sin.squeeze(0).squeeze(0).unsqueeze(0).unsqueeze(0)
+        # RoPE適用（NoPEの場合はスキップ）
+        if self.rotary_emb is not None:
+            cos, sin = self.rotary_emb(query, seq_len)
+            cos = cos.squeeze(0).squeeze(0).unsqueeze(0).unsqueeze(0)
+            sin = sin.squeeze(0).squeeze(0).unsqueeze(0).unsqueeze(0)
 
-        query_rot, key_rot = apply_rotary_pos_emb(
-            query[..., :self.rotary_dim],
-            key[..., :self.rotary_dim],
-            cos, sin
-        )
-        query = torch.cat([query_rot, query[..., self.rotary_dim:]], dim=-1)
-        key = torch.cat([key_rot, key[..., self.rotary_dim:]], dim=-1)
+            query_rot, key_rot = apply_rotary_pos_emb(
+                query[..., :self.rotary_dim],
+                key[..., :self.rotary_dim],
+                cos, sin
+            )
+            query = torch.cat([query_rot, query[..., self.rotary_dim:]], dim=-1)
+            key = torch.cat([key_rot, key[..., self.rotary_dim:]], dim=-1)
 
         attn_weights = torch.matmul(query, key.transpose(-1, -2)) * self.scale
 

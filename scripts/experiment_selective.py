@@ -38,6 +38,41 @@ from src.utils.tokenizer_utils import get_tokenizer
 from src.utils.training import get_device, prepare_data_loaders
 
 
+class ModelWrapper:
+    """評価用モデルラッパー（use_selectiveを固定）"""
+    def __init__(self, model, use_selective: bool):
+        self.model = model
+        self.use_selective = use_selective
+
+    def __call__(self, input_ids):
+        logits, _ = self.model(input_ids, use_selective=self.use_selective)
+        return logits
+
+    def eval(self):
+        self.model.eval()
+
+
+def compute_ppl(model, data_loader, device, use_selective: bool) -> float:
+    """共通PPL計算関数"""
+    model.eval()
+    total_loss = 0.0
+    total_tokens = 0
+
+    with torch.no_grad():
+        for batch in data_loader:
+            input_ids, labels = batch
+            input_ids = input_ids.to(device)
+            labels = labels.to(device)
+
+            loss, _ = model.compute_loss(input_ids, labels, use_selective=use_selective)
+
+            batch_tokens = (labels.size(1) - 1) * labels.size(0)
+            total_loss += loss.item() * batch_tokens
+            total_tokens += batch_tokens
+
+    return torch.exp(torch.tensor(total_loss / total_tokens)).item()
+
+
 def train_selective(
     model,
     train_loader,
@@ -86,24 +121,8 @@ def train_selective(
 
         train_ppl = torch.exp(torch.tensor(epoch_loss / epoch_tokens)).item()
 
-        # Validation
-        model.eval()
-        val_loss = 0.0
-        val_tokens = 0
-
-        with torch.no_grad():
-            for batch in val_loader:
-                input_ids, labels = batch
-                input_ids = input_ids.to(device)
-                labels = labels.to(device)
-
-                loss, _ = model.compute_loss(input_ids, labels, use_selective=use_selective)
-
-                batch_tokens = (labels.size(1) - 1) * labels.size(0)
-                val_loss += loss.item() * batch_tokens
-                val_tokens += batch_tokens
-
-        val_ppl = torch.exp(torch.tensor(val_loss / val_tokens)).item()
+        # Validation（共通関数を使用）
+        val_ppl = compute_ppl(model, val_loader, device, use_selective)
         elapsed = time.time() - start_time
 
         improved = val_ppl < best_val_ppl
@@ -143,12 +162,17 @@ def main():
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--patience", type=int, default=3)
+    parser.add_argument("--nope", action="store_true", help="Use NoPE (no position encoding)")
 
     args = parser.parse_args()
 
     set_seed(42)
     device = get_device()
     config = PythiaConfig()
+
+    # NoPE: rotary_pct=0 でPosition Encodingを無効化
+    if args.nope:
+        config.rotary_pct = 0.0
 
     # Print experiment info
     print_flush("=" * 70)
@@ -158,6 +182,7 @@ def main():
     print_flush(f"Samples: {args.samples:,}")
     print_flush(f"Sequence length: {args.seq_length}")
     print_flush(f"Epochs: {args.epochs}")
+    print_flush(f"Position Encoding: {'NoPE' if args.nope else 'RoPE'}")
     print_flush("=" * 70)
 
     # Load data
@@ -202,19 +227,7 @@ def main():
         # Evaluation
         print_flush("\n  Position-wise PPL:")
         model.eval()
-
-        class BaselineWrapper:
-            def __init__(self, model):
-                self.model = model
-
-            def __call__(self, input_ids):
-                logits, _ = self.model(input_ids, use_selective=False)
-                return logits
-
-            def eval(self):
-                self.model.eval()
-
-        wrapper = BaselineWrapper(model)
+        wrapper = ModelWrapper(model, use_selective=False)
         pos_ppl = evaluate_position_wise_ppl(wrapper, val_loader, device)
         for pos_range, ppl in pos_ppl.items():
             print_flush(f"    {pos_range}: {ppl:.1f}")
@@ -269,19 +282,7 @@ def main():
         # Evaluation (using selective mode)
         print_flush("\n  Position-wise PPL (selective mode):")
         model.eval()
-
-        class SelectiveWrapper:
-            def __init__(self, model):
-                self.model = model
-
-            def __call__(self, input_ids):
-                logits, _ = self.model(input_ids, use_selective=True)
-                return logits
-
-            def eval(self):
-                self.model.eval()
-
-        wrapper = SelectiveWrapper(model)
+        wrapper = ModelWrapper(model, use_selective=True)
         pos_ppl = evaluate_position_wise_ppl(wrapper, val_loader, device)
         for pos_range, ppl in pos_ppl.items():
             print_flush(f"    {pos_range}: {ppl:.1f}")
