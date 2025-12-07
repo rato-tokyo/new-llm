@@ -34,9 +34,7 @@ from src.data.family_relations import (
     FamilyPair,
     create_baseline_samples,
     create_context_qa_samples,
-    create_test_pairs,
     generate_family_pairs,
-    get_celebrity_test_pairs,
     split_pairs,
 )
 from src.models import create_model
@@ -350,8 +348,6 @@ def run_baseline(
     config: PythiaConfig,
     train_pairs: list[FamilyPair],
     val_pairs: list[FamilyPair],
-    test_pairs: list[FamilyPair],
-    celebrity_pairs: list[FamilyPair],
     pile_tokens: torch.Tensor,
     pile_val_loader,
     tokenizer,
@@ -396,21 +392,23 @@ def run_baseline(
         model.load_state_dict(best_state)
 
     # 評価
-    print_flush("\n  Relation Reasoning (Test pairs, no context):")
-    test_result = evaluate_relation_reasoning(
-        model, test_pairs, tokenizer, device, use_context=False
+    # Reversal Curse評価: 訓練ペアを使用（順方向は訓練済み、逆方向は未訓練）
+    print_flush("\n  Reversal Curse (Train pairs, no context):")
+    train_result = evaluate_relation_reasoning(
+        model, train_pairs, tokenizer, device, use_context=False
     )
-    print_flush(f"    Forward PPL: {test_result['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {test_result['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {test_result['gap']:+.1f}")
+    print_flush(f"    Forward PPL: {train_result['forward_ppl']:.1f}")
+    print_flush(f"    Backward PPL: {train_result['backward_ppl']:.1f}")
+    print_flush(f"    Gap: {train_result['gap']:+.1f}")
 
-    print_flush("\n  Celebrity Test (no context):")
-    celeb_result = evaluate_relation_reasoning(
-        model, celebrity_pairs, tokenizer, device, use_context=False
+    # 汎化評価: 未学習ペア（パターンは同じ、名前は新規）
+    print_flush("\n  Generalization (Val pairs, no context):")
+    val_result = evaluate_relation_reasoning(
+        model, val_pairs, tokenizer, device, use_context=False
     )
-    print_flush(f"    Forward PPL: {celeb_result['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {celeb_result['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {celeb_result['gap']:+.1f}")
+    print_flush(f"    Forward PPL: {val_result['forward_ppl']:.1f}")
+    print_flush(f"    Backward PPL: {val_result['backward_ppl']:.1f}")
+    print_flush(f"    Gap: {val_result['gap']:+.1f}")
 
     print_flush("\n  Pile PPL:")
     pile_ppl = compute_ppl(model, pile_val_loader, device)
@@ -419,12 +417,12 @@ def run_baseline(
     result = {
         "best_val_ppl": best_ppl,
         "best_epoch": best_epoch,
-        "test_forward_ppl": test_result["forward_ppl"],
-        "test_backward_ppl": test_result["backward_ppl"],
-        "test_gap": test_result["gap"],
-        "celeb_forward_ppl": celeb_result["forward_ppl"],
-        "celeb_backward_ppl": celeb_result["backward_ppl"],
-        "celeb_gap": celeb_result["gap"],
+        "train_forward_ppl": train_result["forward_ppl"],
+        "train_backward_ppl": train_result["backward_ppl"],
+        "train_gap": train_result["gap"],
+        "val_forward_ppl": val_result["forward_ppl"],
+        "val_backward_ppl": val_result["backward_ppl"],
+        "val_gap": val_result["gap"],
         "pile_ppl": pile_ppl,
     }
 
@@ -438,8 +436,6 @@ def run_context_model(
     config: PythiaConfig,
     train_pairs: list[FamilyPair],
     val_pairs: list[FamilyPair],
-    test_pairs: list[FamilyPair],
-    celebrity_pairs: list[FamilyPair],
     pile_tokens: torch.Tensor,
     pile_val_loader,
     tokenizer,
@@ -485,31 +481,33 @@ def run_context_model(
     if best_state:
         model.load_state_dict(best_state)
 
-    # 評価（コンテキスト付き）
-    print_flush("\n  Relation Reasoning (Test pairs, with context):")
-    test_with_ctx = evaluate_relation_reasoning(
-        model, test_pairs, tokenizer, device, use_context=True
+    # 評価（コンテキスト付き - 訓練ペア）
+    # Context modelはコンテキスト付きで訓練されているので、コンテキスト付きで評価
+    print_flush("\n  Reasoning with Context (Train pairs):")
+    train_with_ctx = evaluate_relation_reasoning(
+        model, train_pairs, tokenizer, device, use_context=True
     )
-    print_flush(f"    Forward PPL: {test_with_ctx['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {test_with_ctx['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {test_with_ctx['gap']:+.1f}")
+    print_flush(f"    Forward PPL: {train_with_ctx['forward_ppl']:.1f}")
+    print_flush(f"    Backward PPL: {train_with_ctx['backward_ppl']:.1f}")
+    print_flush(f"    Gap: {train_with_ctx['gap']:+.1f}")
 
-    # 評価（コンテキストなし - 転移能力）
-    print_flush("\n  Relation Reasoning (Test pairs, no context - transfer):")
-    test_no_ctx = evaluate_relation_reasoning(
-        model, test_pairs, tokenizer, device, use_context=False
+    # 評価（コンテキスト付き - 未学習ペア）
+    print_flush("\n  Reasoning with Context (Val pairs - generalization):")
+    val_with_ctx = evaluate_relation_reasoning(
+        model, val_pairs, tokenizer, device, use_context=True
     )
-    print_flush(f"    Forward PPL: {test_no_ctx['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {test_no_ctx['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {test_no_ctx['gap']:+.1f}")
+    print_flush(f"    Forward PPL: {val_with_ctx['forward_ppl']:.1f}")
+    print_flush(f"    Backward PPL: {val_with_ctx['backward_ppl']:.1f}")
+    print_flush(f"    Gap: {val_with_ctx['gap']:+.1f}")
 
-    print_flush("\n  Celebrity Test (with context):")
-    celeb_with_ctx = evaluate_relation_reasoning(
-        model, celebrity_pairs, tokenizer, device, use_context=True
+    # 評価（コンテキストなし - 知識転移評価）
+    print_flush("\n  Without Context (Train pairs - knowledge transfer):")
+    train_no_ctx = evaluate_relation_reasoning(
+        model, train_pairs, tokenizer, device, use_context=False
     )
-    print_flush(f"    Forward PPL: {celeb_with_ctx['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {celeb_with_ctx['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {celeb_with_ctx['gap']:+.1f}")
+    print_flush(f"    Forward PPL: {train_no_ctx['forward_ppl']:.1f}")
+    print_flush(f"    Backward PPL: {train_no_ctx['backward_ppl']:.1f}")
+    print_flush(f"    Gap: {train_no_ctx['gap']:+.1f}")
 
     print_flush("\n  Pile PPL:")
     pile_ppl = compute_ppl(model, pile_val_loader, device)
@@ -518,15 +516,15 @@ def run_context_model(
     result = {
         "best_val_ppl": best_ppl,
         "best_epoch": best_epoch,
-        "test_with_ctx_forward_ppl": test_with_ctx["forward_ppl"],
-        "test_with_ctx_backward_ppl": test_with_ctx["backward_ppl"],
-        "test_with_ctx_gap": test_with_ctx["gap"],
-        "test_no_ctx_forward_ppl": test_no_ctx["forward_ppl"],
-        "test_no_ctx_backward_ppl": test_no_ctx["backward_ppl"],
-        "test_no_ctx_gap": test_no_ctx["gap"],
-        "celeb_with_ctx_forward_ppl": celeb_with_ctx["forward_ppl"],
-        "celeb_with_ctx_backward_ppl": celeb_with_ctx["backward_ppl"],
-        "celeb_with_ctx_gap": celeb_with_ctx["gap"],
+        "train_with_ctx_forward_ppl": train_with_ctx["forward_ppl"],
+        "train_with_ctx_backward_ppl": train_with_ctx["backward_ppl"],
+        "train_with_ctx_gap": train_with_ctx["gap"],
+        "val_with_ctx_forward_ppl": val_with_ctx["forward_ppl"],
+        "val_with_ctx_backward_ppl": val_with_ctx["backward_ppl"],
+        "val_with_ctx_gap": val_with_ctx["gap"],
+        "train_no_ctx_forward_ppl": train_no_ctx["forward_ppl"],
+        "train_no_ctx_backward_ppl": train_no_ctx["backward_ppl"],
+        "train_no_ctx_gap": train_no_ctx["gap"],
         "pile_ppl": pile_ppl,
     }
 
@@ -575,13 +573,9 @@ def main():
     print_flush("\n[Data] Generating family pairs...")
     all_pairs = generate_family_pairs(args.num_pairs)
     train_pairs, val_pairs = split_pairs(all_pairs, train_ratio=0.8)
-    test_pairs = create_test_pairs(50)  # 別の名前でテスト
-    celebrity_pairs = get_celebrity_test_pairs()
 
     print_flush(f"  Train pairs: {len(train_pairs)}")
     print_flush(f"  Val pairs: {len(val_pairs)}")
-    print_flush(f"  Test pairs: {len(test_pairs)}")
-    print_flush(f"  Celebrity pairs: {len(celebrity_pairs)}")
 
     print_flush("\n[Data] Loading Pile data...")
     pile_tokens = load_pile_tokens_cached(args.pile_tokens, config.tokenizer_name)
@@ -604,13 +598,13 @@ def main():
 
     # ベースライン
     results["baseline"] = run_baseline(
-        config, train_pairs, val_pairs, test_pairs, celebrity_pairs,
+        config, train_pairs, val_pairs,
         pile_tokens, pile_val_loader, tokenizer, device, args
     )
 
     # コンテキスト推論
     results["context"] = run_context_model(
-        config, train_pairs, val_pairs, test_pairs, celebrity_pairs,
+        config, train_pairs, val_pairs,
         pile_tokens, pile_val_loader, tokenizer, device, args
     )
 
@@ -619,25 +613,27 @@ def main():
     print_flush("SUMMARY")
     print_flush("=" * 70)
 
-    print_flush("\n| Model | Relation Gap | Celebrity Gap | Pile PPL |")
-    print_flush("|-------|--------------|---------------|----------|")
+    print_flush("\n| Model | Train Gap (RC) | Val Gap (Gen) | Pile PPL |")
+    print_flush("|-------|----------------|---------------|----------|")
 
     baseline = results["baseline"]
     print_flush(
-        f"| Baseline | {baseline['test_gap']:+.1f} | "
-        f"{baseline['celeb_gap']:+.1f} | {baseline['pile_ppl']:.1f} |"
+        f"| Baseline (no ctx) | {baseline['train_gap']:+.1f} | "
+        f"{baseline['val_gap']:+.1f} | {baseline['pile_ppl']:.1f} |"
     )
 
     context = results["context"]
     print_flush(
-        f"| Context (w/ ctx) | {context['test_with_ctx_gap']:+.1f} | "
-        f"{context['celeb_with_ctx_gap']:+.1f} | {context['pile_ppl']:.1f} |"
+        f"| Context (w/ ctx) | {context['train_with_ctx_gap']:+.1f} | "
+        f"{context['val_with_ctx_gap']:+.1f} | {context['pile_ppl']:.1f} |"
     )
     print_flush(
-        f"| Context (no ctx) | {context['test_no_ctx_gap']:+.1f} | "
+        f"| Context (no ctx) | {context['train_no_ctx_gap']:+.1f} | "
         f"- | - |"
     )
 
+    print_flush("\n* RC = Reversal Curse (trained facts)")
+    print_flush("* Gen = Generalization (unseen names)")
     print_flush("\nDONE")
 
 
