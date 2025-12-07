@@ -114,12 +114,13 @@ def _create_reversal_training_samples(
     """
     Create training samples from reversal pairs (forward direction only).
 
-    各ペアを複数回繰り返して訓練データに含める。
+    複数の短い文を連結してseq_lengthのサンプルを作成する。
+    パディングは使用せず、文を繰り返し連結して埋める。
 
     Args:
         tokenizer_name: Tokenizer name
         seq_length: Sequence length
-        repeat_count: Number of times to repeat each sentence
+        repeat_count: Number of times to create samples
 
     Returns:
         (input_ids_list, labels_list) or None if import fails
@@ -133,38 +134,43 @@ def _create_reversal_training_samples(
     tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
     sentences = get_training_sentences(include_backward=False)  # Forward only
 
+    # Tokenize all sentences
+    all_tokens = []
+    for sentence in sentences:
+        tokens = tokenizer.encode(sentence, add_special_tokens=False)
+        all_tokens.extend(tokens)
+        # Add separator (period + space represented by EOS for simplicity)
+        eos = tokenizer.eos_token_id or 0
+        all_tokens.append(eos)
+
+    if len(all_tokens) < seq_length + 1:
+        # Repeat tokens until we have enough
+        original_tokens = all_tokens.copy()
+        while len(all_tokens) < seq_length * repeat_count + 1:
+            all_tokens.extend(original_tokens)
+
     input_ids_list = []
     labels_list = []
 
-    for sentence in sentences:
-        # Tokenize
-        tokens = tokenizer.encode(sentence, add_special_tokens=False)
+    # Create samples by sliding window over concatenated tokens
+    total_tokens = len(all_tokens)
+    for i in range(repeat_count):
+        # Start at different positions to create variety
+        start = (i * seq_length) % (total_tokens - seq_length - 1)
+        end = start + seq_length + 1
 
-        # Pad or truncate to seq_length
-        if len(tokens) < seq_length:
-            # Pad with EOS token
-            pad_token = tokenizer.eos_token_id or 0
-            tokens = tokens + [pad_token] * (seq_length - len(tokens))
+        if end > total_tokens:
+            # Wrap around
+            segment = all_tokens[start:] + all_tokens[: end - total_tokens]
         else:
-            tokens = tokens[:seq_length]
+            segment = all_tokens[start:end]
 
-        tokens_tensor = torch.tensor(tokens)
-
-        # Create input/label pairs (shift by 1)
+        tokens_tensor = torch.tensor(segment[: seq_length + 1])
         input_ids = tokens_tensor[:-1]
         labels = tokens_tensor[1:]
 
-        # Pad to seq_length if needed
-        if len(input_ids) < seq_length:
-            pad_token = tokenizer.eos_token_id or 0
-            pad_len = seq_length - len(input_ids)
-            input_ids = torch.cat([input_ids, torch.full((pad_len,), pad_token)])
-            labels = torch.cat([labels, torch.full((pad_len,), pad_token)])
-
-        # Repeat each sentence multiple times for better learning
-        for _ in range(repeat_count):
-            input_ids_list.append(input_ids[:seq_length])
-            labels_list.append(labels[:seq_length])
+        input_ids_list.append(input_ids)
+        labels_list.append(labels)
 
     return input_ids_list, labels_list
 
