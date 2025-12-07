@@ -22,7 +22,6 @@ def prepare_data_loaders(
     tokenizer_name: str,
     val_split: float = 0.1,
     batch_size: int = 32,
-    include_reversal_pairs: bool = True,
 ) -> Tuple[DataLoader, DataLoader]:
     """
     Prepare training and validation DataLoaders from Pile.
@@ -33,7 +32,6 @@ def prepare_data_loaders(
         tokenizer_name: Tokenizer name
         val_split: Validation split ratio
         batch_size: Batch size
-        include_reversal_pairs: Include forward sentences from reversal pairs in training
 
     Returns:
         train_loader, val_loader
@@ -60,7 +58,7 @@ def prepare_data_loaders(
     pile_input_ids = torch.stack(all_input_ids_list)
     pile_labels = torch.stack(all_labels_list)
 
-    # Split Pile data FIRST (before adding reversal pairs)
+    # Split Pile data
     val_size = int(num_samples * val_split)
     train_size = num_samples - val_size
 
@@ -74,108 +72,16 @@ def prepare_data_loaders(
     val_input = pile_input_ids[train_size:]
     val_labels = pile_labels[train_size:]
 
-    # Add reversal pairs ONLY to training data (not validation)
-    # This prevents data leakage
-    if include_reversal_pairs:
-        # Create 100 samples to ensure all 33 sentences are well-represented
-        reversal_samples = _create_reversal_training_samples(
-            tokenizer_name, seq_length, num_samples=100
-        )
-        if reversal_samples:
-            rev_inputs, rev_labels = reversal_samples
-            rev_inputs_tensor = torch.stack(rev_inputs)
-            rev_labels_tensor = torch.stack(rev_labels)
-
-            train_input = torch.cat([train_input, rev_inputs_tensor], dim=0)
-            train_labels = torch.cat([train_labels, rev_labels_tensor], dim=0)
-            print_flush(f"  Added {len(rev_inputs)} reversal pair samples to training only")
-
-            # Shuffle training data (with reversal pairs mixed in)
-            train_perm = torch.randperm(len(train_input))
-            train_input = train_input[train_perm]
-            train_labels = train_labels[train_perm]
-
     train_dataset = TensorDataset(train_input, train_labels)
     val_dataset = TensorDataset(val_input, val_labels)
 
-    print_flush(f"  Train: {len(train_input):,} samples (Pile: {train_size:,})")
-    print_flush(f"  Val: {val_size:,} samples (Pile only, no reversal pairs)")
+    print_flush(f"  Train: {len(train_input):,} samples")
+    print_flush(f"  Val: {val_size:,} samples")
 
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 
     return train_loader, val_loader
-
-
-def _create_reversal_training_samples(
-    tokenizer_name: str,
-    seq_length: int,
-    num_samples: int = 100,
-) -> Optional[Tuple[list, list]]:
-    """
-    Create training samples from reversal pairs (forward direction only).
-
-    複数の短い文を連結してseq_lengthのサンプルを作成する。
-    パディングは使用せず、文を繰り返し連結して埋める。
-    各文が十分な回数出現するようにサンプル数を確保する。
-
-    Args:
-        tokenizer_name: Tokenizer name
-        seq_length: Sequence length
-        num_samples: Number of samples to create
-
-    Returns:
-        (input_ids_list, labels_list) or None if import fails
-    """
-    try:
-        from src.data.reversal_pairs import get_training_sentences
-        from transformers import AutoTokenizer
-    except ImportError:
-        return None
-
-    tokenizer = AutoTokenizer.from_pretrained(tokenizer_name)
-    sentences = get_training_sentences(include_backward=False)  # Forward only
-
-    # Tokenize all sentences
-    all_tokens = []
-    for sentence in sentences:
-        tokens = tokenizer.encode(sentence, add_special_tokens=False)
-        all_tokens.extend(tokens)
-        # Add separator (period + space represented by EOS for simplicity)
-        eos = tokenizer.eos_token_id or 0
-        all_tokens.append(eos)
-
-    # Repeat tokens to ensure enough data for all samples
-    original_tokens = all_tokens.copy()
-    min_tokens_needed = seq_length * num_samples + seq_length
-    while len(all_tokens) < min_tokens_needed:
-        all_tokens.extend(original_tokens)
-
-    input_ids_list = []
-    labels_list = []
-
-    # Create samples by sliding window with stride = seq_length // 2 for overlap
-    stride = max(seq_length // 2, 1)
-    total_tokens = len(all_tokens)
-
-    for i in range(num_samples):
-        start = (i * stride) % (total_tokens - seq_length - 1)
-        end = start + seq_length + 1
-
-        if end > total_tokens:
-            # Wrap around
-            segment = all_tokens[start:] + all_tokens[: end - total_tokens]
-        else:
-            segment = all_tokens[start:end]
-
-        tokens_tensor = torch.tensor(segment[: seq_length + 1])
-        input_ids = tokens_tensor[:-1]
-        labels = tokens_tensor[1:]
-
-        input_ids_list.append(input_ids)
-        labels_list.append(labels)
-
-    return input_ids_list, labels_list
 
 
 def train_epoch(

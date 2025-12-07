@@ -1,9 +1,5 @@
 """Data utilities for New-LLM."""
 
-from .reversal_pairs import (
-    get_reversal_pairs,
-    get_training_sentences,
-)
 from .family_relations import (
     FamilyPair,
     generate_family_pairs,
@@ -15,10 +11,6 @@ from .family_relations import (
 )
 
 __all__ = [
-    # reversal_pairs
-    "get_reversal_pairs",
-    "get_training_sentences",
-    # family_relations
     "FamilyPair",
     "generate_family_pairs",
     "split_pairs_for_experiment",

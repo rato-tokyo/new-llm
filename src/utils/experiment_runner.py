@@ -15,13 +15,11 @@ import torch.nn as nn
 
 from config.pythia import PythiaConfig
 from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE
-from src.data.reversal_pairs import get_reversal_pairs
 from src.models import create_model as model_factory
 from src.utils.device import clear_gpu_cache
-from src.utils.evaluation import evaluate_position_wise_ppl, evaluate_reversal_curse
+from src.utils.evaluation import evaluate_position_wise_ppl
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
-from src.utils.tokenizer_utils import get_tokenizer
 from src.utils.training import (
     get_device,
     prepare_data_loaders,
@@ -205,7 +203,7 @@ def evaluate_model(
     モデルを評価
 
     Returns:
-        position_wise_ppl, reversal_curse
+        position_wise_ppl
     """
     model.eval()
 
@@ -218,21 +216,8 @@ def evaluate_model(
     for pos_range, ppl in pos_ppl.items():
         print_flush(f"    {pos_range}: {ppl:.1f}")
 
-    # Reversal Curse
-    if has_memory and hasattr(model, 'reset_memory'):
-        model.reset_memory()
-
-    print_flush("\n  Reversal Curse:")
-    tokenizer = get_tokenizer(tokenizer_name)
-    reversal_pairs = get_reversal_pairs()
-    reversal = evaluate_reversal_curse(model, tokenizer, reversal_pairs, device)
-    print_flush(f"    Forward PPL: {reversal['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {reversal['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {reversal['reversal_gap']:+.1f}")
-
     return {
         "position_wise_ppl": pos_ppl,
-        "reversal_curse": reversal,
     }
 
 
@@ -326,20 +311,6 @@ def print_summary(results: dict[str, Any], exp_config: ExperimentConfig) -> None
         if results.get(key):
             r = results[key]
             print_flush(f"| {model_type.name} | {r['best_val_ppl']:.1f} | {r['best_epoch']} |")
-
-    # Reversal Curse comparison
-    print_flush("\n| Model | Forward PPL | Backward PPL | Gap |")
-    print_flush("|-------|-------------|--------------|-----|")
-
-    for model_type in ModelType:
-        key = model_type.value
-        if results.get(key):
-            rev = results[key]["reversal_curse"]
-            gap = rev["backward_ppl"] - rev["forward_ppl"]
-            print_flush(
-                f"| {model_type.name} | {rev['forward_ppl']:.1f} | "
-                f"{rev['backward_ppl']:.1f} | {gap:+.1f} |"
-            )
 
 
 def run_experiment(
