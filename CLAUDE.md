@@ -409,32 +409,32 @@ python3 scripts/experiment_continuous.py --nope
 
 ---
 
-## 🔧 学習可能ゲートによるSelective Output（失敗）
+## 🔧 2-Pass Processing による発見（実験記録）
 
-**⚠️ 動的ゲート方式は複雑すぎて失敗。現在は固定extra_passesに簡素化。**
+**意図せず発見: 2回処理がReversal Curseを改善**
 
-### 試した方式
+### 概要
 
-| 方式 | 結果 |
-|------|------|
-| OutputGate + threshold | ❌ carry-over 96.3%、ほぼ学習されない |
-| max_skip強制 + threshold | ❌ 収束が不安定、PPL改善せず |
-| エントロピーベースgate_loss | ❌ ゲートが適切に学習されない |
+SelectiveOutputLM実装中に、Transformerを2回通す方式がReversal Curseを改善することを発見。
 
-### 問題点
+```
+1回処理: token → embed → layers → h1 → output
+2回処理: token → embed → layers → h1 → proj → layers → h2 → output
+```
 
-1. **ゲート学習の不安定性**: gate_probがthresholdに収束しない
-2. **carry-over率の制御困難**: 動的に持ち越し判断すると予測困難
-3. **勾配の不連続性**: threshold判定で勾配が途切れる
-4. **ターゲットアライメントの複雑さ**: 持ち越し時のターゲット計算が非自明
+### 結果
 
-### 教訓
+| Model | Val PPL | Forward PPL | Gap |
+|-------|---------|-------------|-----|
+| 1回処理 | **484.6** | 12868.4 | -1799.1 |
+| 2回処理 | 516.8 | **9576.1** | **+1114.1** |
 
-- 動的な判断より**固定パターン**（extra_passes）がシンプル
-- 学習可能ゲートは追加パラメータ（65K）に対して効果が見合わない
-- OutputGate、エントロピーベース損失は削除済み
+- Val PPLは悪化するが、Reversal CurseのGapが大幅改善
+- なぜ2回処理で記憶が定着するのかは未解明
 
-詳細は `docs/experiments/2025-12-07_selective_output_gate_failure.md` を参照。
+詳細は `docs/experiments/2025-12-07_two_pass_discovery.md` を参照。
+
+**注意**: この発見はメンテナンス性のためコード削除済み。記録のみ残す。
 
 ---
 
@@ -443,8 +443,7 @@ python3 scripts/experiment_continuous.py --nope
 | 日付 | 内容 |
 |------|------|
 | 2025-12-07 | **Continuous LM実装**: 離散化スキップ仮説の検証。extra_pass/use_h1オプション追加 |
-| 2025-12-07 | **Selective Output LM再設計**: 隠れ状態の追加処理方式に変更（skip_interval=追加処理回数） |
-| 2025-12-07 | **学習可能ゲート失敗を記録**: OutputGate方式は複雑すぎて失敗、固定パターンに簡素化 |
+| 2025-12-07 | **2-Pass発見を記録**: Transformerを2回通すとReversal Curseが改善（コードは削除、記録のみ） |
 | 2025-12-07 | **訓練-評価一貫性ポリシー追加**: 訓練時と評価時の条件を揃えることを必須化 |
 | 2025-12-06 | **SelectiveOutputLM追加**: 学習可能ゲートによる選択的出力モデル（後に失敗と判明） |
 | 2025-12-06 | **レイヤーベースアーキテクチャに移行**: TransformerLM + 4レイヤータイプ、コード31%削減 |
