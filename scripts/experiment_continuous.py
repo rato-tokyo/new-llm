@@ -28,7 +28,7 @@ sys.path.insert(0, ".")
 import torch
 
 from config.pythia import PythiaConfig
-from src.config.experiment_defaults import GRADIENT_CLIP
+from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE, GRADIENT_CLIP
 from src.data.reversal_pairs import get_reversal_pairs
 from src.models import create_model
 from src.utils.device import clear_gpu_cache
@@ -255,7 +255,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--patience", type=int, default=3)
+    parser.add_argument("--patience", type=int, default=EARLY_STOPPING_PATIENCE)
     parser.add_argument("--nope", action="store_true", help="Use NoPE (no position encoding)")
 
     args = parser.parse_args()
