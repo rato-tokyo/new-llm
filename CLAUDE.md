@@ -147,7 +147,6 @@ src/models/
 │   ├── multi_memory.py  # MultiMemoryLayer
 │   └── hierarchical.py  # HierarchicalLayer
 ├── model.py             # TransformerLM（汎用モデル）
-├── continuous.py        # ContinuousLM（離散化スキップ仮説検証）
 ├── base_components.py   # PythiaMLP, init_weights
 ├── memory_utils.py      # elu_plus_one, causal_linear_attention
 └── position_encoding.py # RoPE
@@ -246,20 +245,25 @@ def evaluate():
 ### 解決策: Lagged Cache Training
 
 ```python
-# 1. 初期キャッシュを計算（最初のイテレーションのみ）
-hidden_cache = model.init_hidden_cache(input_ids)  # [batch, seq_len, hidden]
+# 基本アルゴリズム
+hidden_caches = {}  # バッチごとのキャッシュ
 
-# 2. 訓練ループ
 for epoch in epochs:
-    for batch_idx, batch in enumerate(train_loader):
-        # 前イテレーションのキャッシュを入力として使用
+    for batch_idx, (input_ids, labels) in enumerate(train_loader):
+        # 1. キャッシュ初期化（初回のみ）
+        if batch_idx not in hidden_caches:
+            with torch.no_grad():
+                hidden_caches[batch_idx] = model.forward(input_ids).detach()
+
+        # 2. 前イテレーションのキャッシュを入力として使用
         prev_cache = hidden_caches[batch_idx]
 
-        # 並列処理で全シーケンスを一度に計算
+        # 3. 並列処理で全シーケンスを一度に計算
         # 位置t の入力 = prev_cache[t-1]（前イテレーションでの位置t-1の出力）
-        loss, new_hidden = model.forward_with_cache(input_ids, prev_cache)
+        output, new_hidden = model.forward_with_cache(input_ids, prev_cache)
+        loss = compute_loss(output, labels)
 
-        # キャッシュを更新（次イテレーション用）
+        # 4. キャッシュを更新（次イテレーション用）
         hidden_caches[batch_idx] = new_hidden.detach()
 
         loss.backward()
@@ -284,27 +288,9 @@ for epoch in epochs:
 
 ### 適用可能なモデル
 
-- Continuous LM（h_{t-1} → x_t）
+- 任意のRNN的再帰構造（h_{t-1} → h_t）
 - Context-Pythia（context_{t-1} → context_t）
-- DProj（prev_proj → new_proj）
-- 任意のRNN的再帰構造
-
-### 実装例（ContinuousLM）
-
-```python
-# src/models/continuous.py
-def forward_with_cache(self, input_ids, prev_hidden_cache):
-    # 位置0: 最初のトークンの埋め込み
-    first_embed = self.embed_in(input_ids[:, :1])
-
-    # 位置1以降: prev_hidden_cache[t-1] を変換して使用
-    rest_input = self.hidden_proj(prev_hidden_cache[:, :-1, :])
-    hidden_input = torch.cat([first_embed, rest_input], dim=1)
-
-    # 並列でTransformer処理
-    h = self._forward_layers(hidden_input)
-    return logits, h  # hを次イテレーション用キャッシュとして返す
-```
+- 前の出力を次の入力として使う任意のモデル
 
 ### 性能比較（実測値）
 
@@ -417,88 +403,46 @@ all_sentences = "Paris is the capital of France EOS Tokyo is the capital of Japa
 
 ---
 
-## 🔧 Continuous LM
+## 🔧 Continuous LM（失敗）
 
-**仮説: トークン化による離散化で情報が失われている**
+**仮説: トークン化による離散化で情報が失われている → 失敗**
 
-### 背景
-
-通常のLMでは、次トークン予測時に離散化が発生する：
+### コンセプト
 
 ```
 通常LM (Discrete):
   h_t → LM Head → token → Embedding → x_{t+1}
-        ↑                    ↑
-        離散化              再埋め込み
-        (情報損失)
-```
 
-この離散化ステップで情報が失われるのでは？という仮説を検証する。
-
-### Continuous LMのコンセプト
-
-```
 Continuous LM:
-  h_t → proj → x_{t+1}   (離散化をスキップ、情報保持)
+  h_t → proj → x_{t+1}   (離散化をスキップ)
 ```
 
 前のトークン処理時の最終隠れ状態を、直接次の入力として使用する。
 
-### モード一覧
+### 実験結果（2025-12-07）
 
-| モード | 入力方式 | extra_pass | use_h1 | 説明 |
-|--------|----------|------------|--------|------|
-| discrete | token埋め込み | - | - | 通常のLM（ベースライン） |
-| continuous | h_{t-1}を直接使用 | False | - | 離散化スキップ |
-| continuous_extra | h_{t-1}を直接使用 | True | False | 1回追加処理、h2のみ使用 |
-| continuous_combined | h_{t-1}を直接使用 | True | True | 1回追加処理、h1+h2を使用 |
+| モード | Val PPL | Forward PPL | Backward PPL | Gap |
+|--------|---------|-------------|--------------|-----|
+| discrete | **487.2** | 46534.0 | 11938.4 | -34595.5 |
+| continuous | 2031.6 | **413.5** | **1206.2** | **+792.7** |
+| continuous_extra | 2573.9 | 1255.3 | 1267.1 | +11.8 |
+| continuous_combined | 35062.4 | 32333.1 | 30004.4 | -2328.6 |
 
-### 処理フロー
+### 結論
 
-```
-discrete (通常LM):
-  token_A → embed → layers → h1 → LM Head → "B"予測
+- **Reversal Curse改善**: Forward/Backward PPLのGapは改善（-34595 → +792）
+- **Val PPL大幅悪化**: 487 → 2031（4倍悪化）
+- **トレードオフが悪い**: 言語モデリング性能を犠牲にしすぎ
 
-continuous:
-  h_{t-1} → proj → layers → h1 → LM Head → "B"予測
+### 失敗の原因
 
-continuous_extra (extra_pass=True, use_h1=False):
-  h_{t-1} → proj → layers → h1 → proj → layers → h2 → LM Head → "B"予測
+1. **トークン情報の喪失**: 埋め込みベクトルを完全に捨てている
+   - 埋め込みには意味的・文法的特徴が含まれる
+   - h_{t-1}だけでは現在のトークン情報が失われる
 
-continuous_combined (extra_pass=True, use_h1=True):
-  h_{t-1} → proj → layers → h1 → proj → layers → h2 → combine(h1,h2) → LM Head → "B"予測
-```
+2. **残差加算も効果なし**: `embed + proj(h_{t-1})` も試したが改善せず
 
-### 使用方法
-
-```python
-from src.models import create_model
-
-# モデル作成
-model = create_model("continuous")
-
-# Discrete（通常LM、ベースライン）
-loss, stats = model.compute_loss(input_ids, labels, mode="discrete")
-
-# Continuous（離散化スキップ）
-loss, stats = model.compute_loss(input_ids, labels, mode="continuous")
-
-# Continuous + 追加処理（h2のみ）
-loss, stats = model.compute_loss(input_ids, labels, mode="continuous", extra_pass=True)
-
-# Continuous + 追加処理（h1+h2）
-loss, stats = model.compute_loss(input_ids, labels, mode="continuous", extra_pass=True, use_h1=True)
-```
-
-### 実験スクリプト
-
-```bash
-# 全モード比較
-python3 scripts/experiment_continuous.py --models discrete continuous continuous_extra continuous_combined
-
-# NoPE（Position Encodingなし）で実験
-python3 scripts/experiment_continuous.py --nope
-```
+**注意**: 実装は削除済み。記録のみ残す。
 
 ---
 
@@ -535,8 +479,8 @@ SelectiveOutputLM実装中に、Transformerを2回通す方式がReversal Curse�
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-07 | **Continuous LM失敗**: 離散化スキップ仮説は失敗。Reversal Curse改善するもVal PPL 4倍悪化。実装削除 |
 | 2025-12-07 | **LCT方式追加**: Lagged Cache Training - 再帰的モデルを並列訓練可能にする手法。22倍高速化 |
-| 2025-12-07 | **Continuous LM実装**: 離散化スキップ仮説の検証。extra_pass/use_h1オプション追加 |
 | 2025-12-07 | **2-Pass発見を記録**: Transformerを2回通すとReversal Curseが改善（コードは削除、記録のみ） |
 | 2025-12-07 | **訓練-評価一貫性ポリシー追加**: 訓練時と評価時の条件を揃えることを必須化 |
 | 2025-12-06 | **SelectiveOutputLM追加**: 学習可能ゲートによる選択的出力モデル（後に失敗と判明） |
