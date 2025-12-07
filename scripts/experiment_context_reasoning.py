@@ -541,7 +541,7 @@ def main():
         help="Number of val pairs (for reversal curse test)"
     )
     parser.add_argument(
-        "--num-pile-samples", type=int, default=1100,
+        "--num-pile-samples", type=int, default=2000,
         help="Number of Pile samples (fixed for fair comparison)"
     )
     parser.add_argument("--pile-tokens", type=int, default=500000)
@@ -549,7 +549,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--patience", type=int, default=EARLY_STOPPING_PATIENCE)
+    parser.add_argument("--patience", type=int, default=3)
     parser.add_argument("--nope", action="store_true", help="Use NoPE")
 
     args = parser.parse_args()
