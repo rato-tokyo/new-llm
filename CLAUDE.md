@@ -147,6 +147,7 @@ src/models/
 │   ├── multi_memory.py  # MultiMemoryLayer
 │   └── hierarchical.py  # HierarchicalLayer
 ├── model.py             # TransformerLM（汎用モデル）
+├── continuous.py        # ContinuousLM（離散化スキップ仮説検証）
 ├── base_components.py   # PythiaMLP, init_weights
 ├── memory_utils.py      # elu_plus_one, causal_linear_attention
 └── position_encoding.py # RoPE

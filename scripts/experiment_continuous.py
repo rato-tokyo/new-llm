@@ -213,7 +213,7 @@ def run_model(
         model.load_state_dict(best_state)
 
     # Evaluation
-    print_flush(f"\n  Position-wise PPL:")
+    print_flush("\n  Position-wise PPL:")
     model.eval()
     wrapper = ModelWrapper(model, mode, extra_pass, use_h1)
     pos_ppl = evaluate_position_wise_ppl(wrapper, val_loader, device)
