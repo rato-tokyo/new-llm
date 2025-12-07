@@ -211,6 +211,9 @@ def main():
                 logits, _ = self.model(input_ids, use_selective=False)
                 return logits
 
+            def eval(self):
+                self.model.eval()
+
         wrapper = BaselineWrapper(model)
         pos_ppl = evaluate_position_wise_ppl(wrapper, val_loader, device)
         for pos_range, ppl in pos_ppl.items():
@@ -274,6 +277,9 @@ def main():
             def __call__(self, input_ids):
                 logits, _ = self.model(input_ids, use_selective=True)
                 return logits
+
+            def eval(self):
+                self.model.eval()
 
         wrapper = SelectiveWrapper(model)
         pos_ppl = evaluate_position_wise_ppl(wrapper, val_loader, device)
