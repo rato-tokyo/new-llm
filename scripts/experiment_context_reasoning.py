@@ -33,7 +33,7 @@ from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE, GRADIENT_CLI
 from src.data.family_relations import (
     FamilyPair,
     create_baseline_samples,
-    create_context_qa_samples,
+    create_bidirectional_samples,
     generate_family_pairs,
     split_pairs,
 )
@@ -174,21 +174,23 @@ def evaluate_relation_reasoning(
     pairs: list[FamilyPair],
     tokenizer,
     device,
-    use_context: bool = True,
 ) -> dict:
     """
-    関係性推論能力を評価
+    関係性推論能力を評価（QA形式）
+
+    訓練と同じQA形式で評価:
+    - Forward: "Question: Who is {child}'s parent? Answer:" → "{parent}"
+    - Backward: "Question: Who is {parent}'s child? Answer:" → "{child}"
 
     Args:
         model: モデル
         pairs: テスト用ペア
         tokenizer: トークナイザー
         device: デバイス
-        use_context: コンテキストを与えるか
 
     Returns:
-        forward_ppl: 順方向（親→子の質問に答える）
-        backward_ppl: 逆方向（子→親の質問に答える）
+        forward_ppl: 順方向（子→親を問う）
+        backward_ppl: 逆方向（親→子を問う）
     """
     model.eval()
 
@@ -197,23 +199,13 @@ def evaluate_relation_reasoning(
 
     with torch.no_grad():
         for pair in pairs:
-            context = f"{pair.parent_name} is {pair.child_name}'s {pair.relation}."
+            # 順方向: Who is child's parent? → parent
+            forward_input = f"Question: Who is {pair.child_name}'s parent? Answer:"
+            forward_target = f" {pair.parent_name}"
 
-            if use_context:
-                # 順方向: Who is X's parent? → 親の名前
-                forward_input = f"Context: {context} Question: Who is {pair.child_name}'s parent? Answer:"
-                forward_target = f" {pair.parent_name}"
-
-                # 逆方向: Who is X's child? → 子の名前
-                backward_input = f"Context: {context} Question: Who is {pair.parent_name}'s child? Answer:"
-                backward_target = f" {pair.child_name}"
-            else:
-                # コンテキストなしでの直接質問
-                forward_input = f"Question: Who is {pair.child_name}'s parent? Answer:"
-                forward_target = f" {pair.parent_name}"
-
-                backward_input = f"Question: Who is {pair.parent_name}'s child? Answer:"
-                backward_target = f" {pair.child_name}"
+            # 逆方向: Who is parent's child? → child
+            backward_input = f"Question: Who is {pair.parent_name}'s child? Answer:"
+            backward_target = f" {pair.child_name}"
 
             # 順方向のPPL
             forward_loss = compute_target_loss(
@@ -393,18 +385,18 @@ def run_baseline(
 
     # 評価
     # Reversal Curse評価: 訓練ペアを使用（順方向は訓練済み、逆方向は未訓練）
-    print_flush("\n  Reversal Curse (Train pairs, no context):")
+    print_flush("\n  Reversal Curse (Train pairs):")
     train_result = evaluate_relation_reasoning(
-        model, train_pairs, tokenizer, device, use_context=False
+        model, train_pairs, tokenizer, device
     )
     print_flush(f"    Forward PPL: {train_result['forward_ppl']:.1f}")
     print_flush(f"    Backward PPL: {train_result['backward_ppl']:.1f}")
     print_flush(f"    Gap: {train_result['gap']:+.1f}")
 
     # 汎化評価: 未学習ペア（パターンは同じ、名前は新規）
-    print_flush("\n  Generalization (Val pairs, no context):")
+    print_flush("\n  Generalization (Val pairs):")
     val_result = evaluate_relation_reasoning(
-        model, val_pairs, tokenizer, device, use_context=False
+        model, val_pairs, tokenizer, device
     )
     print_flush(f"    Forward PPL: {val_result['forward_ppl']:.1f}")
     print_flush(f"    Backward PPL: {val_result['backward_ppl']:.1f}")
@@ -432,7 +424,7 @@ def run_baseline(
     return result
 
 
-def run_context_model(
+def run_bidirectional_model(
     config: PythiaConfig,
     train_pairs: list[FamilyPair],
     val_pairs: list[FamilyPair],
@@ -442,24 +434,24 @@ def run_context_model(
     device,
     args,
 ) -> dict:
-    """コンテキスト推論モデルの訓練と評価"""
+    """双方向モデルの訓練と評価"""
     print_flush("\n" + "=" * 70)
-    print_flush("CONTEXT REASONING + Pile")
+    print_flush("BIDIRECTIONAL (Forward + Backward) + Pile")
     print_flush("=" * 70)
 
-    # コンテキスト付きサンプル生成
-    context_samples = create_context_qa_samples(train_pairs, include_negative=True)
+    # 双方向サンプル生成（順方向 + 逆方向）
+    bidirectional_samples = create_bidirectional_samples(train_pairs)
 
     # Pileデータと混合
     train_dataset = MixedDataset(
-        pile_tokens, context_samples, tokenizer,
+        pile_tokens, bidirectional_samples, tokenizer,
         seq_length=args.seq_length, pile_ratio=args.pile_ratio
     )
 
     print_flush(f"  Train samples: {len(train_dataset)}")
     print_flush(f"    - Pile: {len(train_dataset.pile_samples)}")
-    print_flush(f"    - Family (with context): {sum(1 for s in context_samples if s['has_context'])}")
-    print_flush(f"    - Family (without context): {sum(1 for s in context_samples if not s['has_context'])}")
+    print_flush(f"    - Family (forward): {sum(1 for s in bidirectional_samples if s['direction'] == 'forward')}")
+    print_flush(f"    - Family (backward): {sum(1 for s in bidirectional_samples if s['direction'] == 'backward')}")
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 
@@ -471,43 +463,33 @@ def run_context_model(
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
-    print_flush("\n[Context] Training...")
+    print_flush("\n[Bidirectional] Training...")
     best_ppl, best_epoch, best_state = train_model(
         model, train_loader, pile_val_loader, optimizer, device,
-        args.epochs, args.patience, GRADIENT_CLIP, "context"
+        args.epochs, args.patience, GRADIENT_CLIP, "bidirectional"
     )
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
 
     if best_state:
         model.load_state_dict(best_state)
 
-    # 評価（コンテキスト付き - 訓練ペア）
-    # Context modelはコンテキスト付きで訓練されているので、コンテキスト付きで評価
-    print_flush("\n  Reasoning with Context (Train pairs):")
-    train_with_ctx = evaluate_relation_reasoning(
-        model, train_pairs, tokenizer, device, use_context=True
+    # 評価（訓練ペア - 両方向とも訓練済み）
+    print_flush("\n  Train pairs (both directions trained):")
+    train_result = evaluate_relation_reasoning(
+        model, train_pairs, tokenizer, device
     )
-    print_flush(f"    Forward PPL: {train_with_ctx['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {train_with_ctx['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {train_with_ctx['gap']:+.1f}")
+    print_flush(f"    Forward PPL: {train_result['forward_ppl']:.1f}")
+    print_flush(f"    Backward PPL: {train_result['backward_ppl']:.1f}")
+    print_flush(f"    Gap: {train_result['gap']:+.1f}")
 
-    # 評価（コンテキスト付き - 未学習ペア）
-    print_flush("\n  Reasoning with Context (Val pairs - generalization):")
-    val_with_ctx = evaluate_relation_reasoning(
-        model, val_pairs, tokenizer, device, use_context=True
+    # 評価（未学習ペア - 汎化テスト）
+    print_flush("\n  Val pairs (generalization):")
+    val_result = evaluate_relation_reasoning(
+        model, val_pairs, tokenizer, device
     )
-    print_flush(f"    Forward PPL: {val_with_ctx['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {val_with_ctx['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {val_with_ctx['gap']:+.1f}")
-
-    # 評価（コンテキストなし - 知識転移評価）
-    print_flush("\n  Without Context (Train pairs - knowledge transfer):")
-    train_no_ctx = evaluate_relation_reasoning(
-        model, train_pairs, tokenizer, device, use_context=False
-    )
-    print_flush(f"    Forward PPL: {train_no_ctx['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {train_no_ctx['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {train_no_ctx['gap']:+.1f}")
+    print_flush(f"    Forward PPL: {val_result['forward_ppl']:.1f}")
+    print_flush(f"    Backward PPL: {val_result['backward_ppl']:.1f}")
+    print_flush(f"    Gap: {val_result['gap']:+.1f}")
 
     print_flush("\n  Pile PPL:")
     pile_ppl = compute_ppl(model, pile_val_loader, device)
@@ -516,15 +498,12 @@ def run_context_model(
     result = {
         "best_val_ppl": best_ppl,
         "best_epoch": best_epoch,
-        "train_with_ctx_forward_ppl": train_with_ctx["forward_ppl"],
-        "train_with_ctx_backward_ppl": train_with_ctx["backward_ppl"],
-        "train_with_ctx_gap": train_with_ctx["gap"],
-        "val_with_ctx_forward_ppl": val_with_ctx["forward_ppl"],
-        "val_with_ctx_backward_ppl": val_with_ctx["backward_ppl"],
-        "val_with_ctx_gap": val_with_ctx["gap"],
-        "train_no_ctx_forward_ppl": train_no_ctx["forward_ppl"],
-        "train_no_ctx_backward_ppl": train_no_ctx["backward_ppl"],
-        "train_no_ctx_gap": train_no_ctx["gap"],
+        "train_forward_ppl": train_result["forward_ppl"],
+        "train_backward_ppl": train_result["backward_ppl"],
+        "train_gap": train_result["gap"],
+        "val_forward_ppl": val_result["forward_ppl"],
+        "val_backward_ppl": val_result["backward_ppl"],
+        "val_gap": val_result["gap"],
         "pile_ppl": pile_ppl,
     }
 
@@ -596,14 +575,14 @@ def main():
 
     results = {}
 
-    # ベースライン
+    # ベースライン（順方向のみ訓練）
     results["baseline"] = run_baseline(
         config, train_pairs, val_pairs,
         pile_tokens, pile_val_loader, tokenizer, device, args
     )
 
-    # コンテキスト推論
-    results["context"] = run_context_model(
+    # 双方向（順方向+逆方向を訓練）
+    results["bidirectional"] = run_bidirectional_model(
         config, train_pairs, val_pairs,
         pile_tokens, pile_val_loader, tokenizer, device, args
     )
@@ -613,27 +592,26 @@ def main():
     print_flush("SUMMARY")
     print_flush("=" * 70)
 
-    print_flush("\n| Model | Train Gap (RC) | Val Gap (Gen) | Pile PPL |")
-    print_flush("|-------|----------------|---------------|----------|")
+    print_flush("\n| Model | Train Fwd | Train Bwd | Gap | Val Gap | Pile PPL |")
+    print_flush("|-------|-----------|-----------|-----|---------|----------|")
 
     baseline = results["baseline"]
     print_flush(
-        f"| Baseline (no ctx) | {baseline['train_gap']:+.1f} | "
+        f"| Baseline (fwd only) | {baseline['train_forward_ppl']:.1f} | "
+        f"{baseline['train_backward_ppl']:.1f} | {baseline['train_gap']:+.1f} | "
         f"{baseline['val_gap']:+.1f} | {baseline['pile_ppl']:.1f} |"
     )
 
-    context = results["context"]
+    bidir = results["bidirectional"]
     print_flush(
-        f"| Context (w/ ctx) | {context['train_with_ctx_gap']:+.1f} | "
-        f"{context['val_with_ctx_gap']:+.1f} | {context['pile_ppl']:.1f} |"
-    )
-    print_flush(
-        f"| Context (no ctx) | {context['train_no_ctx_gap']:+.1f} | "
-        f"- | - |"
+        f"| Bidirectional | {bidir['train_forward_ppl']:.1f} | "
+        f"{bidir['train_backward_ppl']:.1f} | {bidir['train_gap']:+.1f} | "
+        f"{bidir['val_gap']:+.1f} | {bidir['pile_ppl']:.1f} |"
     )
 
-    print_flush("\n* RC = Reversal Curse (trained facts)")
-    print_flush("* Gen = Generalization (unseen names)")
+    print_flush("\n* Baseline: Forward direction only trained")
+    print_flush("* Bidirectional: Both directions trained")
+    print_flush("* Gap = Backward PPL - Forward PPL (closer to 0 is better)")
     print_flush("\nDONE")
 
 

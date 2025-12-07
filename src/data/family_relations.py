@@ -143,21 +143,49 @@ def create_context_qa_samples(
 
 def create_baseline_samples(pairs: list[FamilyPair]) -> list[dict]:
     """
-    ベースライン用サンプルを生成（コンテキストなし、直接学習）
+    ベースライン用サンプルを生成（QA形式、順方向のみ）
 
-    通常のReversal Curse実験と同様:
-    - 順方向: "Tom Johnson's mother is Alice Smith."
-    - 評価時に逆方向を問う
+    評価と同じQA形式で訓練するが、順方向のみ学習。
+    Reversal Curseテスト: 順方向は学習済み、逆方向は未学習。
     """
     samples = []
 
     for pair in pairs:
-        # 順方向の事実のみ学習（通常のLM訓練）
-        statement = f"{pair.child_name}'s {pair.relation} is {pair.parent_name}."
+        # 順方向のみ: Who is child's parent? → parent
         samples.append({
-            "input": statement,
-            "target": "",  # 文全体を学習
-            "direction": "forward_only",
+            "input": f"Question: Who is {pair.child_name}'s parent? Answer:",
+            "target": f" {pair.parent_name}",
+            "has_context": False,
+            "direction": "forward",
+        })
+
+    return samples
+
+
+def create_bidirectional_samples(pairs: list[FamilyPair]) -> list[dict]:
+    """
+    双方向サンプルを生成（QA形式、順方向+逆方向）
+
+    順方向と逆方向の両方を学習。
+    Reversal Curseを軽減できるかテスト。
+    """
+    samples = []
+
+    for pair in pairs:
+        # 順方向: Who is child's parent? → parent
+        samples.append({
+            "input": f"Question: Who is {pair.child_name}'s parent? Answer:",
+            "target": f" {pair.parent_name}",
+            "has_context": False,
+            "direction": "forward",
+        })
+
+        # 逆方向: Who is parent's child? → child
+        samples.append({
+            "input": f"Question: Who is {pair.parent_name}'s child? Answer:",
+            "target": f" {pair.child_name}",
+            "has_context": False,
+            "direction": "backward",
         })
 
     return samples
