@@ -4,12 +4,14 @@ Selective Output Language Model
 仮説: LLMは即座に出力せず、隠れ状態を追加処理してから出力すべき
 
 動作:
-- extra_passes=0 (use_selective=False): トークン入力 → 即座に次トークン予測
-- extra_passes=1 (use_selective=True): トークン入力 → 1回追加処理 → 次トークン予測
+- mode="baseline": トークン入力 → 即座に次トークン予測
+- mode="selective": トークン入力 → 1回追加処理 → 次トークン予測（h2のみ使用）
+- mode="combined": トークン入力 → 1回追加処理 → h1+h2の両方を使用して予測
 
 例 (入力: "A B C D"):
-  extra_passes=0: embed(A) → layers → 即座に"B"予測
-  extra_passes=1: embed(A) → layers → proj → layers → "B"予測
+  baseline: embed(A) → layers → h1 → "B"予測
+  selective: embed(A) → layers → h1 → proj → layers → h2 → "B"予測
+  combined: embed(A) → layers → h1 → proj → layers → h2 → combine(h1,h2) → "B"予測
 """
 
 from typing import Optional
@@ -26,8 +28,9 @@ class SelectiveOutputLM(nn.Module):
     """
     Selective Output Language Model (効率化版)
 
-    extra_passes=0 (use_selective=False): 通常のContinuous（追加処理なし）
-    extra_passes=1 (use_selective=True): 1回追加処理してから出力
+    mode="baseline": 通常のContinuous（追加処理なし）
+    mode="selective": 1回追加処理してから出力（h2のみ使用）
+    mode="combined": 1回追加処理してh1+h2の両方を使用して出力
 
     バッチ処理で高速化: forループなしで全トークンを一括処理
     """
@@ -49,6 +52,9 @@ class SelectiveOutputLM(nn.Module):
 
         # Hidden → Hidden projection (追加処理時に使用)
         self.hidden_proj = nn.Linear(hidden_size, hidden_size)
+
+        # Combined mode: h1 + h2 を結合するための投影
+        self.combine_proj = nn.Linear(hidden_size * 2, hidden_size)
 
         # Transformer layers
         self.layers = nn.ModuleList(layers)
@@ -81,7 +87,7 @@ class SelectiveOutputLM(nn.Module):
         self,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        use_selective: bool = True,
+        mode: str = "selective",
         update_memory: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -90,7 +96,7 @@ class SelectiveOutputLM(nn.Module):
         Args:
             input_ids: [batch, seq_len]
             attention_mask: Optional attention mask
-            use_selective: True=extra_passes=1、False=extra_passes=0
+            mode: "baseline", "selective", or "combined"
             update_memory: メモリ更新フラグ
 
         Returns:
@@ -99,25 +105,38 @@ class SelectiveOutputLM(nn.Module):
         """
         # Pass 1: トークン埋め込み → Transformer
         hidden_states = self.embed_in(input_ids)
-        hidden_states = self._forward_layers(hidden_states, attention_mask, update_memory)
+        h1 = self._forward_layers(hidden_states, attention_mask, update_memory)
 
-        if use_selective:
+        if mode == "baseline":
+            # 追加処理なし
+            final_hidden_states = h1
+        elif mode == "selective":
+            # Pass 2: 隠れ状態を投影 → 再度Transformer（h2のみ使用）
+            h2 = self.hidden_proj(h1)
+            h2 = self._forward_layers(h2, attention_mask, update_memory)
+            final_hidden_states = h2
+        elif mode == "combined":
             # Pass 2: 隠れ状態を投影 → 再度Transformer
-            hidden_states = self.hidden_proj(hidden_states)
-            hidden_states = self._forward_layers(hidden_states, attention_mask, update_memory)
+            h2 = self.hidden_proj(h1)
+            h2 = self._forward_layers(h2, attention_mask, update_memory)
+            # h1とh2を結合して使用
+            combined = torch.cat([h1, h2], dim=-1)
+            final_hidden_states = self.combine_proj(combined)
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
 
         # Final layer norm + LM Head
-        hidden_states = self.final_layer_norm(hidden_states)
-        logits = self.embed_out(hidden_states)
+        final_hidden_states = self.final_layer_norm(final_hidden_states)
+        logits = self.embed_out(final_hidden_states)
 
-        final_hidden = hidden_states[:, -1, :]
+        final_hidden = final_hidden_states[:, -1, :]
         return logits, final_hidden
 
     def compute_loss(
         self,
         input_ids: torch.Tensor,
         labels: torch.Tensor,
-        use_selective: bool = True,
+        mode: str = "selective",
     ) -> tuple[torch.Tensor, dict]:
         """
         損失計算
@@ -125,13 +144,13 @@ class SelectiveOutputLM(nn.Module):
         Args:
             input_ids: [batch, seq_len]
             labels: [batch, seq_len] - input_idsと同じ（内部でshift）
-            use_selective: True=extra_passes=1、False=extra_passes=0
+            mode: "baseline", "selective", or "combined"
 
         Returns:
             loss: スカラー損失
             stats: 訓練統計
         """
-        logits, _ = self.forward(input_ids, use_selective=use_selective)
+        logits, _ = self.forward(input_ids, mode=mode)
 
         # Next-token prediction: logits[:-1] -> labels[1:]
         shift_logits = logits[:, :-1, :].contiguous()
@@ -142,11 +161,10 @@ class SelectiveOutputLM(nn.Module):
             shift_labels.view(-1),
         )
 
-        extra_passes = 1 if use_selective else 0
         stats = {
             "lm_loss": loss.item(),
             "ppl": torch.exp(loss).item(),
-            "extra_passes": extra_passes,
+            "mode": mode,
         }
 
         return loss, stats
@@ -156,7 +174,7 @@ class SelectiveOutputLM(nn.Module):
         input_ids: torch.Tensor,
         max_new_tokens: int = 50,
         temperature: float = 1.0,
-        use_selective: bool = True,
+        mode: str = "selective",
     ) -> tuple[torch.Tensor, dict]:
         """
         テキスト生成
@@ -165,7 +183,7 @@ class SelectiveOutputLM(nn.Module):
             input_ids: [batch, seq_len]
             max_new_tokens: 最大生成トークン数
             temperature: サンプリング温度
-            use_selective: True=extra_passes=1、False=extra_passes=0
+            mode: "baseline", "selective", or "combined"
 
         Returns:
             generated_ids: [batch, output_len]
@@ -177,7 +195,7 @@ class SelectiveOutputLM(nn.Module):
 
         for _ in range(max_new_tokens):
             with torch.no_grad():
-                logits, _ = self.forward(generated, use_selective=use_selective)
+                logits, _ = self.forward(generated, mode=mode)
 
                 # サンプリング
                 next_logits = logits[:, -1, :] / temperature
@@ -186,10 +204,9 @@ class SelectiveOutputLM(nn.Module):
 
                 generated = torch.cat([generated, next_token], dim=1)
 
-        extra_passes = 1 if use_selective else 0
         stats = {
             "num_tokens_generated": max_new_tokens,
-            "extra_passes": extra_passes,
+            "mode": mode,
         }
 
         return generated, stats
@@ -227,6 +244,7 @@ class SelectiveOutputLM(nn.Module):
         embedding = self.embed_in.weight.numel()
         lm_head = self.embed_out.weight.numel()
         hidden_proj = sum(p.numel() for p in self.hidden_proj.parameters())
+        combine_proj = sum(p.numel() for p in self.combine_proj.parameters())
 
         layer_params = [
             sum(p.numel() for p in layer.parameters())
@@ -238,6 +256,7 @@ class SelectiveOutputLM(nn.Module):
             "embedding": embedding,
             "lm_head": lm_head,
             "hidden_proj": hidden_proj,
+            "combine_proj": combine_proj,
             "transformer": sum(layer_params),
             "per_layer": layer_params,
         }

@@ -77,8 +77,9 @@ def prepare_data_loaders(
     # Add reversal pairs ONLY to training data (not validation)
     # This prevents data leakage
     if include_reversal_pairs:
+        # Create 100 samples to ensure all 33 sentences are well-represented
         reversal_samples = _create_reversal_training_samples(
-            tokenizer_name, seq_length
+            tokenizer_name, seq_length, num_samples=100
         )
         if reversal_samples:
             rev_inputs, rev_labels = reversal_samples
@@ -109,18 +110,19 @@ def prepare_data_loaders(
 def _create_reversal_training_samples(
     tokenizer_name: str,
     seq_length: int,
-    repeat_count: int = 10,
+    num_samples: int = 100,
 ) -> Optional[Tuple[list, list]]:
     """
     Create training samples from reversal pairs (forward direction only).
 
     複数の短い文を連結してseq_lengthのサンプルを作成する。
     パディングは使用せず、文を繰り返し連結して埋める。
+    各文が十分な回数出現するようにサンプル数を確保する。
 
     Args:
         tokenizer_name: Tokenizer name
         seq_length: Sequence length
-        repeat_count: Number of times to create samples
+        num_samples: Number of samples to create
 
     Returns:
         (input_ids_list, labels_list) or None if import fails
@@ -143,20 +145,21 @@ def _create_reversal_training_samples(
         eos = tokenizer.eos_token_id or 0
         all_tokens.append(eos)
 
-    if len(all_tokens) < seq_length + 1:
-        # Repeat tokens until we have enough
-        original_tokens = all_tokens.copy()
-        while len(all_tokens) < seq_length * repeat_count + 1:
-            all_tokens.extend(original_tokens)
+    # Repeat tokens to ensure enough data for all samples
+    original_tokens = all_tokens.copy()
+    min_tokens_needed = seq_length * num_samples + seq_length
+    while len(all_tokens) < min_tokens_needed:
+        all_tokens.extend(original_tokens)
 
     input_ids_list = []
     labels_list = []
 
-    # Create samples by sliding window over concatenated tokens
+    # Create samples by sliding window with stride = seq_length // 2 for overlap
+    stride = max(seq_length // 2, 1)
     total_tokens = len(all_tokens)
-    for i in range(repeat_count):
-        # Start at different positions to create variety
-        start = (i * seq_length) % (total_tokens - seq_length - 1)
+
+    for i in range(num_samples):
+        start = (i * stride) % (total_tokens - seq_length - 1)
         end = start + seq_length + 1
 
         if end > total_tokens:

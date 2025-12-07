@@ -5,15 +5,16 @@ Selective Output LM Experiment
 仮説: LLMは即座に出力せず、隠れ状態を追加処理してから出力すべき
 
 動作:
-- Baseline (extra_passes=0): トークン入力 → 即座に次トークン予測（追加処理なし）
-- Selective (extra_passes=1): トークン入力 → 1回追加処理 → 次トークン予測
+- baseline: トークン入力 → 即座に次トークン予測
+- selective: トークン入力 → 1回追加処理 → 次トークン予測（h2のみ使用）
+- combined: トークン入力 → 1回追加処理 → h1+h2の両方を使用して予測
 
 Usage:
-    # Selective only (default)
+    # Combined only (default)
     python3 scripts/experiment_selective.py
 
-    # Compare with baseline
-    python3 scripts/experiment_selective.py --models baseline selective
+    # Compare all models
+    python3 scripts/experiment_selective.py --models baseline selective combined
 """
 
 import argparse
@@ -38,20 +39,20 @@ from src.utils.training import get_device, prepare_data_loaders
 
 
 class ModelWrapper:
-    """評価用モデルラッパー（use_selectiveを固定）"""
-    def __init__(self, model, use_selective: bool):
+    """評価用モデルラッパー（modeを固定）"""
+    def __init__(self, model, mode: str):
         self.model = model
-        self.use_selective = use_selective
+        self.mode = mode
 
     def __call__(self, input_ids):
-        logits, _ = self.model(input_ids, use_selective=self.use_selective)
+        logits, _ = self.model(input_ids, mode=self.mode)
         return logits
 
     def eval(self):
         self.model.eval()
 
 
-def compute_ppl(model, data_loader, device, use_selective: bool) -> float:
+def compute_ppl(model, data_loader, device, mode: str) -> float:
     """共通PPL計算関数"""
     model.eval()
     total_loss = 0.0
@@ -63,7 +64,7 @@ def compute_ppl(model, data_loader, device, use_selective: bool) -> float:
             input_ids = input_ids.to(device)
             labels = labels.to(device)
 
-            loss, _ = model.compute_loss(input_ids, labels, use_selective=use_selective)
+            loss, _ = model.compute_loss(input_ids, labels, mode=mode)
 
             batch_tokens = (labels.size(1) - 1) * labels.size(0)
             total_loss += loss.item() * batch_tokens
@@ -81,13 +82,12 @@ def train_selective(
     num_epochs: int,
     patience: int,
     gradient_clip: float = 1.0,
-    use_selective: bool = True,
+    mode: str = "selective",
 ) -> tuple[float, int, Optional[dict]]:
     """
     SelectiveOutputLM訓練
 
-    use_selective=True: extra_passes=1（1回追加処理してから出力）
-    use_selective=False: extra_passes=0（即座に出力、通常のContinuous）
+    mode: "baseline", "selective", or "combined"
     """
     best_val_ppl = float("inf")
     best_epoch = 0
@@ -108,7 +108,7 @@ def train_selective(
 
             optimizer.zero_grad()
 
-            loss, stats = model.compute_loss(input_ids, labels, use_selective=use_selective)
+            loss, stats = model.compute_loss(input_ids, labels, mode=mode)
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
@@ -121,7 +121,7 @@ def train_selective(
         train_ppl = torch.exp(torch.tensor(epoch_loss / epoch_tokens)).item()
 
         # Validation（共通関数を使用）
-        val_ppl = compute_ppl(model, val_loader, device, use_selective)
+        val_ppl = compute_ppl(model, val_loader, device, mode)
         elapsed = time.time() - start_time
 
         improved = val_ppl < best_val_ppl
@@ -135,10 +135,9 @@ def train_selective(
             patience_counter += 1
             marker = ""
 
-        extra_passes = 1 if use_selective else 0
         print_flush(
             f"  Epoch {epoch:2d}: train={train_ppl:7.1f}, val={val_ppl:7.1f}, "
-            f"extra={extra_passes} ({elapsed:.1f}s) {marker}"
+            f"mode={mode} ({elapsed:.1f}s) {marker}"
         )
 
         if patience_counter >= patience:
@@ -148,12 +147,79 @@ def train_selective(
     return best_val_ppl, best_epoch, best_state_dict
 
 
+def run_model(
+    model_name: str,
+    mode: str,
+    config: PythiaConfig,
+    train_loader,
+    val_loader,
+    device: torch.device,
+    args,
+) -> dict:
+    """単一モデルの訓練と評価"""
+    print_flush("\n" + "=" * 70)
+    print_flush(f"{model_name.upper()} (mode={mode})")
+    print_flush("=" * 70)
+
+    model = create_model("selective", config)
+    model = model.to(device)
+
+    param_info = model.num_parameters()
+    print_flush(f"  Parameters: {param_info['total']:,}")
+    if mode in ["selective", "combined"]:
+        print_flush(f"    - hidden_proj: {param_info['hidden_proj']:,}")
+    if mode == "combined":
+        print_flush(f"    - combine_proj: {param_info['combine_proj']:,}")
+
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+
+    print_flush(f"\n[{model_name}] Training...")
+    best_ppl, best_epoch, best_state = train_selective(
+        model, train_loader, val_loader, optimizer, device,
+        args.epochs, args.patience, GRADIENT_CLIP,
+        mode=mode,
+    )
+    print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
+
+    if best_state:
+        model.load_state_dict(best_state)
+
+    # Evaluation
+    print_flush(f"\n  Position-wise PPL (mode={mode}):")
+    model.eval()
+    wrapper = ModelWrapper(model, mode=mode)
+    pos_ppl = evaluate_position_wise_ppl(wrapper, val_loader, device)
+    for pos_range, ppl in pos_ppl.items():
+        print_flush(f"    {pos_range}: {ppl:.1f}")
+
+    print_flush("\n  Reversal Curse:")
+    tokenizer = get_tokenizer(config.tokenizer_name)
+    reversal_pairs = get_reversal_pairs()
+    reversal = evaluate_reversal_curse(wrapper, tokenizer, reversal_pairs, device)
+    print_flush(f"    Forward PPL: {reversal['forward_ppl']:.1f}")
+    print_flush(f"    Backward PPL: {reversal['backward_ppl']:.1f}")
+    print_flush(f"    Gap: {reversal['reversal_gap']:+.1f}")
+
+    result = {
+        "best_val_ppl": best_ppl,
+        "best_epoch": best_epoch,
+        "mode": mode,
+        "position_wise_ppl": pos_ppl,
+        "reversal_curse": reversal,
+    }
+
+    del model
+    clear_gpu_cache(device)
+
+    return result
+
+
 def main():
     parser = argparse.ArgumentParser(description="Selective Output LM Experiment")
     parser.add_argument(
-        "--models", nargs="+", default=["selective"],
-        choices=["baseline", "selective"],
-        help="Models to run (baseline=extra_passes=0, selective=extra_passes=1)"
+        "--models", nargs="+", default=["combined"],
+        choices=["baseline", "selective", "combined"],
+        help="Models to run"
     )
     parser.add_argument("--samples", type=int, default=5000)
     parser.add_argument("--seq-length", type=int, default=128)
@@ -196,114 +262,18 @@ def main():
 
     results = {}
 
-    # =========================================================================
-    # Baseline (extra_passes=0, equivalent to Continuous)
-    # =========================================================================
-    if "baseline" in args.models:
-        print_flush("\n" + "=" * 70)
-        print_flush("BASELINE (extra_passes=0, no extra processing)")
-        print_flush("=" * 70)
-
-        model = create_model("selective", config)
-        model = model.to(device)
-
-        param_info = model.num_parameters()
-        print_flush(f"  Parameters: {param_info['total']:,}")
-
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-
-        print_flush("\n[Baseline] Training...")
-        best_ppl, best_epoch, best_state = train_selective(
-            model, train_loader, val_loader, optimizer, device,
-            args.epochs, args.patience, GRADIENT_CLIP,
-            use_selective=False,  # extra_passes=0
+    # Run each model
+    for model_name in args.models:
+        result = run_model(
+            model_name=model_name,
+            mode=model_name,  # mode名 = model名
+            config=config,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            device=device,
+            args=args,
         )
-        print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
-
-        if best_state:
-            model.load_state_dict(best_state)
-
-        # Evaluation
-        print_flush("\n  Position-wise PPL:")
-        model.eval()
-        wrapper = ModelWrapper(model, use_selective=False)
-        pos_ppl = evaluate_position_wise_ppl(wrapper, val_loader, device)
-        for pos_range, ppl in pos_ppl.items():
-            print_flush(f"    {pos_range}: {ppl:.1f}")
-
-        print_flush("\n  Reversal Curse:")
-        tokenizer = get_tokenizer(config.tokenizer_name)
-        reversal_pairs = get_reversal_pairs()
-        reversal = evaluate_reversal_curse(wrapper, tokenizer, reversal_pairs, device)
-        print_flush(f"    Forward PPL: {reversal['forward_ppl']:.1f}")
-        print_flush(f"    Backward PPL: {reversal['backward_ppl']:.1f}")
-        print_flush(f"    Gap: {reversal['reversal_gap']:+.1f}")
-
-        results["baseline"] = {
-            "best_val_ppl": best_ppl,
-            "best_epoch": best_epoch,
-            "extra_passes": 0,
-            "position_wise_ppl": pos_ppl,
-            "reversal_curse": reversal,
-        }
-
-        del model
-        clear_gpu_cache(device)
-
-    # =========================================================================
-    # Selective Output LM (extra_passes=1)
-    # =========================================================================
-    if "selective" in args.models:
-        print_flush("\n" + "=" * 70)
-        print_flush("SELECTIVE (extra_passes=1, 1 extra processing)")
-        print_flush("=" * 70)
-
-        model = create_model("selective", config)
-        model = model.to(device)
-
-        param_info = model.num_parameters()
-        print_flush(f"  Parameters: {param_info['total']:,}")
-        print_flush(f"    - hidden_proj: {param_info['hidden_proj']:,}")
-
-        optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
-
-        print_flush("\n[Selective] Training...")
-        best_ppl, best_epoch, best_state = train_selective(
-            model, train_loader, val_loader, optimizer, device,
-            args.epochs, args.patience, GRADIENT_CLIP,
-            use_selective=True,  # extra_passes=1
-        )
-        print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
-
-        if best_state:
-            model.load_state_dict(best_state)
-
-        # Evaluation (using selective mode)
-        print_flush("\n  Position-wise PPL (extra_passes=1):")
-        model.eval()
-        wrapper = ModelWrapper(model, use_selective=True)
-        pos_ppl = evaluate_position_wise_ppl(wrapper, val_loader, device)
-        for pos_range, ppl in pos_ppl.items():
-            print_flush(f"    {pos_range}: {ppl:.1f}")
-
-        print_flush("\n  Reversal Curse:")
-        tokenizer = get_tokenizer(config.tokenizer_name)
-        reversal_pairs = get_reversal_pairs()
-        reversal = evaluate_reversal_curse(wrapper, tokenizer, reversal_pairs, device)
-        print_flush(f"    Forward PPL: {reversal['forward_ppl']:.1f}")
-        print_flush(f"    Backward PPL: {reversal['backward_ppl']:.1f}")
-        print_flush(f"    Gap: {reversal['reversal_gap']:+.1f}")
-
-        results["selective"] = {
-            "best_val_ppl": best_ppl,
-            "best_epoch": best_epoch,
-            "extra_passes": 1,
-            "position_wise_ppl": pos_ppl,
-            "reversal_curse": reversal,
-        }
-
-        del model
-        clear_gpu_cache(device)
+        results[model_name] = result
 
     # =========================================================================
     # Summary
@@ -312,10 +282,10 @@ def main():
     print_flush("SUMMARY")
     print_flush("=" * 70)
 
-    print_flush("\n| Model | Extra Passes | Best PPL | Epoch |")
-    print_flush("|-------|--------------|----------|-------|")
+    print_flush("\n| Model | Mode | Best PPL | Epoch |")
+    print_flush("|-------|------|----------|-------|")
     for model_name, r in results.items():
-        print_flush(f"| {model_name} | {r['extra_passes']} | {r['best_val_ppl']:.1f} | {r['best_epoch']} |")
+        print_flush(f"| {model_name} | {r['mode']} | {r['best_val_ppl']:.1f} | {r['best_epoch']} |")
 
     print_flush("\n| Model | Forward PPL | Backward PPL | Gap |")
     print_flush("|-------|-------------|--------------|-----|")
