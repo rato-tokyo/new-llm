@@ -1,20 +1,30 @@
 """
-Selective Output Language Model (Simplified)
+Selective Output Language Model
 
-仮説: LLMの全出力がトークン化されるべきではない
-- 固定パターンで持ち越し（例: 2回に1回）
-- 持ち越し位置では損失なし、出力位置でのみ損失計算
+仮説: LLMは即座に出力せず、隠れ状態を追加処理してから出力すべき
 
-簡素化版:
-- 学習可能ゲートを削除
-- 固定スキップパターン（skip_interval回に1回出力）
-- 例: skip_interval=2 → 出力、スキップ、出力、スキップ...
+動作:
+- 従来のContinuous: トークン入力 → 即座に次トークン予測
+- Selective: トークン入力 → 隠れ状態を追加処理 → 次トークン予測
+
+skip_interval (追加処理回数):
+- 0: 追加処理なし = 従来のContinuousと同等
+- 1: 1回追加処理後に出力（入力→処理→追加処理→出力）
+- 2: 2回追加処理後に出力
+
+例 (skip_interval=1, 入力: "A B C D"):
+  Step 1: 入力A → 隠れ状態h1（まだ出力しない）
+  Step 2: h1を追加処理 → 隠れ状態h2 → "B"を予測・出力
+  Step 3: 入力B → 隠れ状態h3（まだ出力しない）
+  Step 4: h3を追加処理 → 隠れ状態h4 → "C"を予測・出力
+  ...
 """
 
 from typing import Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from src.models.base_components import init_weights
 from src.models.layers import BaseLayer
@@ -22,18 +32,12 @@ from src.models.layers import BaseLayer
 
 class SelectiveOutputLM(nn.Module):
     """
-    Selective Output Language Model (Simplified)
+    Selective Output Language Model
 
-    固定パターンで持ち越しを行う。
-    skip_interval=2: 2位置ごとに1回出力（50%持ち越し）
-    skip_interval=3: 3位置ごとに1回出力（66%持ち越し）
-
-    訓練時:
-    - 出力位置のみで損失計算
-    - 持ち越し位置は損失なし
-
-    推論時:
-    - 同じ固定パターンで出力
+    トークン入力後、skip_interval回の追加処理を経てから出力する。
+    skip_interval=0: 追加処理なし（Continuousと同等）
+    skip_interval=1: 1回追加処理後に出力
+    skip_interval=2: 2回追加処理後に出力
     """
 
     def __init__(
@@ -41,19 +45,19 @@ class SelectiveOutputLM(nn.Module):
         layers: list[BaseLayer],
         vocab_size: int = 50304,
         hidden_size: int = 512,
-        skip_interval: int = 2,  # N回に1回出力（デフォルト: 2回に1回=50%出力）
+        skip_interval: int = 1,  # 追加処理回数（0=Continuous、1=1回追加処理）
     ):
         super().__init__()
 
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_layers = len(layers)
-        self.skip_interval = skip_interval
+        self.skip_interval = max(0, skip_interval)  # 0以上
 
         # Token Embedding
         self.embed_in = nn.Embedding(vocab_size, hidden_size)
 
-        # Hidden → Hidden projection (スキップ時に使用)
+        # Hidden → Hidden projection (追加処理時に使用)
         self.hidden_proj = nn.Linear(hidden_size, hidden_size)
 
         # Transformer layers
@@ -68,12 +72,84 @@ class SelectiveOutputLM(nn.Module):
         # Initialize weights
         self.apply(init_weights)
 
+    def _process_single_step(
+        self,
+        hidden_states: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        update_memory: bool = True,
+    ) -> torch.Tensor:
+        """1ステップの処理（Transformer layers通過）"""
+        for layer in self.layers:
+            hidden_states = layer(
+                hidden_states,
+                attention_mask=attention_mask,
+                update_memory=update_memory,
+            )
+        return hidden_states
+
+    def forward_selective(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        update_memory: bool = True,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict]:
+        """
+        Selective forward pass - 各トークンをskip_interval回処理してから出力
+
+        Args:
+            input_ids: [batch, seq_len]
+            attention_mask: Optional attention mask
+            update_memory: メモリ更新フラグ
+
+        Returns:
+            logits: [batch, num_outputs, vocab_size] - 出力位置のlogitsのみ
+            final_hidden: [batch, hidden_size] - 最終隠れ表現
+            stats: 統計情報
+        """
+        batch_size, seq_len = input_ids.shape
+        device = input_ids.device
+
+        all_output_logits = []
+        total_process_steps = 0
+
+        # 各入力トークンに対して処理
+        for t in range(seq_len):
+            # Step 1: トークンを埋め込み
+            token_embed = self.embed_in(input_ids[:, t:t+1])  # [batch, 1, hidden]
+
+            # 初回処理（トークン埋め込み → Transformer）
+            hidden = self._process_single_step(token_embed, None, update_memory)
+            total_process_steps += 1
+
+            # skip_interval回の追加処理
+            for _ in range(self.skip_interval):
+                # 隠れ状態を投影して再処理
+                hidden = self.hidden_proj(hidden)
+                hidden = self._process_single_step(hidden, None, update_memory)
+                total_process_steps += 1
+
+            # 出力
+            normed = self.final_layer_norm(hidden)
+            logits = self.embed_out(normed)  # [batch, 1, vocab]
+            all_output_logits.append(logits)
+
+        # 全出力を結合
+        output_logits = torch.cat(all_output_logits, dim=1)  # [batch, seq_len, vocab]
+        final_hidden = hidden[:, -1, :]
+
+        stats = {
+            "num_outputs": seq_len,
+            "total_process_steps": total_process_steps,
+            "avg_steps_per_output": total_process_steps / seq_len if seq_len > 0 else 0,
+        }
+
+        return output_logits, final_hidden, stats
+
     def forward(
         self,
         input_ids: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        use_selective: bool = False,
-        prev_hidden: Optional[torch.Tensor] = None,
+        use_selective: bool = True,
         update_memory: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
@@ -82,28 +158,22 @@ class SelectiveOutputLM(nn.Module):
         Args:
             input_ids: [batch, seq_len]
             attention_mask: Optional attention mask
-            use_selective: 選択的出力モードを使用するか
-            prev_hidden: [batch, hidden_size] - 前ステップの隠れ表現（スキップ時）
+            use_selective: Selectiveモードを使用するか（False=通常のforward）
             update_memory: メモリ更新フラグ
 
         Returns:
             logits: [batch, seq_len, vocab_size]
-            final_hidden: [batch, hidden_size] - 最終隠れ表現
+            final_hidden: [batch, hidden_size]
         """
-        if use_selective and prev_hidden is not None:
-            # 選択的モード: 前の隠れ表現を最初の入力に使用
-            batch_size, seq_len = input_ids.shape
-            first_hidden = self.hidden_proj(prev_hidden).unsqueeze(1)
+        if use_selective and self.skip_interval > 0:
+            logits, final_hidden, _ = self.forward_selective(
+                input_ids, attention_mask, update_memory
+            )
+            return logits, final_hidden
 
-            if seq_len > 1:
-                rest_hidden = self.embed_in(input_ids[:, 1:])
-                hidden_states = torch.cat([first_hidden, rest_hidden], dim=1)
-            else:
-                hidden_states = first_hidden
-        else:
-            hidden_states = self.embed_in(input_ids)
+        # 通常のforward（skip_interval=0 または use_selective=False）
+        hidden_states = self.embed_in(input_ids)
 
-        # Transformer layers
         for layer in self.layers:
             hidden_states = layer(
                 hidden_states,
@@ -111,106 +181,71 @@ class SelectiveOutputLM(nn.Module):
                 update_memory=update_memory,
             )
 
-        # Final layer norm
         hidden_states = self.final_layer_norm(hidden_states)
-
-        # LM Head
         logits = self.embed_out(hidden_states)
-
-        # Final hidden for next step
         final_hidden = hidden_states[:, -1, :]
 
         return logits, final_hidden
 
-    def compute_fixed_skip_loss(
+    def compute_loss(
         self,
-        logits: torch.Tensor,
+        input_ids: torch.Tensor,
         labels: torch.Tensor,
+        use_selective: bool = True,
     ) -> tuple[torch.Tensor, dict]:
         """
-        固定スキップパターンによる損失計算
+        損失計算
 
-        skip_interval=2の場合:
-        - pos 0: 出力 → logits[0]とlabels[1]比較
-        - pos 1: スキップ → 損失なし（labels[2]を持ち越し）
-        - pos 2: 出力 → logits[2]とlabels[2]比較（持ち越されたターゲット）
-        - pos 3: スキップ → 損失なし（labels[3]を持ち越し）
-        ...
+        Selective mode:
+        - forward_selectiveで各トークンをskip_interval回処理
+        - 各出力で次トークンを予測
 
         Args:
-            logits: [batch, seq_len, vocab_size]
-            labels: [batch, seq_len]
+            input_ids: [batch, seq_len]
+            labels: [batch, seq_len] - input_idsと同じ（内部でshift）
 
         Returns:
             loss: スカラー損失
             stats: 訓練統計
         """
-        batch_size, seq_len = labels.shape
-
-        # Next-token prediction の shift
-        shift_logits = logits[:, :-1, :].contiguous()  # [batch, seq_len-1, vocab]
-
-        # 固定出力マスク: skip_interval回に1回出力
-        # pos 0, skip_interval, 2*skip_interval, ... で出力
-        output_mask = torch.zeros(seq_len - 1, device=logits.device)
-        for i in range(0, seq_len - 1, self.skip_interval):
-            output_mask[i] = 1.0
-        output_mask = output_mask.unsqueeze(0).expand(batch_size, -1)  # [batch, seq_len-1]
-
-        # 持ち越しターゲットの計算
-        # 累積出力数（exclusive）
-        cumsum_before = torch.zeros_like(output_mask)
-        cumsum_before[:, 1:] = output_mask[:, :-1].cumsum(dim=1)
-
-        # ターゲットインデックス = 1 + cumsum_before
-        target_indices = (1 + cumsum_before.long()).clamp(0, seq_len - 1)
-
-        # バッチごとにターゲットを gather
-        carryover_targets = torch.gather(labels, 1, target_indices)  # [batch, seq_len-1]
-
-        # Per-token cross entropy
-        loss_fct = nn.CrossEntropyLoss(reduction='none')
-        per_token_loss = loss_fct(
-            shift_logits.view(-1, self.vocab_size),
-            carryover_targets.view(-1)
-        ).view(batch_size, seq_len - 1)
-
-        # 出力位置のみで損失を計算
-        masked_loss = per_token_loss * output_mask
-        output_count = output_mask.sum()
-
-        if output_count > 0:
-            loss = masked_loss.sum() / output_count
+        if use_selective and self.skip_interval > 0:
+            logits, _, proc_stats = self.forward_selective(input_ids)
         else:
-            loss = per_token_loss.mean()
+            logits, _ = self.forward(input_ids, use_selective=False)
+            proc_stats = {"num_outputs": input_ids.size(1), "total_process_steps": input_ids.size(1)}
 
-        # 統計情報
-        with torch.no_grad():
-            output_ratio = output_count.item() / output_mask.numel()
-            carryover_ratio = 1.0 - output_ratio
+        # Next-token prediction: logits[:-1] -> labels[1:]
+        shift_logits = logits[:, :-1, :].contiguous()
+        shift_labels = labels[:, 1:].contiguous()
+
+        loss = F.cross_entropy(
+            shift_logits.view(-1, self.vocab_size),
+            shift_labels.view(-1),
+        )
 
         stats = {
             "lm_loss": loss.item(),
-            "output_ratio": output_ratio,
-            "carryover_ratio": carryover_ratio,
-            "output_count": output_count.item(),
+            "ppl": torch.exp(loss).item(),
+            **proc_stats,
         }
 
         return loss, stats
 
-    def generate_selective(
+    def generate(
         self,
         input_ids: torch.Tensor,
         max_new_tokens: int = 50,
         temperature: float = 1.0,
+        use_selective: bool = True,
     ) -> tuple[torch.Tensor, dict]:
         """
-        固定スキップパターンでテキスト生成
+        テキスト生成
 
         Args:
             input_ids: [batch, seq_len]
             max_new_tokens: 最大生成トークン数
             temperature: サンプリング温度
+            use_selective: Selectiveモードを使用するか
 
         Returns:
             generated_ids: [batch, output_len]
@@ -220,52 +255,41 @@ class SelectiveOutputLM(nn.Module):
         device = input_ids.device
         batch_size = input_ids.size(0)
 
-        # 初期処理
-        with torch.no_grad():
-            logits, prev_hidden = self.forward(input_ids, use_selective=False)
-
         generated = [input_ids]
-        total_steps = 0
-        skip_count = 0
-        output_count = 0
+        total_process_steps = 0
 
-        while output_count < max_new_tokens:
-            total_steps += 1
+        # 初期コンテキスト処理
+        with torch.no_grad():
+            if use_selective and self.skip_interval > 0:
+                logits, prev_hidden, init_stats = self.forward_selective(input_ids)
+                total_process_steps += init_stats["total_process_steps"]
+            else:
+                logits, prev_hidden = self.forward(input_ids, use_selective=False)
+                total_process_steps += input_ids.size(1)
 
-            if total_steps % self.skip_interval == 1:
-                # 出力
+        for _ in range(max_new_tokens):
+            with torch.no_grad():
+                if use_selective and self.skip_interval > 0:
+                    # 最後に生成したトークンをSelectiveモードで処理
+                    last_token = generated[-1][:, -1:]
+                    logits, prev_hidden, step_stats = self.forward_selective(last_token)
+                    total_process_steps += step_stats["total_process_steps"]
+                else:
+                    last_token = generated[-1][:, -1:]
+                    logits, prev_hidden = self.forward(last_token, use_selective=False)
+                    total_process_steps += 1
+
+                # サンプリング
                 next_logits = logits[:, -1, :] / temperature
                 probs = torch.softmax(next_logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
 
                 generated.append(next_token)
-                output_count += 1
-
-                # 次のステップ（トークン埋め込みを使用）
-                with torch.no_grad():
-                    logits, prev_hidden = self.forward(
-                        next_token,
-                        use_selective=False,
-                    )
-            else:
-                # スキップ（hiddenを継続）
-                skip_count += 1
-
-                # ダミートークン
-                dummy_token = torch.zeros(batch_size, 1, dtype=torch.long, device=device)
-
-                with torch.no_grad():
-                    logits, prev_hidden = self.forward(
-                        dummy_token,
-                        use_selective=True,
-                        prev_hidden=prev_hidden,
-                    )
 
         stats = {
-            "total_steps": total_steps,
-            "output_count": output_count,
-            "skip_count": skip_count,
-            "skip_ratio": skip_count / total_steps if total_steps > 0 else 0,
+            "num_tokens_generated": max_new_tokens,
+            "total_process_steps": total_process_steps,
+            "avg_steps_per_token": total_process_steps / (input_ids.size(1) + max_new_tokens),
         }
 
         return torch.cat(generated, dim=1), stats
