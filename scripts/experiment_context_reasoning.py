@@ -33,7 +33,6 @@ from src.data.family_relations import (
     create_baseline_pattern_samples,
     create_baseline_val_samples,
     create_modified_pattern_samples,
-    create_modified_no_context_samples,
     create_modified_val_samples,
     generate_family_pairs,
     split_pairs_for_experiment,
@@ -153,31 +152,25 @@ def create_baseline_family_samples(
 
 def create_modified_family_samples(
     pattern_samples: list[dict],
-    no_context_samples: list[dict],
     val_samples: list[dict],
     tokenizer,
 ) -> list[dict]:
     """Modified用Familyサンプルを作成"""
     family_samples = []
 
-    # コンテキスト分離サンプル
-    for sample in pattern_samples + no_context_samples:
+    # コンテキスト分離サンプル（context部分のみマスク）
+    for sample in pattern_samples:
         context = sample["context"]
         question = sample["question"]
         answer = sample["answer"]
 
-        if context:
-            # context部分のみマスク（question + answerは学習対象）
-            full_text = f"{context} {question}{answer}"
-            # 注意: context + " " の長さを取得（スペースも含む）
-            context_only = f"{context} "
-        else:
-            # コンテキストなしの場合はマスクなし（全文学習）
-            full_text = f"{question}{answer}"
-            context_only = ""
+        # context部分のみマスク（question + answerは学習対象）
+        full_text = f"{context} {question}{answer}"
+        # 注意: context + " " の長さを取得（スペースも含む）
+        context_only = f"{context} "
 
         full_tokens = tokenizer.encode(full_text)
-        context_len = len(tokenizer.encode(context_only)) if context_only else 0
+        context_len = len(tokenizer.encode(context_only))
 
         family_samples.append({
             "type": sample["type"],
@@ -471,12 +464,11 @@ def run_modified(
 
     # サンプル生成
     pattern_samples = create_modified_pattern_samples(pattern_pairs)
-    no_context_samples = create_modified_no_context_samples(pattern_pairs)
     val_samples = create_modified_val_samples(val_pairs)
 
     # Familyサンプル作成
     family_samples = create_modified_family_samples(
-        pattern_samples, no_context_samples, val_samples, tokenizer
+        pattern_samples, val_samples, tokenizer
     )
 
     # データセット作成（Pileサンプルは共通）
@@ -487,7 +479,6 @@ def run_modified(
     print_flush(f"  Train samples: {len(train_dataset)}")
     print_flush(f"    - Pile: {len(pile_samples)}")
     print_flush(f"    - Pattern (context-separated): {len(pattern_samples)}")
-    print_flush(f"    - No-context: {len(no_context_samples)}")
     print_flush(f"    - Val (forward only): {len(val_samples)}")
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)

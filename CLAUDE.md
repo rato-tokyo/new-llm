@@ -534,17 +534,6 @@ Reversal Curseの真の問題は「逆方向を推論できない」ことでは
 
 → 初期コンテキストをloss計算から除外。丸暗記を防ぎ、推論パターンを学習させる。
 
-**コンテキストなし（知識分離確認）**:
-```
-初期context: ""
-学習対象: "Who is Alice's parent? I don't know."
-
-初期context: ""
-学習対象: "Who is Tom's children? I don't know."
-```
-
-→ コンテキストなしでは「わからない」と答えることを学習。
-
 **Valペア（順方向のみ、Baselineと同一）**:
 ```
 初期context: 任意

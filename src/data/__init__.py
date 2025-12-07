@@ -11,7 +11,6 @@ from .family_relations import (
     create_baseline_pattern_samples,
     create_baseline_val_samples,
     create_modified_pattern_samples,
-    create_modified_no_context_samples,
     create_modified_val_samples,
 )
 
@@ -26,6 +25,5 @@ __all__ = [
     "create_baseline_pattern_samples",
     "create_baseline_val_samples",
     "create_modified_pattern_samples",
-    "create_modified_no_context_samples",
     "create_modified_val_samples",
 ]

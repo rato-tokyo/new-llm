@@ -166,34 +166,6 @@ def create_modified_pattern_samples(pairs: list[FamilyPair]) -> list[dict]:
     return samples
 
 
-def create_modified_no_context_samples(pairs: list[FamilyPair]) -> list[dict]:
-    """
-    Modified: コンテキストなしサンプル（知識分離確認）
-
-    コンテキストがない場合は「わからない」と答えることを学習。
-    """
-    samples = []
-
-    for pair in pairs:
-        # 順方向の質問（コンテキストなし）
-        samples.append({
-            "context": "",
-            "question": f"Who is {pair.child_name}'s parent?",
-            "answer": " I don't know.",
-            "type": "no_context",
-        })
-
-        # 逆方向の質問（コンテキストなし）
-        samples.append({
-            "context": "",
-            "question": f"Who is {pair.parent_name}'s child?",
-            "answer": " I don't know.",
-            "type": "no_context",
-        })
-
-    return samples
-
-
 def create_modified_val_samples(pairs: list[FamilyPair]) -> list[dict]:
     """
     Modified: Valペア用サンプル（順方向のみ、全文学習）
