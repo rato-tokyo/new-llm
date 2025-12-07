@@ -3,10 +3,15 @@ Selective Output Language Model
 
 仮説: LLMの全出力がトークン化されるべきではない
 - 高確信度の出力 → トークン化して外部に出力
-- 低確信度の出力 → 内部処理として継続（スキップ）
+- 低確信度の出力 → 内部処理として継続（持ち越し）
 
 人間の「えーと」「うーん」のような思考時間に相当。
 内部で推論を続け、確信が持てたときだけ出力する。
+
+持ち越し（Carry-over）方式:
+- gate_prob < threshold: 隠れ状態を次のステップへ持ち越し、損失なし
+- gate_prob > threshold: トークン出力、持ち越されたターゲットと比較して損失計算
+- 例: 「赤い」でgate_prob低 → 持ち越し → 次ステップで出力時、ターゲットは「赤い」のまま
 
 学習可能ゲート:
 - hidden state から「出力すべきか」を判断
@@ -207,59 +212,84 @@ class SelectiveOutputLM(nn.Module):
 
         return gate_loss
 
-    def compute_selective_loss(
+    def compute_carryover_loss(
         self,
         logits: torch.Tensor,
         gate_probs: torch.Tensor,
         labels: torch.Tensor,
+        threshold: float = 0.5,
         gate_loss_weight: float = 0.1,
     ) -> tuple[torch.Tensor, dict]:
         """
-        連続的重み方式による損失計算
+        持ち越し（Carry-over）方式による損失計算
 
-        gate_probを離散的な判定（> threshold）ではなく、連続的な重みとして使用。
-        これにより:
-        - 全トークンが学習に寄与（勾配が常に流れる）
-        - thresholdハイパーパラメータが不要
-        - 訓練-評価の自然な一貫性
+        gate_prob < threshold の位置では損失を計算せず、ターゲットを持ち越す。
+        gate_prob > threshold の位置で、持ち越されたターゲットと比較して損失計算。
+
+        動作例: labels = [A, B, C, D, E], gate = [0.3, 0.6, 0.2, 0.7, 0.8], threshold=0.5
+        - 通常のnext-token prediction: logits[i]でlabels[i+1]を予測
+        - pending_target は最初 labels[1]=B
+
+        - pos 0: gate[0]=0.3 < 0.5 → 持ち越し、損失なし（pending=Bのまま）
+        - pos 1: gate[1]=0.6 > 0.5 → 出力、logits[1]とB比較、pending→labels[2]=C
+        - pos 2: gate[2]=0.2 < 0.5 → 持ち越し、損失なし（pending=Cのまま）
+        - pos 3: gate[3]=0.7 > 0.5 → 出力、logits[3]とC比較、pending→labels[3]=D
+        - pos 4: gate[4]=0.8 > 0.5 → 出力、logits[4]とD比較
 
         Args:
             logits: [batch, seq_len, vocab_size]
             gate_probs: [batch, seq_len, 1]
             labels: [batch, seq_len]
+            threshold: 出力閾値
             gate_loss_weight: ゲート損失の重み
 
         Returns:
-            total_loss: weighted LM loss + gate_loss_weight * gate_loss
+            total_loss: carry-over LM loss + gate_loss_weight * gate_loss
             stats: 訓練統計
         """
         batch_size, seq_len = labels.shape
 
-        # gate_probを連続的な重みとして使用（detachでLM lossからの勾配を遮断）
-        # gate_probはgate_lossのみで学習される
-        gate_probs_squeezed = gate_probs.squeeze(-1).detach()  # [batch, seq_len]
+        gate_probs_squeezed = gate_probs.squeeze(-1)  # [batch, seq_len]
 
-        # LM Loss計算（gate_probで重み付け）
-        # Shift for next-token prediction
+        # Next-token prediction の shift
+        # logits[i] は labels[i+1] を予測するのが基本
         shift_logits = logits[:, :-1, :].contiguous()  # [batch, seq_len-1, vocab]
-        shift_labels = labels[:, 1:].contiguous()  # [batch, seq_len-1]
-        shift_weights = gate_probs_squeezed[:, :-1].contiguous()  # [batch, seq_len-1]
+        shift_gate_probs = gate_probs_squeezed[:, :-1].contiguous()  # [batch, seq_len-1]
+
+        # 出力マスク: gate_prob > threshold の位置
+        output_mask = (shift_gate_probs > threshold).float()  # [batch, seq_len-1]
+
+        # 持ち越しターゲットの計算
+        # 出力が発生するたびに、ターゲットが次に進む
+        # 位置 i でのターゲット = labels[1 + 位置iまでの出力回数 - 1] = labels[累積出力数]
+        # ただし、位置 i で出力する場合、その出力は「今までの」累積に含まれない
+
+        # 累積出力数（exclusive: 位置iを含まない）
+        # [0, 0, ..., 0] の前に0を追加して exclusive cumsum を作る
+        cumsum_before = torch.zeros_like(output_mask)
+        cumsum_before[:, 1:] = output_mask[:, :-1].cumsum(dim=1)
+
+        # ターゲットインデックス = 1 + cumsum_before（次トークン予測のため +1）
+        target_indices = (1 + cumsum_before.long()).clamp(0, seq_len - 1)
+
+        # バッチごとにターゲットを gather
+        carryover_targets = torch.gather(labels, 1, target_indices)  # [batch, seq_len-1]
 
         # Per-token cross entropy
         loss_fct = nn.CrossEntropyLoss(reduction='none')
         per_token_loss = loss_fct(
             shift_logits.view(-1, self.vocab_size),
-            shift_labels.view(-1)
+            carryover_targets.view(-1)
         ).view(batch_size, seq_len - 1)  # [batch, seq_len-1]
 
-        # gate_probで重み付けした平均
-        weighted_loss = per_token_loss * shift_weights
-        weight_sum = shift_weights.sum()
+        # 出力位置のみで損失を計算（持ち越し位置は損失なし）
+        masked_loss = per_token_loss * output_mask
+        output_count = output_mask.sum()
 
-        if weight_sum > 0:
-            lm_loss = weighted_loss.sum() / weight_sum
+        if output_count > 0:
+            lm_loss = masked_loss.sum() / output_count
         else:
-            # 重みがない場合、通常の平均を使用（まれなケース）
+            # 出力がない場合（まれ）、通常の損失を使用
             lm_loss = per_token_loss.mean()
 
         # Gate Loss（エントロピーベース）
@@ -271,16 +301,17 @@ class SelectiveOutputLM(nn.Module):
         # 統計情報
         with torch.no_grad():
             avg_gate_prob = gate_probs_squeezed.mean().item()
-            # 有効重み（weight_sum / token数）
-            effective_weight = weight_sum.item() / shift_weights.numel()
+            output_ratio = output_count.item() / output_mask.numel()
+            carryover_ratio = 1.0 - output_ratio
 
         stats = {
             "lm_loss": lm_loss.item(),
             "gate_loss": gate_loss.item(),
             "total_loss": total_loss.item(),
             "avg_gate_prob": avg_gate_prob,
-            "effective_weight": effective_weight,
-            "weight_sum": weight_sum.item(),
+            "output_ratio": output_ratio,
+            "carryover_ratio": carryover_ratio,
+            "output_count": output_count.item(),
         }
 
         return total_loss, stats
