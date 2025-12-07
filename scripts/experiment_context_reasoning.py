@@ -167,14 +167,17 @@ def create_modified_family_samples(
         answer = sample["answer"]
 
         if context:
+            # context部分のみマスク（question + answerは学習対象）
             full_text = f"{context} {question}{answer}"
-            context_with_q = f"{context} {question}"
+            # 注意: context + " " の長さを取得（スペースも含む）
+            context_only = f"{context} "
         else:
+            # コンテキストなしの場合はマスクなし（全文学習）
             full_text = f"{question}{answer}"
-            context_with_q = question
+            context_only = ""
 
         full_tokens = tokenizer.encode(full_text)
-        context_len = len(tokenizer.encode(context_with_q))
+        context_len = len(tokenizer.encode(context_only)) if context_only else 0
 
         family_samples.append({
             "type": sample["type"],

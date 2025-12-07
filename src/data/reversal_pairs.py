@@ -103,20 +103,3 @@ def get_training_sentences(include_backward: bool = False) -> List[str]:
     return sentences
 
 
-def get_synthetic_pairs() -> List[Dict[str, str]]:
-    """
-    合成データ（架空の事実）のみを取得
-
-    より純粋なReversal Curse測定用
-    """
-    pairs = get_reversal_pairs()
-    # 最後の5つが合成データ
-    return pairs[-5:]
-
-
-def get_real_world_pairs() -> List[Dict[str, str]]:
-    """
-    実世界の事実のみを取得
-    """
-    pairs = get_reversal_pairs()
-    return pairs[:-5]

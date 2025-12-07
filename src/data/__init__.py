@@ -3,8 +3,6 @@
 from .reversal_pairs import (
     get_reversal_pairs,
     get_training_sentences,
-    get_synthetic_pairs,
-    get_real_world_pairs,
 )
 from .family_relations import (
     FamilyPair,
@@ -21,8 +19,6 @@ __all__ = [
     # reversal_pairs
     "get_reversal_pairs",
     "get_training_sentences",
-    "get_synthetic_pairs",
-    "get_real_world_pairs",
     # family_relations
     "FamilyPair",
     "generate_family_pairs",
