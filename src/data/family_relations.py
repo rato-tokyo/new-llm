@@ -143,49 +143,84 @@ def create_context_qa_samples(
 
 def create_baseline_samples(pairs: list[FamilyPair]) -> list[dict]:
     """
-    ベースライン用サンプルを生成（QA形式、順方向のみ）
+    ベースライン用サンプルを生成（従来のLM学習）
 
-    評価と同じQA形式で訓練するが、順方向のみ学習。
-    Reversal Curseテスト: 順方向は学習済み、逆方向は未学習。
+    コンテキスト+質問+回答を連結して全体を次トークン予測として学習。
+    知識と推論が混在してFFNに保存される。
+
+    形式: "{parent} is {child}'s {relation}. Who is {child}'s parent? {parent}"
     """
     samples = []
 
     for pair in pairs:
-        # 順方向のみ: Who is child's parent? → parent
+        context = f"{pair.parent_name} is {pair.child_name}'s {pair.relation}."
+        question = f"Who is {pair.child_name}'s parent?"
+        answer = pair.parent_name
+
+        # 全体を連結して学習（コンテキスト+質問+回答）
+        full_text = f"{context} {question} {answer}"
         samples.append({
-            "input": f"Question: Who is {pair.child_name}'s parent? Answer:",
-            "target": f" {pair.parent_name}",
-            "has_context": False,
-            "direction": "forward",
+            "input": full_text,
+            "target": "",  # 文全体を学習
+            "context": context,
+            "type": "baseline",
         })
 
     return samples
 
 
-def create_bidirectional_samples(pairs: list[FamilyPair]) -> list[dict]:
+def create_cdr_samples(pairs: list[FamilyPair]) -> list[dict]:
     """
-    双方向サンプルを生成（QA形式、順方向+逆方向）
+    CDR訓練用サンプルを生成（Context-Dependent Reasoning Training）
 
-    順方向と逆方向の両方を学習。
-    Reversal Curseを軽減できるかテスト。
+    推論パターンをFFNに学習させ、知識は外部コンテキストに預ける。
+
+    パターン1: コンテキストありで順方向・逆方向の両方を学習
+    パターン2: コンテキストなしで "I don't know" を学習
     """
     samples = []
 
     for pair in pairs:
-        # 順方向: Who is child's parent? → parent
+        context = f"{pair.parent_name} is {pair.child_name}'s {pair.relation}."
+
+        # コンテキストあり: 順方向（子→親を問う）
         samples.append({
-            "input": f"Question: Who is {pair.child_name}'s parent? Answer:",
+            "context": context,
+            "input": f"Who is {pair.child_name}'s parent?",
             "target": f" {pair.parent_name}",
-            "has_context": False,
+            "has_context": True,
             "direction": "forward",
+            "type": "cdr",
         })
 
-        # 逆方向: Who is parent's child? → child
+        # コンテキストあり: 逆方向（親→子を問う）
         samples.append({
-            "input": f"Question: Who is {pair.parent_name}'s child? Answer:",
+            "context": context,
+            "input": f"Who is {pair.parent_name}'s child?",
             "target": f" {pair.child_name}",
-            "has_context": False,
+            "has_context": True,
             "direction": "backward",
+            "type": "cdr",
+        })
+
+        # コンテキストなし: わからない（順方向の質問で）
+        samples.append({
+            "context": "",
+            "input": f"Who is {pair.child_name}'s parent?",
+            "target": " I don't know",
+            "has_context": False,
+            "direction": "unknown",
+            "type": "cdr",
+        })
+
+        # コンテキストなし: わからない（逆方向の質問で）
+        samples.append({
+            "context": "",
+            "input": f"Who is {pair.parent_name}'s child?",
+            "target": " I don't know",
+            "has_context": False,
+            "direction": "unknown",
+            "type": "cdr",
         })
 
     return samples
