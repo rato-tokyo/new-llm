@@ -133,86 +133,6 @@ class MixedDataset(Dataset):
             return input_ids, labels
 
 
-class ContextReasoningDataset(Dataset):
-    """コンテキスト推論用データセット（家族関係のみ）"""
-
-    def __init__(
-        self,
-        samples: list[dict],
-        tokenizer,
-        max_length: int = 128,
-    ):
-        self.samples = samples
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-        self.pad_token_id = tokenizer.eos_token_id
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        sample = self.samples[idx]
-        input_text = sample["input"]
-        target_text = sample["target"]
-
-        # 入力+出力を結合してトークン化
-        full_text = input_text + target_text
-        tokens = self.tokenizer.encode(full_text)
-
-        # 入力部分の長さを記録（loss計算時に除外するため）
-        input_tokens = self.tokenizer.encode(input_text)
-        input_len = len(input_tokens)
-
-        # パディング/切り詰め
-        if len(tokens) > self.max_length:
-            tokens = tokens[: self.max_length]
-            input_len = min(input_len, self.max_length - 1)
-        else:
-            tokens = tokens + [self.pad_token_id] * (self.max_length - len(tokens))
-
-        input_ids = torch.tensor(tokens, dtype=torch.long)
-        labels = input_ids.clone()
-
-        # 入力部分はloss計算から除外
-        labels[:input_len] = -100
-
-        return input_ids, labels
-
-
-class BaselineDataset(Dataset):
-    """ベースライン用データセット（通常のLM訓練）"""
-
-    def __init__(
-        self,
-        samples: list[dict],
-        tokenizer,
-        max_length: int = 128,
-    ):
-        self.samples = samples
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-        self.pad_token_id = tokenizer.eos_token_id
-
-    def __len__(self):
-        return len(self.samples)
-
-    def __getitem__(self, idx):
-        sample = self.samples[idx]
-        text = sample["input"]
-
-        tokens = self.tokenizer.encode(text)
-
-        if len(tokens) > self.max_length:
-            tokens = tokens[: self.max_length]
-        else:
-            tokens = tokens + [self.pad_token_id] * (self.max_length - len(tokens))
-
-        input_ids = torch.tensor(tokens, dtype=torch.long)
-        labels = input_ids.clone()
-
-        return input_ids, labels
-
-
 def compute_ppl(model, data_loader, device) -> float:
     """PPL計算"""
     model.eval()
@@ -351,7 +271,7 @@ def compute_target_loss(
 def train_model(
     model,
     train_loader,
-    val_loader,
+    pile_val_loader,
     optimizer,
     device,
     num_epochs: int,
@@ -359,7 +279,7 @@ def train_model(
     gradient_clip: float,
     model_name: str,
 ) -> tuple[float, int, Optional[dict]]:
-    """モデル訓練"""
+    """モデル訓練（Pile Val PPLでearly stopping）"""
     best_val_ppl = float("inf")
     best_epoch = 0
     best_state_dict = None
@@ -399,7 +319,8 @@ def train_model(
             epoch_tokens += mask.sum().item()
 
         train_ppl = torch.exp(torch.tensor(epoch_loss / max(epoch_tokens, 1))).item()
-        val_ppl = compute_ppl(model, val_loader, device)
+        # Pile Val PPL で early stopping
+        val_ppl = compute_ppl(model, pile_val_loader, device)
         elapsed = time.time() - start_time
 
         improved = val_ppl < best_val_ppl
@@ -414,7 +335,7 @@ def train_model(
             marker = ""
 
         print_flush(
-            f"  Epoch {epoch:2d}: train={train_ppl:7.1f}, val={val_ppl:7.1f} "
+            f"  Epoch {epoch:2d}: train={train_ppl:7.1f}, pile_val={val_ppl:7.1f} "
             f"({elapsed:.1f}s) {marker}"
         )
 
@@ -444,22 +365,17 @@ def run_baseline(
 
     # ベースラインサンプル生成（順方向の事実のみ）
     baseline_samples = create_baseline_samples(train_pairs)
-    val_samples = create_baseline_samples(val_pairs)
 
     # Pileデータと混合したデータセット
     train_dataset = MixedDataset(
         pile_tokens, baseline_samples, tokenizer,
         seq_length=args.seq_length, pile_ratio=args.pile_ratio
     )
-    val_dataset = BaselineDataset(val_samples, tokenizer, args.seq_length)
 
     print_flush(f"  Train samples: {len(train_dataset)}")
     print_flush(f"    - Pile: {len(train_dataset.pile_samples)}")
     print_flush(f"    - Family: {len(train_dataset.family_samples)}")
-    print_flush(f"  Val samples (family only): {len(val_samples)}")
-
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
 
     # モデル作成
     model = create_model("pythia", config)
@@ -469,9 +385,9 @@ def run_baseline(
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
-    print_flush("\n[Baseline] Training on family relations...")
+    print_flush("\n[Baseline] Training...")
     best_ppl, best_epoch, best_state = train_model(
-        model, train_loader, val_loader, optimizer, device,
+        model, train_loader, pile_val_loader, optimizer, device,
         args.epochs, args.patience, GRADIENT_CLIP, "baseline"
     )
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
@@ -537,23 +453,19 @@ def run_context_model(
 
     # コンテキスト付きサンプル生成
     context_samples = create_context_qa_samples(train_pairs, include_negative=True)
-    val_samples = create_context_qa_samples(val_pairs, include_negative=True)
 
     # Pileデータと混合
     train_dataset = MixedDataset(
         pile_tokens, context_samples, tokenizer,
         seq_length=args.seq_length, pile_ratio=args.pile_ratio
     )
-    val_dataset = ContextReasoningDataset(val_samples, tokenizer, args.seq_length)
 
     print_flush(f"  Train samples: {len(train_dataset)}")
     print_flush(f"    - Pile: {len(train_dataset.pile_samples)}")
     print_flush(f"    - Family (with context): {sum(1 for s in context_samples if s['has_context'])}")
     print_flush(f"    - Family (without context): {sum(1 for s in context_samples if not s['has_context'])}")
-    print_flush(f"  Val samples (family only): {len(val_samples)}")
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
 
     # モデル作成
     model = create_model("pythia", config)
@@ -563,9 +475,9 @@ def run_context_model(
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
-    print_flush("\n[Context] Training on context-based QA...")
+    print_flush("\n[Context] Training...")
     best_ppl, best_epoch, best_state = train_model(
-        model, train_loader, val_loader, optimizer, device,
+        model, train_loader, pile_val_loader, optimizer, device,
         args.epochs, args.patience, GRADIENT_CLIP, "context"
     )
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
