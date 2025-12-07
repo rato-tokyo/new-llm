@@ -5,22 +5,14 @@ Selective Output LM Experiment
 仮説: LLMは即座に出力せず、隠れ状態を追加処理してから出力すべき
 
 動作:
-- 従来のContinuous: トークン入力 → 即座に次トークン予測
-- Selective: トークン入力 → 隠れ状態を追加処理 → 次トークン予測
-
-skip_interval (追加処理回数):
-- 0: 追加処理なし = 従来のContinuousと同等
-- 1: 1回追加処理後に出力（デフォルト）
-- 2: 2回追加処理後に出力
+- Baseline (use_selective=False): トークン入力 → 1パス → 即座に次トークン予測
+- Selective (use_selective=True): トークン入力 → 2パス → 次トークン予測
 
 Usage:
-    # Selective only (default, skip_interval=1)
+    # Selective only (default)
     python3 scripts/experiment_selective.py
 
-    # With different skip interval
-    python3 scripts/experiment_selective.py --skip-interval 2
-
-    # Compare with baseline (skip_interval=0)
+    # Compare with baseline
     python3 scripts/experiment_selective.py --models baseline selective
 """
 
@@ -60,8 +52,8 @@ def train_selective(
     """
     SelectiveOutputLM訓練
 
-    use_selective=True: skip_interval回の追加処理後に出力
-    use_selective=False: 通常のContinuous（即座に出力）
+    use_selective=True: 2パス処理（1回追加処理）
+    use_selective=False: 1パス処理（通常のContinuous）
     """
     best_val_ppl = float("inf")
     best_epoch = 0
@@ -74,7 +66,6 @@ def train_selective(
 
         epoch_loss = 0.0
         epoch_tokens = 0
-        epoch_steps = 0
 
         for batch in train_loader:
             input_ids, labels = batch
@@ -83,7 +74,6 @@ def train_selective(
 
             optimizer.zero_grad()
 
-            # compute_loss uses forward_selective internally
             loss, stats = model.compute_loss(input_ids, labels, use_selective=use_selective)
 
             loss.backward()
@@ -93,10 +83,8 @@ def train_selective(
             batch_tokens = (labels.size(1) - 1) * labels.size(0)
             epoch_loss += loss.item() * batch_tokens
             epoch_tokens += batch_tokens
-            epoch_steps += stats.get("total_process_steps", batch_tokens)
 
         train_ppl = torch.exp(torch.tensor(epoch_loss / epoch_tokens)).item()
-        avg_steps = epoch_steps / epoch_tokens
 
         # Validation
         model.eval()
@@ -129,9 +117,10 @@ def train_selective(
             patience_counter += 1
             marker = ""
 
+        num_passes = 2 if use_selective else 1
         print_flush(
             f"  Epoch {epoch:2d}: train={train_ppl:7.1f}, val={val_ppl:7.1f}, "
-            f"steps/tok={avg_steps:.1f} ({elapsed:.1f}s) {marker}"
+            f"passes={num_passes} ({elapsed:.1f}s) {marker}"
         )
 
         if patience_counter >= patience:
@@ -146,7 +135,7 @@ def main():
     parser.add_argument(
         "--models", nargs="+", default=["selective"],
         choices=["baseline", "selective"],
-        help="Models to run (baseline=skip_interval=0, selective=skip_interval from --skip-interval)"
+        help="Models to run (baseline=1-pass, selective=2-pass)"
     )
     parser.add_argument("--samples", type=int, default=5000)
     parser.add_argument("--seq-length", type=int, default=128)
@@ -154,8 +143,6 @@ def main():
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-4)
     parser.add_argument("--patience", type=int, default=3)
-    parser.add_argument("--skip-interval", type=int, default=1,
-                        help="Number of extra processing steps (0=Continuous, 1=1 extra step)")
 
     args = parser.parse_args()
 
@@ -171,7 +158,6 @@ def main():
     print_flush(f"Samples: {args.samples:,}")
     print_flush(f"Sequence length: {args.seq_length}")
     print_flush(f"Epochs: {args.epochs}")
-    print_flush(f"Skip interval: {args.skip_interval} ({args.skip_interval} extra processing steps)")
     print_flush("=" * 70)
 
     # Load data
@@ -187,14 +173,14 @@ def main():
     results = {}
 
     # =========================================================================
-    # Baseline (skip_interval=0, equivalent to Continuous)
+    # Baseline (1-pass, equivalent to Continuous)
     # =========================================================================
     if "baseline" in args.models:
         print_flush("\n" + "=" * 70)
-        print_flush("BASELINE (skip_interval=0, no extra processing)")
+        print_flush("BASELINE (1-pass, no extra processing)")
         print_flush("=" * 70)
 
-        model = create_model("selective", config, skip_interval=0)
+        model = create_model("selective", config)
         model = model.to(device)
 
         param_info = model.num_parameters()
@@ -206,7 +192,7 @@ def main():
         best_ppl, best_epoch, best_state = train_selective(
             model, train_loader, val_loader, optimizer, device,
             args.epochs, args.patience, GRADIENT_CLIP,
-            use_selective=False,  # No extra processing
+            use_selective=False,  # 1-pass
         )
         print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
 
@@ -241,7 +227,7 @@ def main():
         results["baseline"] = {
             "best_val_ppl": best_ppl,
             "best_epoch": best_epoch,
-            "skip_interval": 0,
+            "num_passes": 1,
             "position_wise_ppl": pos_ppl,
             "reversal_curse": reversal,
         }
@@ -250,14 +236,14 @@ def main():
         clear_gpu_cache(device)
 
     # =========================================================================
-    # Selective Output LM
+    # Selective Output LM (2-pass)
     # =========================================================================
     if "selective" in args.models:
         print_flush("\n" + "=" * 70)
-        print_flush(f"SELECTIVE (skip_interval={args.skip_interval}, {args.skip_interval} extra steps)")
+        print_flush("SELECTIVE (2-pass, 1 extra processing)")
         print_flush("=" * 70)
 
-        model = create_model("selective", config, skip_interval=args.skip_interval)
+        model = create_model("selective", config)
         model = model.to(device)
 
         param_info = model.num_parameters()
@@ -270,7 +256,7 @@ def main():
         best_ppl, best_epoch, best_state = train_selective(
             model, train_loader, val_loader, optimizer, device,
             args.epochs, args.patience, GRADIENT_CLIP,
-            use_selective=True,  # Use extra processing
+            use_selective=True,  # 2-pass
         )
         print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
 
@@ -305,7 +291,7 @@ def main():
         results["selective"] = {
             "best_val_ppl": best_ppl,
             "best_epoch": best_epoch,
-            "skip_interval": args.skip_interval,
+            "num_passes": 2,
             "position_wise_ppl": pos_ppl,
             "reversal_curse": reversal,
         }
@@ -320,10 +306,10 @@ def main():
     print_flush("SUMMARY")
     print_flush("=" * 70)
 
-    print_flush("\n| Model | Skip Interval | Best PPL | Epoch |")
-    print_flush("|-------|---------------|----------|-------|")
+    print_flush("\n| Model | Passes | Best PPL | Epoch |")
+    print_flush("|-------|--------|----------|-------|")
     for model_name, r in results.items():
-        print_flush(f"| {model_name} | {r['skip_interval']} | {r['best_val_ppl']:.1f} | {r['best_epoch']} |")
+        print_flush(f"| {model_name} | {r['num_passes']} | {r['best_val_ppl']:.1f} | {r['best_epoch']} |")
 
     print_flush("\n| Model | Forward PPL | Backward PPL | Gap |")
     print_flush("|-------|-------------|--------------|-----|")

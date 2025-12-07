@@ -4,20 +4,12 @@ Selective Output Language Model
 仮説: LLMは即座に出力せず、隠れ状態を追加処理してから出力すべき
 
 動作:
-- 従来のContinuous: トークン入力 → 即座に次トークン予測
-- Selective: トークン入力 → 隠れ状態を追加処理 → 次トークン予測
+- 従来のContinuous (use_selective=False): トークン入力 → 即座に次トークン予測
+- Selective (use_selective=True): トークン入力 → 1回追加処理 → 次トークン予測
 
-skip_interval (追加処理回数):
-- 0: 追加処理なし = 従来のContinuousと同等
-- 1: 1回追加処理後に出力（入力→処理→追加処理→出力）
-- 2: 2回追加処理後に出力
-
-例 (skip_interval=1, 入力: "A B C D"):
-  Step 1: 入力A → 隠れ状態h1（まだ出力しない）
-  Step 2: h1を追加処理 → 隠れ状態h2 → "B"を予測・出力
-  Step 3: 入力B → 隠れ状態h3（まだ出力しない）
-  Step 4: h3を追加処理 → 隠れ状態h4 → "C"を予測・出力
-  ...
+例 (入力: "A B C D"):
+  Continuous: embed(A) → layers → 即座に"B"予測
+  Selective:  embed(A) → layers → proj → layers → "B"予測（2パス処理）
 """
 
 from typing import Optional
@@ -32,12 +24,12 @@ from src.models.layers import BaseLayer
 
 class SelectiveOutputLM(nn.Module):
     """
-    Selective Output Language Model
+    Selective Output Language Model (効率化版)
 
-    トークン入力後、skip_interval回の追加処理を経てから出力する。
-    skip_interval=0: 追加処理なし（Continuousと同等）
-    skip_interval=1: 1回追加処理後に出力
-    skip_interval=2: 2回追加処理後に出力
+    use_selective=False: 通常のContinuous（1パス）
+    use_selective=True: 2パス処理（1回追加処理）
+
+    バッチ処理で高速化: forループなしで全トークンを一括処理
     """
 
     def __init__(
@@ -45,14 +37,12 @@ class SelectiveOutputLM(nn.Module):
         layers: list[BaseLayer],
         vocab_size: int = 50304,
         hidden_size: int = 512,
-        skip_interval: int = 1,  # 追加処理回数（0=Continuous、1=1回追加処理）
     ):
         super().__init__()
 
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_layers = len(layers)
-        self.skip_interval = max(0, skip_interval)  # 0以上
 
         # Token Embedding
         self.embed_in = nn.Embedding(vocab_size, hidden_size)
@@ -72,13 +62,13 @@ class SelectiveOutputLM(nn.Module):
         # Initialize weights
         self.apply(init_weights)
 
-    def _process_single_step(
+    def _forward_layers(
         self,
         hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
         update_memory: bool = True,
     ) -> torch.Tensor:
-        """1ステップの処理（Transformer layers通過）"""
+        """Transformer layers を通過"""
         for layer in self.layers:
             hidden_states = layer(
                 hidden_states,
@@ -86,64 +76,6 @@ class SelectiveOutputLM(nn.Module):
                 update_memory=update_memory,
             )
         return hidden_states
-
-    def forward_selective(
-        self,
-        input_ids: torch.Tensor,
-        attention_mask: Optional[torch.Tensor] = None,
-        update_memory: bool = True,
-    ) -> tuple[torch.Tensor, torch.Tensor, dict]:
-        """
-        Selective forward pass - 各トークンをskip_interval回処理してから出力
-
-        Args:
-            input_ids: [batch, seq_len]
-            attention_mask: Optional attention mask
-            update_memory: メモリ更新フラグ
-
-        Returns:
-            logits: [batch, num_outputs, vocab_size] - 出力位置のlogitsのみ
-            final_hidden: [batch, hidden_size] - 最終隠れ表現
-            stats: 統計情報
-        """
-        batch_size, seq_len = input_ids.shape
-        device = input_ids.device
-
-        all_output_logits = []
-        total_process_steps = 0
-
-        # 各入力トークンに対して処理
-        for t in range(seq_len):
-            # Step 1: トークンを埋め込み
-            token_embed = self.embed_in(input_ids[:, t:t+1])  # [batch, 1, hidden]
-
-            # 初回処理（トークン埋め込み → Transformer）
-            hidden = self._process_single_step(token_embed, None, update_memory)
-            total_process_steps += 1
-
-            # skip_interval回の追加処理
-            for _ in range(self.skip_interval):
-                # 隠れ状態を投影して再処理
-                hidden = self.hidden_proj(hidden)
-                hidden = self._process_single_step(hidden, None, update_memory)
-                total_process_steps += 1
-
-            # 出力
-            normed = self.final_layer_norm(hidden)
-            logits = self.embed_out(normed)  # [batch, 1, vocab]
-            all_output_logits.append(logits)
-
-        # 全出力を結合
-        output_logits = torch.cat(all_output_logits, dim=1)  # [batch, seq_len, vocab]
-        final_hidden = hidden[:, -1, :]
-
-        stats = {
-            "num_outputs": seq_len,
-            "total_process_steps": total_process_steps,
-            "avg_steps_per_output": total_process_steps / seq_len if seq_len > 0 else 0,
-        }
-
-        return output_logits, final_hidden, stats
 
     def forward(
         self,
@@ -153,38 +85,32 @@ class SelectiveOutputLM(nn.Module):
         update_memory: bool = True,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
-        Forward pass
+        Forward pass (バッチ処理で高速)
 
         Args:
             input_ids: [batch, seq_len]
             attention_mask: Optional attention mask
-            use_selective: Selectiveモードを使用するか（False=通常のforward）
+            use_selective: True=2パス処理、False=通常の1パス
             update_memory: メモリ更新フラグ
 
         Returns:
             logits: [batch, seq_len, vocab_size]
             final_hidden: [batch, hidden_size]
         """
-        if use_selective and self.skip_interval > 0:
-            logits, final_hidden, _ = self.forward_selective(
-                input_ids, attention_mask, update_memory
-            )
-            return logits, final_hidden
-
-        # 通常のforward（skip_interval=0 または use_selective=False）
+        # Pass 1: トークン埋め込み → Transformer
         hidden_states = self.embed_in(input_ids)
+        hidden_states = self._forward_layers(hidden_states, attention_mask, update_memory)
 
-        for layer in self.layers:
-            hidden_states = layer(
-                hidden_states,
-                attention_mask=attention_mask,
-                update_memory=update_memory,
-            )
+        if use_selective:
+            # Pass 2: 隠れ状態を投影 → 再度Transformer
+            hidden_states = self.hidden_proj(hidden_states)
+            hidden_states = self._forward_layers(hidden_states, attention_mask, update_memory)
 
+        # Final layer norm + LM Head
         hidden_states = self.final_layer_norm(hidden_states)
         logits = self.embed_out(hidden_states)
-        final_hidden = hidden_states[:, -1, :]
 
+        final_hidden = hidden_states[:, -1, :]
         return logits, final_hidden
 
     def compute_loss(
@@ -196,23 +122,16 @@ class SelectiveOutputLM(nn.Module):
         """
         損失計算
 
-        Selective mode:
-        - forward_selectiveで各トークンをskip_interval回処理
-        - 各出力で次トークンを予測
-
         Args:
             input_ids: [batch, seq_len]
             labels: [batch, seq_len] - input_idsと同じ（内部でshift）
+            use_selective: True=2パス処理、False=1パス
 
         Returns:
             loss: スカラー損失
             stats: 訓練統計
         """
-        if use_selective and self.skip_interval > 0:
-            logits, _, proc_stats = self.forward_selective(input_ids)
-        else:
-            logits, _ = self.forward(input_ids, use_selective=False)
-            proc_stats = {"num_outputs": input_ids.size(1), "total_process_steps": input_ids.size(1)}
+        logits, _ = self.forward(input_ids, use_selective=use_selective)
 
         # Next-token prediction: logits[:-1] -> labels[1:]
         shift_logits = logits[:, :-1, :].contiguous()
@@ -223,10 +142,11 @@ class SelectiveOutputLM(nn.Module):
             shift_labels.view(-1),
         )
 
+        num_passes = 2 if use_selective else 1
         stats = {
             "lm_loss": loss.item(),
             "ppl": torch.exp(loss).item(),
-            **proc_stats,
+            "num_passes": num_passes,
         }
 
         return loss, stats
@@ -245,54 +165,34 @@ class SelectiveOutputLM(nn.Module):
             input_ids: [batch, seq_len]
             max_new_tokens: 最大生成トークン数
             temperature: サンプリング温度
-            use_selective: Selectiveモードを使用するか
+            use_selective: True=2パス処理、False=1パス
 
         Returns:
             generated_ids: [batch, output_len]
             stats: 統計情報
         """
         self.eval()
-        device = input_ids.device
-        batch_size = input_ids.size(0)
 
-        generated = [input_ids]
-        total_process_steps = 0
-
-        # 初期コンテキスト処理
-        with torch.no_grad():
-            if use_selective and self.skip_interval > 0:
-                logits, prev_hidden, init_stats = self.forward_selective(input_ids)
-                total_process_steps += init_stats["total_process_steps"]
-            else:
-                logits, prev_hidden = self.forward(input_ids, use_selective=False)
-                total_process_steps += input_ids.size(1)
+        generated = input_ids.clone()
 
         for _ in range(max_new_tokens):
             with torch.no_grad():
-                if use_selective and self.skip_interval > 0:
-                    # 最後に生成したトークンをSelectiveモードで処理
-                    last_token = generated[-1][:, -1:]
-                    logits, prev_hidden, step_stats = self.forward_selective(last_token)
-                    total_process_steps += step_stats["total_process_steps"]
-                else:
-                    last_token = generated[-1][:, -1:]
-                    logits, prev_hidden = self.forward(last_token, use_selective=False)
-                    total_process_steps += 1
+                logits, _ = self.forward(generated, use_selective=use_selective)
 
                 # サンプリング
                 next_logits = logits[:, -1, :] / temperature
                 probs = torch.softmax(next_logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
 
-                generated.append(next_token)
+                generated = torch.cat([generated, next_token], dim=1)
 
+        num_passes = 2 if use_selective else 1
         stats = {
             "num_tokens_generated": max_new_tokens,
-            "total_process_steps": total_process_steps,
-            "avg_steps_per_token": total_process_steps / (input_ids.size(1) + max_new_tokens),
+            "num_passes": num_passes,
         }
 
-        return torch.cat(generated, dim=1), stats
+        return generated, stats
 
     def reset_memory(self, keep_frozen: bool = True) -> None:
         """メモリ系レイヤーのメモリをリセット"""
