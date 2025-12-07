@@ -24,7 +24,6 @@ from typing import Optional
 sys.path.insert(0, ".")
 
 import torch
-import torch.nn.functional as F
 
 from config.pythia import PythiaConfig
 from src.config.experiment_defaults import GRADIENT_CLIP

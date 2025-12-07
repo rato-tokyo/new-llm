@@ -33,13 +33,12 @@ class PythiaAttention(nn.Module):
         self.dense = nn.Linear(hidden_size, hidden_size)
 
         # NoPE: rotary_dim=0の場合はRoPEを使わない
+        self.rotary_emb: Optional[RotaryEmbedding] = None
         if self.rotary_dim > 0:
             self.rotary_emb = RotaryEmbedding(
                 self.rotary_dim,
                 max_position_embeddings=max_position_embeddings,
             )
-        else:
-            self.rotary_emb = None
         self.scale = self.head_dim ** -0.5
 
     def forward(
