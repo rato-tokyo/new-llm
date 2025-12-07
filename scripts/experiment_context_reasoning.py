@@ -48,49 +48,31 @@ from src.utils.training import get_device
 
 
 # =============================================================================
-# データセット
+# 統一データセット
 # =============================================================================
 
 
-class BaselineDataset(Dataset):
-    """Baseline用データセット: Pile + 全文学習"""
+class UnifiedDataset(Dataset):
+    """
+    統一データセット: Pile + Family samples
+
+    Baseline/Modified両方で同じPileサンプル数を使用するため、
+    num_pile_samplesを明示的に指定する。
+    """
 
     def __init__(
         self,
-        pile_tokens: torch.Tensor,
-        family_samples: list[dict],
+        pile_samples: list[dict],  # 事前に作成されたPileサンプル
+        family_samples: list[dict],  # Familyサンプル
         tokenizer,
         seq_length: int = 128,
-        pile_ratio: float = 0.9,
     ):
         self.tokenizer = tokenizer
         self.seq_length = seq_length
         self.pad_token_id = tokenizer.eos_token_id
 
-        # Pileデータからサンプル作成
-        self.pile_samples = []
-        for i in range(0, len(pile_tokens) - seq_length, seq_length):
-            tokens = pile_tokens[i : i + seq_length].tolist()
-            self.pile_samples.append({"type": "pile", "tokens": tokens})
-
-        # Familyサンプル: 全文を学習
-        self.family_samples = []
-        for sample in family_samples:
-            tokens = tokenizer.encode(sample["text"])
-            self.family_samples.append({
-                "type": sample["type"],
-                "tokens": tokens,
-            })
-
-        # 比率調整
-        total_family = len(self.family_samples)
-        if 0 < pile_ratio < 1 and total_family > 0:
-            target_pile = int(total_family * pile_ratio / (1 - pile_ratio))
-            target_pile = min(target_pile, len(self.pile_samples))
-        else:
-            target_pile = len(self.pile_samples) if pile_ratio == 1 else 0
-
-        self.pile_samples = self.pile_samples[:target_pile]
+        self.pile_samples = pile_samples
+        self.family_samples = family_samples
         self.all_samples = self.pile_samples + self.family_samples
 
     def __len__(self):
@@ -98,94 +80,33 @@ class BaselineDataset(Dataset):
 
     def __getitem__(self, idx):
         sample = self.all_samples[idx]
-        tokens = sample["tokens"]
 
-        if len(tokens) > self.seq_length:
-            tokens = tokens[: self.seq_length]
-        else:
-            tokens = tokens + [self.pad_token_id] * (self.seq_length - len(tokens))
+        if sample["type"] == "pile":
+            tokens = sample["tokens"]
+            if len(tokens) > self.seq_length:
+                tokens = tokens[: self.seq_length]
+            input_ids = torch.tensor(tokens, dtype=torch.long)
+            labels = input_ids.clone()
+            return input_ids, labels
 
-        input_ids = torch.tensor(tokens, dtype=torch.long)
-        labels = input_ids.clone()
+        # Family sample
+        if "context_len" in sample:
+            # Modified: コンテキスト分離
+            tokens = sample["tokens"]
+            context_len = sample["context_len"]
 
-        return input_ids, labels
-
-
-class ModifiedDataset(Dataset):
-    """Modified用データセット: Pile + コンテキスト分離学習 + 全文学習（Valペア）"""
-
-    def __init__(
-        self,
-        pile_tokens: torch.Tensor,
-        context_samples: list[dict],  # コンテキスト分離サンプル
-        fulltext_samples: list[dict],  # 全文学習サンプル（Valペア）
-        tokenizer,
-        seq_length: int = 128,
-        pile_ratio: float = 0.9,
-    ):
-        self.tokenizer = tokenizer
-        self.seq_length = seq_length
-        self.pad_token_id = tokenizer.eos_token_id
-
-        # Pileデータからサンプル作成
-        self.pile_samples = []
-        for i in range(0, len(pile_tokens) - seq_length, seq_length):
-            tokens = pile_tokens[i : i + seq_length].tolist()
-            self.pile_samples.append({"type": "pile", "tokens": tokens})
-
-        # コンテキスト分離サンプル
-        self.context_samples = []
-        for sample in context_samples:
-            context = sample["context"]
-            question = sample["question"]
-            answer = sample["answer"]
-
-            if context:
-                full_text = f"{context} {question}{answer}"
-                context_with_q = f"{context} {question}"
+            if len(tokens) > self.seq_length:
+                tokens = tokens[: self.seq_length]
+                context_len = min(context_len, self.seq_length - 1)
             else:
-                full_text = f"{question}{answer}"
-                context_with_q = question
+                tokens = tokens + [self.pad_token_id] * (self.seq_length - len(tokens))
 
-            full_tokens = tokenizer.encode(full_text)
-            context_len = len(tokenizer.encode(context_with_q))
-
-            self.context_samples.append({
-                "type": sample["type"],
-                "tokens": full_tokens,
-                "context_len": context_len,
-            })
-
-        # 全文学習サンプル（Valペア）
-        self.fulltext_samples = []
-        for sample in fulltext_samples:
-            tokens = tokenizer.encode(sample["text"])
-            self.fulltext_samples.append({
-                "type": sample["type"],
-                "tokens": tokens,
-            })
-
-        # 比率調整
-        total_family = len(self.context_samples) + len(self.fulltext_samples)
-        if 0 < pile_ratio < 1 and total_family > 0:
-            target_pile = int(total_family * pile_ratio / (1 - pile_ratio))
-            target_pile = min(target_pile, len(self.pile_samples))
+            input_ids = torch.tensor(tokens, dtype=torch.long)
+            labels = input_ids.clone()
+            labels[:context_len] = -100
+            return input_ids, labels
         else:
-            target_pile = len(self.pile_samples) if pile_ratio == 1 else 0
-
-        self.pile_samples = self.pile_samples[:target_pile]
-        self.all_samples = (
-            self.pile_samples + self.context_samples + self.fulltext_samples
-        )
-
-    def __len__(self):
-        return len(self.all_samples)
-
-    def __getitem__(self, idx):
-        sample = self.all_samples[idx]
-
-        if sample["type"] == "pile" or sample["type"] == "val_forward":
-            # 全文学習
+            # Baseline: 全文学習
             tokens = sample["tokens"]
             if len(tokens) > self.seq_length:
                 tokens = tokens[: self.seq_length]
@@ -196,22 +117,80 @@ class ModifiedDataset(Dataset):
             labels = input_ids.clone()
             return input_ids, labels
 
-        # コンテキスト分離サンプル
-        tokens = sample["tokens"]
-        context_len = sample["context_len"]
 
-        if len(tokens) > self.seq_length:
-            tokens = tokens[: self.seq_length]
-            context_len = min(context_len, self.seq_length - 1)
+def create_pile_samples(
+    pile_tokens: torch.Tensor,
+    seq_length: int,
+    num_samples: int,
+) -> list[dict]:
+    """Pileサンプルを作成（数を明示的に指定）"""
+    samples: list[dict] = []
+    for i in range(0, len(pile_tokens) - seq_length, seq_length):
+        if len(samples) >= num_samples:
+            break
+        tokens = pile_tokens[i : i + seq_length].tolist()
+        samples.append({"type": "pile", "tokens": tokens})
+    return samples
+
+
+def create_baseline_family_samples(
+    pattern_samples: list[dict],
+    val_samples: list[dict],
+    tokenizer,
+) -> list[dict]:
+    """Baseline用Familyサンプルを作成"""
+    family_samples = []
+
+    for sample in pattern_samples + val_samples:
+        tokens = tokenizer.encode(sample["text"])
+        family_samples.append({
+            "type": sample["type"],
+            "tokens": tokens,
+        })
+
+    return family_samples
+
+
+def create_modified_family_samples(
+    pattern_samples: list[dict],
+    no_context_samples: list[dict],
+    val_samples: list[dict],
+    tokenizer,
+) -> list[dict]:
+    """Modified用Familyサンプルを作成"""
+    family_samples = []
+
+    # コンテキスト分離サンプル
+    for sample in pattern_samples + no_context_samples:
+        context = sample["context"]
+        question = sample["question"]
+        answer = sample["answer"]
+
+        if context:
+            full_text = f"{context} {question}{answer}"
+            context_with_q = f"{context} {question}"
         else:
-            tokens = tokens + [self.pad_token_id] * (self.seq_length - len(tokens))
+            full_text = f"{question}{answer}"
+            context_with_q = question
 
-        input_ids = torch.tensor(tokens, dtype=torch.long)
-        labels = input_ids.clone()
-        # コンテキスト+質問部分はloss計算から除外
-        labels[:context_len] = -100
+        full_tokens = tokenizer.encode(full_text)
+        context_len = len(tokenizer.encode(context_with_q))
 
-        return input_ids, labels
+        family_samples.append({
+            "type": sample["type"],
+            "tokens": full_tokens,
+            "context_len": context_len,
+        })
+
+    # Valサンプル（全文学習、Baselineと同一）
+    for sample in val_samples:
+        tokens = tokenizer.encode(sample["text"])
+        family_samples.append({
+            "type": sample["type"],
+            "tokens": tokens,
+        })
+
+    return family_samples
 
 
 # =============================================================================
@@ -324,7 +303,6 @@ def train_model(
     num_epochs: int,
     patience: int,
     gradient_clip: float,
-    model_name: str,
 ) -> tuple[float, int, Optional[dict]]:
     """モデル訓練（Pile Val PPLでearly stopping）"""
     best_val_ppl = float("inf")
@@ -401,7 +379,7 @@ def run_baseline(
     config: PythiaConfig,
     pattern_pairs: list[FamilyPair],
     val_pairs: list[FamilyPair],
-    pile_tokens: torch.Tensor,
+    pile_samples: list[dict],
     pile_val_loader,
     tokenizer,
     device,
@@ -415,16 +393,19 @@ def run_baseline(
     # サンプル生成
     pattern_samples = create_baseline_pattern_samples(pattern_pairs)
     val_samples = create_baseline_val_samples(val_pairs)
-    all_samples = pattern_samples + val_samples
 
-    # データセット作成
-    train_dataset = BaselineDataset(
-        pile_tokens, all_samples, tokenizer,
-        seq_length=args.seq_length, pile_ratio=args.pile_ratio
+    # Familyサンプル作成
+    family_samples = create_baseline_family_samples(
+        pattern_samples, val_samples, tokenizer
+    )
+
+    # データセット作成（Pileサンプルは共通）
+    train_dataset = UnifiedDataset(
+        pile_samples, family_samples, tokenizer, seq_length=args.seq_length
     )
 
     print_flush(f"  Train samples: {len(train_dataset)}")
-    print_flush(f"    - Pile: {len(train_dataset.pile_samples)}")
+    print_flush(f"    - Pile: {len(pile_samples)}")
     print_flush(f"    - Pattern (forward+backward): {len(pattern_samples)}")
     print_flush(f"    - Val (forward only): {len(val_samples)}")
 
@@ -441,7 +422,7 @@ def run_baseline(
     print_flush("\n[Baseline] Training...")
     best_ppl, best_epoch, best_state = train_model(
         model, train_loader, pile_val_loader, optimizer, device,
-        args.epochs, args.patience, GRADIENT_CLIP, "baseline"
+        args.epochs, args.patience, GRADIENT_CLIP
     )
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
 
@@ -474,7 +455,7 @@ def run_modified(
     config: PythiaConfig,
     pattern_pairs: list[FamilyPair],
     val_pairs: list[FamilyPair],
-    pile_tokens: torch.Tensor,
+    pile_samples: list[dict],
     pile_val_loader,
     tokenizer,
     device,
@@ -490,16 +471,18 @@ def run_modified(
     no_context_samples = create_modified_no_context_samples(pattern_pairs)
     val_samples = create_modified_val_samples(val_pairs)
 
-    context_samples = pattern_samples + no_context_samples
+    # Familyサンプル作成
+    family_samples = create_modified_family_samples(
+        pattern_samples, no_context_samples, val_samples, tokenizer
+    )
 
-    # データセット作成
-    train_dataset = ModifiedDataset(
-        pile_tokens, context_samples, val_samples, tokenizer,
-        seq_length=args.seq_length, pile_ratio=args.pile_ratio
+    # データセット作成（Pileサンプルは共通）
+    train_dataset = UnifiedDataset(
+        pile_samples, family_samples, tokenizer, seq_length=args.seq_length
     )
 
     print_flush(f"  Train samples: {len(train_dataset)}")
-    print_flush(f"    - Pile: {len(train_dataset.pile_samples)}")
+    print_flush(f"    - Pile: {len(pile_samples)}")
     print_flush(f"    - Pattern (context-separated): {len(pattern_samples)}")
     print_flush(f"    - No-context: {len(no_context_samples)}")
     print_flush(f"    - Val (forward only): {len(val_samples)}")
@@ -517,7 +500,7 @@ def run_modified(
     print_flush("\n[Modified] Training...")
     best_ppl, best_epoch, best_state = train_model(
         model, train_loader, pile_val_loader, optimizer, device,
-        args.epochs, args.patience, GRADIENT_CLIP, "modified"
+        args.epochs, args.patience, GRADIENT_CLIP
     )
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
 
@@ -563,8 +546,11 @@ def main():
         "--num-val-pairs", type=int, default=20,
         help="Number of val pairs (for reversal curse test)"
     )
+    parser.add_argument(
+        "--num-pile-samples", type=int, default=3500,
+        help="Number of Pile samples (fixed for fair comparison)"
+    )
     parser.add_argument("--pile-tokens", type=int, default=500000)
-    parser.add_argument("--pile-ratio", type=float, default=0.9)
     parser.add_argument("--seq-length", type=int, default=128)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -590,8 +576,7 @@ def main():
     print_flush(f"Total pairs: {args.num_pairs}")
     print_flush(f"  - Pattern pairs: {args.num_pairs - args.num_val_pairs}")
     print_flush(f"  - Val pairs: {args.num_val_pairs}")
-    print_flush(f"Pile tokens: {args.pile_tokens:,}")
-    print_flush(f"Pile ratio: {args.pile_ratio:.0%}")
+    print_flush(f"Pile samples: {args.num_pile_samples} (fixed)")
     print_flush(f"Sequence length: {args.seq_length}")
     print_flush(f"Epochs: {args.epochs}")
     print_flush(f"Position Encoding: {'NoPE' if args.nope else 'RoPE'}")
@@ -619,6 +604,12 @@ def main():
     print_flush("\n[Data] Loading Pile data...")
     pile_tokens = load_pile_tokens_cached(args.pile_tokens, config.tokenizer_name)
 
+    # Pileサンプル作成（Baseline/Modified共通）
+    pile_samples = create_pile_samples(
+        pile_tokens, args.seq_length, args.num_pile_samples
+    )
+    print_flush(f"  Pile samples: {len(pile_samples)} (shared between Baseline/Modified)")
+
     # Pile validation用のDataLoader
     val_size = args.pile_tokens // 10
     pile_val_tokens = pile_tokens[-val_size:]
@@ -638,13 +629,13 @@ def main():
     # Baseline
     results["baseline"] = run_baseline(
         config, pattern_pairs, val_pairs,
-        pile_tokens, pile_val_loader, tokenizer, device, args
+        pile_samples, pile_val_loader, tokenizer, device, args
     )
 
     # Modified
     results["modified"] = run_modified(
         config, pattern_pairs, val_pairs,
-        pile_tokens, pile_val_loader, tokenizer, device, args
+        pile_samples, pile_val_loader, tokenizer, device, args
     )
 
     # サマリー
@@ -665,7 +656,7 @@ def main():
         f"| Modified | {modified['reversal_ppl']:.1f} | {modified['pile_ppl']:.1f} |"
     )
 
-    print_flush("\n* Reversal PPL: PPL for 'Who is {parent}'s child?' (lower is better)")
+    print_flush("\n* Reversal PPL: PPL for 'Who is [parent]'s child?' (lower is better)")
     print_flush("* This tests generalization: can the model apply learned patterns")
     print_flush("  to val pairs that were only trained on forward direction?")
     print_flush("\nDONE")

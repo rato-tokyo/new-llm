@@ -242,12 +242,3 @@ def split_pairs_for_experiment(
     return pattern_pairs, val_pairs
 
 
-# 後方互換性のため残す（使用非推奨）
-def create_baseline_samples(pairs: list[FamilyPair]) -> list[dict]:
-    """非推奨: create_baseline_pattern_samplesを使用してください"""
-    return create_baseline_pattern_samples(pairs)
-
-
-def create_cdr_samples(pairs: list[FamilyPair]) -> list[dict]:
-    """非推奨: create_modified_pattern_samplesを使用してください"""
-    return create_modified_pattern_samples(pairs)
