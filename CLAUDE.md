@@ -324,27 +324,57 @@ all_sentences = "Paris is the capital of France EOS Tokyo is the capital of Japa
 
 ---
 
-## 🔧 Selective Output LM
+## 🔧 Continuous LM
 
-**仮説: LLMは即座に出力せず、隠れ状態を追加処理してから出力すべき**
+**仮説: トークン化による離散化で情報が失われている**
 
-### コンセプト
+### 背景
+
+通常のLMでは、次トークン予測時に離散化が発生する：
 
 ```
-extra_passes=0 (Baseline):
-  入力A → Transformer処理 → 即座に次トークン"B"を予測（追加処理なし）
-
-extra_passes=1 (Selective):
-  入力A → Transformer処理 → 隠れ状態h1（まだ出力しない）
-       → h1を追加処理 → 隠れ状態h2 → 次トークン"B"を予測
+通常LM (Discrete):
+  h_t → LM Head → token → Embedding → x_{t+1}
+        ↑                    ↑
+        離散化              再埋め込み
+        (情報損失)
 ```
 
-### extra_passes パラメータ
+この離散化ステップで情報が失われるのでは？という仮説を検証する。
 
-| 値 | 動作 | 説明 |
-|----|------|------|
-| 0 | 追加処理なし | 従来のContinuousと同等（即座に出力） |
-| 1 | 1回追加処理 | トークン入力後、1回追加でTransformer通過してから出力 |
+### Continuous LMのコンセプト
+
+```
+Continuous LM:
+  h_t → proj → x_{t+1}   (離散化をスキップ、情報保持)
+```
+
+前のトークン処理時の最終隠れ状態を、直接次の入力として使用する。
+
+### モード一覧
+
+| モード | 入力方式 | extra_pass | use_h1 | 説明 |
+|--------|----------|------------|--------|------|
+| discrete | token埋め込み | - | - | 通常のLM（ベースライン） |
+| continuous | h_{t-1}を直接使用 | False | - | 離散化スキップ |
+| continuous_extra | h_{t-1}を直接使用 | True | False | 1回追加処理、h2のみ使用 |
+| continuous_combined | h_{t-1}を直接使用 | True | True | 1回追加処理、h1+h2を使用 |
+
+### 処理フロー
+
+```
+discrete (通常LM):
+  token_A → embed → layers → h1 → LM Head → "B"予測
+
+continuous:
+  h_{t-1} → proj → layers → h1 → LM Head → "B"予測
+
+continuous_extra (extra_pass=True, use_h1=False):
+  h_{t-1} → proj → layers → h1 → proj → layers → h2 → LM Head → "B"予測
+
+continuous_combined (extra_pass=True, use_h1=True):
+  h_{t-1} → proj → layers → h1 → proj → layers → h2 → combine(h1,h2) → LM Head → "B"予測
+```
 
 ### 使用方法
 
@@ -352,29 +382,29 @@ extra_passes=1 (Selective):
 from src.models import create_model
 
 # モデル作成
-model = create_model("selective")
+model = create_model("continuous")
 
-# 訓練（extra_passes=1）
-loss, stats = model.compute_loss(input_ids, labels, use_selective=True)
+# Discrete（通常LM、ベースライン）
+loss, stats = model.compute_loss(input_ids, labels, mode="discrete")
 
-# 訓練（extra_passes=0、Baseline）
-loss, stats = model.compute_loss(input_ids, labels, use_selective=False)
+# Continuous（離散化スキップ）
+loss, stats = model.compute_loss(input_ids, labels, mode="continuous")
 
-# 生成
-output, stats = model.generate(input_ids, max_new_tokens=50, use_selective=True)
+# Continuous + 追加処理（h2のみ）
+loss, stats = model.compute_loss(input_ids, labels, mode="continuous", extra_pass=True)
+
+# Continuous + 追加処理（h1+h2）
+loss, stats = model.compute_loss(input_ids, labels, mode="continuous", extra_pass=True, use_h1=True)
 ```
 
 ### 実験スクリプト
 
 ```bash
-# Selective (extra_passes=1)
-python3 scripts/experiment_selective.py
-
-# Baselineとの比較
-python3 scripts/experiment_selective.py --models baseline selective
+# 全モード比較
+python3 scripts/experiment_continuous.py --models discrete continuous continuous_extra continuous_combined
 
 # NoPE（Position Encodingなし）で実験
-python3 scripts/experiment_selective.py --models baseline selective --nope
+python3 scripts/experiment_continuous.py --nope
 ```
 
 ---
@@ -412,6 +442,7 @@ python3 scripts/experiment_selective.py --models baseline selective --nope
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-07 | **Continuous LM実装**: 離散化スキップ仮説の検証。extra_pass/use_h1オプション追加 |
 | 2025-12-07 | **Selective Output LM再設計**: 隠れ状態の追加処理方式に変更（skip_interval=追加処理回数） |
 | 2025-12-07 | **学習可能ゲート失敗を記録**: OutputGate方式は複雑すぎて失敗、固定パターンに簡素化 |
 | 2025-12-07 | **訓練-評価一貫性ポリシー追加**: 訓練時と評価時の条件を揃えることを必須化 |

@@ -1,23 +1,28 @@
 """
-Continuous Representation Language Model
+Continuous Language Model
 
-仮説: 既存LLMはtoken_idへの離散化で情報を損失している
-提案: 前ステップの連続的な隠れ表現を次の入力として使用
+仮説: トークン化による離散化で情報が失われている
 
-既存LLM:
-  hidden → logits → argmax → token_id → embed(token_id) → 次の入力
-  (情報がtoken_idに圧縮 = 情報損失)
+通常LM (Discrete):
+  h_t → LM Head → token → Embedding → x_{t+1}
+        ↑                    ↑
+        離散化              再埋め込み（情報損失）
 
-ContinuousLM:
-  hidden → logits → 出力（表示用）
-         → hidden自体を次の入力として使用
-  (連続表現がそのまま伝播 = 情報保持)
+Continuous LM:
+  h_t → proj → x_{t+1}   (離散化をスキップ、情報保持)
+
+モード:
+- discrete: 通常のLM（トークン埋め込みを入力）
+- continuous: 前の隠れ状態を直接入力として使用
+- continuous + extra_pass: 追加処理あり
+- continuous + extra_pass + use_h1: h1とh2の両方を使用
 """
 
 from typing import Optional
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from src.models.base_components import init_weights
 from src.models.layers import BaseLayer
@@ -25,19 +30,9 @@ from src.models.layers import BaseLayer
 
 class ContinuousLM(nn.Module):
     """
-    Continuous Representation Language Model
+    Continuous Language Model
 
-    通常のLMと異なり、推論時に前ステップの最終隠れ表現を
-    次ステップの入力として使用できる。
-
-    訓練時:
-      - 通常のTeacher Forcing (token embeddingを使用)
-      - または連続表現モードで訓練
-
-    推論時:
-      - use_continuous=True で連続表現モードを有効化
-      - 最初のトークンのみembeddingを使用
-      - 以降は前ステップの隠れ表現を使用
+    離散化をスキップして、隠れ状態を直接次の入力として使用する。
     """
 
     def __init__(
@@ -52,12 +47,17 @@ class ContinuousLM(nn.Module):
         self.hidden_size = hidden_size
         self.num_layers = len(layers)
 
-        # Token Embedding (最初のトークン用)
+        # Token Embedding（discrete mode用）
         self.embed_in = nn.Embedding(vocab_size, hidden_size)
 
-        # Hidden → Hidden projection (連続表現を次の入力に変換)
-        # 最終LayerNorm後の表現を、LayerNorm前の空間に戻す
+        # Hidden → Hidden projection（continuous mode: h_{t-1} → x_t）
         self.hidden_proj = nn.Linear(hidden_size, hidden_size)
+
+        # Extra pass用の投影
+        self.extra_proj = nn.Linear(hidden_size, hidden_size)
+
+        # Combined mode: h1 + h2 を結合するための投影
+        self.combine_proj = nn.Linear(hidden_size * 2, hidden_size)
 
         # Transformer layers
         self.layers = nn.ModuleList(layers)
@@ -71,106 +71,198 @@ class ContinuousLM(nn.Module):
         # Initialize weights
         self.apply(init_weights)
 
-    def forward(
+    def _forward_layers(
         self,
-        input_ids: torch.Tensor,
+        hidden_states: torch.Tensor,
         attention_mask: Optional[torch.Tensor] = None,
-        use_continuous: bool = False,
-        prev_hidden: Optional[torch.Tensor] = None,
         update_memory: bool = True,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        Forward pass
-
-        Args:
-            input_ids: [batch, seq_len] - トークンID
-            attention_mask: Optional attention mask
-            use_continuous: 連続表現モードを使用するか
-            prev_hidden: [batch, hidden_size] - 前ステップの最終隠れ表現
-            update_memory: メモリを更新するか（メモリ系レイヤーのみ）
-
-        Returns:
-            logits: [batch, seq_len, vocab_size]
-            final_hidden: [batch, hidden_size] - 最後のトークンの隠れ表現
-        """
-        batch_size, seq_len = input_ids.shape
-
-        if use_continuous and prev_hidden is not None:
-            # 連続表現モード: 前の隠れ表現を変換して最初の入力に使用
-            # prev_hidden: [batch, hidden_size] → [batch, 1, hidden_size]
-            first_hidden = self.hidden_proj(prev_hidden).unsqueeze(1)
-
-            if seq_len > 1:
-                # 残りはtoken embedding
-                rest_hidden = self.embed_in(input_ids[:, 1:])
-                hidden_states = torch.cat([first_hidden, rest_hidden], dim=1)
-            else:
-                hidden_states = first_hidden
-        else:
-            # 通常モード: token embeddingを使用
-            hidden_states = self.embed_in(input_ids)
-
-        # Transformer layers
+    ) -> torch.Tensor:
+        """Transformer layers を通過"""
         for layer in self.layers:
             hidden_states = layer(
                 hidden_states,
                 attention_mask=attention_mask,
                 update_memory=update_memory,
             )
+        return hidden_states
 
-        # Final layer norm
-        hidden_states = self.final_layer_norm(hidden_states)
+    def forward(
+        self,
+        input_ids: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        mode: str = "discrete",
+        extra_pass: bool = False,
+        use_h1: bool = False,
+        update_memory: bool = True,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Forward pass
 
-        # LM Head
-        logits = self.embed_out(hidden_states)
+        Args:
+            input_ids: [batch, seq_len]
+            attention_mask: Optional attention mask
+            mode: "discrete" or "continuous"
+            extra_pass: 追加処理を行うかどうか
+            use_h1: extra_pass時にh1も使用するか（combined）
+            update_memory: メモリ更新フラグ
 
-        # 最後のトークンの隠れ表現を返す（次ステップの入力用）
-        final_hidden = hidden_states[:, -1, :]  # [batch, hidden_size]
+        Returns:
+            logits: [batch, seq_len, vocab_size]
+            final_hidden: [batch, seq_len, hidden_size]
+        """
+        batch_size, seq_len = input_ids.shape
+
+        if mode == "discrete":
+            # 通常のLM: トークン埋め込みを入力
+            hidden_states = self.embed_in(input_ids)
+            h1 = self._forward_layers(hidden_states, attention_mask, update_memory)
+
+            if extra_pass:
+                h2 = self.extra_proj(h1)
+                h2 = self._forward_layers(h2, attention_mask, update_memory)
+                if use_h1:
+                    combined = torch.cat([h1, h2], dim=-1)
+                    final_hidden = self.combine_proj(combined)
+                else:
+                    final_hidden = h2
+            else:
+                final_hidden = h1
+
+        elif mode == "continuous":
+            # Continuous: 前の隠れ状態を直接入力として使用
+            # 最初のトークンはembeddingを使用、以降は前の隠れ状態を使用
+
+            # 最初のトークンの埋め込み
+            first_embed = self.embed_in(input_ids[:, :1])  # [batch, 1, hidden]
+
+            # 全シーケンスを処理
+            all_hidden = []
+            prev_hidden = None
+
+            for t in range(seq_len):
+                if t == 0:
+                    # 最初のトークンは埋め込みを使用
+                    x_t = first_embed
+                else:
+                    # 以降は前の隠れ状態を変換して使用
+                    x_t = self.hidden_proj(prev_hidden)
+
+                # Transformer処理（1トークンずつ）
+                h_t = self._forward_layers(x_t, attention_mask=None, update_memory=update_memory)
+                all_hidden.append(h_t)
+                prev_hidden = h_t
+
+            # 結合
+            h1 = torch.cat(all_hidden, dim=1)  # [batch, seq_len, hidden]
+
+            if extra_pass:
+                h2 = self.extra_proj(h1)
+                h2 = self._forward_layers(h2, attention_mask, update_memory)
+                if use_h1:
+                    combined = torch.cat([h1, h2], dim=-1)
+                    final_hidden = self.combine_proj(combined)
+                else:
+                    final_hidden = h2
+            else:
+                final_hidden = h1
+
+        else:
+            raise ValueError(f"Unknown mode: {mode}")
+
+        # Final layer norm + LM Head
+        final_hidden = self.final_layer_norm(final_hidden)
+        logits = self.embed_out(final_hidden)
 
         return logits, final_hidden
 
-    def generate_continuous(
+    def compute_loss(
+        self,
+        input_ids: torch.Tensor,
+        labels: torch.Tensor,
+        mode: str = "discrete",
+        extra_pass: bool = False,
+        use_h1: bool = False,
+    ) -> tuple[torch.Tensor, dict]:
+        """
+        損失計算
+
+        Args:
+            input_ids: [batch, seq_len]
+            labels: [batch, seq_len]
+            mode: "discrete" or "continuous"
+            extra_pass: 追加処理を行うか
+            use_h1: extra_pass時にh1も使用するか
+
+        Returns:
+            loss: スカラー損失
+            stats: 訓練統計
+        """
+        logits, _ = self.forward(
+            input_ids, mode=mode, extra_pass=extra_pass, use_h1=use_h1
+        )
+
+        # Next-token prediction: logits[:-1] -> labels[1:]
+        shift_logits = logits[:, :-1, :].contiguous()
+        shift_labels = labels[:, 1:].contiguous()
+
+        loss = F.cross_entropy(
+            shift_logits.view(-1, self.vocab_size),
+            shift_labels.view(-1),
+        )
+
+        # モード名を生成
+        mode_name = mode
+        if extra_pass:
+            mode_name += "_extra"
+        if use_h1:
+            mode_name += "_combined"
+
+        stats = {
+            "lm_loss": loss.item(),
+            "ppl": torch.exp(loss).item(),
+            "mode": mode_name,
+        }
+
+        return loss, stats
+
+    def generate(
         self,
         input_ids: torch.Tensor,
         max_new_tokens: int = 50,
         temperature: float = 1.0,
-    ) -> torch.Tensor:
+        mode: str = "discrete",
+        extra_pass: bool = False,
+        use_h1: bool = False,
+    ) -> tuple[torch.Tensor, dict]:
         """
-        連続表現モードでテキスト生成
-
-        Args:
-            input_ids: [batch, seq_len] - 初期トークン
-            max_new_tokens: 生成する最大トークン数
-            temperature: サンプリング温度
-
-        Returns:
-            generated_ids: [batch, seq_len + max_new_tokens]
+        テキスト生成
         """
         self.eval()
 
-        # 初期トークンを処理
-        with torch.no_grad():
-            logits, prev_hidden = self.forward(input_ids, use_continuous=False)
-
-        generated = [input_ids]
+        generated = input_ids.clone()
 
         for _ in range(max_new_tokens):
-            # 最後のトークンのlogitsからサンプリング
-            next_logits = logits[:, -1, :] / temperature
-            probs = torch.softmax(next_logits, dim=-1)
-            next_token = torch.multinomial(probs, num_samples=1)
-
-            generated.append(next_token)
-
-            # 連続表現モードで次を予測
             with torch.no_grad():
-                logits, prev_hidden = self.forward(
-                    next_token,
-                    use_continuous=True,
-                    prev_hidden=prev_hidden,
+                logits, _ = self.forward(
+                    generated, mode=mode, extra_pass=extra_pass, use_h1=use_h1
                 )
+                next_logits = logits[:, -1, :] / temperature
+                probs = torch.softmax(next_logits, dim=-1)
+                next_token = torch.multinomial(probs, num_samples=1)
+                generated = torch.cat([generated, next_token], dim=1)
 
-        return torch.cat(generated, dim=1)
+        mode_name = mode
+        if extra_pass:
+            mode_name += "_extra"
+        if use_h1:
+            mode_name += "_combined"
+
+        stats = {
+            "num_tokens_generated": max_new_tokens,
+            "mode": mode_name,
+        }
+
+        return generated, stats
 
     def reset_memory(self, keep_frozen: bool = True) -> None:
         """メモリ系レイヤーのメモリをリセット"""
@@ -205,6 +297,8 @@ class ContinuousLM(nn.Module):
         embedding = self.embed_in.weight.numel()
         lm_head = self.embed_out.weight.numel()
         hidden_proj = sum(p.numel() for p in self.hidden_proj.parameters())
+        extra_proj = sum(p.numel() for p in self.extra_proj.parameters())
+        combine_proj = sum(p.numel() for p in self.combine_proj.parameters())
 
         layer_params = [
             sum(p.numel() for p in layer.parameters())
@@ -216,6 +310,8 @@ class ContinuousLM(nn.Module):
             "embedding": embedding,
             "lm_head": lm_head,
             "hidden_proj": hidden_proj,
+            "extra_proj": extra_proj,
+            "combine_proj": combine_proj,
             "transformer": sum(layer_params),
             "per_layer": layer_params,
         }
