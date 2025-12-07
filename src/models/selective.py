@@ -1,81 +1,39 @@
 """
-Selective Output Language Model
+Selective Output Language Model (Simplified)
 
 仮説: LLMの全出力がトークン化されるべきではない
-- 高確信度の出力 → トークン化して外部に出力
-- 低確信度の出力 → 内部処理として継続（持ち越し）
+- 固定パターンで持ち越し（例: 2回に1回）
+- 持ち越し位置では損失なし、出力位置でのみ損失計算
 
-人間の「えーと」「うーん」のような思考時間に相当。
-内部で推論を続け、確信が持てたときだけ出力する。
-
-持ち越し（Carry-over）方式:
-- gate_prob < threshold: 隠れ状態を次のステップへ持ち越し、損失なし
-- gate_prob > threshold: トークン出力、持ち越されたターゲットと比較して損失計算
-- 例: 「赤い」でgate_prob低 → 持ち越し → 次ステップで出力時、ターゲットは「赤い」のまま
-
-学習可能ゲート:
-- hidden state から「出力すべきか」を判断
-- ゲートが開いている → トークン出力
-- ゲートが閉じている → hidden をそのまま次へ
+簡素化版:
+- 学習可能ゲートを削除
+- 固定スキップパターン（skip_interval回に1回出力）
+- 例: skip_interval=2 → 出力、スキップ、出力、スキップ...
 """
 
 from typing import Optional
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from src.models.base_components import init_weights
 from src.models.layers import BaseLayer
 
 
-class OutputGate(nn.Module):
-    """
-    学習可能な出力ゲート
-
-    hidden state を入力として、出力すべきかどうかを判断。
-
-    判断基準（学習で最適化）:
-    - hidden の情報量
-    - 予測の確信度
-    - 文脈の完結度
-    """
-
-    def __init__(self, hidden_size: int):
-        super().__init__()
-
-        # Multi-layer gate for complex decision
-        self.gate_net = nn.Sequential(
-            nn.Linear(hidden_size, hidden_size // 4),
-            nn.GELU(),
-            nn.Linear(hidden_size // 4, 1),
-        )
-
-    def forward(self, hidden: torch.Tensor) -> torch.Tensor:
-        """
-        Args:
-            hidden: [batch, seq_len, hidden_size] or [batch, hidden_size]
-
-        Returns:
-            gate_prob: [batch, seq_len, 1] or [batch, 1] - 出力確率
-        """
-        return torch.sigmoid(self.gate_net(hidden))
-
-
 class SelectiveOutputLM(nn.Module):
     """
-    Selective Output Language Model
+    Selective Output Language Model (Simplified)
 
-    通常のLMと異なり、各ステップで「出力すべきか」を判断。
+    固定パターンで持ち越しを行う。
+    skip_interval=2: 2位置ごとに1回出力（50%持ち越し）
+    skip_interval=3: 3位置ごとに1回出力（66%持ち越し）
 
     訓練時:
-    - 全ステップでlogitsを計算
-    - ゲートの出力確率も計算
-    - ゲート損失: 確信度の高い予測で出力、低い予測でスキップを学習
+    - 出力位置のみで損失計算
+    - 持ち越し位置は損失なし
 
     推論時:
-    - ゲートが開く（> threshold）まで内部処理を継続
-    - 最大スキップ数に達したら強制出力
+    - 同じ固定パターンで出力
     """
 
     def __init__(
@@ -83,23 +41,20 @@ class SelectiveOutputLM(nn.Module):
         layers: list[BaseLayer],
         vocab_size: int = 50304,
         hidden_size: int = 512,
-        max_skip: int = 3,  # 連続スキップの最大数
+        skip_interval: int = 2,  # N回に1回出力（デフォルト: 2回に1回=50%出力）
     ):
         super().__init__()
 
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
         self.num_layers = len(layers)
-        self.max_skip = max_skip
+        self.skip_interval = skip_interval
 
         # Token Embedding
         self.embed_in = nn.Embedding(vocab_size, hidden_size)
 
         # Hidden → Hidden projection (スキップ時に使用)
         self.hidden_proj = nn.Linear(hidden_size, hidden_size)
-
-        # Output gate (学習可能)
-        self.output_gate = OutputGate(hidden_size)
 
         # Transformer layers
         self.layers = nn.ModuleList(layers)
@@ -120,7 +75,7 @@ class SelectiveOutputLM(nn.Module):
         use_selective: bool = False,
         prev_hidden: Optional[torch.Tensor] = None,
         update_memory: bool = True,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass
 
@@ -133,13 +88,11 @@ class SelectiveOutputLM(nn.Module):
 
         Returns:
             logits: [batch, seq_len, vocab_size]
-            gate_probs: [batch, seq_len, 1] - 各位置の出力確率
             final_hidden: [batch, hidden_size] - 最終隠れ表現
         """
-        batch_size, seq_len = input_ids.shape
-
         if use_selective and prev_hidden is not None:
             # 選択的モード: 前の隠れ表現を最初の入力に使用
+            batch_size, seq_len = input_ids.shape
             first_hidden = self.hidden_proj(prev_hidden).unsqueeze(1)
 
             if seq_len > 1:
@@ -164,140 +117,52 @@ class SelectiveOutputLM(nn.Module):
         # LM Head
         logits = self.embed_out(hidden_states)
 
-        # Output gate
-        gate_probs = self.output_gate(hidden_states)
-
         # Final hidden for next step
         final_hidden = hidden_states[:, -1, :]
 
-        return logits, gate_probs, final_hidden
+        return logits, final_hidden
 
-    def compute_gate_loss(
+    def compute_fixed_skip_loss(
         self,
         logits: torch.Tensor,
-        gate_probs: torch.Tensor,
         labels: torch.Tensor,
-        gate_target_mode: str = "entropy",
-    ) -> torch.Tensor:
-        """
-        ゲートの学習用損失を計算
-
-        目標: 確信度が高いときに出力、低いときにスキップを学習
-
-        Args:
-            logits: [batch, seq_len, vocab_size]
-            gate_probs: [batch, seq_len, 1]
-            labels: [batch, seq_len]
-            gate_target_mode: "entropy" or "correctness"
-
-        Returns:
-            gate_loss: スカラー
-        """
-        # logitsからエントロピーを計算
-        probs = F.softmax(logits, dim=-1)
-        log_probs = F.log_softmax(logits, dim=-1)
-        entropy = -(probs * log_probs).sum(dim=-1)  # [batch, seq_len]
-
-        # エントロピーを[0, 1]に正規化
-        # 低エントロピー（高確信度）→ 1に近い、高エントロピー（低確信度）→ 0に近い
-        max_entropy = torch.log(torch.tensor(self.vocab_size, dtype=logits.dtype, device=logits.device))
-        normalized_entropy = entropy / max_entropy
-
-        # ゲートのターゲット: 低エントロピーなら出力(1)、高エントロピーならスキップ(0)
-        gate_target = 1.0 - normalized_entropy  # [batch, seq_len]
-
-        # Binary cross entropy
-        gate_probs_squeezed = gate_probs.squeeze(-1)  # [batch, seq_len]
-        gate_loss = F.binary_cross_entropy(gate_probs_squeezed, gate_target.detach())
-
-        return gate_loss
-
-    def compute_carryover_loss(
-        self,
-        logits: torch.Tensor,
-        gate_probs: torch.Tensor,
-        labels: torch.Tensor,
-        threshold: float = 0.5,
-        gate_loss_weight: float = 0.1,
-        max_skip: Optional[int] = None,
     ) -> tuple[torch.Tensor, dict]:
         """
-        持ち越し（Carry-over）方式による損失計算
+        固定スキップパターンによる損失計算
 
-        gate_prob < threshold の位置では損失を計算せず、ターゲットを持ち越す。
-        gate_prob > threshold の位置で、持ち越されたターゲットと比較して損失計算。
-        max_skip回連続でスキップした場合、強制的に出力する。
-
-        動作例: labels = [A, B, C, D, E], gate = [0.3, 0.6, 0.2, 0.7, 0.8], threshold=0.5
-        - 通常のnext-token prediction: logits[i]でlabels[i+1]を予測
-        - pending_target は最初 labels[1]=B
-
-        - pos 0: gate[0]=0.3 < 0.5 → 持ち越し、損失なし（pending=Bのまま）
-        - pos 1: gate[1]=0.6 > 0.5 → 出力、logits[1]とB比較、pending→labels[2]=C
-        - pos 2: gate[2]=0.2 < 0.5 → 持ち越し、損失なし（pending=Cのまま）
-        - pos 3: gate[3]=0.7 > 0.5 → 出力、logits[3]とC比較、pending→labels[3]=D
-        - pos 4: gate[4]=0.8 > 0.5 → 出力、logits[4]とD比較
-
-        max_skip=1の例: labels = [A, B, C, D, E], gate = [0.3, 0.3, 0.3, 0.3, 0.3], threshold=0.5
-        - pos 0: gate < 0.5 → 持ち越し（連続スキップ=1）
-        - pos 1: gate < 0.5 だが max_skip=1到達 → 強制出力、logits[1]とB比較
-        - pos 2: gate < 0.5 → 持ち越し（連続スキップ=1）
-        - pos 3: gate < 0.5 だが max_skip=1到達 → 強制出力、logits[3]とC比較
+        skip_interval=2の場合:
+        - pos 0: 出力 → logits[0]とlabels[1]比較
+        - pos 1: スキップ → 損失なし（labels[2]を持ち越し）
+        - pos 2: 出力 → logits[2]とlabels[2]比較（持ち越されたターゲット）
+        - pos 3: スキップ → 損失なし（labels[3]を持ち越し）
         ...
 
         Args:
             logits: [batch, seq_len, vocab_size]
-            gate_probs: [batch, seq_len, 1]
             labels: [batch, seq_len]
-            threshold: 出力閾値
-            gate_loss_weight: ゲート損失の重み
-            max_skip: 連続スキップ最大数（Noneの場合self.max_skipを使用）
 
         Returns:
-            total_loss: carry-over LM loss + gate_loss_weight * gate_loss
+            loss: スカラー損失
             stats: 訓練統計
         """
         batch_size, seq_len = labels.shape
-        if max_skip is None:
-            max_skip = self.max_skip
-
-        gate_probs_squeezed = gate_probs.squeeze(-1)  # [batch, seq_len]
 
         # Next-token prediction の shift
-        # logits[i] は labels[i+1] を予測するのが基本
         shift_logits = logits[:, :-1, :].contiguous()  # [batch, seq_len-1, vocab]
-        shift_gate_probs = gate_probs_squeezed[:, :-1].contiguous()  # [batch, seq_len-1]
 
-        # 出力マスク: gate_prob > threshold の位置（初期）
-        gate_output = (shift_gate_probs > threshold)  # [batch, seq_len-1]
-
-        # max_skip 強制出力を追加
-        # 連続スキップがmax_skipに達したら強制出力
-        # バッチ独立で処理
-        output_mask = torch.zeros_like(gate_output, dtype=torch.float)
-
-        for b in range(batch_size):
-            consecutive_skips = 0
-            for i in range(seq_len - 1):
-                if gate_output[b, i].item() or consecutive_skips >= max_skip:
-                    # 出力（ゲート開 or max_skip到達）
-                    output_mask[b, i] = 1.0
-                    consecutive_skips = 0
-                else:
-                    # 持ち越し
-                    consecutive_skips += 1
+        # 固定出力マスク: skip_interval回に1回出力
+        # pos 0, skip_interval, 2*skip_interval, ... で出力
+        output_mask = torch.zeros(seq_len - 1, device=logits.device)
+        for i in range(0, seq_len - 1, self.skip_interval):
+            output_mask[i] = 1.0
+        output_mask = output_mask.unsqueeze(0).expand(batch_size, -1)  # [batch, seq_len-1]
 
         # 持ち越しターゲットの計算
-        # 出力が発生するたびに、ターゲットが次に進む
-        # 位置 i でのターゲット = labels[1 + 位置iまでの出力回数 - 1] = labels[累積出力数]
-        # ただし、位置 i で出力する場合、その出力は「今までの」累積に含まれない
-
-        # 累積出力数（exclusive: 位置iを含まない）
-        # [0, 0, ..., 0] の前に0を追加して exclusive cumsum を作る
+        # 累積出力数（exclusive）
         cumsum_before = torch.zeros_like(output_mask)
         cumsum_before[:, 1:] = output_mask[:, :-1].cumsum(dim=1)
 
-        # ターゲットインデックス = 1 + cumsum_before（次トークン予測のため +1）
+        # ターゲットインデックス = 1 + cumsum_before
         target_indices = (1 + cumsum_before.long()).clamp(0, seq_len - 1)
 
         # バッチごとにターゲットを gather
@@ -308,66 +173,48 @@ class SelectiveOutputLM(nn.Module):
         per_token_loss = loss_fct(
             shift_logits.view(-1, self.vocab_size),
             carryover_targets.view(-1)
-        ).view(batch_size, seq_len - 1)  # [batch, seq_len-1]
+        ).view(batch_size, seq_len - 1)
 
-        # 出力位置のみで損失を計算（持ち越し位置は損失なし）
+        # 出力位置のみで損失を計算
         masked_loss = per_token_loss * output_mask
         output_count = output_mask.sum()
 
         if output_count > 0:
-            lm_loss = masked_loss.sum() / output_count
+            loss = masked_loss.sum() / output_count
         else:
-            # 出力がない場合（まれ）、通常の損失を使用
-            lm_loss = per_token_loss.mean()
-
-        # Gate Loss（エントロピーベース）
-        gate_loss = self.compute_gate_loss(logits, gate_probs, labels)
-
-        # Total Loss
-        total_loss = lm_loss + gate_loss_weight * gate_loss
+            loss = per_token_loss.mean()
 
         # 統計情報
         with torch.no_grad():
-            avg_gate_prob = gate_probs_squeezed.mean().item()
             output_ratio = output_count.item() / output_mask.numel()
             carryover_ratio = 1.0 - output_ratio
-            # ゲートによる出力数 vs 強制出力数
-            gate_outputs = gate_output.float().sum().item()
-            forced_outputs = output_count.item() - gate_outputs
 
         stats = {
-            "lm_loss": lm_loss.item(),
-            "gate_loss": gate_loss.item(),
-            "total_loss": total_loss.item(),
-            "avg_gate_prob": avg_gate_prob,
+            "lm_loss": loss.item(),
             "output_ratio": output_ratio,
             "carryover_ratio": carryover_ratio,
             "output_count": output_count.item(),
-            "gate_outputs": gate_outputs,
-            "forced_outputs": forced_outputs,
         }
 
-        return total_loss, stats
+        return loss, stats
 
     def generate_selective(
         self,
         input_ids: torch.Tensor,
         max_new_tokens: int = 50,
         temperature: float = 1.0,
-        threshold: float = 0.5,
     ) -> tuple[torch.Tensor, dict]:
         """
-        選択的出力モードでテキスト生成
+        固定スキップパターンでテキスト生成
 
         Args:
             input_ids: [batch, seq_len]
             max_new_tokens: 最大生成トークン数
             temperature: サンプリング温度
-            threshold: 出力閾値
 
         Returns:
             generated_ids: [batch, output_len]
-            stats: 統計情報（スキップ数など）
+            stats: 統計情報
         """
         self.eval()
         device = input_ids.device
@@ -375,46 +222,40 @@ class SelectiveOutputLM(nn.Module):
 
         # 初期処理
         with torch.no_grad():
-            logits, gate_probs, prev_hidden = self.forward(input_ids, use_selective=False)
+            logits, prev_hidden = self.forward(input_ids, use_selective=False)
 
         generated = [input_ids]
         total_steps = 0
         skip_count = 0
         output_count = 0
-        consecutive_skips = 0
 
-        while output_count < max_new_tokens and total_steps < max_new_tokens * (self.max_skip + 1):
+        while output_count < max_new_tokens:
             total_steps += 1
 
-            # 最後の位置のゲート確率（バッチ平均）
-            gate_prob = gate_probs[:, -1, 0].mean().item()
-
-            if gate_prob > threshold or consecutive_skips >= self.max_skip:
+            if total_steps % self.skip_interval == 1:
                 # 出力
                 next_logits = logits[:, -1, :] / temperature
-                probs = F.softmax(next_logits, dim=-1)
+                probs = torch.softmax(next_logits, dim=-1)
                 next_token = torch.multinomial(probs, num_samples=1)
 
                 generated.append(next_token)
                 output_count += 1
-                consecutive_skips = 0
 
                 # 次のステップ（トークン埋め込みを使用）
                 with torch.no_grad():
-                    logits, gate_probs, prev_hidden = self.forward(
+                    logits, prev_hidden = self.forward(
                         next_token,
                         use_selective=False,
                     )
             else:
                 # スキップ（hiddenを継続）
                 skip_count += 1
-                consecutive_skips += 1
 
-                # ダミートークン（使わないが形式上必要）
+                # ダミートークン
                 dummy_token = torch.zeros(batch_size, 1, dtype=torch.long, device=device)
 
                 with torch.no_grad():
-                    logits, gate_probs, prev_hidden = self.forward(
+                    logits, prev_hidden = self.forward(
                         dummy_token,
                         use_selective=True,
                         prev_hidden=prev_hidden,
@@ -462,7 +303,6 @@ class SelectiveOutputLM(nn.Module):
         embedding = self.embed_in.weight.numel()
         lm_head = self.embed_out.weight.numel()
         hidden_proj = sum(p.numel() for p in self.hidden_proj.parameters())
-        gate = sum(p.numel() for p in self.output_gate.parameters())
 
         layer_params = [
             sum(p.numel() for p in layer.parameters())
@@ -474,7 +314,6 @@ class SelectiveOutputLM(nn.Module):
             "embedding": embedding,
             "lm_head": lm_head,
             "hidden_proj": hidden_proj,
-            "output_gate": gate,
             "transformer": sum(layer_params),
             "per_layer": layer_params,
         }
