@@ -16,6 +16,10 @@ Continuous LM:
 - continuous: 前の隠れ状態を直接入力として使用
 - continuous + extra_pass: 追加処理あり
 - continuous + extra_pass + use_h1: h1とh2の両方を使用
+
+訓練方式:
+- キャッシュベース訓練: 前イテレーションの隠れ状態をキャッシュして再利用
+  → 並列処理が可能で高速（450s → 20s程度）
 """
 
 from typing import Optional
@@ -131,6 +135,7 @@ class ContinuousLM(nn.Module):
         elif mode == "continuous":
             # Continuous: 前の隠れ状態を直接入力として使用
             # 最初のトークンはembeddingを使用、以降は前の隠れ状態を使用
+            # 注意: この実装は遅い（1トークンずつ処理）。高速化にはforward_with_cacheを使用
 
             # 最初のトークンの埋め込み
             first_embed = self.embed_in(input_ids[:, :1])  # [batch, 1, hidden]
@@ -174,6 +179,141 @@ class ContinuousLM(nn.Module):
         logits = self.embed_out(final_hidden)
 
         return logits, final_hidden
+
+    def forward_with_cache(
+        self,
+        input_ids: torch.Tensor,
+        prev_hidden_cache: torch.Tensor,
+        attention_mask: Optional[torch.Tensor] = None,
+        extra_pass: bool = False,
+        use_h1: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        キャッシュベースのContinuous forward（高速版）
+
+        前のイテレーションで計算した隠れ状態をキャッシュとして受け取り、
+        それを入力として使用する。これにより並列処理が可能。
+
+        考え方:
+        - prev_hidden_cache[t] = 前イテレーションでのトークンtの隠れ状態
+        - 訓練時: prev_hidden_cache[t-1] を使って位置tの隠れ状態を計算
+        - イテレーションごとにキャッシュを更新（モデルの学習で隠れ状態が変化）
+
+        Args:
+            input_ids: [batch, seq_len] - トークンID
+            prev_hidden_cache: [batch, seq_len, hidden_size] - 前イテレーションの隠れ状態
+            attention_mask: Optional attention mask
+            extra_pass: 追加処理を行うか
+            use_h1: extra_pass時にh1も使用するか
+
+        Returns:
+            logits: [batch, seq_len, vocab_size]
+            new_hidden: [batch, seq_len, hidden_size] - 次イテレーション用の隠れ状態
+        """
+        batch_size, seq_len = input_ids.shape
+
+        # 入力を構築
+        # 位置0: 最初のトークンの埋め込み
+        # 位置t (t>0): prev_hidden_cache[t-1] を変換したもの
+        first_embed = self.embed_in(input_ids[:, :1])  # [batch, 1, hidden]
+
+        if seq_len > 1:
+            # prev_hidden_cache[:, :-1] を変換して位置1以降の入力とする
+            rest_input = self.hidden_proj(prev_hidden_cache[:, :-1, :])  # [batch, seq_len-1, hidden]
+            hidden_input = torch.cat([first_embed, rest_input], dim=1)  # [batch, seq_len, hidden]
+        else:
+            hidden_input = first_embed
+
+        # Transformer処理（並列で全シーケンスを処理）
+        h1 = self._forward_layers(hidden_input, attention_mask, update_memory=True)
+
+        if extra_pass:
+            h2 = self.extra_proj(h1)
+            h2 = self._forward_layers(h2, attention_mask, update_memory=True)
+            if use_h1:
+                combined = torch.cat([h1, h2], dim=-1)
+                final_hidden = self.combine_proj(combined)
+            else:
+                final_hidden = h2
+        else:
+            final_hidden = h1
+
+        # Final layer norm + LM Head
+        normed_hidden = self.final_layer_norm(final_hidden)
+        logits = self.embed_out(normed_hidden)
+
+        # h1を次イテレーション用のキャッシュとして返す（final_hiddenではなくh1）
+        return logits, h1
+
+    def compute_loss_with_cache(
+        self,
+        input_ids: torch.Tensor,
+        labels: torch.Tensor,
+        prev_hidden_cache: torch.Tensor,
+        extra_pass: bool = False,
+        use_h1: bool = False,
+    ) -> tuple[torch.Tensor, torch.Tensor, dict]:
+        """
+        キャッシュベースの損失計算（高速版）
+
+        Args:
+            input_ids: [batch, seq_len]
+            labels: [batch, seq_len]
+            prev_hidden_cache: [batch, seq_len, hidden_size]
+            extra_pass: 追加処理を行うか
+            use_h1: extra_pass時にh1も使用するか
+
+        Returns:
+            loss: スカラー損失
+            new_hidden: 次イテレーション用の隠れ状態
+            stats: 訓練統計
+        """
+        logits, new_hidden = self.forward_with_cache(
+            input_ids, prev_hidden_cache, extra_pass=extra_pass, use_h1=use_h1
+        )
+
+        # Next-token prediction: logits[:-1] -> labels[1:]
+        shift_logits = logits[:, :-1, :].contiguous()
+        shift_labels = labels[:, 1:].contiguous()
+
+        loss = F.cross_entropy(
+            shift_logits.view(-1, self.vocab_size),
+            shift_labels.view(-1),
+        )
+
+        mode_name = "continuous_cached"
+        if extra_pass:
+            mode_name += "_extra"
+        if use_h1:
+            mode_name += "_combined"
+
+        stats = {
+            "lm_loss": loss.item(),
+            "ppl": torch.exp(loss).item(),
+            "mode": mode_name,
+        }
+
+        return loss, new_hidden, stats
+
+    def init_hidden_cache(
+        self,
+        input_ids: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        隠れ状態キャッシュを初期化
+
+        最初のイテレーション用に、discreteモードで隠れ状態を計算。
+
+        Args:
+            input_ids: [batch, seq_len]
+
+        Returns:
+            hidden_cache: [batch, seq_len, hidden_size]
+        """
+        with torch.no_grad():
+            hidden_states = self.embed_in(input_ids)
+            h = self._forward_layers(hidden_states, update_memory=True)
+            return h.detach()
 
     def compute_loss(
         self,

@@ -40,11 +40,12 @@ from src.utils.training import get_device, prepare_data_loaders
 
 
 # モード設定のマッピング
+# use_cache=Trueの場合はキャッシュベース訓練（高速）を使用
 MODE_CONFIGS = {
-    "discrete": {"mode": "discrete", "extra_pass": False, "use_h1": False},
-    "continuous": {"mode": "continuous", "extra_pass": False, "use_h1": False},
-    "continuous_extra": {"mode": "continuous", "extra_pass": True, "use_h1": False},
-    "continuous_combined": {"mode": "continuous", "extra_pass": True, "use_h1": True},
+    "discrete": {"mode": "discrete", "extra_pass": False, "use_h1": False, "use_cache": False},
+    "continuous": {"mode": "continuous", "extra_pass": False, "use_h1": False, "use_cache": True},
+    "continuous_extra": {"mode": "continuous", "extra_pass": True, "use_h1": False, "use_cache": True},
+    "continuous_combined": {"mode": "continuous", "extra_pass": True, "use_h1": True, "use_cache": True},
 }
 
 
@@ -101,6 +102,7 @@ def train_continuous(
     mode: str,
     extra_pass: bool,
     use_h1: bool,
+    use_cache: bool,
 ) -> tuple[float, int, Optional[dict]]:
     """ContinuousLM訓練"""
     best_val_ppl = float("inf")
@@ -109,10 +111,16 @@ def train_continuous(
     patience_counter = 0
 
     mode_name = mode
+    if use_cache:
+        mode_name = "continuous_cached"
     if extra_pass:
         mode_name += "_extra"
     if use_h1:
         mode_name += "_combined"
+
+    # キャッシュベース訓練の場合、各バッチの隠れ状態キャッシュを初期化
+    # キャッシュはエポックごとにリセット（学習が進むとキャッシュも変化する必要あり）
+    hidden_caches: dict[int, torch.Tensor] = {}
 
     for epoch in range(1, num_epochs + 1):
         start_time = time.time()
@@ -121,16 +129,31 @@ def train_continuous(
         epoch_loss = 0.0
         epoch_tokens = 0
 
-        for batch in train_loader:
+        for batch_idx, batch in enumerate(train_loader):
             input_ids, labels = batch
             input_ids = input_ids.to(device)
             labels = labels.to(device)
 
             optimizer.zero_grad()
 
-            loss, stats = model.compute_loss(
-                input_ids, labels, mode=mode, extra_pass=extra_pass, use_h1=use_h1
-            )
+            if use_cache:
+                # キャッシュベース訓練
+                # 最初のエポックまたはキャッシュがない場合は初期化
+                if batch_idx not in hidden_caches:
+                    hidden_caches[batch_idx] = model.init_hidden_cache(input_ids)
+
+                prev_cache = hidden_caches[batch_idx].to(device)
+                loss, new_hidden, stats = model.compute_loss_with_cache(
+                    input_ids, labels, prev_cache, extra_pass=extra_pass, use_h1=use_h1
+                )
+
+                # キャッシュを更新（detachして勾配グラフを切断）
+                hidden_caches[batch_idx] = new_hidden.detach().cpu()
+            else:
+                # 通常訓練（discrete mode）
+                loss, stats = model.compute_loss(
+                    input_ids, labels, mode=mode, extra_pass=extra_pass, use_h1=use_h1
+                )
 
             loss.backward()
             torch.nn.utils.clip_grad_norm_(model.parameters(), gradient_clip)
@@ -142,8 +165,8 @@ def train_continuous(
 
         train_ppl = torch.exp(torch.tensor(epoch_loss / epoch_tokens)).item()
 
-        # Validation
-        val_ppl = compute_ppl(model, val_loader, device, mode, extra_pass, use_h1)
+        # Validation（常にdiscreteモードで評価、公平な比較のため）
+        val_ppl = compute_ppl(model, val_loader, device, "discrete", False, False)
         elapsed = time.time() - start_time
 
         improved = val_ppl < best_val_ppl
@@ -182,6 +205,7 @@ def run_model(
     mode = mode_config["mode"]
     extra_pass = mode_config["extra_pass"]
     use_h1 = mode_config["use_h1"]
+    use_cache = mode_config["use_cache"]
 
     print_flush("\n" + "=" * 70)
     print_flush(f"{model_name.upper()}")
@@ -192,12 +216,14 @@ def run_model(
 
     param_info = model.num_parameters()
     print_flush(f"  Parameters: {param_info['total']:,}")
-    if mode == "continuous":
+    if mode == "continuous" or use_cache:
         print_flush(f"    - hidden_proj: {param_info['hidden_proj']:,}")
     if extra_pass:
         print_flush(f"    - extra_proj: {param_info['extra_proj']:,}")
     if use_h1:
         print_flush(f"    - combine_proj: {param_info['combine_proj']:,}")
+    if use_cache:
+        print_flush("    - Training: cache-based (fast)")
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
@@ -205,17 +231,17 @@ def run_model(
     best_ppl, best_epoch, best_state = train_continuous(
         model, train_loader, val_loader, optimizer, device,
         args.epochs, args.patience, GRADIENT_CLIP,
-        mode=mode, extra_pass=extra_pass, use_h1=use_h1,
+        mode=mode, extra_pass=extra_pass, use_h1=use_h1, use_cache=use_cache,
     )
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
 
     if best_state:
         model.load_state_dict(best_state)
 
-    # Evaluation
+    # Evaluation（公平な比較のためdiscreteモードで評価）
     print_flush("\n  Position-wise PPL:")
     model.eval()
-    wrapper = ModelWrapper(model, mode, extra_pass, use_h1)
+    wrapper = ModelWrapper(model, "discrete", False, False)
     pos_ppl = evaluate_position_wise_ppl(wrapper, val_loader, device)
     for pos_range, ppl in pos_ppl.items():
         print_flush(f"    {pos_range}: {ppl:.1f}")
