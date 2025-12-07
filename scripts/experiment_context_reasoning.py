@@ -44,11 +44,97 @@ from src.utils.device import clear_gpu_cache
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
 from src.utils.tokenizer_utils import get_tokenizer
-from src.utils.training import get_device, prepare_data_loaders
+from src.utils.data_pythia import load_pile_tokens_cached
+from src.utils.training import get_device
+
+
+class MixedDataset(Dataset):
+    """Pileデータと家族関係データを混合したデータセット"""
+
+    def __init__(
+        self,
+        pile_tokens: torch.Tensor,
+        family_samples: list[dict],
+        tokenizer,
+        seq_length: int = 128,
+        pile_ratio: float = 0.8,
+    ):
+        """
+        Args:
+            pile_tokens: Pileデータのトークン列
+            family_samples: 家族関係サンプル（input, target形式）
+            tokenizer: トークナイザー
+            seq_length: シーケンス長
+            pile_ratio: Pileデータの割合（0.8 = 80% Pile, 20% family）
+        """
+        self.tokenizer = tokenizer
+        self.seq_length = seq_length
+        self.pad_token_id = tokenizer.eos_token_id
+
+        # Pileデータからサンプル作成
+        self.pile_samples = []
+        for i in range(0, len(pile_tokens) - seq_length, seq_length):
+            tokens = pile_tokens[i : i + seq_length].tolist()
+            self.pile_samples.append({"type": "pile", "tokens": tokens})
+
+        # 家族関係サンプルを処理
+        self.family_samples = []
+        for sample in family_samples:
+            input_text = sample["input"]
+            target_text = sample["target"]
+            full_text = input_text + target_text
+            tokens = tokenizer.encode(full_text)
+            input_tokens = tokenizer.encode(input_text)
+            input_len = len(input_tokens)
+            self.family_samples.append({
+                "type": "family",
+                "tokens": tokens,
+                "input_len": input_len,
+            })
+
+        # 比率に基づいてサンプル数を決定
+        total_family = len(self.family_samples)
+        if pile_ratio > 0 and pile_ratio < 1:
+            # family_samples の数を基準に pile_samples 数を計算
+            target_pile = int(total_family * pile_ratio / (1 - pile_ratio))
+            target_pile = min(target_pile, len(self.pile_samples))
+        else:
+            target_pile = len(self.pile_samples) if pile_ratio == 1 else 0
+
+        self.pile_samples = self.pile_samples[:target_pile]
+        self.all_samples = self.pile_samples + self.family_samples
+
+    def __len__(self):
+        return len(self.all_samples)
+
+    def __getitem__(self, idx):
+        sample = self.all_samples[idx]
+
+        if sample["type"] == "pile":
+            tokens = sample["tokens"]
+            input_ids = torch.tensor(tokens, dtype=torch.long)
+            labels = input_ids.clone()
+            return input_ids, labels
+
+        else:  # family
+            tokens = sample["tokens"]
+            input_len = sample["input_len"]
+
+            if len(tokens) > self.seq_length:
+                tokens = tokens[: self.seq_length]
+                input_len = min(input_len, self.seq_length - 1)
+            else:
+                tokens = tokens + [self.pad_token_id] * (self.seq_length - len(tokens))
+
+            input_ids = torch.tensor(tokens, dtype=torch.long)
+            labels = input_ids.clone()
+            labels[:input_len] = -100
+
+            return input_ids, labels
 
 
 class ContextReasoningDataset(Dataset):
-    """コンテキスト推論用データセット"""
+    """コンテキスト推論用データセット（家族関係のみ）"""
 
     def __init__(
         self,
@@ -345,7 +431,7 @@ def run_baseline(
     val_pairs: list[FamilyPair],
     test_pairs: list[FamilyPair],
     celebrity_pairs: list[FamilyPair],
-    pile_train_loader,
+    pile_tokens: torch.Tensor,
     pile_val_loader,
     tokenizer,
     device,
@@ -353,18 +439,24 @@ def run_baseline(
 ) -> dict:
     """ベースラインモデルの訓練と評価"""
     print_flush("\n" + "=" * 70)
-    print_flush("BASELINE (Direct Learning)")
+    print_flush("BASELINE (Direct Learning + Pile)")
     print_flush("=" * 70)
 
     # ベースラインサンプル生成（順方向の事実のみ）
     baseline_samples = create_baseline_samples(train_pairs)
     val_samples = create_baseline_samples(val_pairs)
 
-    print_flush(f"  Train samples: {len(baseline_samples)}")
-    print_flush(f"  Val samples: {len(val_samples)}")
-
-    train_dataset = BaselineDataset(baseline_samples, tokenizer, args.seq_length)
+    # Pileデータと混合したデータセット
+    train_dataset = MixedDataset(
+        pile_tokens, baseline_samples, tokenizer,
+        seq_length=args.seq_length, pile_ratio=args.pile_ratio
+    )
     val_dataset = BaselineDataset(val_samples, tokenizer, args.seq_length)
+
+    print_flush(f"  Train samples: {len(train_dataset)}")
+    print_flush(f"    - Pile: {len(train_dataset.pile_samples)}")
+    print_flush(f"    - Family: {len(train_dataset.family_samples)}")
+    print_flush(f"  Val samples (family only): {len(val_samples)}")
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
@@ -432,7 +524,7 @@ def run_context_model(
     val_pairs: list[FamilyPair],
     test_pairs: list[FamilyPair],
     celebrity_pairs: list[FamilyPair],
-    pile_train_loader,
+    pile_tokens: torch.Tensor,
     pile_val_loader,
     tokenizer,
     device,
@@ -440,20 +532,25 @@ def run_context_model(
 ) -> dict:
     """コンテキスト推論モデルの訓練と評価"""
     print_flush("\n" + "=" * 70)
-    print_flush("CONTEXT REASONING")
+    print_flush("CONTEXT REASONING + Pile")
     print_flush("=" * 70)
 
     # コンテキスト付きサンプル生成
     context_samples = create_context_qa_samples(train_pairs, include_negative=True)
     val_samples = create_context_qa_samples(val_pairs, include_negative=True)
 
-    print_flush(f"  Train samples: {len(context_samples)}")
-    print_flush(f"    - With context: {sum(1 for s in context_samples if s['has_context'])}")
-    print_flush(f"    - Without context: {sum(1 for s in context_samples if not s['has_context'])}")
-    print_flush(f"  Val samples: {len(val_samples)}")
-
-    train_dataset = ContextReasoningDataset(context_samples, tokenizer, args.seq_length)
+    # Pileデータと混合
+    train_dataset = MixedDataset(
+        pile_tokens, context_samples, tokenizer,
+        seq_length=args.seq_length, pile_ratio=args.pile_ratio
+    )
     val_dataset = ContextReasoningDataset(val_samples, tokenizer, args.seq_length)
+
+    print_flush(f"  Train samples: {len(train_dataset)}")
+    print_flush(f"    - Pile: {len(train_dataset.pile_samples)}")
+    print_flush(f"    - Family (with context): {sum(1 for s in context_samples if s['has_context'])}")
+    print_flush(f"    - Family (without context): {sum(1 for s in context_samples if not s['has_context'])}")
+    print_flush(f"  Val samples (family only): {len(val_samples)}")
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size)
@@ -530,7 +627,8 @@ def run_context_model(
 def main():
     parser = argparse.ArgumentParser(description="Context-Based Reasoning Experiment")
     parser.add_argument("--num-pairs", type=int, default=200, help="Number of family pairs")
-    parser.add_argument("--samples", type=int, default=2500, help="Number of Pile samples")
+    parser.add_argument("--pile-tokens", type=int, default=500000, help="Number of Pile tokens")
+    parser.add_argument("--pile-ratio", type=float, default=0.9, help="Ratio of Pile data (0.9 = 90% Pile, 10% family)")
     parser.add_argument("--seq-length", type=int, default=128)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -554,7 +652,8 @@ def main():
     print_flush("CONTEXT-BASED REASONING EXPERIMENT")
     print_flush("=" * 70)
     print_flush(f"Family pairs: {args.num_pairs}")
-    print_flush(f"Pile samples: {args.samples}")
+    print_flush(f"Pile tokens: {args.pile_tokens:,}")
+    print_flush(f"Pile ratio: {args.pile_ratio:.0%}")
     print_flush(f"Sequence length: {args.seq_length}")
     print_flush(f"Epochs: {args.epochs}")
     print_flush(f"Position Encoding: {'NoPE' if args.nope else 'RoPE'}")
@@ -573,26 +672,34 @@ def main():
     print_flush(f"  Celebrity pairs: {len(celebrity_pairs)}")
 
     print_flush("\n[Data] Loading Pile data...")
-    pile_train_loader, pile_val_loader = prepare_data_loaders(
-        num_samples=args.samples,
-        seq_length=args.seq_length,
-        tokenizer_name=config.tokenizer_name,
-        val_split=0.1,
-        batch_size=args.batch_size,
+    pile_tokens = load_pile_tokens_cached(args.pile_tokens, config.tokenizer_name)
+
+    # Pile validation用のDataLoader
+    val_size = args.pile_tokens // 10  # 10%をvalidationに
+    pile_val_tokens = pile_tokens[-val_size:]
+    pile_val_samples = []
+    for i in range(0, len(pile_val_tokens) - args.seq_length, args.seq_length):
+        tokens = pile_val_tokens[i : i + args.seq_length]
+        pile_val_samples.append((tokens, tokens.clone()))
+
+    pile_val_dataset = torch.utils.data.TensorDataset(
+        torch.stack([s[0] for s in pile_val_samples]),
+        torch.stack([s[1] for s in pile_val_samples]),
     )
+    pile_val_loader = DataLoader(pile_val_dataset, batch_size=args.batch_size)
 
     results = {}
 
     # ベースライン
     results["baseline"] = run_baseline(
         config, train_pairs, val_pairs, test_pairs, celebrity_pairs,
-        pile_train_loader, pile_val_loader, tokenizer, device, args
+        pile_tokens, pile_val_loader, tokenizer, device, args
     )
 
     # コンテキスト推論
     results["context"] = run_context_model(
         config, train_pairs, val_pairs, test_pairs, celebrity_pairs,
-        pile_train_loader, pile_val_loader, tokenizer, device, args
+        pile_tokens, pile_val_loader, tokenizer, device, args
     )
 
     # サマリー
