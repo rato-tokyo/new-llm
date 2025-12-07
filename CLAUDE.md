@@ -285,6 +285,27 @@ for start in range(0, seq_len - 1, stride):
 | Sliding window (stride=512) | **40.96** ✓ |
 | Segment-based | 14,204 ❌ |
 
+### 5. 短い文のパディング問題（Reversal Curse評価）
+
+**短い文をEOSでパディングすると、訓練と評価の分布が乖離する。**
+
+```python
+# ❌ 問題: 短い文をseq_lengthまでEOSでパディング
+sentence = "Paris is the capital of France"  # 6トークン
+tokens = tokenize(sentence) + [EOS] * 122     # 128トークンにパディング
+# → モデルは主にEOS→EOSを学習（94%がEOS）
+# → 評価時（6トークンのみ）でPPLが異常に高くなる
+
+# ✅ 正しい方法: 複数の短い文を連結
+all_sentences = "Paris is the capital of France EOS Tokyo is the capital of Japan EOS ..."
+# → 文の内容が連続して現れる（EOSは12%程度、区切りとしてのみ）
+# → 訓練と評価の分布が一致
+```
+
+**症状**: Forward PPL > Backward PPL（通常は逆）
+**原因**: 訓練データの94%がEOSトークンで、実際の文内容をほとんど学習していない
+**対策**: パディングせず、文を連結してスライディングウィンドウでサンプル作成
+
 ---
 
 ## 🔧 Pretrained LLMへのInfini-Attention導入（失敗）
