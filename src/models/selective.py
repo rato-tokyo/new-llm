@@ -219,12 +219,14 @@ class SelectiveOutputLM(nn.Module):
         labels: torch.Tensor,
         threshold: float = 0.5,
         gate_loss_weight: float = 0.1,
+        max_skip: Optional[int] = None,
     ) -> tuple[torch.Tensor, dict]:
         """
         持ち越し（Carry-over）方式による損失計算
 
         gate_prob < threshold の位置では損失を計算せず、ターゲットを持ち越す。
         gate_prob > threshold の位置で、持ち越されたターゲットと比較して損失計算。
+        max_skip回連続でスキップした場合、強制的に出力する。
 
         動作例: labels = [A, B, C, D, E], gate = [0.3, 0.6, 0.2, 0.7, 0.8], threshold=0.5
         - 通常のnext-token prediction: logits[i]でlabels[i+1]を予測
@@ -236,18 +238,28 @@ class SelectiveOutputLM(nn.Module):
         - pos 3: gate[3]=0.7 > 0.5 → 出力、logits[3]とC比較、pending→labels[3]=D
         - pos 4: gate[4]=0.8 > 0.5 → 出力、logits[4]とD比較
 
+        max_skip=1の例: labels = [A, B, C, D, E], gate = [0.3, 0.3, 0.3, 0.3, 0.3], threshold=0.5
+        - pos 0: gate < 0.5 → 持ち越し（連続スキップ=1）
+        - pos 1: gate < 0.5 だが max_skip=1到達 → 強制出力、logits[1]とB比較
+        - pos 2: gate < 0.5 → 持ち越し（連続スキップ=1）
+        - pos 3: gate < 0.5 だが max_skip=1到達 → 強制出力、logits[3]とC比較
+        ...
+
         Args:
             logits: [batch, seq_len, vocab_size]
             gate_probs: [batch, seq_len, 1]
             labels: [batch, seq_len]
             threshold: 出力閾値
             gate_loss_weight: ゲート損失の重み
+            max_skip: 連続スキップ最大数（Noneの場合self.max_skipを使用）
 
         Returns:
             total_loss: carry-over LM loss + gate_loss_weight * gate_loss
             stats: 訓練統計
         """
         batch_size, seq_len = labels.shape
+        if max_skip is None:
+            max_skip = self.max_skip
 
         gate_probs_squeezed = gate_probs.squeeze(-1)  # [batch, seq_len]
 
@@ -256,8 +268,24 @@ class SelectiveOutputLM(nn.Module):
         shift_logits = logits[:, :-1, :].contiguous()  # [batch, seq_len-1, vocab]
         shift_gate_probs = gate_probs_squeezed[:, :-1].contiguous()  # [batch, seq_len-1]
 
-        # 出力マスク: gate_prob > threshold の位置
-        output_mask = (shift_gate_probs > threshold).float()  # [batch, seq_len-1]
+        # 出力マスク: gate_prob > threshold の位置（初期）
+        gate_output = (shift_gate_probs > threshold)  # [batch, seq_len-1]
+
+        # max_skip 強制出力を追加
+        # 連続スキップがmax_skipに達したら強制出力
+        # バッチ独立で処理
+        output_mask = torch.zeros_like(gate_output, dtype=torch.float)
+
+        for b in range(batch_size):
+            consecutive_skips = 0
+            for i in range(seq_len - 1):
+                if gate_output[b, i].item() or consecutive_skips >= max_skip:
+                    # 出力（ゲート開 or max_skip到達）
+                    output_mask[b, i] = 1.0
+                    consecutive_skips = 0
+                else:
+                    # 持ち越し
+                    consecutive_skips += 1
 
         # 持ち越しターゲットの計算
         # 出力が発生するたびに、ターゲットが次に進む
@@ -303,6 +331,9 @@ class SelectiveOutputLM(nn.Module):
             avg_gate_prob = gate_probs_squeezed.mean().item()
             output_ratio = output_count.item() / output_mask.numel()
             carryover_ratio = 1.0 - output_ratio
+            # ゲートによる出力数 vs 強制出力数
+            gate_outputs = gate_output.float().sum().item()
+            forced_outputs = output_count.item() - gate_outputs
 
         stats = {
             "lm_loss": lm_loss.item(),
@@ -312,6 +343,8 @@ class SelectiveOutputLM(nn.Module):
             "output_ratio": output_ratio,
             "carryover_ratio": carryover_ratio,
             "output_count": output_count.item(),
+            "gate_outputs": gate_outputs,
+            "forced_outputs": forced_outputs,
         }
 
         return total_loss, stats
