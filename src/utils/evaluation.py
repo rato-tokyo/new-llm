@@ -137,12 +137,23 @@ def evaluate_position_wise_ppl(
                 else:
                     logits = output
 
-            # Compute per-position loss
+            # Next-token prediction: logits[:-1] -> labels[1:]
+            shift_logits = logits[:, :-1, :].contiguous()
+            shift_labels = labels[:, 1:].contiguous()
+
+            # Compute per-position loss (positions are 0-indexed on shifted sequence)
             for start, end in position_ranges:
                 key = f"{start}-{end}"
 
-                range_logits = logits[:, start:end, :]
-                range_labels = labels[:, start:end]
+                # Adjust for shifted sequence length
+                adj_end = min(end - 1, shift_logits.size(1))
+                adj_start = max(0, start - 1) if start > 0 else 0
+
+                if adj_start >= adj_end:
+                    continue
+
+                range_logits = shift_logits[:, adj_start:adj_end, :]
+                range_labels = shift_labels[:, adj_start:adj_end]
 
                 loss = nn.functional.cross_entropy(
                     range_logits.reshape(-1, range_logits.size(-1)),

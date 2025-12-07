@@ -5,8 +5,8 @@ Selective Output LM Experiment
 仮説: LLMは即座に出力せず、隠れ状態を追加処理してから出力すべき
 
 動作:
-- Baseline (use_selective=False): トークン入力 → 1パス → 即座に次トークン予測
-- Selective (use_selective=True): トークン入力 → 2パス → 次トークン予測
+- Baseline (extra_passes=0): トークン入力 → 即座に次トークン予測（追加処理なし）
+- Selective (extra_passes=1): トークン入力 → 1回追加処理 → 次トークン予測
 
 Usage:
     # Selective only (default)
@@ -87,8 +87,8 @@ def train_selective(
     """
     SelectiveOutputLM訓練
 
-    use_selective=True: 2パス処理（1回追加処理）
-    use_selective=False: 1パス処理（通常のContinuous）
+    use_selective=True: extra_passes=1（1回追加処理してから出力）
+    use_selective=False: extra_passes=0（即座に出力、通常のContinuous）
     """
     best_val_ppl = float("inf")
     best_epoch = 0
@@ -136,10 +136,10 @@ def train_selective(
             patience_counter += 1
             marker = ""
 
-        num_passes = 2 if use_selective else 1
+        extra_passes = 1 if use_selective else 0
         print_flush(
             f"  Epoch {epoch:2d}: train={train_ppl:7.1f}, val={val_ppl:7.1f}, "
-            f"passes={num_passes} ({elapsed:.1f}s) {marker}"
+            f"extra={extra_passes} ({elapsed:.1f}s) {marker}"
         )
 
         if patience_counter >= patience:
@@ -154,7 +154,7 @@ def main():
     parser.add_argument(
         "--models", nargs="+", default=["selective"],
         choices=["baseline", "selective"],
-        help="Models to run (baseline=1-pass, selective=2-pass)"
+        help="Models to run (baseline=extra_passes=0, selective=extra_passes=1)"
     )
     parser.add_argument("--samples", type=int, default=5000)
     parser.add_argument("--seq-length", type=int, default=128)
@@ -198,11 +198,11 @@ def main():
     results = {}
 
     # =========================================================================
-    # Baseline (1-pass, equivalent to Continuous)
+    # Baseline (extra_passes=0, equivalent to Continuous)
     # =========================================================================
     if "baseline" in args.models:
         print_flush("\n" + "=" * 70)
-        print_flush("BASELINE (1-pass, no extra processing)")
+        print_flush("BASELINE (extra_passes=0, no extra processing)")
         print_flush("=" * 70)
 
         model = create_model("selective", config)
@@ -217,7 +217,7 @@ def main():
         best_ppl, best_epoch, best_state = train_selective(
             model, train_loader, val_loader, optimizer, device,
             args.epochs, args.patience, GRADIENT_CLIP,
-            use_selective=False,  # 1-pass
+            use_selective=False,  # extra_passes=0
         )
         print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
 
@@ -243,7 +243,7 @@ def main():
         results["baseline"] = {
             "best_val_ppl": best_ppl,
             "best_epoch": best_epoch,
-            "num_passes": 1,
+            "extra_passes": 0,
             "position_wise_ppl": pos_ppl,
             "reversal_curse": reversal,
         }
@@ -252,11 +252,11 @@ def main():
         clear_gpu_cache(device)
 
     # =========================================================================
-    # Selective Output LM (2-pass)
+    # Selective Output LM (extra_passes=1)
     # =========================================================================
     if "selective" in args.models:
         print_flush("\n" + "=" * 70)
-        print_flush("SELECTIVE (2-pass, 1 extra processing)")
+        print_flush("SELECTIVE (extra_passes=1, 1 extra processing)")
         print_flush("=" * 70)
 
         model = create_model("selective", config)
@@ -272,7 +272,7 @@ def main():
         best_ppl, best_epoch, best_state = train_selective(
             model, train_loader, val_loader, optimizer, device,
             args.epochs, args.patience, GRADIENT_CLIP,
-            use_selective=True,  # 2-pass
+            use_selective=True,  # extra_passes=1
         )
         print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
 
@@ -280,7 +280,7 @@ def main():
             model.load_state_dict(best_state)
 
         # Evaluation (using selective mode)
-        print_flush("\n  Position-wise PPL (selective mode):")
+        print_flush("\n  Position-wise PPL (extra_passes=1):")
         model.eval()
         wrapper = ModelWrapper(model, use_selective=True)
         pos_ppl = evaluate_position_wise_ppl(wrapper, val_loader, device)
@@ -298,7 +298,7 @@ def main():
         results["selective"] = {
             "best_val_ppl": best_ppl,
             "best_epoch": best_epoch,
-            "num_passes": 2,
+            "extra_passes": 1,
             "position_wise_ppl": pos_ppl,
             "reversal_curse": reversal,
         }
@@ -313,10 +313,10 @@ def main():
     print_flush("SUMMARY")
     print_flush("=" * 70)
 
-    print_flush("\n| Model | Passes | Best PPL | Epoch |")
-    print_flush("|-------|--------|----------|-------|")
+    print_flush("\n| Model | Extra Passes | Best PPL | Epoch |")
+    print_flush("|-------|--------------|----------|-------|")
     for model_name, r in results.items():
-        print_flush(f"| {model_name} | {r['num_passes']} | {r['best_val_ppl']:.1f} | {r['best_epoch']} |")
+        print_flush(f"| {model_name} | {r['extra_passes']} | {r['best_val_ppl']:.1f} | {r['best_epoch']} |")
 
     print_flush("\n| Model | Forward PPL | Backward PPL | Gap |")
     print_flush("|-------|-------------|--------------|-----|")

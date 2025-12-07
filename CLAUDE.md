@@ -310,35 +310,34 @@ for start in range(0, seq_len - 1, stride):
 ### コンセプト
 
 ```
-従来のContinuous:
-  入力A → Transformer処理 → 即座に次トークン"B"を予測
+extra_passes=0 (Baseline):
+  入力A → Transformer処理 → 即座に次トークン"B"を予測（追加処理なし）
 
-Selective (skip_interval=1):
+extra_passes=1 (Selective):
   入力A → Transformer処理 → 隠れ状態h1（まだ出力しない）
        → h1を追加処理 → 隠れ状態h2 → 次トークン"B"を予測
 ```
 
-### skip_interval パラメータ
+### extra_passes パラメータ
 
 | 値 | 動作 | 説明 |
 |----|------|------|
-| 0 | 追加処理なし | 従来のContinuousと同等 |
+| 0 | 追加処理なし | 従来のContinuousと同等（即座に出力） |
 | 1 | 1回追加処理 | トークン入力後、1回追加でTransformer通過してから出力 |
-| 2 | 2回追加処理 | トークン入力後、2回追加でTransformer通過してから出力 |
 
 ### 使用方法
 
 ```python
 from src.models import create_model
 
-# Selective (1回追加処理)
-model = create_model("selective", skip_interval=1)
+# モデル作成
+model = create_model("selective")
 
-# Baseline (追加処理なし = Continuous)
-model = create_model("selective", skip_interval=0)
-
-# 訓練
+# 訓練（extra_passes=1）
 loss, stats = model.compute_loss(input_ids, labels, use_selective=True)
+
+# 訓練（extra_passes=0、Baseline）
+loss, stats = model.compute_loss(input_ids, labels, use_selective=False)
 
 # 生成
 output, stats = model.generate(input_ids, max_new_tokens=50, use_selective=True)
@@ -347,21 +346,21 @@ output, stats = model.generate(input_ids, max_new_tokens=50, use_selective=True)
 ### 実験スクリプト
 
 ```bash
-# Selective (skip_interval=1)
+# Selective (extra_passes=1)
 python3 scripts/experiment_selective.py
-
-# skip_interval=2
-python3 scripts/experiment_selective.py --skip-interval 2
 
 # Baselineとの比較
 python3 scripts/experiment_selective.py --models baseline selective
+
+# NoPE（Position Encodingなし）で実験
+python3 scripts/experiment_selective.py --models baseline selective --nope
 ```
 
 ---
 
 ## 🔧 学習可能ゲートによるSelective Output（失敗）
 
-**⚠️ 動的ゲート方式は複雑すぎて失敗。現在は固定skip_intervalに簡素化。**
+**⚠️ 動的ゲート方式は複雑すぎて失敗。現在は固定extra_passesに簡素化。**
 
 ### 試した方式
 
@@ -380,7 +379,7 @@ python3 scripts/experiment_selective.py --models baseline selective
 
 ### 教訓
 
-- 動的な判断より**固定パターン**（skip_interval）がシンプル
+- 動的な判断より**固定パターン**（extra_passes）がシンプル
 - 学習可能ゲートは追加パラメータ（65K）に対して効果が見合わない
 - OutputGate、エントロピーベース損失は削除済み
 

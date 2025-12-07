@@ -4,12 +4,12 @@ Selective Output Language Model
 仮説: LLMは即座に出力せず、隠れ状態を追加処理してから出力すべき
 
 動作:
-- 従来のContinuous (use_selective=False): トークン入力 → 即座に次トークン予測
-- Selective (use_selective=True): トークン入力 → 1回追加処理 → 次トークン予測
+- extra_passes=0 (use_selective=False): トークン入力 → 即座に次トークン予測
+- extra_passes=1 (use_selective=True): トークン入力 → 1回追加処理 → 次トークン予測
 
 例 (入力: "A B C D"):
-  Continuous: embed(A) → layers → 即座に"B"予測
-  Selective:  embed(A) → layers → proj → layers → "B"予測（2パス処理）
+  extra_passes=0: embed(A) → layers → 即座に"B"予測
+  extra_passes=1: embed(A) → layers → proj → layers → "B"予測
 """
 
 from typing import Optional
@@ -26,8 +26,8 @@ class SelectiveOutputLM(nn.Module):
     """
     Selective Output Language Model (効率化版)
 
-    use_selective=False: 通常のContinuous（1パス）
-    use_selective=True: 2パス処理（1回追加処理）
+    extra_passes=0 (use_selective=False): 通常のContinuous（追加処理なし）
+    extra_passes=1 (use_selective=True): 1回追加処理してから出力
 
     バッチ処理で高速化: forループなしで全トークンを一括処理
     """
@@ -90,7 +90,7 @@ class SelectiveOutputLM(nn.Module):
         Args:
             input_ids: [batch, seq_len]
             attention_mask: Optional attention mask
-            use_selective: True=2パス処理、False=通常の1パス
+            use_selective: True=extra_passes=1、False=extra_passes=0
             update_memory: メモリ更新フラグ
 
         Returns:
@@ -125,7 +125,7 @@ class SelectiveOutputLM(nn.Module):
         Args:
             input_ids: [batch, seq_len]
             labels: [batch, seq_len] - input_idsと同じ（内部でshift）
-            use_selective: True=2パス処理、False=1パス
+            use_selective: True=extra_passes=1、False=extra_passes=0
 
         Returns:
             loss: スカラー損失
@@ -142,11 +142,11 @@ class SelectiveOutputLM(nn.Module):
             shift_labels.view(-1),
         )
 
-        num_passes = 2 if use_selective else 1
+        extra_passes = 1 if use_selective else 0
         stats = {
             "lm_loss": loss.item(),
             "ppl": torch.exp(loss).item(),
-            "num_passes": num_passes,
+            "extra_passes": extra_passes,
         }
 
         return loss, stats
@@ -165,7 +165,7 @@ class SelectiveOutputLM(nn.Module):
             input_ids: [batch, seq_len]
             max_new_tokens: 最大生成トークン数
             temperature: サンプリング温度
-            use_selective: True=2パス処理、False=1パス
+            use_selective: True=extra_passes=1、False=extra_passes=0
 
         Returns:
             generated_ids: [batch, output_len]
@@ -186,10 +186,10 @@ class SelectiveOutputLM(nn.Module):
 
                 generated = torch.cat([generated, next_token], dim=1)
 
-        num_passes = 2 if use_selective else 1
+        extra_passes = 1 if use_selective else 0
         stats = {
             "num_tokens_generated": max_new_tokens,
-            "num_passes": num_passes,
+            "extra_passes": extra_passes,
         }
 
         return generated, stats
