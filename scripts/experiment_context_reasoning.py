@@ -533,15 +533,15 @@ def main():
         description="Reversal Curse Generalization Experiment"
     )
     parser.add_argument(
-        "--num-pairs", type=int, default=200,
+        "--num-pairs", type=int, default=500,
         help="Total number of family pairs"
     )
     parser.add_argument(
-        "--num-val-pairs", type=int, default=20,
+        "--num-val-pairs", type=int, default=100,
         help="Number of val pairs (for reversal curse test)"
     )
     parser.add_argument(
-        "--num-pile-samples", type=int, default=3500,
+        "--num-pile-samples", type=int, default=1100,
         help="Number of Pile samples (fixed for fair comparison)"
     )
     parser.add_argument("--pile-tokens", type=int, default=500000)
