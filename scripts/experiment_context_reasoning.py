@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 """
-Context-Dependent Reasoning (CDR) Training Experiment
+Reversal Curse 汎化性能実験
 
-目的: 推論パターンをFFNに学習させ、知識は外部コンテキストに預ける
+仮説:
+  Reversal Curseの本質は「汎化性能の低さ」である。
+  パターン学習ペアで学んだ逆方向推論を、Valペアに汎化できるかを検証。
+
+設計:
+  - パターン学習ペア: 順方向・逆方向の両方を学習
+  - Valペア: 順方向のみ学習 → 逆方向で評価（汎化テスト）
 
 比較:
-- Baseline: 従来のLM学習（コンテキスト+質問+回答を全体として学習）
-  → 知識と推論がFFNに混在 → Reversal Curse発生
-- CDR: コンテキストを初期状態として与え、質問→回答のみ学習
-  → 推論パターンをFFNに、知識はAttentionで処理 → Reversal Curse軽減
-
-訓練データ:
-- Baseline: "{parent} is {child}'s {relation}. Who is {child}'s parent? {parent}"
-- CDR:
-  - コンテキストあり: context="{parent} is {child}'s {relation}." → "Who is X?" → answer
-  - コンテキストなし: context="" → "Who is X?" → "I don't know"
+  - Baseline: 全文を学習（丸暗記傾向）
+  - Modified: コンテキスト分離学習（推論パターン抽出）
 """
 
 import argparse
@@ -32,10 +30,13 @@ from config.pythia import PythiaConfig
 from src.config.experiment_defaults import EARLY_STOPPING_PATIENCE, GRADIENT_CLIP
 from src.data.family_relations import (
     FamilyPair,
-    create_baseline_samples,
-    create_cdr_samples,
+    create_baseline_pattern_samples,
+    create_baseline_val_samples,
+    create_modified_pattern_samples,
+    create_modified_no_context_samples,
+    create_modified_val_samples,
     generate_family_pairs,
-    split_pairs,
+    split_pairs_for_experiment,
 )
 from src.models import create_model
 from src.utils.device import clear_gpu_cache
@@ -44,6 +45,11 @@ from src.utils.seed import set_seed
 from src.utils.tokenizer_utils import get_tokenizer
 from src.utils.data_pythia import load_pile_tokens_cached
 from src.utils.training import get_device
+
+
+# =============================================================================
+# データセット
+# =============================================================================
 
 
 class BaselineDataset(Dataset):
@@ -67,19 +73,18 @@ class BaselineDataset(Dataset):
             tokens = pile_tokens[i : i + seq_length].tolist()
             self.pile_samples.append({"type": "pile", "tokens": tokens})
 
-        # Baselineサンプル: 全文を学習
+        # Familyサンプル: 全文を学習
         self.family_samples = []
         for sample in family_samples:
-            full_text = sample["input"]  # 全文が入っている
-            tokens = tokenizer.encode(full_text)
+            tokens = tokenizer.encode(sample["text"])
             self.family_samples.append({
-                "type": "baseline",
+                "type": sample["type"],
                 "tokens": tokens,
             })
 
         # 比率調整
         total_family = len(self.family_samples)
-        if 0 < pile_ratio < 1:
+        if 0 < pile_ratio < 1 and total_family > 0:
             target_pile = int(total_family * pile_ratio / (1 - pile_ratio))
             target_pile = min(target_pile, len(self.pile_samples))
         else:
@@ -106,13 +111,14 @@ class BaselineDataset(Dataset):
         return input_ids, labels
 
 
-class CDRDataset(Dataset):
-    """CDR訓練用データセット: Pile + コンテキスト分離学習"""
+class ModifiedDataset(Dataset):
+    """Modified用データセット: Pile + コンテキスト分離学習 + 全文学習（Valペア）"""
 
     def __init__(
         self,
         pile_tokens: torch.Tensor,
-        family_samples: list[dict],
+        context_samples: list[dict],  # コンテキスト分離サンプル
+        fulltext_samples: list[dict],  # 全文学習サンプル（Valペア）
         tokenizer,
         seq_length: int = 128,
         pile_ratio: float = 0.9,
@@ -127,40 +133,50 @@ class CDRDataset(Dataset):
             tokens = pile_tokens[i : i + seq_length].tolist()
             self.pile_samples.append({"type": "pile", "tokens": tokens})
 
-        # CDRサンプル: コンテキスト部分はloss計算から除外
-        self.family_samples = []
-        for sample in family_samples:
+        # コンテキスト分離サンプル
+        self.context_samples = []
+        for sample in context_samples:
             context = sample["context"]
-            question = sample["input"]
-            target = sample["target"]
+            question = sample["question"]
+            answer = sample["answer"]
 
-            # コンテキスト + 質問 + 回答
             if context:
-                full_text = f"{context} {question}{target}"
-                context_tokens = tokenizer.encode(f"{context} {question}")
+                full_text = f"{context} {question}{answer}"
+                context_with_q = f"{context} {question}"
             else:
-                full_text = f"{question}{target}"
-                context_tokens = tokenizer.encode(question)
+                full_text = f"{question}{answer}"
+                context_with_q = question
 
             full_tokens = tokenizer.encode(full_text)
-            context_len = len(context_tokens)
+            context_len = len(tokenizer.encode(context_with_q))
 
-            self.family_samples.append({
-                "type": "cdr",
+            self.context_samples.append({
+                "type": sample["type"],
                 "tokens": full_tokens,
-                "context_len": context_len,  # この位置までloss計算から除外
+                "context_len": context_len,
+            })
+
+        # 全文学習サンプル（Valペア）
+        self.fulltext_samples = []
+        for sample in fulltext_samples:
+            tokens = tokenizer.encode(sample["text"])
+            self.fulltext_samples.append({
+                "type": sample["type"],
+                "tokens": tokens,
             })
 
         # 比率調整
-        total_family = len(self.family_samples)
-        if 0 < pile_ratio < 1:
+        total_family = len(self.context_samples) + len(self.fulltext_samples)
+        if 0 < pile_ratio < 1 and total_family > 0:
             target_pile = int(total_family * pile_ratio / (1 - pile_ratio))
             target_pile = min(target_pile, len(self.pile_samples))
         else:
             target_pile = len(self.pile_samples) if pile_ratio == 1 else 0
 
         self.pile_samples = self.pile_samples[:target_pile]
-        self.all_samples = self.pile_samples + self.family_samples
+        self.all_samples = (
+            self.pile_samples + self.context_samples + self.fulltext_samples
+        )
 
     def __len__(self):
         return len(self.all_samples)
@@ -168,13 +184,19 @@ class CDRDataset(Dataset):
     def __getitem__(self, idx):
         sample = self.all_samples[idx]
 
-        if sample["type"] == "pile":
+        if sample["type"] == "pile" or sample["type"] == "val_forward":
+            # 全文学習
             tokens = sample["tokens"]
+            if len(tokens) > self.seq_length:
+                tokens = tokens[: self.seq_length]
+            else:
+                tokens = tokens + [self.pad_token_id] * (self.seq_length - len(tokens))
+
             input_ids = torch.tensor(tokens, dtype=torch.long)
             labels = input_ids.clone()
             return input_ids, labels
 
-        # CDRサンプル
+        # コンテキスト分離サンプル
         tokens = sample["tokens"]
         context_len = sample["context_len"]
 
@@ -186,10 +208,15 @@ class CDRDataset(Dataset):
 
         input_ids = torch.tensor(tokens, dtype=torch.long)
         labels = input_ids.clone()
-        # コンテキスト+質問部分はloss計算から除外（回答部分のみ学習）
+        # コンテキスト+質問部分はloss計算から除外
         labels[:context_len] = -100
 
         return input_ids, labels
+
+
+# =============================================================================
+# 訓練・評価関数
+# =============================================================================
 
 
 def compute_ppl(model, data_loader, device) -> float:
@@ -228,79 +255,6 @@ def compute_ppl(model, data_loader, device) -> float:
     return torch.exp(torch.tensor(total_loss / total_tokens)).item()
 
 
-def evaluate_with_context(
-    model,
-    pairs: list[FamilyPair],
-    tokenizer,
-    device,
-) -> dict:
-    """
-    コンテキストありで評価（CDR訓練の成功指標）
-
-    コンテキストを与えた状態で順方向・逆方向の質問に回答できるか評価。
-    """
-    model.eval()
-
-    forward_losses = []
-    backward_losses = []
-
-    with torch.no_grad():
-        for pair in pairs:
-            context = f"{pair.parent_name} is {pair.child_name}'s {pair.relation}."
-
-            # 順方向: コンテキスト + "Who is child's parent?" → parent
-            forward_prompt = f"{context} Who is {pair.child_name}'s parent?"
-            forward_target = f" {pair.parent_name}"
-            forward_loss = compute_target_loss(
-                model, forward_prompt, forward_target, tokenizer, device
-            )
-            forward_losses.append(forward_loss)
-
-            # 逆方向: コンテキスト + "Who is parent's child?" → child
-            backward_prompt = f"{context} Who is {pair.parent_name}'s child?"
-            backward_target = f" {pair.child_name}"
-            backward_loss = compute_target_loss(
-                model, backward_prompt, backward_target, tokenizer, device
-            )
-            backward_losses.append(backward_loss)
-
-    forward_ppl = torch.exp(torch.tensor(sum(forward_losses) / len(forward_losses))).item()
-    backward_ppl = torch.exp(torch.tensor(sum(backward_losses) / len(backward_losses))).item()
-
-    return {
-        "forward_ppl": forward_ppl,
-        "backward_ppl": backward_ppl,
-        "gap": backward_ppl - forward_ppl,
-    }
-
-
-def evaluate_without_context(
-    model,
-    pairs: list[FamilyPair],
-    tokenizer,
-    device,
-) -> dict:
-    """
-    コンテキストなしで評価
-
-    コンテキストなしで質問したとき "I don't know" と回答できるか評価。
-    """
-    model.eval()
-
-    losses = []
-
-    with torch.no_grad():
-        for pair in pairs:
-            # コンテキストなしで質問
-            prompt = f"Who is {pair.child_name}'s parent?"
-            target = " I don't know"
-            loss = compute_target_loss(model, prompt, target, tokenizer, device)
-            losses.append(loss)
-
-    ppl = torch.exp(torch.tensor(sum(losses) / len(losses))).item()
-    return {"ppl": ppl}
-
-
 def compute_target_loss(
     model,
     prompt: str,
@@ -328,6 +282,37 @@ def compute_target_loss(
 
     loss = F.cross_entropy(target_logits, target_labels, reduction="mean")
     return loss.item()
+
+
+def evaluate_reversal_curse(
+    model,
+    val_pairs: list[FamilyPair],
+    tokenizer,
+    device,
+) -> dict:
+    """
+    Reversal Curse評価（汎化テスト）
+
+    Valペアは順方向のみ学習。逆方向で評価して汎化できるか確認。
+    """
+    model.eval()
+
+    backward_losses = []
+
+    with torch.no_grad():
+        for pair in val_pairs:
+            # 逆方向: "Who is {parent}'s child?" → child
+            # Valペアではこの方向を学習していない
+            prompt = f"Who is {pair.parent_name}'s child?"
+            target = f" {pair.child_name}"
+            loss = compute_target_loss(model, prompt, target, tokenizer, device)
+            backward_losses.append(loss)
+
+    backward_ppl = torch.exp(
+        torch.tensor(sum(backward_losses) / len(backward_losses))
+    ).item()
+
+    return {"reversal_ppl": backward_ppl}
 
 
 def train_model(
@@ -407,9 +392,14 @@ def train_model(
     return best_val_ppl, best_epoch, best_state_dict
 
 
+# =============================================================================
+# 実験実行
+# =============================================================================
+
+
 def run_baseline(
     config: PythiaConfig,
-    train_pairs: list[FamilyPair],
+    pattern_pairs: list[FamilyPair],
     val_pairs: list[FamilyPair],
     pile_tokens: torch.Tensor,
     pile_val_loader,
@@ -417,23 +407,27 @@ def run_baseline(
     device,
     args,
 ) -> dict:
-    """Baseline: 従来のLM学習"""
+    """Baseline: 全文学習"""
     print_flush("\n" + "=" * 70)
     print_flush("BASELINE (Traditional LM Training)")
     print_flush("=" * 70)
 
-    # Baselineサンプル生成（全文学習）
-    baseline_samples = create_baseline_samples(train_pairs)
+    # サンプル生成
+    pattern_samples = create_baseline_pattern_samples(pattern_pairs)
+    val_samples = create_baseline_val_samples(val_pairs)
+    all_samples = pattern_samples + val_samples
 
     # データセット作成
     train_dataset = BaselineDataset(
-        pile_tokens, baseline_samples, tokenizer,
+        pile_tokens, all_samples, tokenizer,
         seq_length=args.seq_length, pile_ratio=args.pile_ratio
     )
 
     print_flush(f"  Train samples: {len(train_dataset)}")
     print_flush(f"    - Pile: {len(train_dataset.pile_samples)}")
-    print_flush(f"    - Family: {len(train_dataset.family_samples)}")
+    print_flush(f"    - Pattern (forward+backward): {len(pattern_samples)}")
+    print_flush(f"    - Val (forward only): {len(val_samples)}")
+
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 
     # モデル作成
@@ -455,21 +449,9 @@ def run_baseline(
         model.load_state_dict(best_state)
 
     # 評価
-    print_flush("\n  With Context (Train pairs):")
-    train_ctx = evaluate_with_context(model, train_pairs, tokenizer, device)
-    print_flush(f"    Forward PPL: {train_ctx['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {train_ctx['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {train_ctx['gap']:+.1f}")
-
-    print_flush("\n  With Context (Val pairs - generalization):")
-    val_ctx = evaluate_with_context(model, val_pairs, tokenizer, device)
-    print_flush(f"    Forward PPL: {val_ctx['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {val_ctx['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {val_ctx['gap']:+.1f}")
-
-    print_flush("\n  Without Context (should answer 'I don't know'):")
-    no_ctx = evaluate_without_context(model, val_pairs, tokenizer, device)
-    print_flush(f"    'I don't know' PPL: {no_ctx['ppl']:.1f}")
+    print_flush("\n  Reversal Curse (Val pairs, backward direction):")
+    reversal = evaluate_reversal_curse(model, val_pairs, tokenizer, device)
+    print_flush(f"    'Who is [parent]'s child?' PPL: {reversal['reversal_ppl']:.1f}")
 
     print_flush("\n  Pile PPL:")
     pile_ppl = compute_ppl(model, pile_val_loader, device)
@@ -478,13 +460,7 @@ def run_baseline(
     result = {
         "best_val_ppl": best_ppl,
         "best_epoch": best_epoch,
-        "train_forward_ppl": train_ctx["forward_ppl"],
-        "train_backward_ppl": train_ctx["backward_ppl"],
-        "train_gap": train_ctx["gap"],
-        "val_forward_ppl": val_ctx["forward_ppl"],
-        "val_backward_ppl": val_ctx["backward_ppl"],
-        "val_gap": val_ctx["gap"],
-        "no_context_ppl": no_ctx["ppl"],
+        "reversal_ppl": reversal["reversal_ppl"],
         "pile_ppl": pile_ppl,
     }
 
@@ -494,9 +470,9 @@ def run_baseline(
     return result
 
 
-def run_cdr(
+def run_modified(
     config: PythiaConfig,
-    train_pairs: list[FamilyPair],
+    pattern_pairs: list[FamilyPair],
     val_pairs: list[FamilyPair],
     pile_tokens: torch.Tensor,
     pile_val_loader,
@@ -504,27 +480,29 @@ def run_cdr(
     device,
     args,
 ) -> dict:
-    """CDR訓練: Context-Dependent Reasoning"""
+    """Modified: コンテキスト分離学習"""
     print_flush("\n" + "=" * 70)
-    print_flush("CDR (Context-Dependent Reasoning Training)")
+    print_flush("MODIFIED (Context-Separated Training)")
     print_flush("=" * 70)
 
-    # CDRサンプル生成
-    cdr_samples = create_cdr_samples(train_pairs)
+    # サンプル生成
+    pattern_samples = create_modified_pattern_samples(pattern_pairs)
+    no_context_samples = create_modified_no_context_samples(pattern_pairs)
+    val_samples = create_modified_val_samples(val_pairs)
+
+    context_samples = pattern_samples + no_context_samples
 
     # データセット作成
-    train_dataset = CDRDataset(
-        pile_tokens, cdr_samples, tokenizer,
+    train_dataset = ModifiedDataset(
+        pile_tokens, context_samples, val_samples, tokenizer,
         seq_length=args.seq_length, pile_ratio=args.pile_ratio
     )
 
-    ctx_samples = [s for s in cdr_samples if s["has_context"]]
-    no_ctx_samples = [s for s in cdr_samples if not s["has_context"]]
-
     print_flush(f"  Train samples: {len(train_dataset)}")
     print_flush(f"    - Pile: {len(train_dataset.pile_samples)}")
-    print_flush(f"    - With context: {len(ctx_samples)}")
-    print_flush(f"    - Without context: {len(no_ctx_samples)}")
+    print_flush(f"    - Pattern (context-separated): {len(pattern_samples)}")
+    print_flush(f"    - No-context: {len(no_context_samples)}")
+    print_flush(f"    - Val (forward only): {len(val_samples)}")
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
 
@@ -536,10 +514,10 @@ def run_cdr(
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
 
-    print_flush("\n[CDR] Training...")
+    print_flush("\n[Modified] Training...")
     best_ppl, best_epoch, best_state = train_model(
         model, train_loader, pile_val_loader, optimizer, device,
-        args.epochs, args.patience, GRADIENT_CLIP, "cdr"
+        args.epochs, args.patience, GRADIENT_CLIP, "modified"
     )
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
 
@@ -547,21 +525,9 @@ def run_cdr(
         model.load_state_dict(best_state)
 
     # 評価
-    print_flush("\n  With Context (Train pairs):")
-    train_ctx = evaluate_with_context(model, train_pairs, tokenizer, device)
-    print_flush(f"    Forward PPL: {train_ctx['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {train_ctx['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {train_ctx['gap']:+.1f}")
-
-    print_flush("\n  With Context (Val pairs - generalization):")
-    val_ctx = evaluate_with_context(model, val_pairs, tokenizer, device)
-    print_flush(f"    Forward PPL: {val_ctx['forward_ppl']:.1f}")
-    print_flush(f"    Backward PPL: {val_ctx['backward_ppl']:.1f}")
-    print_flush(f"    Gap: {val_ctx['gap']:+.1f}")
-
-    print_flush("\n  Without Context (should answer 'I don't know'):")
-    no_ctx = evaluate_without_context(model, val_pairs, tokenizer, device)
-    print_flush(f"    'I don't know' PPL: {no_ctx['ppl']:.1f}")
+    print_flush("\n  Reversal Curse (Val pairs, backward direction):")
+    reversal = evaluate_reversal_curse(model, val_pairs, tokenizer, device)
+    print_flush(f"    'Who is [parent]'s child?' PPL: {reversal['reversal_ppl']:.1f}")
 
     print_flush("\n  Pile PPL:")
     pile_ppl = compute_ppl(model, pile_val_loader, device)
@@ -570,13 +536,7 @@ def run_cdr(
     result = {
         "best_val_ppl": best_ppl,
         "best_epoch": best_epoch,
-        "train_forward_ppl": train_ctx["forward_ppl"],
-        "train_backward_ppl": train_ctx["backward_ppl"],
-        "train_gap": train_ctx["gap"],
-        "val_forward_ppl": val_ctx["forward_ppl"],
-        "val_backward_ppl": val_ctx["backward_ppl"],
-        "val_gap": val_ctx["gap"],
-        "no_context_ppl": no_ctx["ppl"],
+        "reversal_ppl": reversal["reversal_ppl"],
         "pile_ppl": pile_ppl,
     }
 
@@ -586,11 +546,25 @@ def run_cdr(
     return result
 
 
+# =============================================================================
+# メイン
+# =============================================================================
+
+
 def main():
-    parser = argparse.ArgumentParser(description="CDR Training Experiment")
-    parser.add_argument("--num-pairs", type=int, default=200, help="Number of family pairs")
-    parser.add_argument("--pile-tokens", type=int, default=500000, help="Number of Pile tokens")
-    parser.add_argument("--pile-ratio", type=float, default=0.9, help="Ratio of Pile data")
+    parser = argparse.ArgumentParser(
+        description="Reversal Curse Generalization Experiment"
+    )
+    parser.add_argument(
+        "--num-pairs", type=int, default=200,
+        help="Total number of family pairs"
+    )
+    parser.add_argument(
+        "--num-val-pairs", type=int, default=20,
+        help="Number of val pairs (for reversal curse test)"
+    )
+    parser.add_argument("--pile-tokens", type=int, default=500000)
+    parser.add_argument("--pile-ratio", type=float, default=0.9)
     parser.add_argument("--seq-length", type=int, default=128)
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=8)
@@ -611,9 +585,11 @@ def main():
 
     # 実験情報
     print_flush("=" * 70)
-    print_flush("CONTEXT-DEPENDENT REASONING (CDR) EXPERIMENT")
+    print_flush("REVERSAL CURSE GENERALIZATION EXPERIMENT")
     print_flush("=" * 70)
-    print_flush(f"Family pairs: {args.num_pairs}")
+    print_flush(f"Total pairs: {args.num_pairs}")
+    print_flush(f"  - Pattern pairs: {args.num_pairs - args.num_val_pairs}")
+    print_flush(f"  - Val pairs: {args.num_val_pairs}")
     print_flush(f"Pile tokens: {args.pile_tokens:,}")
     print_flush(f"Pile ratio: {args.pile_ratio:.0%}")
     print_flush(f"Sequence length: {args.seq_length}")
@@ -624,10 +600,21 @@ def main():
     # データ準備
     print_flush("\n[Data] Generating family pairs...")
     all_pairs = generate_family_pairs(args.num_pairs)
-    train_pairs, val_pairs = split_pairs(all_pairs, train_ratio=0.8)
+    pattern_pairs, val_pairs = split_pairs_for_experiment(
+        all_pairs, num_val_pairs=args.num_val_pairs
+    )
 
-    print_flush(f"  Train pairs: {len(train_pairs)}")
+    print_flush(f"  Pattern pairs: {len(pattern_pairs)}")
     print_flush(f"  Val pairs: {len(val_pairs)}")
+
+    # 最初のいくつかのペアを表示
+    print_flush("\n  Sample pattern pairs:")
+    for pair in pattern_pairs[:3]:
+        print_flush(f"    {pair.parent_name} is {pair.child_name}'s {pair.relation}")
+
+    print_flush("\n  Sample val pairs:")
+    for pair in val_pairs[:3]:
+        print_flush(f"    {pair.parent_name} is {pair.child_name}'s {pair.relation}")
 
     print_flush("\n[Data] Loading Pile data...")
     pile_tokens = load_pile_tokens_cached(args.pile_tokens, config.tokenizer_name)
@@ -650,13 +637,13 @@ def main():
 
     # Baseline
     results["baseline"] = run_baseline(
-        config, train_pairs, val_pairs,
+        config, pattern_pairs, val_pairs,
         pile_tokens, pile_val_loader, tokenizer, device, args
     )
 
-    # CDR
-    results["cdr"] = run_cdr(
-        config, train_pairs, val_pairs,
+    # Modified
+    results["modified"] = run_modified(
+        config, pattern_pairs, val_pairs,
         pile_tokens, pile_val_loader, tokenizer, device, args
     )
 
@@ -665,25 +652,22 @@ def main():
     print_flush("SUMMARY")
     print_flush("=" * 70)
 
-    print_flush("\n| Model | Train Gap | Val Gap | No-Ctx PPL | Pile PPL |")
-    print_flush("|-------|-----------|---------|------------|----------|")
+    print_flush("\n| Model | Reversal PPL | Pile PPL |")
+    print_flush("|-------|--------------|----------|")
 
     baseline = results["baseline"]
     print_flush(
-        f"| Baseline | {baseline['train_gap']:+.1f} | "
-        f"{baseline['val_gap']:+.1f} | {baseline['no_context_ppl']:.1f} | "
-        f"{baseline['pile_ppl']:.1f} |"
+        f"| Baseline | {baseline['reversal_ppl']:.1f} | {baseline['pile_ppl']:.1f} |"
     )
 
-    cdr = results["cdr"]
+    modified = results["modified"]
     print_flush(
-        f"| CDR | {cdr['train_gap']:+.1f} | "
-        f"{cdr['val_gap']:+.1f} | {cdr['no_context_ppl']:.1f} | "
-        f"{cdr['pile_ppl']:.1f} |"
+        f"| Modified | {modified['reversal_ppl']:.1f} | {modified['pile_ppl']:.1f} |"
     )
 
-    print_flush("\n* Gap = Backward PPL - Forward PPL (closer to 0 is better)")
-    print_flush("* No-Ctx PPL: PPL for 'I don't know' response (lower is better for CDR)")
+    print_flush("\n* Reversal PPL: PPL for 'Who is {parent}'s child?' (lower is better)")
+    print_flush("* This tests generalization: can the model apply learned patterns")
+    print_flush("  to val pairs that were only trained on forward direction?")
     print_flush("\nDONE")
 
 

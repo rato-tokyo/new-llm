@@ -1,11 +1,11 @@
 """
 Family Relation Data Generator
 
-知識と推論を分離した訓練データを生成する。
-- コンテキスト付き: 関係性が与えられた状態で推論
-- コンテキストなし: 知らない人物には「わからない」と回答
+Reversal Curse 汎化性能仮説の検証用データ生成。
 
-目的: FFNに関係性パターン（母親↔子供など）を学習させ、Reversal Curseを軽減
+設計:
+- パターン学習ペア: 順方向・逆方向の両方を学習（汎化パターンを獲得）
+- Valペア: 順方向のみ学習 → 逆方向で評価（汎化テスト）
 """
 
 import random
@@ -18,7 +18,7 @@ FIRST_NAMES = [
     "Alice", "Emma", "Olivia", "Sophia", "Isabella", "Mia", "Charlotte",
     "Amelia", "Harper", "Evelyn", "Abigail", "Emily", "Elizabeth", "Sofia",
     "Avery", "Ella", "Scarlett", "Grace", "Chloe", "Victoria", "Riley",
-    "Aria", "Lily", "Aurora", "Zoey", "Nora", "Hannah", "Lily", "Eleanor",
+    "Aria", "Lily", "Aurora", "Zoey", "Nora", "Hannah", "Eleanor",
     "Hazel", "Violet", "Luna", "Stella", "Natalie", "Zoe", "Leah", "Penelope",
     # 男性名
     "James", "William", "Oliver", "Benjamin", "Elijah", "Lucas", "Mason",
@@ -73,189 +73,181 @@ def generate_family_pairs(num_pairs: int, seed: int = 42) -> list[FamilyPair]:
     return pairs
 
 
-def create_context_qa_samples(
-    pairs: list[FamilyPair],
-    include_negative: bool = True,
-) -> list[dict]:
+# =============================================================================
+# Baseline用サンプル生成
+# =============================================================================
+
+
+def create_baseline_pattern_samples(pairs: list[FamilyPair]) -> list[dict]:
     """
-    コンテキスト付きQAサンプルを生成
+    Baseline: パターン学習ペア用サンプル（順方向・逆方向両方）
+
+    全文を学習対象とする従来のLM学習方式。
+    """
+    samples = []
+
+    for pair in pairs:
+        # 順方向: "X is Y's parent. Who is Y's parent? X"
+        forward_text = (
+            f"{pair.parent_name} is {pair.child_name}'s {pair.relation}. "
+            f"Who is {pair.child_name}'s parent? {pair.parent_name}"
+        )
+        samples.append({
+            "text": forward_text,
+            "type": "pattern_forward",
+        })
+
+        # 逆方向: "Y is X's child. Who is X's child? Y"
+        # 注: childrenではなくchildを使用（文法的に正確）
+        backward_text = (
+            f"{pair.child_name} is {pair.parent_name}'s child. "
+            f"Who is {pair.parent_name}'s child? {pair.child_name}"
+        )
+        samples.append({
+            "text": backward_text,
+            "type": "pattern_backward",
+        })
+
+    return samples
+
+
+def create_baseline_val_samples(pairs: list[FamilyPair]) -> list[dict]:
+    """
+    Baseline: Valペア用サンプル（順方向のみ）
+
+    このペアでは逆方向を学習しない。評価時に逆方向で汎化テスト。
+    """
+    samples = []
+
+    for pair in pairs:
+        # 順方向のみ
+        forward_text = (
+            f"{pair.parent_name} is {pair.child_name}'s {pair.relation}. "
+            f"Who is {pair.child_name}'s parent? {pair.parent_name}"
+        )
+        samples.append({
+            "text": forward_text,
+            "type": "val_forward",
+        })
+
+    return samples
+
+
+# =============================================================================
+# Modified用サンプル生成（知識分離訓練）
+# =============================================================================
+
+
+def create_modified_pattern_samples(pairs: list[FamilyPair]) -> list[dict]:
+    """
+    Modified: パターン学習ペア用サンプル（コンテキスト分離）
+
+    初期コンテキストをloss計算から除外し、推論パターンのみを学習。
+    """
+    samples = []
+
+    for pair in pairs:
+        # 順方向: context="X is Y's parent." → 学習対象="Who is Y's parent? X"
+        samples.append({
+            "context": f"{pair.parent_name} is {pair.child_name}'s {pair.relation}.",
+            "question": f"Who is {pair.child_name}'s parent?",
+            "answer": f" {pair.parent_name}",
+            "type": "pattern_forward",
+        })
+
+        # 逆方向: context="Y is X's child." → 学習対象="Who is X's child? Y"
+        samples.append({
+            "context": f"{pair.child_name} is {pair.parent_name}'s child.",
+            "question": f"Who is {pair.parent_name}'s child?",
+            "answer": f" {pair.child_name}",
+            "type": "pattern_backward",
+        })
+
+    return samples
+
+
+def create_modified_no_context_samples(pairs: list[FamilyPair]) -> list[dict]:
+    """
+    Modified: コンテキストなしサンプル（知識分離確認）
+
+    コンテキストがない場合は「わからない」と答えることを学習。
+    """
+    samples = []
+
+    for pair in pairs:
+        # 順方向の質問（コンテキストなし）
+        samples.append({
+            "context": "",
+            "question": f"Who is {pair.child_name}'s parent?",
+            "answer": " I don't know.",
+            "type": "no_context",
+        })
+
+        # 逆方向の質問（コンテキストなし）
+        samples.append({
+            "context": "",
+            "question": f"Who is {pair.parent_name}'s child?",
+            "answer": " I don't know.",
+            "type": "no_context",
+        })
+
+    return samples
+
+
+def create_modified_val_samples(pairs: list[FamilyPair]) -> list[dict]:
+    """
+    Modified: Valペア用サンプル（順方向のみ、全文学習）
+
+    Baselineと同一のデータ。公平な比較のため。
+    """
+    samples = []
+
+    for pair in pairs:
+        # 順方向のみ（Baselineと同一形式）
+        forward_text = (
+            f"{pair.parent_name} is {pair.child_name}'s {pair.relation}. "
+            f"Who is {pair.child_name}'s parent? {pair.parent_name}"
+        )
+        samples.append({
+            "text": forward_text,
+            "type": "val_forward",
+        })
+
+    return samples
+
+
+# =============================================================================
+# ユーティリティ
+# =============================================================================
+
+
+def split_pairs_for_experiment(
+    all_pairs: list[FamilyPair],
+    num_val_pairs: int = 20,
+) -> tuple[list[FamilyPair], list[FamilyPair]]:
+    """
+    パターン学習ペアとValペアに分割
 
     Args:
-        pairs: 親子ペア
-        include_negative: コンテキストなし（わからない）サンプルを含めるか
+        all_pairs: 全ペア
+        num_val_pairs: Valペア数
 
     Returns:
-        list of {"input": str, "target": str, "has_context": bool}
+        (pattern_pairs, val_pairs)
     """
-    samples = []
-
-    for pair in pairs:
-        # 1. コンテキスト付き: 順方向（親→子を推論）
-        # Context: "Alice Smith is Tom Johnson's mother."
-        # Question: "Who is Tom Johnson's parent?"
-        # Answer: "Alice Smith"
-        context = f"{pair.parent_name} is {pair.child_name}'s {pair.relation}."
-        question_parent = f"Who is {pair.child_name}'s parent?"
-
-        samples.append({
-            "input": f"Context: {context} Question: {question_parent} Answer:",
-            "target": f" {pair.parent_name}",
-            "has_context": True,
-            "direction": "forward",
-        })
-
-        # 2. コンテキスト付き: 逆方向（子→親を推論）
-        # Context: "Alice Smith is Tom Johnson's mother."
-        # Question: "Who is Alice Smith's child?"
-        # Answer: "Tom Johnson"
-        question_child = f"Who is {pair.parent_name}'s child?"
-
-        samples.append({
-            "input": f"Context: {context} Question: {question_child} Answer:",
-            "target": f" {pair.child_name}",
-            "has_context": True,
-            "direction": "backward",
-        })
-
-    if include_negative:
-        # 3. コンテキストなし: 知らない人物
-        # 別のペアから名前を借りて、コンテキストなしで質問
-        for pair in pairs:
-            # この人物についてのコンテキストがない状態で質問
-            question = f"Who is {pair.child_name}'s parent?"
-            samples.append({
-                "input": f"Context: None. Question: {question} Answer:",
-                "target": " I don't know.",
-                "has_context": False,
-                "direction": "unknown",
-            })
-
-            question = f"Who is {pair.parent_name}'s child?"
-            samples.append({
-                "input": f"Context: None. Question: {question} Answer:",
-                "target": " I don't know.",
-                "has_context": False,
-                "direction": "unknown",
-            })
-
-    return samples
+    # シャッフルせず、最後のnum_val_pairsをValペアとする
+    # （再現性のため）
+    pattern_pairs = all_pairs[:-num_val_pairs]
+    val_pairs = all_pairs[-num_val_pairs:]
+    return pattern_pairs, val_pairs
 
 
+# 後方互換性のため残す（使用非推奨）
 def create_baseline_samples(pairs: list[FamilyPair]) -> list[dict]:
-    """
-    ベースライン用サンプルを生成（従来のLM学習）
-
-    コンテキスト+質問+回答を連結して全体を次トークン予測として学習。
-    知識と推論が混在してFFNに保存される。
-
-    形式: "{parent} is {child}'s {relation}. Who is {child}'s parent? {parent}"
-    """
-    samples = []
-
-    for pair in pairs:
-        context = f"{pair.parent_name} is {pair.child_name}'s {pair.relation}."
-        question = f"Who is {pair.child_name}'s parent?"
-        answer = pair.parent_name
-
-        # 全体を連結して学習（コンテキスト+質問+回答）
-        full_text = f"{context} {question} {answer}"
-        samples.append({
-            "input": full_text,
-            "target": "",  # 文全体を学習
-            "context": context,
-            "type": "baseline",
-        })
-
-    return samples
+    """非推奨: create_baseline_pattern_samplesを使用してください"""
+    return create_baseline_pattern_samples(pairs)
 
 
 def create_cdr_samples(pairs: list[FamilyPair]) -> list[dict]:
-    """
-    CDR訓練用サンプルを生成（Context-Dependent Reasoning Training）
-
-    推論パターンをFFNに学習させ、知識は外部コンテキストに預ける。
-
-    パターン1: コンテキストありで順方向・逆方向の両方を学習
-    パターン2: コンテキストなしで "I don't know" を学習
-    """
-    samples = []
-
-    for pair in pairs:
-        context = f"{pair.parent_name} is {pair.child_name}'s {pair.relation}."
-
-        # コンテキストあり: 順方向（子→親を問う）
-        samples.append({
-            "context": context,
-            "input": f"Who is {pair.child_name}'s parent?",
-            "target": f" {pair.parent_name}",
-            "has_context": True,
-            "direction": "forward",
-            "type": "cdr",
-        })
-
-        # コンテキストあり: 逆方向（親→子を問う）
-        samples.append({
-            "context": context,
-            "input": f"Who is {pair.parent_name}'s child?",
-            "target": f" {pair.child_name}",
-            "has_context": True,
-            "direction": "backward",
-            "type": "cdr",
-        })
-
-        # コンテキストなし: わからない（順方向の質問で）
-        samples.append({
-            "context": "",
-            "input": f"Who is {pair.child_name}'s parent?",
-            "target": " I don't know",
-            "has_context": False,
-            "direction": "unknown",
-            "type": "cdr",
-        })
-
-        # コンテキストなし: わからない（逆方向の質問で）
-        samples.append({
-            "context": "",
-            "input": f"Who is {pair.parent_name}'s child?",
-            "target": " I don't know",
-            "has_context": False,
-            "direction": "unknown",
-            "type": "cdr",
-        })
-
-    return samples
-
-
-def create_test_pairs(num_pairs: int, seed: int = 12345) -> list[FamilyPair]:
-    """
-    テスト用ペアを生成（訓練データとは別の名前）
-    """
-    return generate_family_pairs(num_pairs, seed=seed)
-
-
-def split_pairs(
-    pairs: list[FamilyPair],
-    train_ratio: float = 0.8,
-) -> tuple[list[FamilyPair], list[FamilyPair]]:
-    """訓練/検証に分割"""
-    random.shuffle(pairs)
-    split_idx = int(len(pairs) * train_ratio)
-    return pairs[:split_idx], pairs[split_idx:]
-
-
-# 有名人テストペア（実在の親子関係）
-CELEBRITY_TEST_PAIRS = [
-    FamilyPair("Mary Lee Pfeiffer", "Tom Cruise", "mother"),
-    FamilyPair("Gloria Henry", "Ron Howard", "mother"),
-    FamilyPair("Jada Pinkett Smith", "Jaden Smith", "mother"),
-    FamilyPair("Goldie Hawn", "Kate Hudson", "mother"),
-    FamilyPair("Judy Garland", "Liza Minnelli", "mother"),
-    FamilyPair("Janet Sheen", "Charlie Sheen", "mother"),
-    FamilyPair("Donna Summer", "Brooklyn Sudano", "mother"),
-    FamilyPair("Debbie Reynolds", "Carrie Fisher", "mother"),
-]
-
-
-def get_celebrity_test_pairs() -> list[FamilyPair]:
-    """有名人テストペアを取得"""
-    return CELEBRITY_TEST_PAIRS.copy()
+    """非推奨: create_modified_pattern_samplesを使用してください"""
+    return create_modified_pattern_samples(pairs)
