@@ -460,7 +460,7 @@ def run_experiment(
     num_memories: int,
     epochs: int,
     device: torch.device,
-    patience: int = 5,
+    patience: int = 1,
 ) -> dict:
     """単一の実験を実行"""
     print_flush(f"\n{'='*60}")
@@ -506,7 +506,7 @@ def main():
     parser.add_argument("--seq-length", type=int, default=256, help="Sequence length")
     parser.add_argument("--epochs", type=int, default=30, help="Max epochs")
     parser.add_argument("--num-memories", type=int, default=4, help="Number of memories")
-    parser.add_argument("--patience", type=int, default=5, help="Early stopping patience")
+    parser.add_argument("--patience", type=int, default=1, help="Early stopping patience")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     args = parser.parse_args()
 
