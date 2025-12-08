@@ -26,7 +26,7 @@ Infini-Pythia Architecture:
 - **Compressive Memory**: O(1) memory for infinite context via linear attention
 - **Delta Rule**: Efficient memory update preventing information overwrite
 - **Memory Transfer**: Save/load memory state across devices
-- **Multiple Memory Variants**: Infini, Multi-Memory, Hierarchical
+- **HSA-style Landmark Selection**: ChunkEncoder for learnable memory selection (Multi-Memory)
 
 ## Quick Start
 
@@ -47,11 +47,8 @@ model = create_model("pythia")
 # Infini-Pythia (Layer 0: Infini + 5 Pythia layers)
 model = create_model("infini")
 
-# Multi-Memory with 8 memories
+# Multi-Memory with 8 memories (HSA-style Landmark selection)
 model = create_model("multi_memory", num_memories=8)
-
-# Hierarchical Memory
-model = create_model("hierarchical", num_memories=4)
 ```
 
 ### Custom Layer Composition
@@ -97,14 +94,11 @@ model.set_memory_state(state)
 ### Run Experiments
 
 ```bash
-# Compare all models
-python3 scripts/experiment.py --models pythia infini multi_memory hierarchical
+# Context Separation Training (Reversal Curse)
+python3 scripts/experiment_context_reasoning.py
 
-# Infini only
-python3 scripts/experiment.py --models infini
-
-# Multi-Memory vs Hierarchical
-python3 scripts/experiment.py --models multi_memory hierarchical --num-memories 4
+# HSA vs Memory-Norm Landmark Comparison
+python3 scripts/experiment_hsa_vs_memory_norm.py --samples 5000 --seq-length 256
 ```
 
 ## Model Variants
@@ -113,8 +107,7 @@ python3 scripts/experiment.py --models multi_memory hierarchical --num-memories 
 |-------|-------------|
 | `pythia` | Standard Pythia-70M with RoPE |
 | `infini` | Infini-Pythia (Layer 0: Infini + RoPE) |
-| `multi_memory` | Multiple independent memories with attention-based selection |
-| `hierarchical` | Hierarchical memory with coarse-to-fine retrieval |
+| `multi_memory` | Multiple independent memories with HSA-style Landmark selection |
 
 ## Layer Types
 
@@ -122,8 +115,7 @@ python3 scripts/experiment.py --models multi_memory hierarchical --num-memories 
 |-------|-------------|
 | `PythiaLayer` | Standard Pythia (RoPE + Softmax Attention) |
 | `InfiniLayer` | Infini-Attention (Memory + Linear Attention, NoPE) |
-| `MultiMemoryLayer` | Multiple independent memories |
-| `HierarchicalLayer` | Hierarchical memory with expansion gate |
+| `MultiMemoryLayer` | Multiple independent memories with ChunkEncoder Landmarks |
 
 ## Architecture Details
 
@@ -156,7 +148,17 @@ Memory Retrieval:
 |-------|-------------|
 | Infini | ~135 KB |
 | Multi-Memory (4) | ~540 KB |
-| Hierarchical (4) | ~540 KB |
+
+### HSA vs Memory-Norm Landmark Comparison (2025-12-09)
+
+| Method | Best PPL | Params | Training Time/epoch |
+|--------|----------|--------|---------------------|
+| **HSA** | **494.4** | 71.5M | ~143s |
+| memory_norm | 497.7 | 70.4M | ~84s |
+
+- HSA method: 0.7% better PPL, but 70% slower training
+- memory_norm is more cost-effective for current scale
+- See `docs/experiments/2025-12-09_hsa_vs_memory_norm.md` for details
 
 ## Project Structure
 
@@ -165,26 +167,30 @@ new-llm/
 ├── config/
 │   └── pythia.py                   # PythiaConfig
 ├── scripts/
-│   └── experiment.py               # Unified experiment script
+│   ├── experiment_context_reasoning.py  # Reversal Curse experiment
+│   └── experiment_hsa_vs_memory_norm.py # HSA vs memory_norm comparison
 ├── src/
 │   ├── data/
 │   │   └── reversal_pairs.py       # Reversal Curse evaluation data
 │   ├── models/
 │   │   ├── __init__.py             # create_model() factory
 │   │   ├── layers/                 # Layer package
+│   │   │   ├── base.py             # BaseLayer base class
 │   │   │   ├── pythia.py           # PythiaLayer (RoPE + Softmax)
 │   │   │   ├── infini.py           # InfiniLayer (Memory + Linear)
-│   │   │   ├── multi_memory.py     # MultiMemoryLayer
-│   │   │   └── hierarchical.py     # HierarchicalLayer
+│   │   │   └── multi_memory.py     # MultiMemoryLayer + ChunkEncoder
 │   │   ├── model.py                # TransformerLM (generic model)
 │   │   ├── base_components.py      # PythiaMLP, init_weights
 │   │   ├── memory_utils.py         # Linear attention utilities
 │   │   └── position_encoding.py    # RoPE
 │   └── utils/
-│       ├── experiment_runner.py    # Unified experiment runner
+│       ├── experiment_runner.py    # ExperimentConfig + unified runner
 │       ├── training.py             # Training utilities
 │       ├── evaluation.py           # Evaluation functions
+│       ├── memory_builder.py       # DirectMemoryBuilder, MemoryBuilder
 │       └── ...
+├── tests/
+│   └── test_pythia_pretrained.py   # Pretrained Pythia validation
 ├── docs/
 │   └── experiments/                # Experiment results
 ├── CLAUDE.md                       # Development guidelines

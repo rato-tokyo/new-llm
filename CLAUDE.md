@@ -100,6 +100,21 @@ HSA方式では、各メモリ（チャンク）を**双方向エンコーダ**�
 - **検索専用Query**: Attention用とは別の射影で最適化
 - **論文準拠**: HSA論文の設計を忠実に再現
 
+### HSA vs memory_norm 比較実験 (2025-12-09)
+
+| 方式 | Best PPL | パラメータ数 | 訓練時間/epoch |
+|------|----------|-------------|----------------|
+| **HSA** | **494.4** | 71.5M | ~143s |
+| memory_norm | 497.7 | 70.4M | ~84s |
+
+- **HSA方式**: ChunkEncoder（双方向Transformerエンコーダ）で学習可能なLandmarkを生成
+- **memory_norm方式**: 書き込み操作の副産物 Σσ(k) をLandmarkとして使用（追加パラメータなし）
+
+**結論**: HSAはPPL 0.7%改善だが訓練時間70%増加。現段階ではmemory_norm方式がコスト効率で優れる。
+ただしメモリ数増加（16+）や長コンテキスト環境ではHSA方式が有利になる可能性あり。
+
+詳細: `docs/experiments/2025-12-09_hsa_vs_memory_norm.md`
+
 ---
 
 ## 🎯 レイヤーベースアーキテクチャ
@@ -709,6 +724,8 @@ Reversal Curseの真の問題は「逆方向を推論できない」ことでは
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-09 | **HSA vs memory_norm比較実験**: ChunkEncoder方式 vs Σσ(k)方式を比較。HSA=494.4 PPL、memory_norm=497.7 PPL。HSA微改善だがコスト増 |
+| 2025-12-09 | **リファクタリング**: experiment_landmark_comparison.py削除、test_pythia_pretrained.pyをtests/へ移動 |
 | 2025-12-08 | **patience=1に統一**: Early stoppingのデフォルトpatience値を1に変更。過学習防止 |
 | 2025-12-08 | **HSA方式Landmark採用**: MultiMemoryLayerのLandmark計算をHSA方式（mean(K)）に一本化。LandmarkType削除 |
 | 2025-12-08 | **メモリ階層定義追加**: Working Memory / Index Memory / Detail Memory の3層構成を定義 |
@@ -730,4 +747,4 @@ Reversal Curseの真の問題は「逆方向を推論できない」ことでは
 
 ---
 
-Last Updated: 2025-12-08
+Last Updated: 2025-12-09
