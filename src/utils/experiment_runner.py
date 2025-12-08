@@ -2,7 +2,7 @@
 Unified Experiment Runner
 
 共通の実験実行ロジックを提供。
-全モデルタイプ（Pythia, Infini, Multi-Memory, Hierarchical）に対応。
+全モデルタイプ（Pythia, Infini, Multi-Memory）に対応。
 """
 
 import time
@@ -31,7 +31,6 @@ class ModelType(Enum):
     PYTHIA = "pythia"
     INFINI = "infini"
     MULTI_MEMORY = "multi_memory"
-    HIERARCHICAL = "hierarchical"
 
 
 @dataclass
@@ -49,7 +48,7 @@ class ExperimentConfig:
 
     # Model
     use_delta_rule: bool = True
-    num_memories: int = 4  # Multi-Memory / Hierarchical用
+    num_memories: int = 4  # Multi-Memory用
 
     # Multi-Memory Bank (Infini用)
     num_memory_banks: int = 1
@@ -242,7 +241,6 @@ def run_single_model_experiment(
         ModelType.PYTHIA: "PYTHIA (RoPE)",
         ModelType.INFINI: "INFINI-PYTHIA",
         ModelType.MULTI_MEMORY: f"MULTI-MEMORY ({exp_config.num_memories} memories)",
-        ModelType.HIERARCHICAL: f"HIERARCHICAL ({exp_config.num_memories} fine memories)",
     }
     model_name = name_map[model_type]
 
@@ -261,9 +259,6 @@ def run_single_model_experiment(
     if has_memory and hasattr(model, 'memory_info'):
         memory_info = model.memory_info()
         print_flush(f"  Memory: {memory_info['total_bytes']:,} bytes")
-
-    if model_type == ModelType.HIERARCHICAL:
-        print_flush(f"  Expansion gate: {param_info.get('expansion_gate', 0):,} params")
 
     # Train
     optimizer = torch.optim.AdamW(model.parameters(), lr=exp_config.lr)

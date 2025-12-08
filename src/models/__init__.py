@@ -16,9 +16,6 @@ model = create_model("infini")
 
 # Multi-Memory (4メモリ)
 model = create_model("multi_memory", num_memories=8)
-
-# Hierarchical Memory
-model = create_model("hierarchical", num_memories=4)
 ```
 
 ## Layer-based Construction
@@ -53,8 +50,6 @@ from .layers import (
     InfiniAttention,
     MultiMemoryLayer,
     MultiMemoryAttention,
-    HierarchicalLayer,
-    HierarchicalAttention,
 )
 
 # Building blocks
@@ -80,7 +75,7 @@ from .position_encoding import (
 )
 
 # Type alias for model types
-ModelTypeLiteral = Literal["pythia", "infini", "multi_memory", "hierarchical"]
+ModelTypeLiteral = Literal["pythia", "infini", "multi_memory"]
 
 
 def create_model(
@@ -98,10 +93,10 @@ def create_model(
     Create a model by type.
 
     Args:
-        model_type: Model type ("pythia", "infini", "multi_memory", "hierarchical")
+        model_type: Model type ("pythia", "infini", "multi_memory")
         config: PythiaConfig (uses default if None)
         use_delta_rule: Use delta rule for memory update (memory models only)
-        num_memories: Number of memories (multi_memory, hierarchical only)
+        num_memories: Number of memories (multi_memory only)
         num_memory_banks: Number of memory banks (infini only)
         segments_per_bank: Segments per bank (infini only)
 
@@ -147,16 +142,10 @@ def create_model(
             *pythia_layers(config.num_layers - 1),
         ]
 
-    elif model_type == "hierarchical":
-        layers = [
-            HierarchicalLayer(h, n, i, num_memories, use_delta_rule),
-            *pythia_layers(config.num_layers - 1),
-        ]
-
     else:
         raise ValueError(
             f"Unknown model type: {model_type}. "
-            f"Available: pythia, infini, multi_memory, hierarchical"
+            f"Available: pythia, infini, multi_memory"
         )
 
     return TransformerLM(
@@ -182,8 +171,6 @@ __all__ = [
     'InfiniAttention',
     'MultiMemoryLayer',
     'MultiMemoryAttention',
-    'HierarchicalLayer',
-    'HierarchicalAttention',
 
     # Building blocks
     'PythiaMLP',

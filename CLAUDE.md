@@ -9,11 +9,10 @@
 ### コンセプト
 
 ```
-従来: 4つの固定モデルクラス
-  PythiaModel, InfiniPythiaModel, MultiMemoryPythiaModel, HierarchicalMemoryPythiaModel
+従来: 複数の固定モデルクラス
 
-新設計: 1つの汎用モデル + 4つのレイヤータイプ
-  TransformerLM + [PythiaLayer, InfiniLayer, MultiMemoryLayer, HierarchicalLayer]
+新設計: 1つの汎用モデル + 3つのレイヤータイプ
+  TransformerLM + [PythiaLayer, InfiniLayer, MultiMemoryLayer]
 ```
 
 ### アーキテクチャ
@@ -36,7 +35,6 @@ TransformerLM:
 | `PythiaLayer` | 標準Pythia (RoPE + Softmax Attention) |
 | `InfiniLayer` | Infini-Attention (Memory + Linear Attention, NoPE) |
 | `MultiMemoryLayer` | 複数独立メモリ + Attention-based選択 |
-| `HierarchicalLayer` | 階層的メモリ + 学習可能な展開ゲート |
 
 ---
 
@@ -51,11 +49,9 @@ from src.models import create_model
 model = create_model("pythia")       # 標準Pythia（6層）
 model = create_model("infini")       # 1層Infini + 5層Pythia
 model = create_model("multi_memory") # 1層Multi-Memory + 5層Pythia
-model = create_model("hierarchical") # 1層Hierarchical + 5層Pythia
 
 # オプション付き
 model = create_model("multi_memory", num_memories=8)
-model = create_model("hierarchical", num_memories=4, use_delta_rule=False)
 model = create_model("infini", num_memory_banks=2, segments_per_bank=4)
 ```
 
@@ -91,7 +87,7 @@ model = TransformerLM(layers=layers)
 | オプション | 対象 | デフォルト | 説明 |
 |------------|------|------------|------|
 | `use_delta_rule` | 全memory系 | `True` | Delta Rule使用 |
-| `num_memories` | multi_memory, hierarchical | `4` | メモリ数 |
+| `num_memories` | multi_memory | `4` | メモリ数 |
 | `num_memory_banks` | infini | `1` | メモリバンク数 |
 | `segments_per_bank` | infini | `4` | バンクあたりセグメント数 |
 
@@ -130,7 +126,6 @@ output = model(input_ids)
 |--------|--------|
 | Infini (1 bank) | ~135 KB |
 | Multi-Memory (4) | ~540 KB |
-| Hierarchical (4) | ~540 KB |
 
 ---
 
@@ -144,8 +139,7 @@ src/models/
 │   ├── base.py          # BaseLayer 基底クラス
 │   ├── pythia.py        # PythiaLayer (RoPE + Softmax)
 │   ├── infini.py        # InfiniLayer (Memory + Linear)
-│   ├── multi_memory.py  # MultiMemoryLayer
-│   └── hierarchical.py  # HierarchicalLayer
+│   └── multi_memory.py  # MultiMemoryLayer
 ├── model.py             # TransformerLM（汎用モデル）
 ├── base_components.py   # PythiaMLP, init_weights
 ├── memory_utils.py      # elu_plus_one, causal_linear_attention
@@ -154,17 +148,11 @@ src/models/
 
 ---
 
-## 🧪 統一実験スクリプト
+## 🧪 実験スクリプト
 
 ```bash
-# 全モデル比較
-python3 scripts/experiment.py --models pythia infini multi_memory hierarchical
-
-# Infiniのみ
-python3 scripts/experiment.py --models infini
-
-# 設定カスタマイズ
-python3 scripts/experiment.py --models infini --samples 10000 --epochs 50 --lr 5e-5
+# Context Separation Training（Reversal Curse対策）
+python3 scripts/experiment_context_reasoning.py
 ```
 
 ---
@@ -570,16 +558,16 @@ Reversal Curseの真の問題は「逆方向を推論できない」ことでは
 | 2025-12-07 | **2-Pass発見を記録**: Transformerを2回通すとReversal Curseが改善（コードは削除、記録のみ） |
 | 2025-12-07 | **訓練-評価一貫性ポリシー追加**: 訓練時と評価時の条件を揃えることを必須化 |
 | 2025-12-06 | **SelectiveOutputLM追加**: 学習可能ゲートによる選択的出力モデル（後に失敗と判明） |
-| 2025-12-06 | **レイヤーベースアーキテクチャに移行**: TransformerLM + 4レイヤータイプ、コード31%削減 |
+| 2025-12-08 | **HierarchicalLayer削除**: MultiMemoryLayerと実質同等のため削除。3レイヤータイプに整理 |
+| 2025-12-06 | **レイヤーベースアーキテクチャに移行**: TransformerLM + レイヤータイプ、コード31%削減 |
 | 2025-12-06 | **Layer置き換え方式を削除**: 蒸留+Fine-tune等すべて失敗、スクラッチ訓練に集中 |
 | 2025-12-06 | **シングルヘッドメモリ導入**: memory_head_dim=512でLinear Attentionの表現力を最大化 |
 | 2025-12-06 | **PPL評価方法の教訓追加**: Sliding window方式が正しい |
 | 2025-12-06 | **メモリ転送API追加**: get_memory_state/set_memory_stateで圧縮メモリを別PCに転送可能 |
 | 2025-12-06 | **モデルファクトリ追加**: create_model()でシンプルにモデル作成 |
-| 2025-12-06 | **Hierarchical Memory追加**: 学習可能な展開判断、Coarse-to-Fine検索 |
 | 2025-12-06 | **Multi-Memory Attention追加**: Attention-based選択で複数メモリを動的混合 |
 | 2025-12-05 | **Infini-Pythia実装**: 1層目Infini + RoPE |
 
 ---
 
-Last Updated: 2025-12-07
+Last Updated: 2025-12-08
