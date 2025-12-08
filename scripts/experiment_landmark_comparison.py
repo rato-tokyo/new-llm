@@ -20,12 +20,12 @@ import torch.nn as nn
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-from config.pythia import PythiaConfig
-from src.models import create_model, LandmarkType
-from src.utils.device import clear_gpu_cache
-from src.utils.io import print_flush
-from src.utils.seed import set_seed
-from src.utils.training import get_device, prepare_data_loaders
+from config.pythia import PythiaConfig  # noqa: E402
+from src.models import create_model, LandmarkType  # noqa: E402
+from src.utils.device import clear_gpu_cache  # noqa: E402
+from src.utils.io import print_flush  # noqa: E402
+from src.utils.seed import set_seed  # noqa: E402
+from src.utils.training import get_device, prepare_data_loaders  # noqa: E402
 
 
 @dataclass
