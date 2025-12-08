@@ -514,13 +514,8 @@ def main():
     print_flush(f"Patience: {args.patience}")
     print_flush()
 
-    # Config
-    config = PythiaConfig(
-        hidden_size=512,
-        num_attention_heads=8,
-        num_hidden_layers=6,
-        intermediate_size=2048,
-    )
+    # Config（PythiaConfigはクラス属性で定義されているのでインスタンス化のみ）
+    config = PythiaConfig()
 
     # データ準備
     train_loader, val_loader = prepare_data(
