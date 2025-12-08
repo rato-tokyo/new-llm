@@ -27,7 +27,7 @@ from src.utils import (
     get_device,
     get_tokenizer,
     print_flush,
-    MemoryBuilder,
+    DirectMemoryBuilder,
 )
 
 
@@ -116,6 +116,72 @@ The Great Barrier Reef is the world's largest coral reef system.
     }
 
 
+def evaluate_orthogonal_memory_selection(
+    memory_layer: MultiMemoryLayer,
+    num_queries_per_memory: int = 10,
+    device: torch.device = torch.device("cpu"),
+) -> dict:
+    """直交メモリの選択精度を評価
+
+    各メモリのLandmark方向に沿ったクエリを生成し、
+    正しいメモリが選択されるかを評価。
+
+    Args:
+        memory_layer: MultiMemoryLayer
+        num_queries_per_memory: 各メモリあたりのクエリ数
+        device: デバイス
+
+    Returns:
+        評価結果
+    """
+    attn = memory_layer.attention
+    assert attn.landmarks is not None and attn.key_counts is not None
+
+    num_memories = attn.num_memories
+
+    results: dict = {
+        "total": 0,
+        "correct": 0,
+        "per_memory": {},
+    }
+
+    with torch.no_grad():
+        for expected_memory in range(num_memories):
+            memory_results = {"total": 0, "correct": 0}
+            landmark = attn.landmarks[expected_memory]  # (num_heads, head_dim)
+
+            for _ in range(num_queries_per_memory):
+                # Landmark方向に沿ったクエリを生成
+                noise = torch.randn_like(landmark) * 0.1
+                q = (landmark + noise).unsqueeze(0).unsqueeze(0)  # (1, 1, num_heads, head_dim)
+                q = q.transpose(1, 2)  # (1, num_heads, 1, head_dim)
+
+                # 各メモリとの関連度を計算
+                relevances = []
+                for idx, lm in enumerate(attn.landmarks):
+                    if attn.key_counts[idx].sum() < 1e-6:
+                        relevances.append(float('-inf'))
+                    else:
+                        rel = attn._compute_relevance(q, lm)
+                        relevances.append(rel.mean().item())
+
+                # 最も関連度が高いメモリを選択
+                selected_memory = max(range(len(relevances)), key=lambda x: relevances[x])
+
+                # 正解判定
+                correct = selected_memory == expected_memory
+                memory_results["total"] += 1
+                memory_results["correct"] += int(correct)
+                results["total"] += 1
+                results["correct"] += int(correct)
+
+            results["per_memory"][expected_memory] = memory_results
+
+    results["accuracy"] = results["correct"] / results["total"] if results["total"] > 0 else 0
+
+    return results
+
+
 def evaluate_memory_selection(
     model,
     memory_layer: MultiMemoryLayer,
@@ -200,6 +266,8 @@ def main():
     parser.add_argument("--num-memories", type=int, default=4)
     parser.add_argument("--seq-length", type=int, default=256)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--orthogonal", action="store_true",
+                        help="Use orthogonal memories for validation")
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -212,6 +280,7 @@ def main():
     print_flush(f"Device: {device}")
     print_flush(f"Memories: {args.num_memories}")
     print_flush(f"Seq length: {args.seq_length}")
+    print_flush(f"Mode: {'orthogonal' if args.orthogonal else 'text-based'}")
     print_flush()
 
     # ドメインデータ作成
@@ -238,40 +307,77 @@ def main():
     if memory_layer is None:
         raise RuntimeError("MultiMemoryLayer not found")
 
-    # MemoryBuilderでメモリを構築
-    print_flush("[Building memories]")
-    builder = MemoryBuilder(model, tokenizer, args.seq_length, device)
-    builder.reset_all_memories()
+    # DirectMemoryBuilderでメモリを構築（モデル非依存）
+    builder = DirectMemoryBuilder(
+        num_memories=args.num_memories,
+        num_heads=config.num_attention_heads,
+        head_dim=config.hidden_size // config.num_attention_heads,
+        device=device,
+    )
 
-    domain_to_memory = {}
-    for i, domain_name in enumerate(domain_names):
-        context = domain_data[domain_name]["context"]
-        stats = builder.build_memory(i, context)
-        domain_to_memory[domain_name] = i
-        print_flush(f"  Memory {i} ({domain_name}): {stats['num_tokens']} tokens")
+    if args.orthogonal:
+        # 直交メモリを構築（検証用）
+        print_flush("[Building orthogonal memories (validation mode)]")
+        builder.build_orthogonal_memories(num_keys_per_memory=100)
+        domain_to_memory = {name: i for i, name in enumerate(domain_names)}
+    else:
+        # テキストベースでメモリを構築
+        print_flush("[Building memories from texts]")
+        embedding_layer = model.embed_in
+        texts = [domain_data[name]["context"] for name in domain_names]
+        stats = builder.build_from_texts(texts, tokenizer, embedding_layer)
+
+        domain_to_memory = {name: i for i, name in enumerate(domain_names)}
+
+        for stat in stats:
+            print_flush(f"  Memory {stat['memory_idx']}: {stat['seq_len']} tokens, landmark_norm={stat['landmark_norm']:.4f}")
 
     print_flush()
-    builder.print_memory_info()
+    builder.print_info()
+    print_flush()
+
+    # 構築したメモリをモデルに適用
+    builder.apply_to_model(model)
+    print_flush("[Applied memories to model]")
     print_flush()
 
     # 評価
     print_flush("[Evaluating memory selection]")
-    results = evaluate_memory_selection(
-        model, memory_layer, tokenizer,
-        {k: v for k, v in domain_data.items() if k in domain_to_memory},
-        domain_to_memory, device
-    )
 
-    print_flush()
-    print_flush("=" * 60)
-    print_flush("Results")
-    print_flush("=" * 60)
-    print_flush(f"Overall Accuracy: {results['accuracy']:.1%} ({results['correct']}/{results['total']})")
-    print_flush()
-    print_flush("Per-domain:")
-    for domain_name, domain_results in results["per_domain"].items():
-        acc = domain_results["correct"] / domain_results["total"] if domain_results["total"] > 0 else 0
-        print_flush(f"  {domain_name}: {acc:.1%} ({domain_results['correct']}/{domain_results['total']})")
+    if args.orthogonal:
+        # 直交メモリモードの評価
+        results = evaluate_orthogonal_memory_selection(
+            memory_layer,
+            num_queries_per_memory=20,
+            device=device,
+        )
+        print_flush()
+        print_flush("=" * 60)
+        print_flush("Results (Orthogonal Mode)")
+        print_flush("=" * 60)
+        print_flush(f"Overall Accuracy: {results['accuracy']:.1%} ({results['correct']}/{results['total']})")
+        print_flush()
+        print_flush("Per-memory:")
+        for mem_idx, mem_results in results["per_memory"].items():
+            acc = mem_results["correct"] / mem_results["total"] if mem_results["total"] > 0 else 0
+            print_flush(f"  Memory {mem_idx}: {acc:.1%} ({mem_results['correct']}/{mem_results['total']})")
+    else:
+        # テキストベースモードの評価
+        results = evaluate_memory_selection(
+            model, memory_layer, tokenizer,
+            {k: v for k, v in domain_data.items() if k in domain_to_memory},
+            domain_to_memory, device
+        )
+        print_flush()
+        print_flush("=" * 60)
+        print_flush("Results (Text-based Mode)")
+        print_flush("=" * 60)
+        print_flush(f"Overall Accuracy: {results['accuracy']:.1%} ({results['correct']}/{results['total']})")
+        print_flush()
+        print_flush("Per-domain:")
+        for domain_name, domain_results in results["per_domain"].items():
+            acc = domain_results["correct"] / domain_results["total"] if domain_results["total"] > 0 else 0
+            print_flush(f"  {domain_name}: {acc:.1%} ({domain_results['correct']}/{domain_results['total']})")
 
     print_flush()
     print_flush("=" * 60)

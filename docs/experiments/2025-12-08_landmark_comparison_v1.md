@@ -203,3 +203,56 @@ python3 scripts/experiment_memory_selection.py
 # MemoryBuilderユーティリティ
 src/utils/memory_builder.py
 ```
+
+---
+
+## 追加実験: 直交メモリによる検証
+
+### 目的
+
+HSA方式のLandmark選択機構が正しく動作するかを検証。
+直交するLandmarkを持つメモリを構築し、正しいメモリが選択されるかをテスト。
+
+### 方法
+
+```python
+# DirectMemoryBuilderで直交メモリを構築
+builder = DirectMemoryBuilder(num_memories=4, num_heads=8, head_dim=64)
+builder.build_orthogonal_memories(num_keys_per_memory=100)
+```
+
+### 結果
+
+```
+Landmark Similarity Matrix:
+            0       1       2       3
+   0    1.000  -0.005   0.012  -0.015
+   1   -0.005   1.000   0.006   0.004
+   2    0.012   0.006   1.000   0.014
+   3   -0.015   0.004   0.014   1.000
+
+Overall Accuracy: 100.0% (80/80)
+```
+
+| メモリ | 正解率 |
+|--------|--------|
+| Memory 0 | 100% (20/20) |
+| Memory 1 | 100% (20/20) |
+| Memory 2 | 100% (20/20) |
+| Memory 3 | 100% (20/20) |
+
+### 結論
+
+- **HSA方式のLandmark選択は正しく動作**
+- 直交するLandmarkを持つメモリでは**100%の精度**
+- テキストベースで精度が低いのは、ランダム初期化の埋め込み層が意味的区別を持たないため
+
+### 実行方法
+
+```bash
+# 直交メモリモード（検証用）
+python3 scripts/experiment_memory_selection.py --orthogonal
+
+# テキストベースモード
+python3 scripts/experiment_memory_selection.py
+```

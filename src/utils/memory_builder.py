@@ -1,27 +1,39 @@
 """
 Memory Builder - テキストからメモリを事前構築するユーティリティ
 
-使用例:
+2つの方式を提供:
+
+1. MemoryBuilder: モデルを通してメモリを構築（従来方式）
+2. DirectMemoryBuilder: テキストから直接メモリを構築（モデル非依存）
+
+使用例（DirectMemoryBuilder - 推奨）:
+    from src.utils.memory_builder import DirectMemoryBuilder
+
+    # 直接メモリ構築（モデル不要）
+    builder = DirectMemoryBuilder(
+        num_memories=4,
+        num_heads=8,
+        head_dim=64,
+    )
+
+    # 各メモリに異なるテキストを書き込み
+    builder.build_from_texts([
+        "Physics quantum mechanics relativity thermodynamics",
+        "History war revolution renaissance industrial",
+        "Technology machine learning programming python",
+        "Geography mountain river ocean desert climate",
+    ], tokenizer)
+
+    # メモリ状態をモデルに設定
+    builder.apply_to_model(model)
+
+使用例（MemoryBuilder - 従来方式）:
     from src.utils.memory_builder import MemoryBuilder
     from src.models import create_model
 
-    # モデル作成
     model = create_model("multi_memory", num_memories=4)
-
-    # メモリビルダー作成
     builder = MemoryBuilder(model, tokenizer)
-
-    # 各メモリに異なるドメインのテキストを書き込み
     builder.build_memory(0, "科学論文のテキスト...")
-    builder.build_memory(1, "ニュース記事のテキスト...")
-    builder.build_memory(2, "小説のテキスト...")
-    builder.build_memory(3, "コードドキュメントのテキスト...")
-
-    # メモリ状態を保存
-    builder.save("memories/domain_specific.pt")
-
-    # 後で読み込み
-    builder.load("memories/domain_specific.pt")
 """
 
 from typing import Optional, Union
@@ -29,6 +41,282 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+
+from src.models.memory_utils import elu_plus_one
+
+
+class DirectMemoryBuilder:
+    """テキストから直接圧縮メモリを構築（モデル非依存）
+
+    トークンの埋め込みベクトルを使って、モデルの重みに依存せず
+    メモリ（K-V行列）とLandmark（mean(K)）を構築する。
+
+    これにより：
+    - ランダム初期化モデルでも意味的に異なるメモリを作成可能
+    - 検証に必要な最低限の内容で構築可能
+    - 完全に制御されたメモリ内容
+    """
+
+    def __init__(
+        self,
+        num_memories: int = 4,
+        num_heads: int = 8,
+        head_dim: int = 64,
+        device: Optional[torch.device] = None,
+        dtype: torch.dtype = torch.float32,
+    ):
+        """
+        Args:
+            num_memories: メモリ数
+            num_heads: ヘッド数
+            head_dim: ヘッド次元（hidden_size // num_heads）
+            device: デバイス
+            dtype: データ型
+        """
+        self.num_memories = num_memories
+        self.num_heads = num_heads
+        self.head_dim = head_dim
+        self.device = device or torch.device("cpu")
+        self.dtype = dtype
+
+        # メモリ状態を初期化
+        self._init_memory()
+
+    def _init_memory(self) -> None:
+        """メモリを初期化"""
+        self.memories = [
+            torch.zeros(self.num_heads, self.head_dim, self.head_dim,
+                        device=self.device, dtype=self.dtype)
+            for _ in range(self.num_memories)
+        ]
+        self.memory_norms = [
+            torch.zeros(self.num_heads, self.head_dim,
+                        device=self.device, dtype=self.dtype)
+            for _ in range(self.num_memories)
+        ]
+        self.landmarks = [
+            torch.zeros(self.num_heads, self.head_dim,
+                        device=self.device, dtype=self.dtype)
+            for _ in range(self.num_memories)
+        ]
+        self.key_counts = [
+            torch.zeros(self.num_heads, device=self.device, dtype=self.dtype)
+            for _ in range(self.num_memories)
+        ]
+
+    def build_memory_from_embeddings(
+        self,
+        memory_idx: int,
+        embeddings: torch.Tensor,
+    ) -> dict:
+        """埋め込みベクトルからメモリを構築
+
+        Args:
+            memory_idx: メモリインデックス
+            embeddings: (seq_len, hidden_size) の埋め込みベクトル
+
+        Returns:
+            統計情報
+        """
+        if memory_idx < 0 or memory_idx >= self.num_memories:
+            raise ValueError(f"memory_idx must be 0 ~ {self.num_memories - 1}")
+
+        seq_len, hidden_size = embeddings.shape
+        expected_hidden = self.num_heads * self.head_dim
+        if hidden_size != expected_hidden:
+            raise ValueError(
+                f"embeddings hidden_size ({hidden_size}) != "
+                f"num_heads * head_dim ({expected_hidden})"
+            )
+
+        # (seq_len, hidden) -> (seq_len, num_heads, head_dim)
+        embeddings = embeddings.to(self.device, self.dtype)
+        kv = embeddings.view(seq_len, self.num_heads, self.head_dim)
+
+        # K = V = embeddings（簡略化）
+        k = kv  # (seq_len, num_heads, head_dim)
+        v = kv
+
+        # σ(K) for Linear Attention
+        sigma_k = elu_plus_one(k)  # (seq_len, num_heads, head_dim)
+
+        # メモリ更新: M += σ(K)^T @ V
+        # (num_heads, head_dim, head_dim)
+        memory_update = torch.einsum('shd,she->hde', sigma_k, v)
+        self.memories[memory_idx] = self.memories[memory_idx] + memory_update
+
+        # memory_norm更新: z += Σ σ(k)
+        norm_update = sigma_k.sum(dim=0)  # (num_heads, head_dim)
+        self.memory_norms[memory_idx] = self.memory_norms[memory_idx] + norm_update
+
+        # Landmark更新: mean(K)
+        k_sum = k.sum(dim=0)  # (num_heads, head_dim)
+        old_count = self.key_counts[memory_idx]
+        new_count = old_count + seq_len
+
+        # オンライン平均更新
+        old_landmark = self.landmarks[memory_idx]
+        self.landmarks[memory_idx] = (
+            (old_landmark * old_count.unsqueeze(-1) + k_sum)
+            / new_count.clamp(min=1).unsqueeze(-1)
+        )
+        self.key_counts[memory_idx] = new_count
+
+        return {
+            "memory_idx": memory_idx,
+            "seq_len": seq_len,
+            "landmark_norm": float(self.landmarks[memory_idx].norm().item()),
+        }
+
+    def build_from_texts(
+        self,
+        texts: list[str],
+        tokenizer,
+        embedding_layer: Optional[nn.Embedding] = None,
+    ) -> list[dict]:
+        """テキストリストからメモリを構築
+
+        Args:
+            texts: テキストリスト（長さ <= num_memories）
+            tokenizer: トークナイザー
+            embedding_layer: 埋め込み層（Noneならランダム埋め込み使用）
+
+        Returns:
+            各メモリの統計情報
+        """
+        if len(texts) > self.num_memories:
+            raise ValueError(f"Too many texts ({len(texts)}) for {self.num_memories} memories")
+
+        # 埋め込み層がない場合、ランダム埋め込みを作成
+        if embedding_layer is None:
+            vocab_size = tokenizer.vocab_size
+            hidden_size = self.num_heads * self.head_dim
+            embedding_layer = nn.Embedding(vocab_size, hidden_size)
+            embedding_layer = embedding_layer.to(self.device, self.dtype)
+
+        stats = []
+        for i, text in enumerate(texts):
+            # トークン化
+            tokens = tokenizer.encode(text)
+            if isinstance(tokens, list):
+                tokens = torch.tensor(tokens, dtype=torch.long)
+            tokens = tokens.to(self.device)
+
+            # 埋め込み取得
+            with torch.no_grad():
+                embeddings = embedding_layer(tokens)  # (seq_len, hidden_size)
+
+            # メモリ構築
+            stat = self.build_memory_from_embeddings(i, embeddings)
+            stat["text_preview"] = text[:50] + "..." if len(text) > 50 else text
+            stats.append(stat)
+
+        return stats
+
+    def get_memory_state(self) -> dict:
+        """メモリ状態を取得（モデルに設定可能な形式）"""
+        return {
+            "memories": [m.cpu().clone() for m in self.memories],
+            "memory_norms": [n.cpu().clone() for n in self.memory_norms],
+            "landmarks": [lm.cpu().clone() for lm in self.landmarks],
+            "key_counts": [c.cpu().clone() for c in self.key_counts],
+            "current_memory_idx": torch.tensor(0),
+        }
+
+    def apply_to_model(self, model: nn.Module) -> None:
+        """構築したメモリをモデルに適用
+
+        Args:
+            model: MultiMemoryLayerを持つモデル
+        """
+        from src.models.layers import MultiMemoryLayer
+
+        for layer in model.layers:
+            if isinstance(layer, MultiMemoryLayer):
+                device = next(model.parameters()).device
+                layer.set_memory_state(self.get_memory_state(), device)
+                return
+
+        raise ValueError("Model does not have MultiMemoryLayer")
+
+    def build_orthogonal_memories(self, num_keys_per_memory: int = 100) -> None:
+        """直交するLandmarkを持つメモリを構築（検証用）
+
+        各メモリが異なる方向を向くLandmarkを持つように構築。
+        これによりメモリ選択の検証が容易になる。
+
+        Args:
+            num_keys_per_memory: 各メモリに格納するキー数
+        """
+        hidden_size = self.num_heads * self.head_dim
+
+        # 直交基底を生成（QR分解）
+        random_matrix = torch.randn(hidden_size, self.num_memories, device=self.device, dtype=self.dtype)
+        q, _ = torch.linalg.qr(random_matrix)
+        orthogonal_directions = q.T  # (num_memories, hidden_size)
+
+        for i in range(self.num_memories):
+            # 各メモリの方向ベクトル
+            direction = orthogonal_directions[i]  # (hidden_size,)
+
+            # その方向に沿ったキーを生成
+            # keys: (num_keys, hidden_size)
+            noise = torch.randn(num_keys_per_memory, hidden_size, device=self.device, dtype=self.dtype) * 0.1
+            keys = direction.unsqueeze(0) + noise  # 方向+ノイズ
+
+            # (num_keys, num_heads, head_dim)
+            k = keys.view(num_keys_per_memory, self.num_heads, self.head_dim)
+            v = k  # K = V
+
+            sigma_k = elu_plus_one(k)
+
+            # メモリ更新
+            self.memories[i] = torch.einsum('shd,she->hde', sigma_k, v)
+            self.memory_norms[i] = sigma_k.sum(dim=0)
+
+            # Landmark = mean(K)
+            self.landmarks[i] = k.mean(dim=0)
+            self.key_counts[i] = torch.full((self.num_heads,), num_keys_per_memory,
+                                            device=self.device, dtype=self.dtype)
+
+    def get_landmark_similarity_matrix(self) -> torch.Tensor:
+        """Landmark間のコサイン類似度行列を計算
+
+        Returns:
+            (num_memories, num_memories) の類似度行列
+        """
+        # (num_memories, num_heads * head_dim)
+        landmarks_flat = torch.stack([
+            lm.flatten() for lm in self.landmarks
+        ])
+
+        # 正規化
+        landmarks_norm = landmarks_flat / landmarks_flat.norm(dim=1, keepdim=True).clamp(min=1e-8)
+
+        # コサイン類似度
+        return landmarks_norm @ landmarks_norm.T
+
+    def print_info(self) -> None:
+        """メモリ情報を表示"""
+        print(f"DirectMemoryBuilder: {self.num_memories} memories")
+        print(f"  num_heads={self.num_heads}, head_dim={self.head_dim}")
+        print("-" * 50)
+        print(f"{'Idx':<5} {'Keys':<15} {'Landmark':<15} {'Memory':<15}")
+        print("-" * 50)
+
+        for i in range(self.num_memories):
+            key_count = float(self.key_counts[i].sum().item())
+            landmark_norm = float(self.landmarks[i].norm().item())
+            memory_norm = float(self.memory_norms[i].norm().item())
+            print(f"{i:<5} {key_count:<15.1f} {landmark_norm:<15.4f} {memory_norm:<15.4f}")
+
+        # Landmark類似度を表示
+        sim_matrix = self.get_landmark_similarity_matrix()
+        print("\nLandmark Similarity Matrix:")
+        print("     " + "".join(f"{i:>8}" for i in range(self.num_memories)))
+        for i in range(self.num_memories):
+            row = "".join(f"{sim_matrix[i, j].item():>8.3f}" for j in range(self.num_memories))
+            print(f"{i:>4} {row}")
 
 
 class MemoryBuilder:

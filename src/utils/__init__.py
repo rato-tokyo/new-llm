@@ -18,6 +18,7 @@ from .evaluation import (
     evaluate_position_wise_ppl,
 )
 from .memory_builder import (
+    DirectMemoryBuilder,
     MemoryBuilder,
     create_domain_memories,
 )
@@ -42,6 +43,7 @@ __all__ = [
     'evaluate_ppl',
     'evaluate_position_wise_ppl',
     # Memory builder
+    'DirectMemoryBuilder',
     'MemoryBuilder',
     'create_domain_memories',
 ]
