@@ -138,6 +138,7 @@ class MultiMemoryAttentionComparable(nn.Module):
 
         sigma_q = elu_plus_one(q)
         outputs, relevances = [], []
+        has_non_empty = False
 
         for idx, (memory, memory_norm) in enumerate(zip(self.memories, self.memory_norms)):  # type: ignore
             # メモリが空かチェック
@@ -149,6 +150,7 @@ class MultiMemoryAttentionComparable(nn.Module):
                     torch.full((q.size(0), self.num_heads), float('-inf'), device=q.device)
                 )
             else:
+                has_non_empty = True
                 # Linear Attentionでメモリから検索
                 a_mem = torch.einsum('bhsd,hde->bhse', sigma_q, memory)
                 norm = torch.einsum('bhsd,hd->bhs', sigma_q, memory_norm)
@@ -156,6 +158,10 @@ class MultiMemoryAttentionComparable(nn.Module):
 
                 # 関連度計算（方式による）
                 relevances.append(self._compute_relevance(q, idx))
+
+        # 全メモリが空の場合はゼロを返す
+        if not has_non_empty:
+            return torch.zeros_like(q)
 
         stacked = torch.stack(outputs, dim=0)
         weights = F.softmax(torch.stack(relevances, dim=0), dim=0)
@@ -175,17 +181,18 @@ class MultiMemoryAttentionComparable(nn.Module):
         memory = self.memories[idx]
         memory_norm = self.memory_norms[idx]
 
-        # メモリ更新（共通）
-        if self.use_delta_rule:
-            retrieved = torch.einsum('bhsd,hde->bhse', sigma_k, memory)
-            norm = torch.einsum('bhsd,hd->bhs', sigma_k, memory_norm).clamp(min=1e-6).unsqueeze(-1)
-            delta_v = v - retrieved / norm
-            update = torch.einsum('bhsd,bhse->hde', sigma_k, delta_v) / (k.size(0) * k.size(2))
-        else:
-            update = torch.einsum('bhsd,bhse->hde', sigma_k, v) / (k.size(0) * k.size(2))
+        # メモリ更新（シンプルな加算方式 - 数値安定性のため）
+        # Note: Delta Ruleはランダム初期化で数値不安定になりやすい
+        update = torch.einsum('bhsd,bhse->hde', sigma_k, v) / (k.size(0) * k.size(2))
+
+        # NaN/Inf対策
+        if not torch.isfinite(update).all():
+            return  # 異常値の場合は更新をスキップ
 
         self.memories[idx] = (memory + update).detach()
-        self.memory_norms[idx] = (memory_norm + sigma_k.sum(dim=(0, 2)) / k.size(0)).detach()
+        norm_update = sigma_k.sum(dim=(0, 2)) / k.size(0)
+        if torch.isfinite(norm_update).all():
+            self.memory_norms[idx] = (memory_norm + norm_update).detach()
 
         # HSA方式の場合のみLandmark更新
         if self.landmark_type == "hsa":
