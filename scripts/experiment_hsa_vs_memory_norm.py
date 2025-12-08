@@ -36,6 +36,7 @@ from src.utils import (
     print_flush,
     train_model,
 )
+from src.utils.experiment_runner import ExperimentConfig
 from datasets import load_dataset
 
 
@@ -460,7 +461,7 @@ def run_experiment(
     num_memories: int,
     epochs: int,
     device: torch.device,
-    patience: int = 1,
+    patience: int,
 ) -> dict:
     """単一の実験を実行"""
     print_flush(f"\n{'='*60}")
@@ -501,12 +502,15 @@ def run_experiment(
 
 
 def main():
+    # ExperimentConfigからデフォルト値を取得
+    exp_config = ExperimentConfig()
+
     parser = argparse.ArgumentParser(description="HSA vs Memory Norm Comparison")
-    parser.add_argument("--samples", type=int, default=5000, help="Number of samples")
-    parser.add_argument("--seq-length", type=int, default=256, help="Sequence length")
-    parser.add_argument("--epochs", type=int, default=30, help="Max epochs")
-    parser.add_argument("--num-memories", type=int, default=4, help="Number of memories")
-    parser.add_argument("--patience", type=int, default=1, help="Early stopping patience")
+    parser.add_argument("--samples", type=int, default=exp_config.num_samples, help="Number of samples")
+    parser.add_argument("--seq-length", type=int, default=exp_config.seq_length, help="Sequence length")
+    parser.add_argument("--epochs", type=int, default=exp_config.num_epochs, help="Max epochs")
+    parser.add_argument("--num-memories", type=int, default=exp_config.num_memories, help="Number of memories")
+    parser.add_argument("--patience", type=int, default=exp_config.patience, help="Early stopping patience")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     args = parser.parse_args()
 

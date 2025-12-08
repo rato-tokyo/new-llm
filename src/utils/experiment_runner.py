@@ -45,6 +45,7 @@ class ExperimentConfig:
     num_epochs: int = 30
     batch_size: int = 8
     lr: float = 1e-4
+    patience: int = 1  # Early stopping patience
 
     # Model
     use_delta_rule: bool = True
