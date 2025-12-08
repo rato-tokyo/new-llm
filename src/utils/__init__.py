@@ -16,7 +16,6 @@ from .tokenizer_utils import get_tokenizer
 from .evaluation import (
     evaluate_ppl,
     evaluate_position_wise_ppl,
-    evaluate_reversal_curse,
 )
 
 __all__ = [
@@ -38,5 +37,4 @@ __all__ = [
     # Evaluation utilities
     'evaluate_ppl',
     'evaluate_position_wise_ppl',
-    'evaluate_reversal_curse',
 ]
