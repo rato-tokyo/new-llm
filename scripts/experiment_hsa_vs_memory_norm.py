@@ -388,7 +388,10 @@ def prepare_data(
     seq_length: int,
     val_ratio: float = 0.1,
 ) -> tuple[DataLoader, DataLoader]:
-    """データを準備"""
+    """データを準備
+
+    言語モデル形式: input_ids[:-1] -> labels[1:]
+    """
     print_flush(f"Loading {num_samples} samples from Pile...")
 
     # Pileデータセットから直接ロード
@@ -399,7 +402,8 @@ def prepare_data(
     )
 
     all_tokens: list[int] = []
-    target_tokens = num_samples * seq_length * 2  # 十分な量を確保
+    # seq_length + 1 でラベル用の1トークン分を確保
+    target_tokens = num_samples * (seq_length + 1) * 2
 
     for example in dataset:
         text = example["text"]  # type: ignore
@@ -408,32 +412,39 @@ def prepare_data(
         if len(all_tokens) >= target_tokens:
             break
 
-    # シーケンスに分割
+    # シーケンスに分割（seq_length + 1 でラベル用の1トークン分を含む）
     all_tokens_tensor = torch.tensor(all_tokens, dtype=torch.long)
-    total_seqs = len(all_tokens_tensor) // seq_length
-    all_tokens_tensor = all_tokens_tensor[:total_seqs * seq_length].view(-1, seq_length)
+    total_seqs = len(all_tokens_tensor) // (seq_length + 1)
+    all_tokens_tensor = all_tokens_tensor[:total_seqs * (seq_length + 1)].view(-1, seq_length + 1)
 
     # 必要なサンプル数に制限
     if len(all_tokens_tensor) > num_samples:
         all_tokens_tensor = all_tokens_tensor[:num_samples]
 
+    # input_ids と labels に分割
+    # input_ids: [0:seq_length], labels: [1:seq_length+1]
+    input_ids = all_tokens_tensor[:, :-1]  # (num_samples, seq_length)
+    labels = all_tokens_tensor[:, 1:]       # (num_samples, seq_length)
+
     # Train/Val分割
-    num_val = max(1, int(len(all_tokens_tensor) * val_ratio))
-    num_train = len(all_tokens_tensor) - num_val
+    num_val = max(1, int(len(input_ids) * val_ratio))
+    num_train = len(input_ids) - num_val
 
-    train_data = all_tokens_tensor[:num_train]
-    val_data = all_tokens_tensor[num_train:]
+    train_input = input_ids[:num_train]
+    train_labels = labels[:num_train]
+    val_input = input_ids[num_train:]
+    val_labels = labels[num_train:]
 
-    print_flush(f"  Train: {len(train_data)} samples")
-    print_flush(f"  Val: {len(val_data)} samples")
+    print_flush(f"  Train: {len(train_input)} samples")
+    print_flush(f"  Val: {len(val_input)} samples")
 
     train_loader = DataLoader(
-        TensorDataset(train_data),
+        TensorDataset(train_input, train_labels),
         batch_size=8,
         shuffle=True,
     )
     val_loader = DataLoader(
-        TensorDataset(val_data),
+        TensorDataset(val_input, val_labels),
         batch_size=8,
         shuffle=False,
     )
