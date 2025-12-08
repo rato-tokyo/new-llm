@@ -28,6 +28,7 @@ from src.models import TransformerLM
 from src.models.layers import PythiaLayer, BaseLayer
 from src.models.base_components import PythiaMLP
 from src.models.memory_utils import causal_linear_attention, elu_plus_one
+from torch.utils.data import DataLoader, TensorDataset
 from src.utils import (
     set_seed,
     get_device,
@@ -35,7 +36,7 @@ from src.utils import (
     print_flush,
     train_model,
 )
-from src.utils.data_loading import load_pile_tokens, create_pile_dataloader
+from src.utils.data_loading import load_long_documents_from_pile
 
 
 # =============================================================================
@@ -403,18 +404,29 @@ def main():
 
     # データ準備
     print_flush("[Data] Loading Pile data...")
-    total_tokens = args.samples * args.seq_length
-    tokens = load_pile_tokens(total_tokens, tokenizer)
+    documents = load_long_documents_from_pile(
+        tokenizer=tokenizer,
+        num_docs=args.samples,
+        tokens_per_doc=args.seq_length,
+    )
 
-    train_size = int(len(tokens) * 0.9)
-    train_tokens = tokens[:train_size]
-    val_tokens = tokens[train_size:]
+    # Train/Val split
+    train_size = int(len(documents) * 0.9)
+    train_docs = documents[:train_size]
+    val_docs = documents[train_size:]
 
-    train_loader = create_pile_dataloader(train_tokens, args.seq_length, args.batch_size)
-    val_loader = create_pile_dataloader(val_tokens, args.seq_length, args.batch_size)
+    # DataLoader作成
+    train_data = torch.stack(train_docs)
+    val_data = torch.stack(val_docs)
 
-    print_flush(f"  Train: {len(train_loader) * args.batch_size} samples")
-    print_flush(f"  Val: {len(val_loader) * args.batch_size} samples")
+    train_dataset = TensorDataset(train_data, train_data)
+    val_dataset = TensorDataset(val_data, val_data)
+
+    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
+
+    print_flush(f"  Train: {len(train_docs)} samples")
+    print_flush(f"  Val: {len(val_docs)} samples")
 
     # 両方式で実験
     results = []
