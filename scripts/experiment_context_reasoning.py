@@ -549,7 +549,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--patience", type=int, default=3)
+    parser.add_argument("--patience", type=int, default=1)
     parser.add_argument("--nope", action="store_true", help="Use NoPE")
 
     args = parser.parse_args()

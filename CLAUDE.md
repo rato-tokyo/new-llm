@@ -2,6 +2,98 @@
 
 ---
 
+## 🧠 メモリ階層の定義 - 削除禁止
+
+**⚠️ この定義は本プロジェクトのメモリアーキテクチャの基盤です。**
+
+### 3種類の圧縮メモリ
+
+| メモリ名 | 役割 | 更新タイミング | 人間の認知との対応 |
+|----------|------|----------------|-------------------|
+| **Working Memory** | コンテキスト格納、会話内容管理 | トークンごとに更新 | 短期記憶・ワーキングメモリ |
+| **Index Memory** | 粗い知識の格納、Detail Memoryへの索引 | 事前に構築、推論時は不変 | 意味記憶の索引 |
+| **Detail Memory** | 細かい知識の格納 | 事前に構築、推論時は不変 | 意味記憶の詳細 |
+
+### 各メモリの詳細
+
+#### Working Memory（作業記憶）
+
+- **機能**: 現在のセッション・会話のコンテキストを保持
+- **対応**: 既存LLMのKVキャッシュに相当
+- **更新**: トークンが増えるたびに更新される
+- **特徴**:
+  - セッションごとにリセット
+  - Linear Attention形式で圧縮
+  - 直近の文脈を高速参照
+
+#### Index Memory（索引記憶）
+
+- **機能**: 粗い知識を格納し、Detail Memoryへのルーティングを担当
+- **更新**: 推論時は更新されない（事前構築）
+- **特徴**:
+  - クエリに対して「どのDetail Memoryを参照すべきか」を判定
+  - 対応不能と判断した場合のみDetail Memoryを検索
+  - 検索方式: HSA方式（Landmark = mean(K)）を採用
+
+#### Detail Memory（詳細記憶）
+
+- **機能**: 細かい知識を格納
+- **更新**: 推論時は更新されない（事前構築）
+- **特徴**:
+  - Index Memoryから選択されたときのみアクセス
+  - 複数のDetail Memoryが存在（Multi-Memory構成）
+  - 各メモリは独立した知識ドメインを担当可能
+
+### 処理フロー
+
+```
+Query
+  ↓
+Working Memory 参照（直近コンテキスト）
+  ↓
+Index Memory 参照（粗い知識）
+  ↓
+対応可能? ──Yes──→ 回答生成
+  │
+  No
+  ↓
+Top-K Detail Memory 選択
+  ↓
+Detail Memory 検索
+  ↓
+回答生成
+```
+
+### 既存実装との対応
+
+| メモリ名 | 現在の実装 | 備考 |
+|----------|-----------|------|
+| Working Memory | InfiniLayer のメモリ | トークンごと更新 |
+| Index Memory | 未実装 | HSA方式Landmarkで選択判定 |
+| Detail Memory | MultiMemoryLayer のメモリ群 | HSA方式で検索 |
+
+### HSA方式 Landmark
+
+**Landmark = mean(K)**: 各メモリに格納されたキーの平均方向
+
+```
+従来方式（memory_norm）:
+  Landmark = Σ σ(k)  ← 書き込み操作の副産物
+
+HSA方式（採用）:
+  Landmark = mean(K) ← メモリ内容の要約（検索のために設計）
+
+検索スコア:
+  relevance = Q @ Landmark  （σ変換なしの内積）
+```
+
+**利点**:
+- Landmarkが「メモリの内容」を直接表現
+- 追加パラメータ不要
+- 理論的に明確な意味を持つ
+
+---
+
 ## 🎯 レイヤーベースアーキテクチャ
 
 **レイヤーを組み合わせてモデルを構築する柔軟な設計。**
@@ -91,6 +183,16 @@ model = TransformerLM(layers=layers)
 | `num_memory_banks` | infini | `1` | メモリバンク数 |
 | `segments_per_bank` | infini | `4` | バンクあたりセグメント数 |
 
+### 訓練設定のデフォルト値
+
+| 設定 | デフォルト | 説明 |
+|------|------------|------|
+| `early_stopping_patience` | **1** | 改善なしで訓練終了までのエポック数 |
+| `gradient_clip` | 1.0 | 勾配クリッピング |
+| `lr` | 1e-4 | 学習率 |
+
+**注意**: patienceのデフォルト値は1。過学習防止のため早めに終了する。
+
 ---
 
 ## 💾 メモリ状態の保存・転送
@@ -126,6 +228,53 @@ output = model(input_ids)
 |--------|--------|
 | Infini (1 bank) | ~135 KB |
 | Multi-Memory (4) | ~540 KB |
+
+---
+
+## 🔨 MemoryBuilder - テキストからメモリ構築
+
+**異なるドメインのテキストを各メモリに事前格納するユーティリティ。**
+
+```python
+from src.utils import MemoryBuilder, get_tokenizer
+from src.models import create_model
+
+# モデル作成
+model = create_model("multi_memory", num_memories=4)
+tokenizer = get_tokenizer()
+
+# メモリビルダー作成
+builder = MemoryBuilder(model, tokenizer)
+
+# 各メモリに異なるドメインのテキストを書き込み
+builder.build_memory(0, "物理学に関するテキスト...")
+builder.build_memory(1, "歴史に関するテキスト...")
+builder.build_memory(2, "技術に関するテキスト...")
+builder.build_memory(3, "地理に関するテキスト...")
+
+# メモリ情報を表示
+builder.print_memory_info()
+
+# メモリ状態を保存
+builder.save("memories/domain_specific.pt")
+
+# 後で読み込み
+builder.load("memories/domain_specific.pt")
+```
+
+### ヘルパー関数
+
+```python
+from src.utils import create_domain_memories
+
+domain_texts = {
+    "science": "量子力学は...",
+    "history": "産業革命は...",
+    "technology": "機械学習は...",
+    "geography": "エベレストは...",
+}
+builder = create_domain_memories(model, tokenizer, domain_texts)
+```
 
 ---
 
@@ -552,6 +701,9 @@ Reversal Curseの真の問題は「逆方向を推論できない」ことでは
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-08 | **patience=1に統一**: Early stoppingのデフォルトpatience値を1に変更。過学習防止 |
+| 2025-12-08 | **HSA方式Landmark採用**: MultiMemoryLayerのLandmark計算をHSA方式（mean(K)）に一本化。LandmarkType削除 |
+| 2025-12-08 | **メモリ階層定義追加**: Working Memory / Index Memory / Detail Memory の3層構成を定義 |
 | 2025-12-07 | **CDR訓練追加**: Context-Dependent Reasoning Training - 推論をFFNに、知識を外部コンテキストに分離する訓練手法 |
 | 2025-12-07 | **Continuous LM失敗**: 離散化スキップ仮説は失敗。Reversal Curse改善するもVal PPL 4倍悪化。実装削除 |
 | 2025-12-07 | **LCT方式追加**: Lagged Cache Training - 再帰的モデルを並列訓練可能にする手法。22倍高速化 |

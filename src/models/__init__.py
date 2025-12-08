@@ -50,7 +50,6 @@ from .layers import (
     InfiniAttention,
     MultiMemoryLayer,
     MultiMemoryAttention,
-    LandmarkType,
 )
 
 # Building blocks
@@ -89,8 +88,6 @@ def create_model(
     # Infini-specific settings
     num_memory_banks: int = 1,
     segments_per_bank: int = 4,
-    # Multi-Memory specific settings
-    landmark_type: LandmarkType = "memory_norm",
 ):
     """
     Create a model by type.
@@ -102,9 +99,6 @@ def create_model(
         num_memories: Number of memories (multi_memory only)
         num_memory_banks: Number of memory banks (infini only)
         segments_per_bank: Segments per bank (infini only)
-        landmark_type: Landmark計算方式 (multi_memory only)
-            - "memory_norm": memory_normを流用（デフォルト）
-            - "learned": 学習可能な射影
 
     Returns:
         TransformerLM instance
@@ -116,8 +110,8 @@ def create_model(
         # Infini-Pythia
         model = create_model("infini")
 
-        # Multi-Memory with learned landmark
-        model = create_model("multi_memory", landmark_type="learned")
+        # Multi-Memory (HSA-style landmarks)
+        model = create_model("multi_memory", num_memories=8)
     """
     if config is None:
         config = PythiaConfig()
@@ -147,7 +141,7 @@ def create_model(
 
     elif model_type == "multi_memory":
         layers = [
-            MultiMemoryLayer(h, n, i, num_memories, use_delta_rule, landmark_type),
+            MultiMemoryLayer(h, n, i, num_memories, use_delta_rule),
             *pythia_layers(config.num_layers - 1),
         ]
 
@@ -180,7 +174,6 @@ __all__ = [
     'InfiniAttention',
     'MultiMemoryLayer',
     'MultiMemoryAttention',
-    'LandmarkType',
 
     # Building blocks
     'PythiaMLP',

@@ -188,7 +188,7 @@ def train_model(
     device: torch.device,
     num_epochs: int = 10,
     learning_rate: float = 1e-4,
-    patience: int = 3,
+    patience: int = 1,
     model_name: str = "Model",
 ) -> Dict[str, Any]:
     """

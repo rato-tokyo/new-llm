@@ -17,6 +17,10 @@ from .evaluation import (
     evaluate_ppl,
     evaluate_position_wise_ppl,
 )
+from .memory_builder import (
+    MemoryBuilder,
+    create_domain_memories,
+)
 
 __all__ = [
     # Device utilities
@@ -37,4 +41,7 @@ __all__ = [
     # Evaluation utilities
     'evaluate_ppl',
     'evaluate_position_wise_ppl',
+    # Memory builder
+    'MemoryBuilder',
+    'create_domain_memories',
 ]
