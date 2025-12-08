@@ -72,25 +72,33 @@ Detail Memory 検索
 | Index Memory | 未実装 | HSA方式Landmarkで選択判定 |
 | Detail Memory | MultiMemoryLayer のメモリ群 | HSA方式で検索 |
 
-### HSA方式 Landmark
+### HSA方式 (Hierarchical Sparse Attention)
 
-**Landmark = mean(K)**: 各メモリに格納されたキーの平均方向
+**論文**: arXiv:2511.23319v1
+
+HSA方式では、各メモリ（チャンク）を**双方向エンコーダ**で要約してLandmarkを生成する。
 
 ```
-従来方式（memory_norm）:
-  Landmark = Σ σ(k)  ← 書き込み操作の副産物
+論文の構成:
+  1. ChunkEncoder: 双方向Transformerエンコーダ
+  2. [CLS]トークン: 各チャンクに付加
+  3. Landmark = ChunkEncoder([CLS] + Keys)[CLS]
+  4. Q_slc: 検索専用Query（Attention用Qとは別の射影）
+  5. 検索スコア: Q_slc @ Landmark / sqrt(d)
 
-HSA方式（採用）:
-  Landmark = mean(K) ← メモリ内容の要約（検索のために設計）
-
-検索スコア:
-  relevance = Q @ Landmark  （σ変換なしの内積）
+本プロジェクトへの適用:
+| HSA論文              | 本プロジェクト           |
+|---------------------|------------------------|
+| Chunk + [CLS]       | メモリ内キー列 + [CLS]   |
+| Bi-directional Enc  | ChunkEncoder (2層)     |
+| Q_slc               | w_q_slc (検索専用)      |
+| Q_attn              | w_q (Attention用)      |
 ```
 
 **利点**:
-- Landmarkが「メモリの内容」を直接表現
-- 追加パラメータ不要
-- 理論的に明確な意味を持つ
+- **学習可能なLandmark**: 双方向エンコーダがメモリ内容を要約
+- **検索専用Query**: Attention用とは別の射影で最適化
+- **論文準拠**: HSA論文の設計を忠実に再現
 
 ---
 

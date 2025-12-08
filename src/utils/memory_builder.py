@@ -49,7 +49,10 @@ class DirectMemoryBuilder:
     """テキストから直接圧縮メモリを構築（モデル非依存）
 
     トークンの埋め込みベクトルを使って、モデルの重みに依存せず
-    メモリ（K-V行列）とLandmark（mean(K)）を構築する。
+    メモリ（K-V行列）とkey_sequences（ChunkEncoderの入力）を構築する。
+
+    HSA方式では Landmark = ChunkEncoder([CLS] + Keys)[CLS] として計算されるため、
+    ここではキー列 (key_sequences) を保持する。
 
     これにより：
     - ランダム初期化モデルでも意味的に異なるメモリを作成可能
@@ -62,6 +65,7 @@ class DirectMemoryBuilder:
         num_memories: int = 4,
         num_heads: int = 8,
         head_dim: int = 64,
+        max_keys_per_memory: int = 256,
         device: Optional[torch.device] = None,
         dtype: torch.dtype = torch.float32,
     ):
@@ -70,12 +74,14 @@ class DirectMemoryBuilder:
             num_memories: メモリ数
             num_heads: ヘッド数
             head_dim: ヘッド次元（hidden_size // num_heads）
+            max_keys_per_memory: メモリあたりの最大キー数
             device: デバイス
             dtype: データ型
         """
         self.num_memories = num_memories
         self.num_heads = num_heads
         self.head_dim = head_dim
+        self.max_keys_per_memory = max_keys_per_memory
         self.device = device or torch.device("cpu")
         self.dtype = dtype
 
@@ -94,13 +100,11 @@ class DirectMemoryBuilder:
                         device=self.device, dtype=self.dtype)
             for _ in range(self.num_memories)
         ]
-        self.landmarks = [
-            torch.zeros(self.num_heads, self.head_dim,
-                        device=self.device, dtype=self.dtype)
-            for _ in range(self.num_memories)
-        ]
-        self.key_counts = [
-            torch.zeros(self.num_heads, device=self.device, dtype=self.dtype)
+        # HSA: キー列を保持（ChunkEncoderの入力）
+        # key_sequences[memory_idx][head_idx] = (seq_len, head_dim)
+        self.key_sequences: list[list[torch.Tensor]] = [
+            [torch.zeros(0, self.head_dim, device=self.device, dtype=self.dtype)
+             for _ in range(self.num_heads)]
             for _ in range(self.num_memories)
         ]
 
@@ -149,23 +153,27 @@ class DirectMemoryBuilder:
         norm_update = sigma_k.sum(dim=0)  # (num_heads, head_dim)
         self.memory_norms[memory_idx] = self.memory_norms[memory_idx] + norm_update
 
-        # Landmark更新: mean(K)
-        k_sum = k.sum(dim=0)  # (num_heads, head_dim)
-        old_count = self.key_counts[memory_idx]
-        new_count = old_count + seq_len
+        # HSA: キー列を更新（ChunkEncoderの入力）
+        for h in range(self.num_heads):
+            new_keys = k[:, h, :]  # (seq_len, head_dim)
+            current_keys = self.key_sequences[memory_idx][h]
+            combined = torch.cat([current_keys, new_keys], dim=0)
 
-        # オンライン平均更新
-        old_landmark = self.landmarks[memory_idx]
-        self.landmarks[memory_idx] = (
-            (old_landmark * old_count.unsqueeze(-1) + k_sum)
-            / new_count.clamp(min=1).unsqueeze(-1)
+            # max_keys_per_memory を超えたら古いキーを削除
+            if combined.size(0) > self.max_keys_per_memory:
+                combined = combined[-self.max_keys_per_memory:]
+
+            self.key_sequences[memory_idx][h] = combined
+
+        total_keys = sum(
+            self.key_sequences[memory_idx][h].size(0)
+            for h in range(self.num_heads)
         )
-        self.key_counts[memory_idx] = new_count
 
         return {
             "memory_idx": memory_idx,
             "seq_len": seq_len,
-            "landmark_norm": float(self.landmarks[memory_idx].norm().item()),
+            "total_keys": total_keys,
         }
 
     def build_from_texts(
@@ -218,8 +226,10 @@ class DirectMemoryBuilder:
         return {
             "memories": [m.cpu().clone() for m in self.memories],
             "memory_norms": [n.cpu().clone() for n in self.memory_norms],
-            "landmarks": [lm.cpu().clone() for lm in self.landmarks],
-            "key_counts": [c.cpu().clone() for c in self.key_counts],
+            "key_sequences": [
+                [ks.cpu().clone() for ks in mem_keys]
+                for mem_keys in self.key_sequences
+            ],
             "current_memory_idx": torch.tensor(0),
         }
 
@@ -240,10 +250,10 @@ class DirectMemoryBuilder:
         raise ValueError("Model does not have MultiMemoryLayer")
 
     def build_orthogonal_memories(self, num_keys_per_memory: int = 100) -> None:
-        """直交するLandmarkを持つメモリを構築（検証用）
+        """直交するキー列を持つメモリを構築（検証用）
 
-        各メモリが異なる方向を向くLandmarkを持つように構築。
-        これによりメモリ選択の検証が容易になる。
+        各メモリが異なる方向を向くキー列を持つように構築。
+        ChunkEncoderが異なるLandmarkを生成することを確認できる。
 
         Args:
             num_keys_per_memory: 各メモリに格納するキー数
@@ -274,10 +284,9 @@ class DirectMemoryBuilder:
             self.memories[i] = torch.einsum('shd,she->hde', sigma_k, v)
             self.memory_norms[i] = sigma_k.sum(dim=0)
 
-            # Landmark = mean(K)
-            self.landmarks[i] = k.mean(dim=0)
-            self.key_counts[i] = torch.full((self.num_heads,), num_keys_per_memory,
-                                            device=self.device, dtype=self.dtype)
+            # HSA: キー列を保存（ChunkEncoderの入力）
+            for h in range(self.num_heads):
+                self.key_sequences[i][h] = k[:, h, :]  # (num_keys, head_dim)
 
     def get_landmark_similarity_matrix(self) -> torch.Tensor:
         """Landmark間のコサイン類似度行列を計算
