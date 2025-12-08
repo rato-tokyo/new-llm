@@ -1,8 +1,12 @@
 """
 Multi-Memory Layer (Multiple Independent Memories)
+
+Landmark方式:
+  - "memory_norm": memory_normを流用（デフォルト）
+  - "learned": 学習可能な射影でLandmarkを計算
 """
 
-from typing import Optional
+from typing import Literal, Optional
 
 import torch
 import torch.nn as nn
@@ -11,6 +15,8 @@ import torch.nn.functional as F
 from src.models.base_components import PythiaMLP
 from src.models.memory_utils import causal_linear_attention, elu_plus_one
 from .base import BaseLayer
+
+LandmarkType = Literal["memory_norm", "learned"]
 
 
 class MultiMemoryAttention(nn.Module):
@@ -22,6 +28,7 @@ class MultiMemoryAttention(nn.Module):
         num_heads: int,
         num_memories: int = 4,
         use_delta_rule: bool = True,
+        landmark_type: LandmarkType = "memory_norm",
     ):
         super().__init__()
         self.hidden_size = hidden_size
@@ -29,6 +36,7 @@ class MultiMemoryAttention(nn.Module):
         self.head_dim = hidden_size // num_heads
         self.num_memories = num_memories
         self.use_delta_rule = use_delta_rule
+        self.landmark_type = landmark_type
 
         self.w_q = nn.Linear(hidden_size, hidden_size, bias=False)
         self.w_k = nn.Linear(hidden_size, hidden_size, bias=False)
@@ -36,6 +44,10 @@ class MultiMemoryAttention(nn.Module):
         self.w_o = nn.Linear(hidden_size, hidden_size, bias=False)
 
         self.gate = nn.Parameter(torch.zeros(num_heads))
+
+        # 学習可能Landmark用の射影（landmark_type="learned"の場合のみ使用）
+        if landmark_type == "learned":
+            self.landmark_proj = nn.Linear(self.head_dim, self.head_dim, bias=False)
 
         self.memories: Optional[list[torch.Tensor]] = None
         self.memory_norms: Optional[list[torch.Tensor]] = None
@@ -56,6 +68,39 @@ class MultiMemoryAttention(nn.Module):
         ]
         self.current_memory_idx = torch.tensor(0, device=device)
 
+    def _compute_landmark(self, memory_norm: torch.Tensor) -> torch.Tensor:
+        """Landmarkベクトルを計算
+
+        Args:
+            memory_norm: (num_heads, head_dim)
+
+        Returns:
+            landmark: (num_heads, head_dim)
+        """
+        if self.landmark_type == "learned":
+            # 学習可能な射影を適用
+            return self.landmark_proj(memory_norm)
+        else:
+            # memory_normをそのまま使用
+            return memory_norm
+
+    def _compute_relevance(
+        self, sigma_q: torch.Tensor, landmark: torch.Tensor
+    ) -> torch.Tensor:
+        """クエリとLandmarkの関連度を計算
+
+        Args:
+            sigma_q: (batch, num_heads, seq_len, head_dim)
+            landmark: (num_heads, head_dim)
+
+        Returns:
+            relevance: (batch, num_heads) - シーケンス平均
+        """
+        # (batch, num_heads, seq_len)
+        rel = torch.einsum('bhsd,hd->bhs', sigma_q, landmark)
+        # シーケンス平均
+        return rel.mean(dim=-1)
+
     def _retrieve_from_memory(self, q: torch.Tensor) -> torch.Tensor:
         if self.memories is None or self.memory_norms is None:
             return torch.zeros_like(q)
@@ -68,10 +113,14 @@ class MultiMemoryAttention(nn.Module):
                 outputs.append(torch.zeros_like(q))
                 relevances.append(torch.zeros(q.size(0), self.num_heads, device=q.device))
             else:
+                # メモリからの検索（共通）
                 a_mem = torch.einsum('bhsd,hde->bhse', sigma_q, memory)
-                rel = torch.einsum('bhsd,hd->bhs', sigma_q, memory_norm)
-                outputs.append(a_mem / rel.clamp(min=1e-6).unsqueeze(-1))
-                relevances.append(rel.mean(dim=-1))
+                norm = torch.einsum('bhsd,hd->bhs', sigma_q, memory_norm)
+                outputs.append(a_mem / norm.clamp(min=1e-6).unsqueeze(-1))
+
+                # Landmark計算と関連度（方式により異なる）
+                landmark = self._compute_landmark(memory_norm)
+                relevances.append(self._compute_relevance(sigma_q, landmark))
 
         stacked = torch.stack(outputs, dim=0)
         weights = F.softmax(torch.stack(relevances, dim=0), dim=0)
@@ -143,7 +192,13 @@ class MultiMemoryAttention(nn.Module):
 
 
 class MultiMemoryLayer(BaseLayer):
-    """Multi-Memory Infini-Attention Layer"""
+    """Multi-Memory Infini-Attention Layer
+
+    Args:
+        landmark_type: Landmark計算方式
+            - "memory_norm": memory_normを流用（デフォルト、追加パラメータなし）
+            - "learned": 学習可能な射影でLandmarkを計算
+    """
 
     def __init__(
         self,
@@ -152,6 +207,7 @@ class MultiMemoryLayer(BaseLayer):
         intermediate_size: int,
         num_memories: int = 4,
         use_delta_rule: bool = True,
+        landmark_type: LandmarkType = "memory_norm",
     ):
         super().__init__()
         self.input_layernorm = nn.LayerNorm(hidden_size)
@@ -160,6 +216,7 @@ class MultiMemoryLayer(BaseLayer):
             num_heads=num_heads,
             num_memories=num_memories,
             use_delta_rule=use_delta_rule,
+            landmark_type=landmark_type,
         )
         self.mlp = PythiaMLP(hidden_size, intermediate_size)
 

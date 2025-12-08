@@ -19,7 +19,7 @@ Transformer Layer Implementations
 from .base import BaseLayer
 from .pythia import PythiaLayer, PythiaAttention
 from .infini import InfiniLayer, InfiniAttention
-from .multi_memory import MultiMemoryLayer, MultiMemoryAttention
+from .multi_memory import MultiMemoryLayer, MultiMemoryAttention, LandmarkType
 
 __all__ = [
     # Base
@@ -33,4 +33,5 @@ __all__ = [
     # Multi-Memory
     'MultiMemoryLayer',
     'MultiMemoryAttention',
+    'LandmarkType',
 ]
