@@ -358,11 +358,11 @@ def run_experiment(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
-        epochs=epochs,
-        lr=lr,
-        patience=patience,
         device=device,
-        verbose=True,
+        num_epochs=epochs,
+        learning_rate=lr,
+        patience=patience,
+        model_name=f"MultiMemory ({landmark_type})",
     )
 
     return {
