@@ -19,7 +19,6 @@ HSA (Hierarchical Sparse Attention) 方式を採用:
 """
 
 from typing import Optional
-import math
 
 import torch
 import torch.nn as nn
@@ -217,7 +216,6 @@ class MultiMemoryAttention(nn.Module):
             relevance: (batch, num_heads) - シーケンス平均のスコア
         """
         batch_size, num_heads, seq_len, head_dim = q_slc.shape
-        device = q_slc.device
 
         # 各ヘッドのLandmarkを計算
         landmarks = []

@@ -288,40 +288,56 @@ class DirectMemoryBuilder:
             for h in range(self.num_heads):
                 self.key_sequences[i][h] = k[:, h, :]  # (num_keys, head_dim)
 
-    def get_landmark_similarity_matrix(self) -> torch.Tensor:
-        """Landmark間のコサイン類似度行列を計算
+    def get_key_mean_similarity_matrix(self) -> torch.Tensor:
+        """キー列平均間のコサイン類似度行列を計算
+
+        HSA方式ではLandmarkはChunkEncoderで動的計算されるため、
+        ここではキー列の平均を使って類似度を近似。
 
         Returns:
             (num_memories, num_memories) の類似度行列
         """
-        # (num_memories, num_heads * head_dim)
-        landmarks_flat = torch.stack([
-            lm.flatten() for lm in self.landmarks
-        ])
+        # 各メモリのキー列平均を計算
+        key_means = []
+        for i in range(self.num_memories):
+            # 全ヘッドのキー列を平均
+            all_keys = []
+            for h in range(self.num_heads):
+                if self.key_sequences[i][h].size(0) > 0:
+                    all_keys.append(self.key_sequences[i][h].mean(dim=0))
+            if all_keys:
+                key_means.append(torch.stack(all_keys).flatten())
+            else:
+                key_means.append(torch.zeros(self.num_heads * self.head_dim,
+                                             device=self.device, dtype=self.dtype))
+
+        key_means_tensor = torch.stack(key_means)
 
         # 正規化
-        landmarks_norm = landmarks_flat / landmarks_flat.norm(dim=1, keepdim=True).clamp(min=1e-8)
+        key_means_norm = key_means_tensor / key_means_tensor.norm(dim=1, keepdim=True).clamp(min=1e-8)
 
         # コサイン類似度
-        return landmarks_norm @ landmarks_norm.T
+        return key_means_norm @ key_means_norm.T
 
     def print_info(self) -> None:
         """メモリ情報を表示"""
         print(f"DirectMemoryBuilder: {self.num_memories} memories")
         print(f"  num_heads={self.num_heads}, head_dim={self.head_dim}")
         print("-" * 50)
-        print(f"{'Idx':<5} {'Keys':<15} {'Landmark':<15} {'Memory':<15}")
+        print(f"{'Idx':<5} {'Keys':<15} {'Memory Norm':<15}")
         print("-" * 50)
 
         for i in range(self.num_memories):
-            key_count = float(self.key_counts[i].sum().item())
-            landmark_norm = float(self.landmarks[i].norm().item())
+            # 全ヘッドのキー数を合計
+            key_count = sum(
+                self.key_sequences[i][h].size(0) for h in range(self.num_heads)
+            )
             memory_norm = float(self.memory_norms[i].norm().item())
-            print(f"{i:<5} {key_count:<15.1f} {landmark_norm:<15.4f} {memory_norm:<15.4f}")
+            print(f"{i:<5} {key_count:<15} {memory_norm:<15.4f}")
 
-        # Landmark類似度を表示
-        sim_matrix = self.get_landmark_similarity_matrix()
-        print("\nLandmark Similarity Matrix:")
+        # キー平均類似度を表示
+        sim_matrix = self.get_key_mean_similarity_matrix()
+        print("\nKey Mean Similarity Matrix:")
         print("     " + "".join(f"{i:>8}" for i in range(self.num_memories)))
         for i in range(self.num_memories):
             row = "".join(f"{sim_matrix[i, j].item():>8.3f}" for j in range(self.num_memories))
