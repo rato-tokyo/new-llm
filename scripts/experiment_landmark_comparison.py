@@ -348,6 +348,9 @@ def run_experiment(
     model = create_model_with_landmark_type(config, landmark_type, num_memories)
     model = model.to(device)
 
+    # メモリをリセット（公平な比較のため）
+    model.reset_memory()
+
     params = sum(p.numel() for p in model.parameters())
     layer0_params = sum(p.numel() for p in model.layers[0].parameters())
     print_flush(f"Parameters: {params:,}")
@@ -381,7 +384,7 @@ def main():
     parser.add_argument("--epochs", type=int, default=30)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--patience", type=int, default=5)
+    parser.add_argument("--patience", type=int, default=1)
     parser.add_argument("--num-memories", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
