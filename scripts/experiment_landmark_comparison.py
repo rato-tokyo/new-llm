@@ -415,12 +415,17 @@ def main():
     train_docs = documents[:train_size]
     val_docs = documents[train_size:]
 
-    # DataLoader作成
+    # DataLoader作成（因果LM: input=tokens[:-1], labels=tokens[1:]）
     train_data = torch.stack(train_docs)
     val_data = torch.stack(val_docs)
 
-    train_dataset = TensorDataset(train_data, train_data)
-    val_dataset = TensorDataset(val_data, val_data)
+    train_input = train_data[:, :-1]
+    train_labels = train_data[:, 1:]
+    val_input = val_data[:, :-1]
+    val_labels = val_data[:, 1:]
+
+    train_dataset = TensorDataset(train_input, train_labels)
+    val_dataset = TensorDataset(val_input, val_labels)
 
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False)
