@@ -3,6 +3,7 @@ Senri Configuration Module
 
 定数、モデルプリセット、実験設定を提供。
 全ての値は constants.py で一元管理され、デフォルト値は使用しない。
+PythiaLayerとSenriLayerは独立した設定を持つ。
 
 モデル作成:
     from src.config import SENRI_MODEL, PYTHIA_MODEL
@@ -11,9 +12,9 @@ Senri Configuration Module
     model = PYTHIA_MODEL()
 
 設定値の参照:
-    from src.config import MODEL_HIDDEN_SIZE, MODEL_NUM_HEADS
+    from src.config import PYTHIA_HIDDEN_SIZE, SENRI_HIDDEN_SIZE
 
-    # 設定値は constants.py に集約されている
+    # PythiaLayerとSenriLayerは独立した設定
 """
 
 # Constants - 全ての設定値
@@ -22,18 +23,22 @@ from .constants import (
     OPEN_CALM_TOKENIZER,
     OPEN_CALM_VOCAB_SIZE,
     PYTHIA_TOKENIZER,
-    # モデルアーキテクチャ
+    # Model共通
     MODEL_HIDDEN_SIZE,
-    MODEL_NUM_HEADS,
-    MODEL_INTERMEDIATE_SIZE,
-    MODEL_NUM_LAYERS,
-    # SenriLayer
+    MODEL_VOCAB_SIZE,
+    # PythiaLayer専用
+    PYTHIA_HIDDEN_SIZE,
+    PYTHIA_NUM_HEADS,
+    PYTHIA_INTERMEDIATE_SIZE,
+    PYTHIA_ROTARY_PCT,
+    PYTHIA_MAX_POSITION_EMBEDDINGS,
+    # SenriLayer専用
+    SENRI_HIDDEN_SIZE,
+    SENRI_NUM_HEADS,
+    SENRI_INTERMEDIATE_SIZE,
     SENRI_NUM_MEMORIES,
     SENRI_MEMORY_HEAD_DIM,
     SENRI_USE_DELTA_RULE,
-    # PythiaLayer
-    PYTHIA_ROTARY_PCT,
-    PYTHIA_MAX_POSITION_EMBEDDINGS,
 )
 
 # Model presets
@@ -54,18 +59,22 @@ __all__ = [
     "OPEN_CALM_TOKENIZER",
     "OPEN_CALM_VOCAB_SIZE",
     "PYTHIA_TOKENIZER",
-    # Model architecture constants
+    # Model common constants
     "MODEL_HIDDEN_SIZE",
-    "MODEL_NUM_HEADS",
-    "MODEL_INTERMEDIATE_SIZE",
-    "MODEL_NUM_LAYERS",
+    "MODEL_VOCAB_SIZE",
+    # PythiaLayer constants
+    "PYTHIA_HIDDEN_SIZE",
+    "PYTHIA_NUM_HEADS",
+    "PYTHIA_INTERMEDIATE_SIZE",
+    "PYTHIA_ROTARY_PCT",
+    "PYTHIA_MAX_POSITION_EMBEDDINGS",
     # SenriLayer constants
+    "SENRI_HIDDEN_SIZE",
+    "SENRI_NUM_HEADS",
+    "SENRI_INTERMEDIATE_SIZE",
     "SENRI_NUM_MEMORIES",
     "SENRI_MEMORY_HEAD_DIM",
     "SENRI_USE_DELTA_RULE",
-    # PythiaLayer constants
-    "PYTHIA_ROTARY_PCT",
-    "PYTHIA_MAX_POSITION_EMBEDDINGS",
     # Model presets
     "PYTHIA_MODEL",
     "SENRI_MODEL",
