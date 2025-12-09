@@ -1,10 +1,10 @@
-# New-LLM: Japanese LLM with Compressive Memory
+# Senri: Japanese LLM with Compressive Memory
 
-OpenCALM (Japanese) based experimental architectures with Infini-Attention for efficient long-context processing.
+Senri is a Japanese LLM with Infini-Attention for efficient long-context processing.
 
 ## Overview
 
-New-LLM extends OpenCALM with Infini-Attention, enabling infinite context processing through learned compressive memory. The architecture uses a layer-based design for maximum flexibility.
+Senri uses OpenCALM tokenizer with Infini-Attention, enabling infinite context processing through learned compressive memory. The architecture uses a layer-based design for maximum flexibility.
 
 ```
 Architecture:
@@ -40,9 +40,9 @@ pip install torch transformers datasets
 
 ```python
 from src.models import create_model
-from src.config import OpenCalmConfig
+from src.config import SenriConfig
 
-# Standard model (OpenCALM config, 52K vocab)
+# Standard model (Senri config, 52K vocab)
 model = create_model("pythia")
 
 # Infini model (Layer 0: Infini + 5 Pythia layers)
@@ -52,7 +52,7 @@ model = create_model("infini")
 model = create_model("multi_memory", num_memories=8)
 
 # Custom config
-config = OpenCalmConfig()
+config = SenriConfig()
 model = create_model("pythia", base_config=config)
 ```
 
@@ -99,8 +99,8 @@ model.set_memory_state(state)
 ### Run Experiments
 
 ```bash
-# OpenCALM integration verification
-python3 scripts/verify_open_calm.py
+# Senri integration verification
+python3 scripts/verify_senri.py
 
 # Context Separation Training (Reversal Curse)
 python3 scripts/experiment_context_reasoning.py
@@ -146,7 +146,7 @@ tokenizer = get_open_calm_tokenizer()
 
 ## Architecture Details
 
-### OpenCALM Base Config
+### Senri Config
 
 | Component | Value |
 |-----------|-------|
@@ -180,37 +180,38 @@ sigma(x) = ELU(x) + 1
 ## Project Structure
 
 ```
-new-llm/
+senri/
 ├── src/
 │   ├── config/
-│   │   ├── open_calm.py           # OpenCalmConfig (default)
-│   │   ├── pythia.py              # PythiaConfig (legacy)
-│   │   ├── models.py              # InfiniConfig, MultiMemoryConfig
-│   │   └── experiment.py          # ExperimentConfig
+│   │   ├── senri.py              # SenriConfig (default)
+│   │   ├── open_calm.py          # OpenCALM tokenizer constants
+│   │   ├── pythia.py             # PythiaConfig (legacy)
+│   │   ├── models.py             # InfiniConfig, MultiMemoryConfig
+│   │   └── experiment.py         # ExperimentConfig
 │   ├── models/
-│   │   ├── __init__.py            # create_model() factory
-│   │   ├── layers/                # Layer package
-│   │   │   ├── base.py            # BaseLayer base class
-│   │   │   ├── pythia.py          # PythiaLayer (RoPE + Softmax)
-│   │   │   ├── infini.py          # InfiniLayer (Memory + Linear)
-│   │   │   └── multi_memory.py    # MultiMemoryLayer
-│   │   ├── model.py               # TransformerLM (generic model)
-│   │   ├── base_components.py     # PythiaMLP, init_weights
-│   │   ├── memory_utils.py        # Linear attention utilities
-│   │   └── position_encoding.py   # RoPE
+│   │   ├── __init__.py           # create_model() factory
+│   │   ├── layers/               # Layer package
+│   │   │   ├── base.py           # BaseLayer base class
+│   │   │   ├── pythia.py         # PythiaLayer (RoPE + Softmax)
+│   │   │   ├── infini.py         # InfiniLayer (Memory + Linear)
+│   │   │   └── multi_memory.py   # MultiMemoryLayer
+│   │   ├── model.py              # TransformerLM (generic model)
+│   │   ├── base_components.py    # PythiaMLP, init_weights
+│   │   ├── memory_utils.py       # Linear attention utilities
+│   │   └── position_encoding.py  # RoPE
 │   └── utils/
-│       ├── tokenizer_utils.py     # OpenCALM tokenizer
-│       ├── training.py            # Training utilities
+│       ├── tokenizer_utils.py    # OpenCALM tokenizer
+│       ├── training.py           # Training utilities
 │       └── ...
 ├── scripts/
-│   ├── verify_open_calm.py        # OpenCALM integration test
+│   ├── verify_senri.py           # Senri integration test
 │   ├── experiment_context_reasoning.py  # Reversal Curse experiment
-│   └── evaluate_baseline.py       # Baseline PPL evaluation
+│   └── evaluate_baseline.py      # Baseline PPL evaluation
 ├── tests/
-│   └── test_pythia_pretrained.py  # Pretrained validation
+│   └── test_pythia_pretrained.py # Pretrained validation
 ├── docs/
-│   └── experiments/               # Experiment results
-├── CLAUDE.md                      # Development guidelines
+│   └── experiments/              # Experiment results
+├── CLAUDE.md                     # Development guidelines
 └── README.md
 ```
 

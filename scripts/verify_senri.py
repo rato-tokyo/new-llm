@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-OpenCALM Integration Verification Script
+Senri Integration Verification Script
 
-OpenCALMトークナイザーとモデルの動作確認スクリプト。
-日本語LLM開発の基盤が正しく動作することを確認する。
+Senri日本語LLMの動作確認スクリプト。
+トークナイザーとモデルが正しく動作することを確認する。
 
 Usage:
-    python3 scripts/verify_open_calm.py
+    python3 scripts/verify_senri.py
 """
 
 import sys
@@ -15,7 +15,7 @@ sys.path.insert(0, ".")
 
 import torch
 
-from src.config import OpenCalmConfig
+from src.config import SenriConfig
 from src.models import create_model
 from src.utils.tokenizer_utils import get_open_calm_tokenizer, test_tokenizer_coverage
 from src.utils.training import get_device
@@ -69,7 +69,7 @@ def test_config():
     print_flush("2. CONFIG TEST")
     print_flush("=" * 70)
 
-    config = OpenCalmConfig()
+    config = SenriConfig()
     print_flush(f"  vocab_size: {config.vocab_size:,}")
     print_flush(f"  hidden_size: {config.hidden_size}")
     print_flush(f"  num_layers: {config.num_layers}")
@@ -93,7 +93,7 @@ def test_model_creation():
     print_flush("3. MODEL CREATION TEST")
     print_flush("=" * 70)
 
-    config = OpenCalmConfig()
+    config = SenriConfig()
 
     # Pythiaモデル
     print_flush("\n  [pythia] Standard Transformer:")
@@ -125,7 +125,7 @@ def test_forward_pass():
     device = get_device()
     print_flush(f"  Device: {device}")
 
-    config = OpenCalmConfig()
+    config = SenriConfig()
     tokenizer = get_open_calm_tokenizer()
 
     # テスト入力
@@ -169,7 +169,7 @@ def test_generation():
     print_flush("=" * 70)
 
     device = get_device()
-    config = OpenCalmConfig()
+    config = SenriConfig()
     tokenizer = get_open_calm_tokenizer()
 
     # Infiniモデルで生成テスト
@@ -210,10 +210,10 @@ def test_generation():
 
 def main():
     print_flush("=" * 70)
-    print_flush("OPENCALM INTEGRATION VERIFICATION")
+    print_flush("SENRI INTEGRATION VERIFICATION")
     print_flush("=" * 70)
-    print_flush("This script verifies that the OpenCALM tokenizer and model")
-    print_flush("are correctly integrated for Japanese LLM development.")
+    print_flush("This script verifies that Senri (Japanese LLM) is correctly")
+    print_flush("configured with OpenCALM tokenizer.")
 
     results = {}
 
@@ -246,7 +246,7 @@ def main():
 
     print_flush("\n" + "=" * 70)
     if all_passed:
-        print_flush("ALL TESTS PASSED - OpenCALM integration is ready!")
+        print_flush("ALL TESTS PASSED - Senri is ready!")
     else:
         print_flush("SOME TESTS FAILED - Please check the errors above.")
     print_flush("=" * 70)

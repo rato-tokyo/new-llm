@@ -1,15 +1,15 @@
-"""New-LLM Models
+"""Senri Models
 
-OpenCALM (Japanese LLM) based experimental architectures.
-Infini-Attention for compressive memory.
+Senri: Japanese LLM with Compressive Memory
+Infini-Attention for efficient long-context processing.
 
 ## Quick Start
 
 ```python
 from src.models import create_model
-from src.config import OpenCalmConfig, InfiniConfig, MultiMemoryConfig
+from src.config import SenriConfig, InfiniConfig, MultiMemoryConfig
 
-# 標準モデル（OpenCALM設定）
+# 標準モデル（Senri設定）
 model = create_model("pythia")
 
 # Infiniモデル（デフォルト設定）
@@ -46,6 +46,7 @@ model = TransformerLM(layers=layers)
 from typing import Optional, Union
 
 from src.config import (
+    SenriConfig,
     PythiaConfig,
     OpenCalmConfig,
     InfiniConfig,
@@ -90,8 +91,9 @@ from .position_encoding import (  # noqa: E402
     apply_rotary_pos_emb,
 )
 
-# Base config type (supports both PythiaConfig and OpenCalmConfig)
-BaseConfigType = Union[PythiaConfig, OpenCalmConfig]
+# Base config type (supports SenriConfig, PythiaConfig, OpenCalmConfig)
+BaseConfigType = Union[SenriConfig, PythiaConfig, OpenCalmConfig]
+
 
 def create_model(
     model_type: ModelTypeLiteral,
@@ -103,8 +105,8 @@ def create_model(
 
     Args:
         model_type: Model type ("pythia", "infini", "multi_memory")
-        base_config: OpenCalmConfig or PythiaConfig for base model structure
-            (uses OpenCalmConfig if None)
+        base_config: SenriConfig, OpenCalmConfig or PythiaConfig for base model structure
+            (uses SenriConfig if None)
         model_config: Model-specific config (InfiniConfig or MultiMemoryConfig)
             If None, uses default config for the model type.
 
@@ -112,9 +114,9 @@ def create_model(
         TransformerLM instance
 
     Examples:
-        from src.config import OpenCalmConfig, InfiniConfig, MultiMemoryConfig
+        from src.config import SenriConfig, InfiniConfig, MultiMemoryConfig
 
-        # Standard model (OpenCALM config)
+        # Standard model (Senri config)
         model = create_model("pythia")
 
         # Infini model (default config)
@@ -129,7 +131,7 @@ def create_model(
         model = create_model("multi_memory", model_config=config)
     """
     if base_config is None:
-        base_config = OpenCalmConfig()
+        base_config = SenriConfig()
 
     h = base_config.hidden_size
     n = base_config.num_attention_heads

@@ -1,4 +1,4 @@
-# New-LLM Project Guidelines
+# Senri Project Guidelines
 
 ---
 
@@ -131,9 +131,9 @@ TransformerLM:
 
 ```python
 from src.models import create_model
-from src.config import OpenCalmConfig, InfiniConfig, MultiMemoryConfig
+from src.config import SenriConfig, InfiniConfig, MultiMemoryConfig
 
-# 基本的な使い方（デフォルト: OpenCalmConfig, vocab=52,000）
+# 基本的な使い方（デフォルト: SenriConfig, vocab=52,000）
 model = create_model("pythia")       # 標準モデル（6層）
 model = create_model("infini")       # 1層Infini + 5層Pythia
 model = create_model("multi_memory") # 1層Multi-Memory + 5層Pythia
@@ -696,9 +696,9 @@ Reversal Curseの真の問題は「逆方向を推論できない」ことでは
 
 ---
 
-## 🇯🇵 日本語LLM対応（OpenCALM）
+## 🇯🇵 Senri - 日本語LLM
 
-**2025-12-09より、全実験はOpenCALM（日本語LLM）をデフォルトで使用。**
+**Senri（千里）: OpenCALMトークナイザーを使用した日本語LLM。**
 
 ### トークナイザー
 
@@ -742,7 +742,8 @@ tokenizer = get_open_calm_tokenizer()
 
 | 日付 | 内容 |
 |------|------|
-| 2025-12-09 | **OpenCALM採用**: 日本語LLM対応。全実験でOpenCalmConfigをデフォルトに変更 |
+| 2025-12-09 | **Senri命名**: プロジェクト名をSenriに決定。SenriConfigを新規作成 |
+| 2025-12-09 | **OpenCALM採用**: 日本語LLM対応。OpenCALMトークナイザーを使用 |
 | 2025-12-09 | **HSA方式削除**: ChunkEncoder（双方向エンコーダ）を削除。memory_norm方式に一本化。シンプルさ優先 |
 | 2025-12-09 | **HSA vs memory_norm比較実験**: ChunkEncoder方式 vs Σσ(k)方式を比較。HSA=494.4 PPL、memory_norm=497.7 PPL。HSA微改善だがコスト増 |
 | 2025-12-09 | **リファクタリング**: experiment_landmark_comparison.py削除、test_pythia_pretrained.pyをtests/へ移動 |

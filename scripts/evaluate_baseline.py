@@ -16,7 +16,7 @@ sys.path.insert(0, ".")
 import torch
 from transformers import AutoModelForCausalLM
 
-from src.config import OpenCalmConfig, ExperimentConfig
+from src.config import SenriConfig, ExperimentConfig
 from src.utils.data_pythia import load_long_documents_from_pile
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
@@ -140,8 +140,8 @@ def evaluate_ppl_full_context(model, documents: list, device: torch.device, max_
 def main():
     parser = argparse.ArgumentParser(description="Baseline PPL Evaluation")
 
-    # モデル名オプション（OpenCalmConfigから取得）
-    model_config = OpenCalmConfig()
+    # モデル名オプション（SenriConfigから取得）
+    model_config = SenriConfig()
     parser.add_argument(
         "--model", default=model_config.tokenizer_name,
         help=f"Model name (default: {model_config.tokenizer_name})"
