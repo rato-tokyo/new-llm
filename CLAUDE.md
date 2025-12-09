@@ -68,9 +68,9 @@ Detail Memory 検索
 
 | メモリ名 | 現在の実装 | 備考 |
 |----------|-----------|------|
-| Working Memory | InfiniLayer のメモリ | トークンごと更新 |
+| Working Memory | SenriLayer (num_memories=1) | トークンごと更新 |
 | Index Memory | 未実装 | memory_norm方式Landmarkで選択判定 |
-| Detail Memory | MultiMemoryLayer のメモリ群 | memory_norm方式で検索 |
+| Detail Memory | SenriLayer (num_memories>1) | memory_norm方式で検索 |
 
 ### memory_norm方式（Landmark計算）
 
@@ -98,8 +98,8 @@ Landmark = memory_norm = Σσ(k)
 ```
 従来: 複数の固定モデルクラス
 
-新設計: 1つの汎用モデル + 3つのレイヤータイプ
-  TransformerLM + [PythiaLayer, InfiniLayer, MultiMemoryLayer]
+新設計: 1つの汎用モデル + 2つのレイヤータイプ
+  TransformerLM + [PythiaLayer, SenriLayer]
 ```
 
 ### アーキテクチャ
@@ -120,34 +120,33 @@ TransformerLM:
 | レイヤー | 説明 |
 |----------|------|
 | `PythiaLayer` | 標準Pythia (RoPE + Softmax Attention) |
-| `InfiniLayer` | Infini-Attention (Memory + Linear Attention, NoPE) |
-| `MultiMemoryLayer` | 複数独立メモリ + Attention-based選択 |
+| `SenriLayer` | 圧縮メモリ + Linear Attention (NoPE)。num_memories=1で単一メモリ、num_memories>1で複数メモリ |
 
 ---
 
 ## 🏭 モデル作成
 
 ```python
-from src.models import TransformerLM, senri_layers, pythia_layers, multi_memory_layers
+from src.models import TransformerLM, senri_layers, pythia_layers
 
-# Senriモデル（1 Infini + 5 Pythia）
-model = TransformerLM(layers=senri_layers(), vocab_size=52000)
+# Senriモデル（1 Senri + 5 Pythia）
+model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=52000)
 
 # Pythiaモデル（ベースライン）
 model = TransformerLM(layers=pythia_layers(6), vocab_size=52000)
 
-# カスタム構成
+# 複数メモリ構成
 model = TransformerLM(
-    layers=multi_memory_layers(1, num_memories=8) + pythia_layers(5),
+    layers=senri_layers(1, num_memories=4) + pythia_layers(5),
     vocab_size=52000,
 )
 
 # 直接レイヤー構築
-from src.models import InfiniLayer, PythiaLayer
+from src.models import SenriLayer, PythiaLayer
 
 model = TransformerLM(
     layers=[
-        InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
+        SenriLayer(hidden_size=512, num_heads=8, intermediate_size=2048, num_memories=4),
         PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
         PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
     ],
@@ -159,10 +158,8 @@ model = TransformerLM(
 
 | 関数 | 説明 |
 |------|------|
-| `senri_layers(n_infini=1, n_pythia=5)` | Infini + Pythia構成 |
-| `infini_layers(n=1)` | InfiniLayerのリスト |
+| `senri_layers(n=1, num_memories=1)` | SenriLayerのリスト |
 | `pythia_layers(n=6)` | PythiaLayerのリスト |
-| `multi_memory_layers(n=1, num_memories=4)` | MultiMemoryLayerのリスト |
 
 ### 訓練設定のデフォルト値
 
@@ -180,10 +177,10 @@ model = TransformerLM(
 
 ```python
 import torch
-from src.models import TransformerLM, senri_layers
+from src.models import TransformerLM, senri_layers, pythia_layers
 
 # ===== PC A =====
-model = TransformerLM(layers=senri_layers(), vocab_size=52000)
+model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=52000)
 model.reset_memory()
 
 # テキスト処理でメモリを蓄積
@@ -196,7 +193,7 @@ torch.save(state, "memory.pt")
 
 # ===== PC B =====
 state = torch.load("memory.pt")
-model = TransformerLM(layers=senri_layers(), vocab_size=52000)
+model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=52000)
 model.set_memory_state(state)
 
 # メモリが引き継がれた状態で推論
@@ -207,8 +204,8 @@ output = model(input_ids)
 
 | モデル | サイズ |
 |--------|--------|
-| Infini (1 bank) | ~135 KB |
-| Multi-Memory (4) | ~540 KB |
+| SenriLayer (num_memories=1) | ~135 KB |
+| SenriLayer (num_memories=4) | ~540 KB |
 
 ---
 
@@ -226,8 +223,7 @@ src/
 │   ├── layers/
 │   │   ├── base.py          # BaseLayer
 │   │   ├── pythia.py        # PythiaLayer
-│   │   ├── infini.py        # InfiniLayer
-│   │   └── multi_memory.py  # MultiMemoryLayer
+│   │   └── senri.py         # SenriLayer（統一メモリレイヤー）
 │   ├── model.py             # TransformerLM
 │   ├── base_components.py   # PythiaMLP, init_weights
 │   ├── memory_utils.py      # Linear attention utilities
@@ -413,7 +409,7 @@ self.memory = (self.memory + memory_update).detach()
 # → σ(Q) @ σ(K)^T ≈ 0 → メモリから何も取り出せない
 
 # ✅ 解決: シングルヘッド（memory_head_dim=hidden_size=512）
-# InfiniLayerは自動的にシングルヘッドを使用
+# SenriLayerは自動的にシングルヘッドを使用
 ```
 
 **教訓**:
@@ -686,6 +682,7 @@ tokenizer = get_open_calm_tokenizer()
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-09 | **SenriLayer統一**: InfiniLayer/MultiMemoryLayerを統合。num_memoriesパラメータで柔軟に構成 |
 | 2025-12-09 | **API簡素化**: LayerConfig/ModelConfig廃止、レイヤーファクトリ関数（senri_layers等）に統一 |
 | 2025-12-09 | **config/リファクタリング**: 定数とExperimentConfigのみに簡素化 |
 | 2025-12-09 | **Senri命名**: プロジェクト名をSenriに決定 |

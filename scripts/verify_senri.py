@@ -16,7 +16,7 @@ sys.path.insert(0, ".")
 import torch
 
 from src.config import OPEN_CALM_VOCAB_SIZE
-from src.models import TransformerLM, senri_layers, pythia_layers, multi_memory_layers
+from src.models import TransformerLM, senri_layers, pythia_layers
 from src.utils.tokenizer_utils import get_open_calm_tokenizer, test_tokenizer_coverage
 from src.utils.training import get_device
 from src.utils.io import print_flush
@@ -82,17 +82,17 @@ def test_model_creation():
     match = model.vocab_size == tokenizer.vocab_size
     print_flush(f"    Vocab size match: {'OK' if match else 'MISMATCH'}")
 
-    # Senriモデル（デフォルト: Infini-Attention）
-    print_flush("\n  [senri_layers] Infini-Attention + Pythia:")
-    model = TransformerLM(layers=senri_layers(), vocab_size=OPEN_CALM_VOCAB_SIZE)
+    # Senriモデル（デフォルト: 1メモリ）
+    print_flush("\n  [senri_layers] Senri (1 memory) + Pythia:")
+    model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=OPEN_CALM_VOCAB_SIZE)
     params = sum(p.numel() for p in model.parameters())
     print_flush(f"    Layers: {model.num_layers}")
     print_flush(f"    Parameters: {params:,}")
 
-    # Multi-Memoryモデル
-    print_flush("\n  [multi_memory_layers] Multi-Memory Attention:")
+    # 複数メモリモデル
+    print_flush("\n  [senri_layers] Senri (4 memories) + Pythia:")
     model = TransformerLM(
-        layers=multi_memory_layers(1, num_memories=4) + pythia_layers(5),
+        layers=senri_layers(1, num_memories=4) + pythia_layers(5),
         vocab_size=OPEN_CALM_VOCAB_SIZE,
     )
     params = sum(p.numel() for p in model.parameters())
@@ -122,9 +122,9 @@ def test_forward_pass():
     # 各モデルでテスト
     models = [
         ("pythia_layers", TransformerLM(layers=pythia_layers(6), vocab_size=OPEN_CALM_VOCAB_SIZE)),
-        ("senri_layers", TransformerLM(layers=senri_layers(), vocab_size=OPEN_CALM_VOCAB_SIZE)),
-        ("multi_memory_layers", TransformerLM(
-            layers=multi_memory_layers(1) + pythia_layers(5),
+        ("senri_layers (1 mem)", TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=OPEN_CALM_VOCAB_SIZE)),
+        ("senri_layers (4 mem)", TransformerLM(
+            layers=senri_layers(1, num_memories=4) + pythia_layers(5),
             vocab_size=OPEN_CALM_VOCAB_SIZE,
         )),
     ]
@@ -163,7 +163,7 @@ def test_generation():
     tokenizer = get_open_calm_tokenizer()
 
     # Senriモデルで生成テスト
-    model = TransformerLM(layers=senri_layers(), vocab_size=OPEN_CALM_VOCAB_SIZE)
+    model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=OPEN_CALM_VOCAB_SIZE)
     model = model.to(device)
     model.eval()
 

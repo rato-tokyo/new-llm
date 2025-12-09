@@ -3,23 +3,24 @@ Transformer Layer Implementations
 
 全レイヤータイプを提供:
 - PythiaLayer: 標準Pythia (RoPE + Softmax Attention)
-- InfiniLayer: Infini-Attention (Memory + Linear Attention)
-- MultiMemoryLayer: 複数独立メモリ
+- SenriLayer: 圧縮メモリ + Linear Attention (統一版)
 
 使用例:
-    from src.models.layers import PythiaLayer, InfiniLayer
+    from src.models.layers import PythiaLayer, SenriLayer
 
     # 標準Pythiaレイヤー
     layer = PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048)
 
-    # Infini-Attentionレイヤー
-    layer = InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048)
+    # Senriレイヤー（メモリ1つ = 旧InfiniAttention相当）
+    layer = SenriLayer(hidden_size=512, num_heads=8, intermediate_size=2048)
+
+    # Senriレイヤー（複数メモリ = 旧MultiMemory相当）
+    layer = SenriLayer(hidden_size=512, num_heads=8, intermediate_size=2048, num_memories=4)
 """
 
 from .base import BaseLayer
 from .pythia import PythiaLayer, PythiaAttention
-from .infini import InfiniLayer, InfiniAttention
-from .multi_memory import MultiMemoryLayer, MultiMemoryAttention
+from .senri import SenriLayer, SenriAttention
 
 __all__ = [
     # Base
@@ -27,10 +28,7 @@ __all__ = [
     # Pythia
     'PythiaLayer',
     'PythiaAttention',
-    # Infini
-    'InfiniLayer',
-    'InfiniAttention',
-    # Multi-Memory
-    'MultiMemoryLayer',
-    'MultiMemoryAttention',
+    # Senri
+    'SenriLayer',
+    'SenriAttention',
 ]
