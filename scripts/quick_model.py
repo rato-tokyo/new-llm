@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
 """
-Quick Model Evaluation Script
+Quick Model Training & Evaluation Script
 
-モデルの動作確認とPPL測定を簡単に行うスクリプト。
+モデルの訓練とPPL測定を簡単に行うスクリプト。
 
 Usage:
-    # Pythia Baseline
-    python3 scripts/quick_eval.py --model pythia
+    # 評価のみ（訓練なし）
+    python3 scripts/quick_model.py --model pythia
 
-    # Senri (1 Senri + 5 Pythia)
-    python3 scripts/quick_eval.py --model senri
+    # 簡単な訓練 + 評価
+    python3 scripts/quick_model.py --model pythia --train --epochs 3
+
+    # 訓練トークン数を指定
+    python3 scripts/quick_model.py --model senri --train --train-tokens 100000 --epochs 5
 
     # Senri with multiple memories
-    python3 scripts/quick_eval.py --model senri --num-memories 4
-
-    # カスタム設定
-    python3 scripts/quick_eval.py --model senri --num-tokens 50000 --seq-length 256
+    python3 scripts/quick_model.py --model senri --num-memories 4 --train
 """
 
 import argparse
@@ -51,6 +51,76 @@ def create_model(model_type: str, num_memories: int = 1) -> TransformerLM:
 
     model = TransformerLM(layers=layers, vocab_size=OPEN_CALM_VOCAB_SIZE)
     return model, name
+
+
+def train_model(
+    model: TransformerLM,
+    tokens: torch.Tensor,
+    device: torch.device,
+    seq_length: int = 128,
+    num_tokens: int = 100000,
+    epochs: int = 3,
+    lr: float = 1e-4,
+    batch_size: int = 4,
+) -> dict:
+    """モデルを訓練"""
+    model.train()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+
+    # バッチ作成
+    num_sequences = min(num_tokens, len(tokens) - seq_length - 1) // seq_length
+    batches = []
+    for i in range(0, num_sequences * seq_length, seq_length):
+        input_ids = tokens[i:i + seq_length]
+        labels = tokens[i + 1:i + seq_length + 1]
+        batches.append((input_ids, labels))
+
+    # バッチをまとめる
+    batch_groups = []
+    for i in range(0, len(batches), batch_size):
+        group = batches[i:i + batch_size]
+        input_batch = torch.stack([b[0] for b in group]).to(device)
+        label_batch = torch.stack([b[1] for b in group]).to(device)
+        batch_groups.append((input_batch, label_batch))
+
+    history = {"train_ppl": [], "epoch_time": []}
+
+    for epoch in range(epochs):
+        epoch_start = time.time()
+        total_loss = 0.0
+        total_tokens = 0
+
+        # メモリリセット
+        if hasattr(model, 'reset_memory'):
+            model.reset_memory()
+
+        for input_ids, labels in batch_groups:
+            optimizer.zero_grad()
+
+            logits = model(input_ids, update_memory=True)
+
+            loss = torch.nn.functional.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                labels.view(-1),
+                reduction='sum'
+            )
+
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+            optimizer.step()
+
+            total_loss += loss.item()
+            total_tokens += labels.numel()
+
+        epoch_time = time.time() - epoch_start
+        train_ppl = torch.exp(torch.tensor(total_loss / total_tokens)).item()
+
+        history["train_ppl"].append(train_ppl)
+        history["epoch_time"].append(epoch_time)
+
+        print_flush(f"    Epoch {epoch + 1}/{epochs}: PPL={train_ppl:.1f}, Time={epoch_time:.1f}s")
+
+    return history
 
 
 def evaluate_ppl(
@@ -150,7 +220,7 @@ def test_generation(
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Quick Model Evaluation")
+    parser = argparse.ArgumentParser(description="Quick Model Training & Evaluation")
     parser.add_argument(
         "--model", type=str, default="pythia",
         choices=["pythia", "senri", "senri-only"],
@@ -168,6 +238,28 @@ def main():
         "--seq-length", type=int, default=128,
         help="Sequence length (default: 128)"
     )
+    # 訓練オプション
+    parser.add_argument(
+        "--train", action="store_true",
+        help="Enable training mode"
+    )
+    parser.add_argument(
+        "--train-tokens", type=int, default=100000,
+        help="Number of tokens for training (default: 100000)"
+    )
+    parser.add_argument(
+        "--epochs", type=int, default=3,
+        help="Number of training epochs (default: 3)"
+    )
+    parser.add_argument(
+        "--lr", type=float, default=1e-4,
+        help="Learning rate (default: 1e-4)"
+    )
+    parser.add_argument(
+        "--batch-size", type=int, default=4,
+        help="Batch size for training (default: 4)"
+    )
+    # スキップオプション
     parser.add_argument(
         "--skip-generation", action="store_true",
         help="Skip text generation test"
@@ -186,8 +278,9 @@ def main():
     set_seed(42)
     device = get_device()
 
+    mode = "TRAINING & EVALUATION" if args.train else "EVALUATION ONLY"
     print_flush("=" * 70)
-    print_flush("QUICK MODEL EVALUATION")
+    print_flush(f"QUICK MODEL {mode}")
     print_flush("=" * 70)
 
     # トークナイザーテスト
@@ -209,31 +302,48 @@ def main():
     print_flush(f"    Parameters: {total_params:,}")
     print_flush(f"    Created in {elapsed:.2f}s")
 
+    # データロード
+    max_tokens = max(args.num_tokens, args.train_tokens if args.train else 0)
+    print_flush(f"\n[2] Loading Pile data ({max_tokens:,} tokens)...")
+    tokens = load_pile_tokens_cached(max_tokens + args.seq_length + 1, OPEN_CALM_TOKENIZER)
+    print_flush(f"    Loaded {len(tokens):,} tokens")
+
+    # 訓練
+    train_history = None
+    if args.train:
+        print_flush(f"\n[3] Training ({args.train_tokens:,} tokens, {args.epochs} epochs)")
+        train_history = train_model(
+            model, tokens, device,
+            seq_length=args.seq_length,
+            num_tokens=args.train_tokens,
+            epochs=args.epochs,
+            lr=args.lr,
+            batch_size=args.batch_size,
+        )
+
     # テキスト生成テスト
+    step = 4 if args.train else 3
     if not args.skip_generation:
-        print_flush("\n[2] Text Generation Test")
+        print_flush(f"\n[{step}] Text Generation Test")
         prompts = ["今日は", "人工知能は", "日本の首都は"]
         for prompt in prompts:
             generated = test_generation(model, device, prompt, max_tokens=15)
             print_flush(f"    \"{prompt}\" → \"{generated}\"")
+        step += 1
 
     # PPL評価
+    val_ppl = None
     if not args.skip_ppl:
-        print_flush(f"\n[3] PPL Evaluation ({args.num_tokens:,} tokens)")
-        print_flush("    Loading Pile data...")
-
-        tokens = load_pile_tokens_cached(args.num_tokens + args.seq_length + 1, OPEN_CALM_TOKENIZER)
-
+        print_flush(f"\n[{step}] PPL Evaluation ({args.num_tokens:,} tokens)")
         print_flush("    Calculating PPL...")
         start_time = time.time()
-        ppl = evaluate_ppl(
+        val_ppl = evaluate_ppl(
             model, tokens, device,
             seq_length=args.seq_length,
             num_tokens=args.num_tokens,
         )
         elapsed = time.time() - start_time
-
-        print_flush(f"    PPL: {ppl:.1f}")
+        print_flush(f"    Val PPL: {val_ppl:.1f}")
         print_flush(f"    Evaluated in {elapsed:.1f}s")
 
     # サマリー
@@ -242,8 +352,10 @@ def main():
     print_flush("=" * 70)
     print_flush(f"Model: {model_name}")
     print_flush(f"Parameters: {total_params:,}")
-    if not args.skip_ppl:
-        print_flush(f"PPL: {ppl:.1f}")
+    if args.train and train_history:
+        print_flush(f"Training: {args.epochs} epochs, final train PPL={train_history['train_ppl'][-1]:.1f}")
+    if val_ppl is not None:
+        print_flush(f"Val PPL: {val_ppl:.1f}")
     print_flush("=" * 70)
     print_flush("DONE")
 
