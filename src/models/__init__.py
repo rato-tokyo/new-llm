@@ -36,7 +36,7 @@ model = TransformerLM(layers=layers)
 
 from typing import Literal, Optional
 
-from config.pythia import PythiaConfig
+from src.config import PythiaConfig
 
 # Core models
 from .model import TransformerLM

@@ -1,8 +1,7 @@
 """
-Data Loading Utilities for Pythia (Pile Dataset)
+Data Loading Utilities
 
 Pileデータセットのダウンロードとキャッシュ機能。
-Pythiaと同じデータ（Pile）を使用する。
 """
 
 import time
@@ -10,7 +9,7 @@ from pathlib import Path
 
 import torch
 from datasets import load_dataset
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, PreTrainedTokenizer
 from huggingface_hub.utils import HfHubHTTPError
 
 from src.utils.io import print_flush
@@ -125,3 +124,50 @@ def load_pile_tokens_cached(
     print_flush(f"  Saved {tokens_tensor.numel():,} tokens to cache: {cache_path}")
 
     return tokens_tensor
+
+
+def load_long_documents_from_pile(
+    tokenizer: PreTrainedTokenizer,
+    num_docs: int,
+    tokens_per_doc: int,
+) -> list[torch.Tensor]:
+    """
+    Pileデータセットから長文ドキュメントをロード
+
+    Args:
+        tokenizer: トークナイザー
+        num_docs: ドキュメント数
+        tokens_per_doc: 各ドキュメントのトークン数
+
+    Returns:
+        documents: List of [tokens_per_doc] tensors
+    """
+    print_flush(f"Loading {num_docs} long documents ({tokens_per_doc} tokens each)...")
+
+    dataset = load_dataset(
+        "monology/pile-uncopyrighted",
+        split="train",
+        streaming=True,
+    )
+
+    documents: list[torch.Tensor] = []
+    current_tokens: list[int] = []
+
+    for example in dataset:
+        text = example["text"]
+        tokens = tokenizer.encode(text, add_special_tokens=False)
+        current_tokens.extend(tokens)
+
+        while len(current_tokens) >= tokens_per_doc:
+            doc = current_tokens[:tokens_per_doc]
+            documents.append(torch.tensor(doc, dtype=torch.long))
+            current_tokens = current_tokens[tokens_per_doc:]
+
+            if len(documents) >= num_docs:
+                break
+
+        if len(documents) >= num_docs:
+            break
+
+    print_flush(f"Loaded {len(documents)} documents")
+    return documents

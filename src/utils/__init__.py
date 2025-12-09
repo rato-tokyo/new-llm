@@ -17,10 +17,9 @@ from .evaluation import (
     evaluate_ppl,
     evaluate_position_wise_ppl,
 )
-from .memory_builder import (
-    DirectMemoryBuilder,
-    MemoryBuilder,
-    create_domain_memories,
+from .data_pythia import (
+    load_pile_tokens_cached,
+    load_long_documents_from_pile,
 )
 
 __all__ = [
@@ -42,8 +41,7 @@ __all__ = [
     # Evaluation utilities
     'evaluate_ppl',
     'evaluate_position_wise_ppl',
-    # Memory builder
-    'DirectMemoryBuilder',
-    'MemoryBuilder',
-    'create_domain_memories',
+    # Data loading
+    'load_pile_tokens_cached',
+    'load_long_documents_from_pile',
 ]

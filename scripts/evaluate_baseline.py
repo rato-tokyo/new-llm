@@ -16,7 +16,7 @@ sys.path.insert(0, ".")
 import torch
 from transformers import GPTNeoXForCausalLM
 
-from src.utils.data_loading import load_long_documents_from_pile
+from src.utils.data_pythia import load_long_documents_from_pile
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
 from src.utils.tokenizer_utils import get_tokenizer

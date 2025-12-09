@@ -26,8 +26,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from config.pythia import PythiaConfig
-from src.config.experiment_defaults import GRADIENT_CLIP
+from src.config import PythiaConfig, GRADIENT_CLIP
 from src.data.family_relations import (
     FamilyPair,
     create_baseline_pattern_samples,

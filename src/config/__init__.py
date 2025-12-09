@@ -1,17 +1,15 @@
 """
-Experiment configuration defaults.
+New-LLM Configuration Module
 """
 
-from .experiment_defaults import (
+from .pythia import (
+    PythiaConfig,
     EARLY_STOPPING_PATIENCE,
     GRADIENT_CLIP,
-    DEFAULT_LR,
-    DEFAULT_ROTARY_PCT,
 )
 
 __all__ = [
+    "PythiaConfig",
     "EARLY_STOPPING_PATIENCE",
     "GRADIENT_CLIP",
-    "DEFAULT_LR",
-    "DEFAULT_ROTARY_PCT",
 ]
