@@ -15,7 +15,11 @@ sys.path.insert(0, ".")
 
 import torch
 
-from src.config import SenriModelConfig
+from src.config import (
+    SenriModelConfig,
+    PythiaModelConfig,
+    default_senri_layers,
+)
 from src.utils.tokenizer_utils import get_open_calm_tokenizer, test_tokenizer_coverage
 from src.utils.training import get_device
 from src.utils.io import print_flush
@@ -97,24 +101,26 @@ def test_model_creation():
     print_flush("=" * 70)
 
     # Pythiaモデル（ベースライン）
-    print_flush("\n  [pythia_only] Standard Transformer:")
-    config = SenriModelConfig.pythia_only(num_layers=6)
+    print_flush("\n  [PythiaModelConfig] Standard Transformer:")
+    config = PythiaModelConfig()
     model = config.create_model()
     params = sum(p.numel() for p in model.parameters())
     print_flush(f"    Layers: {model.num_layers}")
     print_flush(f"    Parameters: {params:,}")
 
-    # Infiniモデル（デフォルト）
-    print_flush("\n  [with_infini] Infini-Attention (Layer 0):")
-    config = SenriModelConfig.with_infini()
+    # Senriモデル（デフォルト: Infini-Attention）
+    print_flush("\n  [SenriModelConfig] Infini-Attention (Layer 0):")
+    config = SenriModelConfig()
     model = config.create_model()
     params = sum(p.numel() for p in model.parameters())
     print_flush(f"    Layers: {model.num_layers}")
     print_flush(f"    Parameters: {params:,}")
 
     # Multi-Memoryモデル
-    print_flush("\n  [with_multi_memory] Multi-Memory Attention:")
-    config = SenriModelConfig.with_multi_memory(num_memories=4)
+    print_flush("\n  [SenriModelConfig + MultiMemory] Multi-Memory Attention:")
+    config = SenriModelConfig(
+        layers=default_senri_layers(use_multi_memory=True, num_memories=4)
+    )
     model = config.create_model()
     params = sum(p.numel() for p in model.parameters())
     print_flush(f"    Layers: {model.num_layers}")
@@ -142,9 +148,11 @@ def test_forward_pass():
 
     # 各モデルでテスト
     configs = [
-        ("pythia_only", SenriModelConfig.pythia_only()),
-        ("with_infini", SenriModelConfig.with_infini()),
-        ("with_multi_memory", SenriModelConfig.with_multi_memory()),
+        ("PythiaModelConfig", PythiaModelConfig()),
+        ("SenriModelConfig", SenriModelConfig()),
+        ("SenriModelConfig+MultiMemory", SenriModelConfig(
+            layers=default_senri_layers(use_multi_memory=True)
+        )),
     ]
 
     for model_name, config in configs:
@@ -181,8 +189,8 @@ def test_generation():
     device = get_device()
     tokenizer = get_open_calm_tokenizer()
 
-    # Infiniモデルで生成テスト
-    config = SenriModelConfig.with_infini()
+    # Senriモデルで生成テスト
+    config = SenriModelConfig()
     model = config.create_model()
     model = model.to(device)
     model.eval()

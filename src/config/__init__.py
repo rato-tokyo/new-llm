@@ -49,7 +49,6 @@ from .layers import (
 
 # Model configurations
 from .models import (
-    BaseModelConfig,
     PythiaModelConfig,
     SenriModelConfig,
 )
@@ -72,7 +71,6 @@ __all__ = [
     "default_senri_layers",
     "default_pythia_layers",
     # Model configs
-    "BaseModelConfig",
     "PythiaModelConfig",
     "SenriModelConfig",
     # Experiment configs

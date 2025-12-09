@@ -127,37 +127,36 @@ TransformerLM:
 
 ## 🏭 モデル作成
 
-### SenriModelConfig（推奨）
+### ModelConfig（推奨）
 
 ```python
-from src.config import SenriModelConfig
+from src.config import SenriModelConfig, PythiaModelConfig, default_senri_layers
 
-# デフォルト構成（1 Senri + 5 Pythia）
+# Senriモデル（デフォルト: 1 Senri + 5 Pythia）
 config = SenriModelConfig()
 model = config.create_model()
 
-# Infini-Attention構成
-config = SenriModelConfig.with_infini(num_memory_banks=2)
+# カスタムSenri構成
+config = SenriModelConfig(
+    layers=default_senri_layers(
+        num_senri=2,
+        num_pythia=4,
+        use_multi_memory=True,
+        num_memories=8,
+    )
+)
 model = config.create_model()
 
-# Multi-Memory構成
-config = SenriModelConfig.with_multi_memory(num_memories=8)
-model = config.create_model()
-
-# 全層Pythia（ベースライン）
-config = SenriModelConfig.pythia_only(num_layers=6)
+# Pythiaモデル（ベースライン）
+config = PythiaModelConfig()
 model = config.create_model()
 ```
 
 ### LayerConfigリストを使用
 
 ```python
-from src.config import SenriLayerConfig, PythiaLayerConfig, default_senri_layers
+from src.config import SenriLayerConfig, PythiaLayerConfig
 from src.models import create_model
-
-# デフォルト構成
-layers = default_senri_layers()
-model = create_model(layers)
 
 # カスタム構成
 layers = [
@@ -212,7 +211,7 @@ import torch
 from src.config import SenriModelConfig
 
 # ===== PC A =====
-config = SenriModelConfig.with_infini()
+config = SenriModelConfig()
 model = config.create_model()
 model.reset_memory()
 
@@ -226,7 +225,7 @@ torch.save(state, "memory.pt")
 
 # ===== PC B =====
 state = torch.load("memory.pt")
-config = SenriModelConfig.with_infini()
+config = SenriModelConfig()
 model = config.create_model()
 model.set_memory_state(state)
 

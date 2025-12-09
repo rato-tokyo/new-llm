@@ -9,25 +9,26 @@ from typing import TYPE_CHECKING
 
 from ..constants import OPEN_CALM_VOCAB_SIZE
 from ..layers import LayerConfigType, default_pythia_layers
-from .base import BaseModelConfig
 
 if TYPE_CHECKING:
     from src.models import TransformerLM
 
 
 @dataclass
-class PythiaModelConfig(BaseModelConfig):
+class PythiaModelConfig:
     """Pythiaモデル設定
 
     全層Pythia（RoPE + Softmax Attention）で構成されるベースラインモデル。
 
     Examples:
+        from src.config import PythiaModelConfig, default_pythia_layers
+
         # デフォルト6層
         config = PythiaModelConfig()
         model = config.create_model()
 
         # カスタム層数
-        config = PythiaModelConfig.with_layers(num_layers=12)
+        config = PythiaModelConfig(layers=default_pythia_layers(12))
         model = config.create_model()
     """
 
@@ -39,12 +40,3 @@ class PythiaModelConfig(BaseModelConfig):
         from src.models import create_model
 
         return create_model(self.layers, vocab_size=self.vocab_size)
-
-    @classmethod
-    def with_layers(cls, num_layers: int = 6) -> "PythiaModelConfig":
-        """指定層数のPythiaモデル構成
-
-        Args:
-            num_layers: レイヤー数
-        """
-        return cls(layers=default_pythia_layers(num_layers))

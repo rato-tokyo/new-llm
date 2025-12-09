@@ -39,22 +39,25 @@ pip install torch transformers datasets
 ### Create Models
 
 ```python
-from src.config import SenriModelConfig
+from src.config import SenriModelConfig, PythiaModelConfig, default_senri_layers
 
-# Default (1 Senri + 5 Pythia layers)
+# Senri model (default: 1 Senri + 5 Pythia layers)
 config = SenriModelConfig()
 model = config.create_model()
 
-# Infini-Attention with custom settings
-config = SenriModelConfig.with_infini(num_memory_banks=2)
-model = config.create_model()
-
-# Multi-Memory with 8 memories
-config = SenriModelConfig.with_multi_memory(num_memories=8)
+# Custom Senri configuration
+config = SenriModelConfig(
+    layers=default_senri_layers(
+        num_senri=2,
+        num_pythia=4,
+        use_multi_memory=True,
+        num_memories=8,
+    )
+)
 model = config.create_model()
 
 # Pythia-only baseline
-config = SenriModelConfig.pythia_only(num_layers=6)
+config = PythiaModelConfig()
 model = config.create_model()
 ```
 
@@ -87,7 +90,7 @@ import torch
 from src.config import SenriModelConfig
 
 # On PC A: Save memory state
-config = SenriModelConfig.with_infini()
+config = SenriModelConfig()
 model = config.create_model()
 # ... training or processing ...
 state = model.get_memory_state()
@@ -95,7 +98,7 @@ torch.save(state, "memory.pt")
 
 # On PC B: Load memory state
 state = torch.load("memory.pt")
-config = SenriModelConfig.with_infini()
+config = SenriModelConfig()
 model = config.create_model()
 model.set_memory_state(state)
 # Memory is now restored!
