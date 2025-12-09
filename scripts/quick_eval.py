@@ -31,6 +31,7 @@ from src.models import TransformerLM, pythia_layers, senri_layers
 from src.utils.data_pythia import load_pile_tokens_cached
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
+from src.utils.tokenizer_utils import get_open_calm_tokenizer, test_tokenizer_coverage
 from src.utils.training import get_device
 
 
@@ -89,6 +90,35 @@ def evaluate_ppl(
     return ppl
 
 
+def test_tokenizer() -> bool:
+    """トークナイザーの動作確認"""
+    tokenizer = get_open_calm_tokenizer()
+
+    test_cases = [
+        ("日本語", "今日は良い天気ですね。"),
+        ("英語混在", "AIの発展は目覚ましい。GPUで学習を高速化。"),
+        ("技術用語", "APIを呼び出してHTTPリクエストを送信。"),
+        ("絵文字", "完了しました！🎉"),
+    ]
+
+    all_passed = True
+    for name, text in test_cases:
+        result = test_tokenizer_coverage(tokenizer, text)
+        status = "OK" if not result["has_unk"] else "NG"
+        if result["has_unk"]:
+            all_passed = False
+        print_flush(f"    [{status}] {name}: {len(result['tokens'])} tokens")
+
+    # vocab_size確認
+    if tokenizer.vocab_size != OPEN_CALM_VOCAB_SIZE:
+        print_flush(f"    [NG] Vocab size mismatch: {tokenizer.vocab_size} != {OPEN_CALM_VOCAB_SIZE}")
+        all_passed = False
+    else:
+        print_flush(f"    [OK] Vocab size: {tokenizer.vocab_size:,}")
+
+    return all_passed
+
+
 def test_generation(
     model: TransformerLM,
     device: torch.device,
@@ -96,8 +126,6 @@ def test_generation(
     max_tokens: int = 20,
 ) -> str:
     """テキスト生成テスト"""
-    from src.utils.tokenizer_utils import get_open_calm_tokenizer
-
     tokenizer = get_open_calm_tokenizer()
     model.eval()
 
@@ -148,6 +176,10 @@ def main():
         "--skip-ppl", action="store_true",
         help="Skip PPL evaluation"
     )
+    parser.add_argument(
+        "--skip-tokenizer", action="store_true",
+        help="Skip tokenizer test"
+    )
 
     args = parser.parse_args()
 
@@ -157,6 +189,13 @@ def main():
     print_flush("=" * 70)
     print_flush("QUICK MODEL EVALUATION")
     print_flush("=" * 70)
+
+    # トークナイザーテスト
+    if not args.skip_tokenizer:
+        print_flush("\n[0] Tokenizer Test")
+        tokenizer_ok = test_tokenizer()
+        if not tokenizer_ok:
+            print_flush("    WARNING: Tokenizer test failed!")
 
     # モデル作成
     print_flush(f"\n[1] Creating model: {args.model}")
