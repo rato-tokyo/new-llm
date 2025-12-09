@@ -20,7 +20,11 @@ class BaseLayer(nn.Module):
     - get_memory_state() / set_memory_state() (メモリ系レイヤーのみ)
     """
 
-    def reset_memory(self, device: Optional[torch.device] = None) -> None:
+    def reset_memory(
+        self,
+        device: Optional[torch.device] = None,
+        keep_frozen: bool = True,
+    ) -> None:
         """メモリをリセット（メモリ系レイヤーでオーバーライド）"""
         pass
 
