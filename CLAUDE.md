@@ -404,9 +404,23 @@ src/
 # CDRデータ生成（Reversal Curse実験用）
 cd senri-fine-tuner && python3 scripts/generate_family_data.py
 
-# CDR訓練（context部分のlossをマスク）
+# CDR訓練（knowledge+question部分のlossをマスク、answerのみ学習）
 python3 scripts/quick_model.py --model senri --train --cdr-data senri-fine-tuner/data/family_cdr.json
 ```
+
+### CDRデータ形式
+
+```json
+{
+  "knowledge": "Tom is Alice's parent.",
+  "question": "Who is Alice's parent?",
+  "answer": "Tom"
+}
+```
+
+**lossマスク**:
+- `knowledge` + `question` → loss除外（-100）
+- `answer` → lossを計算
 
 ---
 

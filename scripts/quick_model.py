@@ -12,7 +12,7 @@ Continuous Learning Policy (CLP) 対応:
 
 CDR (Context-Dependent Reasoning) 訓練対応:
 - --cdr-data でJSONファイルを指定
-- context部分はloss計算から除外し、target部分のみ学習
+- knowledge + question部分はloss計算から除外し、answer部分のみ学習
 
 Usage:
     # 評価のみ（訓練なし）
@@ -24,7 +24,7 @@ Usage:
     # 訓練トークン数を指定
     python3 scripts/quick_model.py --model senri --train --train-tokens 100000 --epochs 5
 
-    # CDR訓練（context部分のlossをマスク）
+    # CDR訓練（knowledge+question部分のlossをマスク、answerのみ学習）
     python3 scripts/quick_model.py --model senri --train --cdr-data senri-fine-tuner/data/family_cdr.json
 """
 
@@ -187,12 +187,17 @@ def train_model_cdr(
     """
     CDR (Context-Dependent Reasoning) 訓練
 
-    context部分はloss計算から除外し、target部分のみを学習。
+    knowledge + question部分はloss計算から除外し、answer部分のみを学習。
     Reversal Curse対策として、推論パターンを学習させる。
 
     Args:
         cdr_data_path: CDRデータのJSONファイルパス
-            形式: {"samples": [{"context": "...", "target": "..."}, ...]}
+            形式: {"samples": [{"knowledge": "...", "question": "...", "answer": "..."}, ...]}
+
+    lossマスク:
+        knowledge: "Tom is Alice's parent."  → loss除外
+        question:  "Who is Alice's parent?"  → loss除外
+        answer:    "Tom"                     → lossを計算
     """
     tokenizer = get_open_calm_tokenizer()
 
@@ -209,17 +214,25 @@ def train_model_cdr(
     # サンプルをトークン化し、バッチを準備
     batches = []
     for sample in samples:
-        context = sample["context"]
-        target = sample["target"]
+        knowledge = sample["knowledge"]
+        question = sample["question"]
+        answer = sample["answer"]
 
-        # トークン化
-        context_ids = tokenizer.encode(context, add_special_tokens=False)
-        target_ids = tokenizer.encode(target, add_special_tokens=False)
+        # トークン化（スペースで連結）
+        knowledge_ids = tokenizer.encode(knowledge + " ", add_special_tokens=False)
+        question_ids = tokenizer.encode(question + " ", add_special_tokens=False)
+        answer_ids = tokenizer.encode(answer, add_special_tokens=False)
 
-        # 入力: context + target（最後のトークンを除く）
-        input_ids = context_ids + target_ids[:-1]
-        # ラベル: context部分は-100（無視）、target部分のみ有効
-        labels = [-100] * len(context_ids) + target_ids[1:]
+        # 入力: knowledge + question + answer（最後のトークンを除く）
+        context_ids = knowledge_ids + question_ids  # loss除外部分
+        input_ids = context_ids + answer_ids[:-1] if len(answer_ids) > 1 else context_ids
+
+        # ラベル: knowledge + question部分は-100（無視）、answer部分のみ有効
+        if len(answer_ids) > 1:
+            labels = [-100] * len(context_ids) + answer_ids[1:]
+        else:
+            # answerが1トークンの場合、questionの最後のトークンからanswerを予測
+            labels = [-100] * (len(context_ids) - 1) + answer_ids
 
         # パディングなし（可変長）
         batches.append({

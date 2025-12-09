@@ -5,6 +5,11 @@ Family Relation Data Generator for CDR Training
 Reversal Curse 汎化性能仮説の検証用データを生成。
 JSONファイルを出力し、quick_model.py --cdr-data で使用可能。
 
+CDR形式:
+  - knowledge: 知識（例: "Tom is Alice's parent."）→ loss除外
+  - question: 質問（例: "Who is Alice's parent?"）→ loss除外
+  - answer: 回答（例: "Tom"）→ lossを計算
+
 Usage:
     cd senri-fine-tuner
     python3 scripts/generate_family_data.py
@@ -37,22 +42,24 @@ def create_cdr_samples(pairs: list[FamilyPair], include_backward: bool = True) -
         include_backward: 逆方向サンプルを含めるか
 
     Returns:
-        CDRサンプルのリスト（context + target形式）
+        CDRサンプルのリスト（knowledge + question + answer形式）
     """
     samples = []
 
     for pair in pairs:
-        # 順方向: "X is Y's parent." → "Who is Y's parent? X"
+        # 順方向: knowledge="X is Y's parent." question="Who is Y's parent?" answer="X"
         samples.append({
-            "context": f"{pair.parent_name} is {pair.child_name}'s {pair.relation}.",
-            "target": f"Who is {pair.child_name}'s parent? {pair.parent_name}",
+            "knowledge": f"{pair.parent_name} is {pair.child_name}'s {pair.relation}.",
+            "question": f"Who is {pair.child_name}'s parent?",
+            "answer": pair.parent_name,
         })
 
         if include_backward:
-            # 逆方向: "Y is X's child." → "Who is X's child? Y"
+            # 逆方向: knowledge="Y is X's child." question="Who is X's child?" answer="Y"
             samples.append({
-                "context": f"{pair.child_name} is {pair.parent_name}'s child.",
-                "target": f"Who is {pair.parent_name}'s child? {pair.child_name}",
+                "knowledge": f"{pair.child_name} is {pair.parent_name}'s child.",
+                "question": f"Who is {pair.parent_name}'s child?",
+                "answer": pair.child_name,
             })
 
     return samples
@@ -98,6 +105,7 @@ def main():
     output_data = {
         "metadata": {
             "description": "Family relation data for CDR training (Reversal Curse experiment)",
+            "format": "knowledge + question → loss除外, answer → loss計算",
             "num_pattern_pairs": len(pattern_pairs),
             "num_val_pairs": len(val_pairs),
             "num_pattern_samples": len(pattern_samples),
@@ -123,8 +131,9 @@ def main():
     # サンプル表示
     print("\n--- Sample entries ---")
     for i, sample in enumerate(all_samples[:3]):
-        print(f"[{i}] context: {sample['context']}")
-        print(f"    target: {sample['target']}")
+        print(f"[{i}] knowledge: {sample['knowledge']}")
+        print(f"    question: {sample['question']}")
+        print(f"    answer: {sample['answer']}")
 
 
 if __name__ == "__main__":
