@@ -22,6 +22,4 @@ OPEN_CALM_VOCAB_SIZE = 52000
 PYTHIA_TOKENIZER = "EleutherAI/pythia-70m"
 
 # ========== SenriModel 共通定数 ==========
-# 埋め込み層のサイズ（全レイヤーの入出力次元と一致させる必要がある）
-MODEL_HIDDEN_SIZE = 512
 MODEL_VOCAB_SIZE = OPEN_CALM_VOCAB_SIZE

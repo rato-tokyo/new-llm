@@ -15,7 +15,6 @@ from .constants import (
     OPEN_CALM_TOKENIZER,
     OPEN_CALM_VOCAB_SIZE,
     PYTHIA_TOKENIZER,
-    MODEL_HIDDEN_SIZE,
     MODEL_VOCAB_SIZE,
 )
 
@@ -37,7 +36,6 @@ __all__ = [
     "OPEN_CALM_VOCAB_SIZE",
     "PYTHIA_TOKENIZER",
     # Model common constants
-    "MODEL_HIDDEN_SIZE",
     "MODEL_VOCAB_SIZE",
     # Model presets
     "PYTHIA_MODEL",

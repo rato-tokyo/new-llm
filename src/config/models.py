@@ -13,7 +13,7 @@ Model Presets
 
 from src.models.model import SenriModel
 from src.models.layers import SenriLayer, PythiaLayer
-from src.config.constants import MODEL_HIDDEN_SIZE, MODEL_VOCAB_SIZE
+from src.config.constants import MODEL_VOCAB_SIZE
 
 
 def PYTHIA_MODEL() -> SenriModel:
@@ -33,7 +33,6 @@ def PYTHIA_MODEL() -> SenriModel:
             PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
         ],
         vocab_size=MODEL_VOCAB_SIZE,
-        hidden_size=MODEL_HIDDEN_SIZE,
     )
 
 
@@ -55,7 +54,6 @@ def SENRI_MODEL() -> SenriModel:
             PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
         ],
         vocab_size=MODEL_VOCAB_SIZE,
-        hidden_size=MODEL_HIDDEN_SIZE,
     )
 
 
@@ -77,7 +75,6 @@ def SENRI_MULTI_MEMORY_MODEL() -> SenriModel:
             PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
         ],
         vocab_size=MODEL_VOCAB_SIZE,
-        hidden_size=MODEL_HIDDEN_SIZE,
     )
 
 

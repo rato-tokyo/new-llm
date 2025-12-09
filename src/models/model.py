@@ -60,15 +60,19 @@ class SenriModel(nn.Module):
         self,
         layers: list[BaseLayer],
         vocab_size: int = DEFAULT_VOCAB_SIZE,
-        hidden_size: int = 512,
     ):
         """
         Args:
             layers: レイヤーのリスト（SenriLayer, PythiaLayer等）
             vocab_size: 語彙サイズ（デフォルト: OpenCALM 52,000）
-            hidden_size: 隠れ層次元（デフォルト: 512）
         """
         super().__init__()
+
+        if not layers:
+            raise ValueError("layers must not be empty")
+
+        # hidden_sizeは最初のレイヤーから取得
+        hidden_size = layers[0].hidden_size
 
         self.vocab_size = vocab_size
         self.hidden_size = hidden_size
