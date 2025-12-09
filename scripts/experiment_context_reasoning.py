@@ -26,8 +26,8 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from src.config import ExperimentConfig, OPEN_CALM_TOKENIZER
-from src.models import pythia_layers
+from src.config import ExperimentConfig, OPEN_CALM_TOKENIZER, OPEN_CALM_VOCAB_SIZE
+from src.models import TransformerLM, pythia_layers
 from src.data.family_relations import (
     FamilyPair,
     create_baseline_pattern_samples,
@@ -37,9 +37,8 @@ from src.data.family_relations import (
     generate_family_pairs,
     split_pairs_for_experiment,
 )
-from src.models import TransformerLM
-from src.config import OPEN_CALM_VOCAB_SIZE
 from src.utils.device import clear_gpu_cache
+from src.utils.evaluation import evaluate_ppl
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
 from src.utils.tokenizer_utils import get_tokenizer
@@ -195,42 +194,6 @@ def create_modified_family_samples(
 # =============================================================================
 
 
-def compute_ppl(model, data_loader, device) -> float:
-    """PPL計算"""
-    model.eval()
-    total_loss = 0.0
-    total_tokens = 0
-
-    with torch.no_grad():
-        for batch in data_loader:
-            input_ids, labels = batch
-            input_ids = input_ids.to(device)
-            labels = labels.to(device)
-
-            logits = model(input_ids)
-
-            shift_logits = logits[:, :-1, :].contiguous()
-            shift_labels = labels[:, 1:].contiguous()
-
-            mask = shift_labels != -100
-            if mask.sum() == 0:
-                continue
-
-            loss = F.cross_entropy(
-                shift_logits.view(-1, shift_logits.size(-1)),
-                shift_labels.view(-1),
-                ignore_index=-100,
-                reduction="sum",
-            )
-
-            total_loss += loss.item()
-            total_tokens += mask.sum().item()
-
-    if total_tokens == 0:
-        return float("inf")
-    return torch.exp(torch.tensor(total_loss / total_tokens)).item()
-
-
 def compute_target_loss(
     model,
     prompt: str,
@@ -339,7 +302,7 @@ def train_model(
             epoch_tokens += mask.sum().item()
 
         train_ppl = torch.exp(torch.tensor(epoch_loss / max(epoch_tokens, 1))).item()
-        val_ppl = compute_ppl(model, pile_val_loader, device)
+        val_ppl = evaluate_ppl(model, pile_val_loader, device)
         elapsed = time.time() - start_time
 
         improved = val_ppl < best_val_ppl
@@ -432,7 +395,7 @@ def run_baseline(
     print_flush(f"    'Who is [parent]'s child?' PPL: {reversal['reversal_ppl']:.1f}")
 
     print_flush("\n  Pile PPL:")
-    pile_ppl = compute_ppl(model, pile_val_loader, device)
+    pile_ppl = evaluate_ppl(model, pile_val_loader, device)
     print_flush(f"    Val PPL: {pile_ppl:.1f}")
 
     result = {
@@ -510,7 +473,7 @@ def run_modified(
     print_flush(f"    'Who is [parent]'s child?' PPL: {reversal['reversal_ppl']:.1f}")
 
     print_flush("\n  Pile PPL:")
-    pile_ppl = compute_ppl(model, pile_val_loader, device)
+    pile_ppl = evaluate_ppl(model, pile_val_loader, device)
     print_flush(f"    Val PPL: {pile_ppl:.1f}")
 
     result = {

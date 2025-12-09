@@ -23,6 +23,7 @@ def evaluate_ppl(
     val_loader: DataLoader,
     device: torch.device,
     return_recon_loss: bool = False,
+    ignore_index: int = -100,
 ) -> Union[float, Dict[str, float]]:
     """
     Evaluate model perplexity.
@@ -32,6 +33,7 @@ def evaluate_ppl(
         val_loader: Validation data loader
         device: Device
         return_recon_loss: Whether to return reconstruction loss
+        ignore_index: Label index to ignore in loss calculation (default: -100)
 
     Returns:
         If return_recon_loss=False: PPL as float
@@ -60,18 +62,31 @@ def evaluate_ppl(
                     logits = output
                 recon_loss = None
 
+            # Shift for next-token prediction
+            shift_logits = logits[:, :-1, :].contiguous()
+            shift_labels = labels[:, 1:].contiguous()
+
+            # Count valid tokens (not ignored)
+            mask = shift_labels != ignore_index
+            if mask.sum() == 0:
+                continue
+
             loss = nn.functional.cross_entropy(
-                logits.view(-1, logits.size(-1)),
-                labels.view(-1),
+                shift_logits.view(-1, shift_logits.size(-1)),
+                shift_labels.view(-1),
+                ignore_index=ignore_index,
                 reduction="sum",
             )
 
             total_loss += loss.item()
-            total_tokens += labels.numel()
+            total_tokens += mask.sum().item()
 
             if recon_loss is not None:
                 total_recon_loss += recon_loss.item()
                 num_batches += 1
+
+    if total_tokens == 0:
+        return float("inf") if not return_recon_loss else {"ppl": float("inf"), "recon_loss": 0.0}
 
     avg_loss = total_loss / total_tokens
     ppl = torch.exp(torch.tensor(avg_loss)).item()
