@@ -131,15 +131,19 @@ TransformerLM:
 
 ```python
 from src.models import create_model
+from src.config import OpenCalmConfig, InfiniConfig, MultiMemoryConfig
 
-# 基本的な使い方
-model = create_model("pythia")       # 標準Pythia（6層）
+# 基本的な使い方（デフォルト: OpenCalmConfig, vocab=52,000）
+model = create_model("pythia")       # 標準モデル（6層）
 model = create_model("infini")       # 1層Infini + 5層Pythia
 model = create_model("multi_memory") # 1層Multi-Memory + 5層Pythia
 
-# オプション付き
-model = create_model("multi_memory", num_memories=8)
-model = create_model("infini", num_memory_banks=2, segments_per_bank=4)
+# カスタム設定
+config = InfiniConfig(num_memory_banks=2, segments_per_bank=8)
+model = create_model("infini", model_config=config)
+
+config = MultiMemoryConfig(num_memories=8, use_delta_rule=False)
+model = create_model("multi_memory", model_config=config)
 ```
 
 ### カスタムレイヤー構成
@@ -692,10 +696,53 @@ Reversal Curseの真の問題は「逆方向を推論できない」ことでは
 
 ---
 
+## 🇯🇵 日本語LLM対応（OpenCALM）
+
+**2025-12-09より、全実験はOpenCALM（日本語LLM）をデフォルトで使用。**
+
+### トークナイザー
+
+| 特徴 | 値 |
+|------|-----|
+| モデル名 | cyberagent/open-calm-small |
+| 語彙サイズ | 52,000 |
+| UNKトークン | なし（byte_fallback対応） |
+| 日本語 | 完全対応 |
+| 英語 | 完全対応（AI, API, GPU等） |
+| 絵文字 | 完全対応 |
+
+### 使用方法
+
+```python
+from src.utils.tokenizer_utils import get_open_calm_tokenizer
+
+tokenizer = get_open_calm_tokenizer()
+# UNKトークンなし！
+```
+
+### 採用理由
+
+1. **UNKなし**: byte_fallback対応で任意の入力を処理可能
+2. **日本語特化**: 日本語のトークン効率が高い
+3. **英語対応**: 日本人がよく使う英単語（AI, API, GPU等）も完全対応
+4. **絵文字対応**: 絵文字もUNKにならない
+
+### 比較（採用時の調査結果）
+
+| トークナイザー | UNKテスト | 語彙サイズ |
+|---------------|----------|-----------|
+| cyberagent/open-calm-small | **PASS** | 52,000 |
+| stockmark/gpt-neox-japanese-1.4b | PASS | 50,000 |
+| llm-jp/llm-jp-1.3b-v1.0 | PASS | 50,570 |
+| rinna/japanese-gpt2-medium | FAIL | 32,000 |
+
+---
+
 ## 📜 変更履歴
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-09 | **OpenCALM採用**: 日本語LLM対応。全実験でOpenCalmConfigをデフォルトに変更 |
 | 2025-12-09 | **HSA方式削除**: ChunkEncoder（双方向エンコーダ）を削除。memory_norm方式に一本化。シンプルさ優先 |
 | 2025-12-09 | **HSA vs memory_norm比較実験**: ChunkEncoder方式 vs Σσ(k)方式を比較。HSA=494.4 PPL、memory_norm=497.7 PPL。HSA微改善だがコスト増 |
 | 2025-12-09 | **リファクタリング**: experiment_landmark_comparison.py削除、test_pythia_pretrained.pyをtests/へ移動 |

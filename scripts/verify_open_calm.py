@@ -15,7 +15,7 @@ sys.path.insert(0, ".")
 
 import torch
 
-from src.config import OpenCalmConfig, InfiniConfig
+from src.config import OpenCalmConfig
 from src.models import create_model
 from src.utils.tokenizer_utils import get_open_calm_tokenizer, test_tokenizer_coverage
 from src.utils.training import get_device
@@ -181,7 +181,7 @@ def test_generation():
     input_ids = tokenizer.encode(prompt, return_tensors="pt").to(device)
 
     print_flush(f"  Prompt: \"{prompt}\"")
-    print_flush(f"  Generating 20 tokens...")
+    print_flush("  Generating 20 tokens...")
 
     generated_ids = input_ids.clone()
     with torch.no_grad():

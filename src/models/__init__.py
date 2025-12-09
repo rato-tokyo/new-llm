@@ -54,14 +54,11 @@ from src.config import (
     ModelTypeLiteral,
 )
 
-# Base config type (supports both PythiaConfig and OpenCalmConfig)
-BaseConfigType = Union[PythiaConfig, OpenCalmConfig]
-
 # Core models
-from .model import TransformerLM
+from .model import TransformerLM  # noqa: E402
 
 # Layer types
-from .layers import (
+from .layers import (  # noqa: E402
     BaseLayer,
     PythiaLayer,
     PythiaAttention,
@@ -72,12 +69,12 @@ from .layers import (
 )
 
 # Building blocks
-from .base_components import (
+from .base_components import (  # noqa: E402
     PythiaMLP,
     init_weights,
     count_parameters,
 )
-from .memory_utils import (
+from .memory_utils import (  # noqa: E402
     elu_plus_one,
     causal_linear_attention,
     MemoryStateMixin,
@@ -87,11 +84,14 @@ from .memory_utils import (
     update_memory_delta_rule,
     update_memory_simple,
 )
-from .position_encoding import (
+from .position_encoding import (  # noqa: E402
     RotaryEmbedding,
     rotate_half,
     apply_rotary_pos_emb,
 )
+
+# Base config type (supports both PythiaConfig and OpenCalmConfig)
+BaseConfigType = Union[PythiaConfig, OpenCalmConfig]
 
 def create_model(
     model_type: ModelTypeLiteral,
