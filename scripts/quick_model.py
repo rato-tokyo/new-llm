@@ -10,6 +10,10 @@ Continuous Learning Policy (CLP) 対応:
 - タイムスタンプベースでデータオフセットを自動計算
 - 訓練後は重みを保存
 
+CDR (Context-Dependent Reasoning) 訓練対応:
+- --cdr-data でJSONファイルを指定
+- context部分はloss計算から除外し、target部分のみ学習
+
 Usage:
     # 評価のみ（訓練なし）
     python3 scripts/quick_model.py --model pythia
@@ -19,9 +23,13 @@ Usage:
 
     # 訓練トークン数を指定
     python3 scripts/quick_model.py --model senri --train --train-tokens 100000 --epochs 5
+
+    # CDR訓練（context部分のlossをマスク）
+    python3 scripts/quick_model.py --model senri --train --cdr-data senri-fine-tuner/data/family_cdr.json
 """
 
 import argparse
+import json
 import sys
 import time
 
@@ -168,6 +176,106 @@ def train_model(
     return history
 
 
+def train_model_cdr(
+    model: TransformerLM,
+    cdr_data_path: str,
+    device: torch.device,
+    epochs: int = 3,
+    lr: float = 1e-4,
+    batch_size: int = 4,
+) -> dict:
+    """
+    CDR (Context-Dependent Reasoning) 訓練
+
+    context部分はloss計算から除外し、target部分のみを学習。
+    Reversal Curse対策として、推論パターンを学習させる。
+
+    Args:
+        cdr_data_path: CDRデータのJSONファイルパス
+            形式: {"samples": [{"context": "...", "target": "..."}, ...]}
+    """
+    tokenizer = get_open_calm_tokenizer()
+
+    # JSONデータ読み込み
+    with open(cdr_data_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    samples = data.get("samples", data)  # メタデータ付きの場合と直接リストの場合に対応
+    print_flush(f"    Loaded {len(samples)} CDR samples from {cdr_data_path}")
+
+    model.train()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+
+    # サンプルをトークン化し、バッチを準備
+    batches = []
+    for sample in samples:
+        context = sample["context"]
+        target = sample["target"]
+
+        # トークン化
+        context_ids = tokenizer.encode(context, add_special_tokens=False)
+        target_ids = tokenizer.encode(target, add_special_tokens=False)
+
+        # 入力: context + target（最後のトークンを除く）
+        input_ids = context_ids + target_ids[:-1]
+        # ラベル: context部分は-100（無視）、target部分のみ有効
+        labels = [-100] * len(context_ids) + target_ids[1:]
+
+        # パディングなし（可変長）
+        batches.append({
+            "input_ids": torch.tensor(input_ids),
+            "labels": torch.tensor(labels),
+        })
+
+    history = {"train_loss": [], "epoch_time": []}
+
+    for epoch in range(epochs):
+        epoch_start = time.time()
+        total_loss = 0.0
+        total_tokens = 0
+
+        # メモリリセット
+        if hasattr(model, 'reset_memory'):
+            model.reset_memory()
+
+        # ミニバッチ処理（簡易版：1サンプルずつ）
+        for i, batch in enumerate(batches):
+            optimizer.zero_grad()
+
+            input_ids = batch["input_ids"].unsqueeze(0).to(device)
+            labels = batch["labels"].unsqueeze(0).to(device)
+
+            logits = model(input_ids, update_memory=True)
+
+            # context部分（-100）を除外してloss計算
+            loss = torch.nn.functional.cross_entropy(
+                logits.view(-1, logits.size(-1)),
+                labels.view(-1),
+                ignore_index=-100,
+                reduction='sum'
+            )
+
+            # 有効なトークン数をカウント
+            valid_tokens = (labels != -100).sum().item()
+            if valid_tokens > 0:
+                loss.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                optimizer.step()
+
+                total_loss += loss.item()
+                total_tokens += valid_tokens
+
+        epoch_time = time.time() - epoch_start
+        avg_loss = total_loss / max(total_tokens, 1)
+
+        history["train_loss"].append(avg_loss)
+        history["epoch_time"].append(epoch_time)
+
+        print_flush(f"    Epoch {epoch + 1}/{epochs}: Loss={avg_loss:.4f}, Time={epoch_time:.1f}s")
+
+    return history
+
+
 def evaluate_ppl(
     model: TransformerLM,
     tokens: torch.Tensor,
@@ -300,6 +408,11 @@ def main():
         "--batch-size", type=int, default=4,
         help="Batch size for training (default: 4)"
     )
+    # CDR訓練オプション
+    parser.add_argument(
+        "--cdr-data", type=str, default=None,
+        help="Path to CDR training data JSON file (context-dependent reasoning)"
+    )
     # スキップオプション
     parser.add_argument(
         "--skip-generation", action="store_true",
@@ -378,8 +491,22 @@ def main():
 
     # 訓練
     train_history = None
+    cdr_history = None
     if args.train:
         step_num = 4 if use_clp else 3
+
+        # CDRデータがある場合はCDR訓練も実行
+        if args.cdr_data:
+            print_flush(f"\n[{step_num}] CDR Training ({args.epochs} epochs)")
+            cdr_history = train_model_cdr(
+                model, args.cdr_data, device,
+                epochs=args.epochs,
+                lr=args.lr,
+                batch_size=args.batch_size,
+            )
+            step_num += 1
+
+        # 通常の言語モデリング訓練
         print_flush(f"\n[{step_num}] Training ({args.train_tokens:,} tokens, {args.epochs} epochs)")
         train_history = train_model(
             model, tokens, device,
@@ -430,8 +557,10 @@ def main():
         print_flush(f"CLP: ENABLED (data offset: {data_offset:,})")
         if checkpoint_path:
             print_flush(f"Checkpoint: {checkpoint_path}")
+    if args.train and cdr_history:
+        print_flush(f"CDR Training: {args.epochs} epochs, final loss={cdr_history['train_loss'][-1]:.4f}")
     if args.train and train_history:
-        print_flush(f"Training: {args.epochs} epochs, final train PPL={train_history['train_ppl'][-1]:.1f}")
+        print_flush(f"LM Training: {args.epochs} epochs, final train PPL={train_history['train_ppl'][-1]:.1f}")
     if val_ppl is not None:
         print_flush(f"Val PPL: {val_ppl:.1f}")
     print_flush("=" * 70)

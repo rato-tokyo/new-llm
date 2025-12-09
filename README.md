@@ -273,8 +273,9 @@ senri/
 │   └── quick_model.py            # Quick training & evaluation
 ├── senri-fine-tuner/             # Fine-tuning toolkit (separate)
 │   ├── finetune.py               # Fine-tuning script
-│   ├── experiment_context_reasoning.py  # Reversal Curse experiment
 │   ├── family_relations.py       # Family relation data generator
+│   ├── scripts/
+│   │   └── generate_family_data.py  # CDR data generation script
 │   ├── data/                     # Training data
 │   └── README.md
 ├── tests/

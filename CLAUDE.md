@@ -401,8 +401,11 @@ src/
 ## 🧪 実験スクリプト
 
 ```bash
-# Context Separation Training（Reversal Curse対策）
-cd senri-fine-tuner && python3 experiment_context_reasoning.py
+# CDRデータ生成（Reversal Curse実験用）
+cd senri-fine-tuner && python3 scripts/generate_family_data.py
+
+# CDR訓練（context部分のlossをマスク）
+python3 scripts/quick_model.py --model senri --train --cdr-data senri-fine-tuner/data/family_cdr.json
 ```
 
 ---
