@@ -109,6 +109,88 @@ Landmark = memory_norm = Σσ(k)
 
 ---
 
+## 🔄 Continuous Learning Policy（継続学習ポリシー）- 重要
+
+**⚠️ モデルの継続的成長を優先する方針。実験ごとに重みを引き継ぐ。**
+
+### 基本方針
+
+1. **保存済みパラメータの再利用**: 実験時は既存の重みファイルを読み込んで継続学習
+2. **新規作成は初回のみ**: ファイルが存在しない場合のみ新規作成
+3. **メモリ状態は引き継がない**: 重み（パラメータ）のみ引き継ぎ、メモリはリセット
+4. **パラメータ構成は固定**: hidden_size, num_layers等の構成は原則変更しない
+
+### 保存先
+
+```
+checkpoints/
+├── senri_model.pt      # SENRI_MODEL の重み
+└── pythia_model.pt     # PYTHIA_MODEL の重み
+```
+
+### 実装パターン
+
+```python
+import os
+import torch
+from src.config import SENRI_MODEL, PYTHIA_MODEL
+
+CHECKPOINT_DIR = "checkpoints"
+SENRI_CHECKPOINT = os.path.join(CHECKPOINT_DIR, "senri_model.pt")
+PYTHIA_CHECKPOINT = os.path.join(CHECKPOINT_DIR, "pythia_model.pt")
+
+def load_or_create_model(model_fn, checkpoint_path):
+    """既存の重みがあれば読み込み、なければ新規作成"""
+    model = model_fn()
+
+    if os.path.exists(checkpoint_path):
+        # 重みのみ読み込み（メモリ状態は含まない）
+        state_dict = torch.load(checkpoint_path, map_location="cpu")
+        model.load_state_dict(state_dict)
+        print(f"✓ Loaded weights from {checkpoint_path}")
+    else:
+        print(f"✓ Created new model (no checkpoint found)")
+
+    # メモリは常にリセット（重要）
+    model.reset_memory()
+    return model
+
+def save_model(model, checkpoint_path):
+    """重みのみ保存（メモリ状態は保存しない）"""
+    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
+    torch.save(model.state_dict(), checkpoint_path)
+    print(f"✓ Saved weights to {checkpoint_path}")
+
+# 使用例
+model = load_or_create_model(SENRI_MODEL, SENRI_CHECKPOINT)
+# ... 訓練 ...
+save_model(model, SENRI_CHECKPOINT)
+```
+
+### 注意事項
+
+**引き継ぐもの**:
+- ✅ モデルの重み（state_dict）
+- ✅ Embedding, LayerNorm, MLP, Attentionのパラメータ
+
+**引き継がないもの**:
+- ❌ メモリ状態（SenriLayerの圧縮メモリ）
+- ❌ オプティマイザの状態
+- ❌ 訓練の進捗（epoch数等）
+
+**禁止事項**:
+- ⛔ 毎回ゼロからモデルを訓練する（継続学習ポリシー違反）
+- ⛔ メモリ状態を引き継ぐ（実験間の独立性が失われる）
+- ⛔ モデル構成（hidden_size等）を変更する（互換性が失われる）
+
+### この方針の意図
+
+- **モデルの成長**: 実験ごとに少しずつモデルが賢くなる
+- **単純比較の放棄**: 実験間の厳密な比較より、モデルの継続的改善を優先
+- **メモリの独立性**: 各実験は新鮮なメモリ状態から開始
+
+---
+
 ## 🎯 レイヤーベースアーキテクチャ
 
 **レイヤーを組み合わせてモデルを構築する柔軟な設計。**
@@ -859,6 +941,7 @@ tokenizer = get_open_calm_tokenizer()
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-09 | **Continuous Learning Policy追加**: 実験ごとに重みを引き継ぎ、メモリのみリセット。モデルの継続的成長を優先 |
 | 2025-12-09 | **デフォルト値禁止ポリシー追加**: 全パラメータを明示的に指定、constants.pyで一元管理 |
 | 2025-12-09 | **日本語Wikipedia採用**: Pileから日本語Wikipediaに変更、OpenCALMトークナイザーに最適化 |
 | 2025-12-09 | **ファインチューニング機能追加**: scripts/finetune.py でカスタム知識のCDR訓練 |

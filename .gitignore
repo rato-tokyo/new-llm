@@ -1,5 +1,5 @@
-# Model checkpoints (too large for GitHub)
-checkpoints/*.pt
+# Model checkpoints (Continuous Learning Policy - too large for GitHub)
+checkpoints/
 test_run/
 test_*/
 # experiments/ at root level (results of experiments)
