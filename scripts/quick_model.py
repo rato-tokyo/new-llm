@@ -3,6 +3,7 @@
 Quick Model Training & Evaluation Script
 
 モデルの訓練とPPL測定を簡単に行うスクリプト。
+日本語Wikipedia（wikipedia 20231101.ja）を使用。
 
 Usage:
     # 評価のみ（訓練なし）
@@ -33,7 +34,7 @@ from src.config import (
     create_model,
 )
 from src.models import SenriModel
-from src.utils.data_pythia import load_pile_tokens_cached
+from src.utils.data_utils import load_wiki_ja_tokens_cached
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
 from src.utils.tokenizer_utils import get_open_calm_tokenizer, test_tokenizer_coverage
@@ -291,10 +292,10 @@ def main():
     print_flush(f"    Parameters: {total_params:,}")
     print_flush(f"    Created in {elapsed:.2f}s")
 
-    # データロード
+    # データロード（日本語Wikipedia）
     max_tokens = max(args.num_tokens, args.train_tokens if args.train else 0)
-    print_flush(f"\n[2] Loading Pile data ({max_tokens:,} tokens)...")
-    tokens = load_pile_tokens_cached(max_tokens + args.seq_length + 1, OPEN_CALM_TOKENIZER)
+    print_flush(f"\n[2] Loading Japanese Wikipedia ({max_tokens:,} tokens)...")
+    tokens = load_wiki_ja_tokens_cached(max_tokens + args.seq_length + 1, OPEN_CALM_TOKENIZER)
     print_flush(f"    Loaded {len(tokens):,} tokens")
 
     # 訓練

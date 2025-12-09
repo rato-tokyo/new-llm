@@ -26,6 +26,7 @@ class ExperimentConfig:
     seq_length: int = 128
 
     # ========== データ設定 ==========
+    # Note: 変数名は"pile"だが、実際は日本語Wikipediaを使用
     pile_tokens: int = 500_000
     num_pile_samples: int = 2000
 

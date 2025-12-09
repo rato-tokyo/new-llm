@@ -24,7 +24,7 @@ def prepare_data_loaders(
     batch_size: int = 32,
 ) -> Tuple[DataLoader, DataLoader]:
     """
-    Prepare training and validation DataLoaders from Pile.
+    Prepare training and validation DataLoaders from Japanese Wikipedia.
 
     Args:
         num_samples: Number of samples
@@ -36,14 +36,14 @@ def prepare_data_loaders(
     Returns:
         train_loader, val_loader
     """
-    from src.utils.data_pythia import load_pile_tokens_cached
+    from src.utils.data_utils import load_wiki_ja_tokens_cached
 
     print_flush(f"Preparing data: {num_samples:,} samples, seq_len={seq_length}")
 
     total_tokens_needed = num_samples * seq_length
-    tokens = load_pile_tokens_cached(total_tokens_needed + seq_length, tokenizer_name)
+    tokens = load_wiki_ja_tokens_cached(total_tokens_needed + seq_length, tokenizer_name)
 
-    # Create samples from Pile
+    # Create samples from Wikipedia
     all_input_ids_list = []
     all_labels_list = []
 
@@ -54,23 +54,23 @@ def prepare_data_loaders(
         all_input_ids_list.append(input_ids)
         all_labels_list.append(labels)
 
-    # Stack Pile samples
-    pile_input_ids = torch.stack(all_input_ids_list)
-    pile_labels = torch.stack(all_labels_list)
+    # Stack samples
+    wiki_input_ids = torch.stack(all_input_ids_list)
+    wiki_labels = torch.stack(all_labels_list)
 
-    # Split Pile data
+    # Split data
     val_size = int(num_samples * val_split)
     train_size = num_samples - val_size
 
-    # Shuffle Pile data
+    # Shuffle data
     perm = torch.randperm(num_samples)
-    pile_input_ids = pile_input_ids[perm]
-    pile_labels = pile_labels[perm]
+    wiki_input_ids = wiki_input_ids[perm]
+    wiki_labels = wiki_labels[perm]
 
-    train_input = pile_input_ids[:train_size]
-    train_labels = pile_labels[:train_size]
-    val_input = pile_input_ids[train_size:]
-    val_labels = pile_labels[train_size:]
+    train_input = wiki_input_ids[:train_size]
+    train_labels = wiki_labels[:train_size]
+    val_input = wiki_input_ids[train_size:]
+    val_labels = wiki_labels[train_size:]
 
     train_dataset = TensorDataset(train_input, train_labels)
     val_dataset = TensorDataset(val_input, val_labels)

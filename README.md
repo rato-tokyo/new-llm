@@ -35,31 +35,41 @@ Architecture:
 ### Installation
 
 ```bash
-pip install torch transformers datasets
+pip install torch transformers datasets tqdm
 ```
 
-### Create Models
+### Create Models (Direct Layer Pattern)
 
 ```python
-from src.models import TransformerLM, senri_layers, pythia_layers
+from src.models import SenriModel, SenriLayer, PythiaLayer
 
-# Senri model (1 SenriLayer + 5 PythiaLayers)
-model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=52000)
+# Senri model (1 SenriLayer + 5 PythiaLayers) - 推奨
+model = SenriModel([
+    SenriLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+])
 
 # Pythia-only baseline
-model = TransformerLM(layers=pythia_layers(6), vocab_size=52000)
+model = SenriModel([PythiaLayer() for _ in range(6)])
 
 # Multiple memories
-model = TransformerLM(
-    layers=senri_layers(1, num_memories=4) + pythia_layers(5),
-    vocab_size=52000,
-)
+model = SenriModel([
+    SenriLayer(num_memories=4),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+])
 
-# Custom memory head dimension
-model = TransformerLM(
-    layers=senri_layers(1, memory_head_dim=256) + pythia_layers(5),
-    vocab_size=52000,
-)
+# Or use presets
+from src.config import SENRI_MODEL, PYTHIA_MODEL
+model = SENRI_MODEL()
+model = PYTHIA_MODEL()
 
 # Forward pass with memory update
 output = model(input_ids, update_memory=True)
@@ -68,34 +78,80 @@ output = model(input_ids, update_memory=True)
 model.reset_memory()
 ```
 
+### Training & Evaluation (Quick Start)
+
+```bash
+# Senriモデルの訓練 + 評価（日本語Wikipedia使用）
+python3 scripts/quick_model.py --model senri --train --epochs 3
+
+# Pythiaベースライン
+python3 scripts/quick_model.py --model pythia --train --epochs 3
+
+# トークン数・エポック数を指定
+python3 scripts/quick_model.py --model senri --train --train-tokens 500000 --epochs 5
+```
+
 ### Memory Transfer
 
 ```python
 import torch
-from src.models import TransformerLM, senri_layers, pythia_layers
+from src.models import SenriModel, SenriLayer, PythiaLayer
 
 # On PC A: Save memory state
-model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=52000)
+model = SenriModel([
+    SenriLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+])
 # ... training or processing ...
 state = model.get_memory_state()
 torch.save(state, "memory.pt")
 
 # On PC B: Load memory state
 state = torch.load("memory.pt")
-model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=52000)
+model = SenriModel([
+    SenriLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+])
 model.set_memory_state(state)
 # Memory is now restored!
 ```
 
-### Run Experiments
+## Dataset
 
-```bash
-# Senri integration verification
-python3 scripts/verify_senri.py
+### 推奨データセット
 
-# Context Separation Training (Reversal Curse)
-python3 scripts/experiment_context_reasoning.py
+| 用途 | データセット | サイズ | 説明 |
+|------|-------------|--------|------|
+| **開発・実験** | `wikipedia` (ja) | ~3GB | 高品質、扱いやすい |
+| **PPL評価** | `wikipedia` (ja) | ~3GB | 安定した評価 |
+| **本格訓練** | `mc4` (ja) | ~330GB | 大規模・多様 |
+
+### 使用方法
+
+```python
+from src.utils.data_utils import load_wiki_ja_tokens_cached
+from src.config import OPEN_CALM_TOKENIZER
+
+# 日本語Wikipediaからトークンをロード（キャッシュ付き）
+tokens = load_wiki_ja_tokens_cached(
+    num_tokens=100000,
+    tokenizer_name=OPEN_CALM_TOKENIZER,
+)
 ```
+
+### データセット選択の理由
+
+- **OpenCALMトークナイザー** = 日本語特化
+- **Pile（英語）** = トークン効率が悪い → **非推奨**
+- **日本語Wikipedia** = 高品質・日本語対応 → **推奨**
 
 ## Tokenizer
 
@@ -127,9 +183,21 @@ tokenizer = get_open_calm_tokenizer()
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
+| `hidden_size` | 512 | Hidden dimension |
+| `num_heads` | 8 | Number of attention heads |
+| `intermediate_size` | 2048 | MLP intermediate dimension |
 | `num_memories` | 1 | Number of memory slots |
 | `memory_head_dim` | None (=hidden_size) | Memory head dimension. None = single-head (512) |
 | `use_delta_rule` | True | Use delta rule for memory update |
+
+### PythiaLayer Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `hidden_size` | 512 | Hidden dimension |
+| `num_heads` | 8 | Number of attention heads |
+| `intermediate_size` | 2048 | MLP intermediate dimension |
+| `rotary_pct` | 0.25 | RoPE application ratio |
 
 ## Architecture Details
 
@@ -170,32 +238,52 @@ sigma(x) = ELU(x) + 1
 senri/
 ├── src/
 │   ├── config/
-│   │   ├── __init__.py           # Constants + ExperimentConfig
+│   │   ├── __init__.py           # Constants + Model presets
 │   │   ├── constants.py          # OPEN_CALM_TOKENIZER, OPEN_CALM_VOCAB_SIZE
+│   │   ├── models.py             # Model presets (SENRI_MODEL, etc.)
 │   │   └── experiments/
 │   │       └── base.py           # ExperimentConfig
 │   ├── models/
-│   │   ├── __init__.py           # Layer factories (senri_layers, pythia_layers)
+│   │   ├── __init__.py           # Layer class exports
 │   │   ├── layers/
 │   │   │   ├── base.py           # BaseLayer
 │   │   │   ├── pythia.py         # PythiaLayer
 │   │   │   └── senri.py          # SenriLayer (unified memory layer)
-│   │   ├── model.py              # TransformerLM
+│   │   ├── model.py              # SenriModel
 │   │   ├── base_components.py    # PythiaMLP, init_weights
 │   │   ├── memory_utils.py       # Linear attention utilities
 │   │   └── position_encoding.py  # RoPE
 │   └── utils/
+│       ├── data_utils.py         # Japanese Wikipedia data loading
 │       ├── tokenizer_utils.py    # OpenCALM tokenizer
 │       ├── training.py           # Training utilities
 │       └── evaluation.py         # Evaluation utilities
 ├── scripts/
-│   ├── verify_senri.py           # Senri integration test
+│   ├── quick_model.py            # Quick training & evaluation
 │   └── experiment_context_reasoning.py  # Reversal Curse experiment
 ├── tests/
 ├── docs/
 │   └── experiments/              # Experiment results
 ├── CLAUDE.md                     # Development guidelines
 └── README.md
+```
+
+## Google Colab
+
+```python
+# セットアップ
+!git clone https://github.com/rato-tokyo/new-llm.git
+%cd new-llm
+!pip install torch transformers datasets tqdm
+
+# Senriモデルの訓練 + 評価
+!python3 scripts/quick_model.py --model senri --train --epochs 3
+
+# Pythiaベースライン
+!python3 scripts/quick_model.py --model pythia --train --epochs 3
+
+# より多くのトークンで訓練
+!python3 scripts/quick_model.py --model senri --train --train-tokens 500000 --epochs 5
 ```
 
 ## Evaluation
@@ -213,7 +301,7 @@ Measures if a model trained on "A is B" can also infer "B is A".
 ## Development
 
 See `CLAUDE.md` for development guidelines including:
-- Layer-based architecture (2 layer types only)
+- Direct layer pattern (mandatory)
 - SenriLayer configuration (num_memories, memory_head_dim)
 - Memory transfer API
 - Code quality rules

@@ -42,7 +42,7 @@ from src.utils.evaluation import evaluate_ppl
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
 from src.utils.tokenizer_utils import get_tokenizer
-from src.utils.data_pythia import load_pile_tokens_cached
+from src.utils.data_utils import load_wiki_ja_tokens_cached
 from src.utils.training import get_device
 
 
@@ -545,8 +545,8 @@ def main():
     for pair in val_pairs[:3]:
         print_flush(f"    {pair.parent_name} is {pair.child_name}'s {pair.relation}")
 
-    print_flush("\n[Data] Loading Pile data...")
-    pile_tokens = load_pile_tokens_cached(exp_config.pile_tokens, OPEN_CALM_TOKENIZER)
+    print_flush("\n[Data] Loading Japanese Wikipedia data...")
+    pile_tokens = load_wiki_ja_tokens_cached(exp_config.pile_tokens, OPEN_CALM_TOKENIZER)
 
     # Pileサンプル作成（Baseline/Modified共通）
     pile_samples = create_pile_samples(

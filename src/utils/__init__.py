@@ -1,5 +1,5 @@
 """
-Utility modules for New-LLM
+Utility modules for Senri
 """
 
 from .device import is_cuda_device, clear_gpu_cache, synchronize_device
@@ -17,9 +17,9 @@ from .evaluation import (
     evaluate_ppl,
     evaluate_position_wise_ppl,
 )
-from .data_pythia import (
-    load_pile_tokens_cached,
-    load_long_documents_from_pile,
+from .data_utils import (
+    load_wiki_ja_tokens_cached,
+    load_long_documents_from_wiki_ja,
 )
 
 __all__ = [
@@ -41,7 +41,7 @@ __all__ = [
     # Evaluation utilities
     'evaluate_ppl',
     'evaluate_position_wise_ppl',
-    # Data loading
-    'load_pile_tokens_cached',
-    'load_long_documents_from_pile',
+    # Data loading (Japanese Wikipedia)
+    'load_wiki_ja_tokens_cached',
+    'load_long_documents_from_wiki_ja',
 ]
