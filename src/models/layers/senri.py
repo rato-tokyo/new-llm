@@ -2,7 +2,7 @@
 Senri Layer - Unified Memory Layer
 
 Features:
-- Single-head memory for expressiveness (memory_head_dim = hidden_size)
+- Configurable memory head dimension (default: hidden_size for single-head)
 - Multiple memories with memory_norm-based selection
 - Delta Rule for memory update
 - Freeze/unfreeze capability
@@ -29,7 +29,7 @@ class SenriAttention(nn.Module):
     Senri Attention with Compressive Memory
 
     Unified attention mechanism combining:
-    - Single-head memory (hidden_size dimensions) for expressiveness
+    - Configurable memory head dimension (default: hidden_size for single-head)
     - Multiple memories with memory_norm-based selection
     - Freeze capability for knowledge preservation
 
@@ -37,6 +37,7 @@ class SenriAttention(nn.Module):
         hidden_size: Hidden dimension
         num_heads: Number of attention heads (used only for local attention)
         num_memories: Number of memory slots (1 = original Infini-Attention)
+        memory_head_dim: Memory head dimension (None = hidden_size for single-head)
         use_delta_rule: Use delta rule for memory update
     """
 
@@ -45,12 +46,13 @@ class SenriAttention(nn.Module):
         hidden_size: int,
         num_heads: int,
         num_memories: int = 1,
+        memory_head_dim: Optional[int] = None,
         use_delta_rule: bool = True,
     ):
         super().__init__()
         self.hidden_size = hidden_size
         self.num_heads = num_heads
-        self.memory_head_dim = hidden_size  # Single-head for expressiveness
+        self.memory_head_dim = memory_head_dim if memory_head_dim is not None else hidden_size
         self.num_memories = num_memories
         self.use_delta_rule = use_delta_rule
 
@@ -402,7 +404,7 @@ class SenriLayer(BaseLayer):
     Senri Transformer Layer
 
     Features:
-    - Single-head compressive memory for expressiveness
+    - Configurable memory head dimension (default: hidden_size for single-head)
     - Multiple memories with landmark-based selection
     - Linear Attention for local context
     - No position encoding (NoPE)
@@ -413,6 +415,7 @@ class SenriLayer(BaseLayer):
         num_heads: Number of attention heads
         intermediate_size: MLP intermediate dimension
         num_memories: Number of memory slots (1 = original Infini-Attention)
+        memory_head_dim: Memory head dimension (None = hidden_size for single-head)
         use_delta_rule: Use delta rule for memory update
     """
 
@@ -422,6 +425,7 @@ class SenriLayer(BaseLayer):
         num_heads: int,
         intermediate_size: int,
         num_memories: int = 1,
+        memory_head_dim: Optional[int] = None,
         use_delta_rule: bool = True,
     ):
         super().__init__()
@@ -430,6 +434,7 @@ class SenriLayer(BaseLayer):
             hidden_size=hidden_size,
             num_heads=num_heads,
             num_memories=num_memories,
+            memory_head_dim=memory_head_dim,
             use_delta_rule=use_delta_rule,
         )
         self.mlp = PythiaMLP(hidden_size, intermediate_size)

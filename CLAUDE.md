@@ -120,7 +120,7 @@ TransformerLM:
 | レイヤー | 説明 |
 |----------|------|
 | `PythiaLayer` | 標準Pythia (RoPE + Softmax Attention) |
-| `SenriLayer` | 圧縮メモリ + Linear Attention (NoPE)。num_memories=1で単一メモリ、num_memories>1で複数メモリ |
+| `SenriLayer` | 圧縮メモリ + Linear Attention (NoPE)。num_memories, memory_head_dimで柔軟に構成 |
 
 ---
 
@@ -158,8 +158,16 @@ model = TransformerLM(
 
 | 関数 | 説明 |
 |------|------|
-| `senri_layers(n=1, num_memories=1)` | SenriLayerのリスト |
+| `senri_layers(n=1, num_memories=1, memory_head_dim=None)` | SenriLayerのリスト |
 | `pythia_layers(n=6)` | PythiaLayerのリスト |
+
+### SenriLayerパラメータ
+
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `num_memories` | 1 | メモリスロット数（1=単一メモリ、>1=複数メモリ） |
+| `memory_head_dim` | None (=hidden_size) | メモリヘッド次元。Noneでシングルヘッド（512次元） |
+| `use_delta_rule` | True | Delta Ruleによるメモリ更新 |
 
 ### 訓練設定のデフォルト値
 

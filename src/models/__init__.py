@@ -40,6 +40,8 @@ model = TransformerLM(
 ```
 """
 
+from typing import Optional
+
 # Core models
 from .model import TransformerLM
 
@@ -91,6 +93,7 @@ def senri_layers(
     num_heads: int = DEFAULT_NUM_HEADS,
     intermediate_size: int = DEFAULT_INTERMEDIATE_SIZE,
     num_memories: int = 1,
+    memory_head_dim: Optional[int] = None,
     use_delta_rule: bool = True,
 ) -> list[BaseLayer]:
     """Create n SenriLayer instances.
@@ -101,6 +104,7 @@ def senri_layers(
         num_heads: Number of attention heads
         intermediate_size: MLP intermediate dimension
         num_memories: Number of memory slots (1 = original Infini-Attention)
+        memory_head_dim: Memory head dimension (None = hidden_size for single-head)
         use_delta_rule: Use delta rule for memory update
 
     Returns:
@@ -112,6 +116,9 @@ def senri_layers(
 
         # Multiple memories
         layers = senri_layers(1, num_memories=4) + pythia_layers(5)
+
+        # Custom memory head dimension
+        layers = senri_layers(1, memory_head_dim=256) + pythia_layers(5)
     """
     return [
         SenriLayer(
@@ -119,6 +126,7 @@ def senri_layers(
             num_heads=num_heads,
             intermediate_size=intermediate_size,
             num_memories=num_memories,
+            memory_head_dim=memory_head_dim,
             use_delta_rule=use_delta_rule,
         )
         for _ in range(n)

@@ -1,17 +1,18 @@
 # Senri: Japanese LLM with Compressive Memory
 
-Senri is a Japanese LLM with Infini-Attention for efficient long-context processing.
+Senri is a Japanese LLM with unified compressive memory for efficient long-context processing.
 
 ## Overview
 
-Senri uses OpenCALM tokenizer with Infini-Attention, enabling infinite context processing through learned compressive memory. The architecture uses a layer-based design for maximum flexibility.
+Senri uses OpenCALM tokenizer with SenriLayer (unified compressive memory), enabling infinite context processing through learned memory. The architecture uses a simple layer-based design with just 2 layer types.
 
 ```
 Architecture:
   Token Embedding (512-dim, vocab=52,000)
          |
-  Layer 0: InfiniLayer (NoPE, Memory Only)
+  Layer 0: SenriLayer (NoPE, Memory Only)
     - Compressive Memory (linear attention)
+    - Configurable: num_memories, memory_head_dim
          |
   Layer 1-5: PythiaLayer (RoPE)
     - Multi-Head Attention
@@ -23,8 +24,9 @@ Architecture:
 ## Key Features
 
 - **Japanese LLM**: OpenCALM tokenizer (UNK-free, byte_fallback support)
-- **Layer-based Design**: Compose models from reusable layer types
+- **Simple Design**: Only 2 layer types (PythiaLayer, SenriLayer)
 - **Compressive Memory**: O(1) memory for infinite context via linear attention
+- **Flexible Configuration**: num_memories, memory_head_dim parameters
 - **Delta Rule**: Efficient memory update preventing information overwrite
 - **Memory Transfer**: Save/load memory state across devices
 
@@ -39,17 +41,23 @@ pip install torch transformers datasets
 ### Create Models
 
 ```python
-from src.models import TransformerLM, senri_layers, pythia_layers, multi_memory_layers
+from src.models import TransformerLM, senri_layers, pythia_layers
 
-# Senri model (1 Infini + 5 Pythia layers)
-model = TransformerLM(layers=senri_layers(), vocab_size=52000)
+# Senri model (1 SenriLayer + 5 PythiaLayers)
+model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=52000)
 
 # Pythia-only baseline
 model = TransformerLM(layers=pythia_layers(6), vocab_size=52000)
 
-# Custom configuration
+# Multiple memories
 model = TransformerLM(
-    layers=multi_memory_layers(1, num_memories=8) + pythia_layers(5),
+    layers=senri_layers(1, num_memories=4) + pythia_layers(5),
+    vocab_size=52000,
+)
+
+# Custom memory head dimension
+model = TransformerLM(
+    layers=senri_layers(1, memory_head_dim=256) + pythia_layers(5),
     vocab_size=52000,
 )
 
@@ -64,17 +72,17 @@ model.reset_memory()
 
 ```python
 import torch
-from src.models import TransformerLM, senri_layers
+from src.models import TransformerLM, senri_layers, pythia_layers
 
 # On PC A: Save memory state
-model = TransformerLM(layers=senri_layers(), vocab_size=52000)
+model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=52000)
 # ... training or processing ...
 state = model.get_memory_state()
 torch.save(state, "memory.pt")
 
 # On PC B: Load memory state
 state = torch.load("memory.pt")
-model = TransformerLM(layers=senri_layers(), vocab_size=52000)
+model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=52000)
 model.set_memory_state(state)
 # Memory is now restored!
 ```
@@ -87,9 +95,6 @@ python3 scripts/verify_senri.py
 
 # Context Separation Training (Reversal Curse)
 python3 scripts/experiment_context_reasoning.py
-
-# Baseline PPL evaluation
-python3 scripts/evaluate_baseline.py
 ```
 
 ## Tokenizer
@@ -116,8 +121,15 @@ tokenizer = get_open_calm_tokenizer()
 | Layer | Description |
 |-------|-------------|
 | `PythiaLayer` | Standard Pythia (RoPE + Softmax Attention) |
-| `InfiniLayer` | Infini-Attention (Memory + Linear Attention, NoPE) |
-| `MultiMemoryLayer` | Multiple independent memories with attention-based selection |
+| `SenriLayer` | Unified memory layer (Linear Attention, NoPE). Configurable: num_memories, memory_head_dim |
+
+### SenriLayer Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `num_memories` | 1 | Number of memory slots |
+| `memory_head_dim` | None (=hidden_size) | Memory head dimension. None = single-head (512) |
+| `use_delta_rule` | True | Use delta rule for memory update |
 
 ## Architecture Details
 
@@ -133,7 +145,7 @@ tokenizer = get_open_calm_tokenizer()
 | Vocab Size | 52,000 |
 | Tokenizer | cyberagent/open-calm-small |
 
-### Infini-Attention
+### SenriAttention (Compressive Memory)
 
 ```
 Memory Update (Delta Rule):
@@ -147,10 +159,10 @@ sigma(x) = ELU(x) + 1
 
 ### Memory Sizes
 
-| Model | Memory Size |
-|-------|-------------|
-| Infini | ~135 KB |
-| Multi-Memory (4) | ~540 KB |
+| Configuration | Memory Size |
+|---------------|-------------|
+| SenriLayer (num_memories=1) | ~135 KB |
+| SenriLayer (num_memories=4) | ~540 KB |
 
 ## Project Structure
 
@@ -167,8 +179,7 @@ senri/
 │   │   ├── layers/
 │   │   │   ├── base.py           # BaseLayer
 │   │   │   ├── pythia.py         # PythiaLayer
-│   │   │   ├── infini.py         # InfiniLayer
-│   │   │   └── multi_memory.py   # MultiMemoryLayer
+│   │   │   └── senri.py          # SenriLayer (unified memory layer)
 │   │   ├── model.py              # TransformerLM
 │   │   ├── base_components.py    # PythiaMLP, init_weights
 │   │   ├── memory_utils.py       # Linear attention utilities
@@ -179,8 +190,7 @@ senri/
 │       └── evaluation.py         # Evaluation utilities
 ├── scripts/
 │   ├── verify_senri.py           # Senri integration test
-│   ├── experiment_context_reasoning.py  # Reversal Curse experiment
-│   └── evaluate_baseline.py      # Baseline PPL evaluation
+│   └── experiment_context_reasoning.py  # Reversal Curse experiment
 ├── tests/
 ├── docs/
 │   └── experiments/              # Experiment results
@@ -203,8 +213,8 @@ Measures if a model trained on "A is B" can also infer "B is A".
 ## Development
 
 See `CLAUDE.md` for development guidelines including:
-- Layer-based architecture
-- SenriModelConfig usage
+- Layer-based architecture (2 layer types only)
+- SenriLayer configuration (num_memories, memory_head_dim)
 - Memory transfer API
 - Code quality rules
 - Past bugs and lessons
