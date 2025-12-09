@@ -25,6 +25,12 @@ def PYTHIA_MODEL() -> SenriModel:
     """
     return SenriModel(
         layers=[
+            # PythiaLayer引数:
+            #   hidden_size: 隠れ層の次元数
+            #   num_heads: Multi-Head Attentionのヘッド数
+            #   intermediate_size: MLP中間層の次元数（通常hidden_size * 4）
+            #   rotary_pct: RoPEを適用する次元の割合（0.25 = 25%）
+            #   max_position_embeddings: 最大位置埋め込み長（RoPEの周波数計算に使用）
             PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
             PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
             PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
@@ -48,6 +54,13 @@ def SENRI_MODEL() -> SenriModel:
     """
     return SenriModel(
         layers=[
+            # SenriLayer引数:
+            #   hidden_size: 隠れ層の次元数
+            #   num_heads: Linear Attentionのヘッド数
+            #   intermediate_size: MLP中間層の次元数
+            #   num_memories: メモリスロット数（>=2推奨: Working + Detail）
+            #   memory_head_dim: メモリ操作時のヘッド次元（=hidden_sizeでシングルヘッド推奨）
+            #   use_delta_rule: Delta Rule使用（メモリ上書き防止、True推奨）
             SenriLayer(hidden_size=512, num_heads=8, intermediate_size=2048, num_memories=2, memory_head_dim=512, use_delta_rule=True),
             PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
             PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
