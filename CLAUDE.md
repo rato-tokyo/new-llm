@@ -232,6 +232,10 @@ src/
 │   │   ├── base.py          # BaseLayer
 │   │   ├── pythia.py        # PythiaLayer
 │   │   └── senri.py         # SenriLayer（統一メモリレイヤー）
+│   ├── memory/              # メモリモジュール
+│   │   ├── __init__.py      # CompressiveMemory exports
+│   │   ├── base.py          # CompressiveMemory（圧縮メモリ実装）
+│   │   └── mixins.py        # FreezableMemoryMixin等
 │   ├── model.py             # TransformerLM
 │   ├── base_components.py   # PythiaMLP, init_weights
 │   ├── memory_utils.py      # Linear attention utilities
