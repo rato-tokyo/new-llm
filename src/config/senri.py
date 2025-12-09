@@ -84,35 +84,6 @@ class SenriModelConfig:
     tokenizer_name: str = OPEN_CALM_TOKENIZER
     layers: list[LayerConfigType] = field(default_factory=default_senri_layers)
 
-    # 読み取り専用プロパティ（後方互換性のため）
-    @property
-    def hidden_size(self) -> int:
-        """最初のレイヤーのhidden_size"""
-        return self.layers[0].hidden_size if self.layers else 512
-
-    @property
-    def num_layers(self) -> int:
-        """レイヤー数"""
-        return len(self.layers)
-
-    @property
-    def num_attention_heads(self) -> int:
-        """最初のレイヤーのnum_attention_heads"""
-        return self.layers[0].num_attention_heads if self.layers else 8
-
-    @property
-    def intermediate_size(self) -> int:
-        """最初のレイヤーのintermediate_size"""
-        return self.layers[0].intermediate_size if self.layers else 2048
-
-    @property
-    def max_position_embeddings(self) -> int:
-        """最初のPythiaレイヤーのmax_position_embeddings"""
-        for layer in self.layers:
-            if isinstance(layer, PythiaLayerConfig):
-                return layer.max_position_embeddings
-        return 2048
-
     def create_model(self) -> "TransformerLM":
         """設定からモデルを構築
 

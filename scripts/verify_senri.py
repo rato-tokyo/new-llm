@@ -62,26 +62,30 @@ def test_tokenizer():
     return all_passed
 
 
-def test_config():
-    """設定テスト"""
+def test_config_and_model():
+    """設定とモデルテスト"""
     print_flush("\n" + "=" * 70)
-    print_flush("2. CONFIG TEST")
+    print_flush("2. CONFIG & MODEL TEST")
     print_flush("=" * 70)
 
     config = SenriModelConfig()
-    print_flush(f"  vocab_size: {config.vocab_size:,}")
-    print_flush(f"  hidden_size: {config.hidden_size}")
-    print_flush(f"  num_layers: {config.num_layers}")
-    print_flush(f"  num_attention_heads: {config.num_attention_heads}")
-    print_flush(f"  intermediate_size: {config.intermediate_size}")
-    print_flush(f"  max_position_embeddings: {config.max_position_embeddings}")
-    print_flush(f"  tokenizer_name: {config.tokenizer_name}")
+    model = config.create_model()
+
+    print_flush("  Config:")
+    print_flush(f"    vocab_size: {config.vocab_size:,}")
+    print_flush(f"    tokenizer_name: {config.tokenizer_name}")
+    print_flush(f"    layers: {len(config.layers)}")
+
+    print_flush("  Model:")
+    print_flush(f"    vocab_size: {model.vocab_size:,}")
+    print_flush(f"    hidden_size: {model.hidden_size}")
+    print_flush(f"    num_layers: {model.num_layers}")
 
     # vocab_sizeがトークナイザーと一致するか確認
     tokenizer = get_open_calm_tokenizer()
-    match = config.vocab_size == tokenizer.vocab_size
+    match = model.vocab_size == tokenizer.vocab_size
     print_flush(f"\n  Vocab size match: {'OK' if match else 'MISMATCH'}")
-    print_flush(f"    Config: {config.vocab_size}, Tokenizer: {tokenizer.vocab_size}")
+    print_flush(f"    Model: {model.vocab_size}, Tokenizer: {tokenizer.vocab_size}")
 
     return match
 
@@ -97,7 +101,7 @@ def test_model_creation():
     config = SenriModelConfig.pythia_only(num_layers=6)
     model = config.create_model()
     params = sum(p.numel() for p in model.parameters())
-    print_flush(f"    Layers: {config.num_layers}")
+    print_flush(f"    Layers: {model.num_layers}")
     print_flush(f"    Parameters: {params:,}")
 
     # Infiniモデル（デフォルト）
@@ -105,7 +109,7 @@ def test_model_creation():
     config = SenriModelConfig.with_infini()
     model = config.create_model()
     params = sum(p.numel() for p in model.parameters())
-    print_flush(f"    Layers: {config.num_layers}")
+    print_flush(f"    Layers: {model.num_layers}")
     print_flush(f"    Parameters: {params:,}")
 
     # Multi-Memoryモデル
@@ -113,7 +117,7 @@ def test_model_creation():
     config = SenriModelConfig.with_multi_memory(num_memories=4)
     model = config.create_model()
     params = sum(p.numel() for p in model.parameters())
-    print_flush(f"    Layers: {config.num_layers}")
+    print_flush(f"    Layers: {model.num_layers}")
     print_flush(f"    Parameters: {params:,}")
 
     return True
@@ -226,8 +230,8 @@ def main():
     # 1. トークナイザーテスト
     results["tokenizer"] = test_tokenizer()
 
-    # 2. 設定テスト
-    results["config"] = test_config()
+    # 2. 設定とモデルテスト
+    results["config_and_model"] = test_config_and_model()
 
     # 3. モデル作成テスト
     results["model_creation"] = test_model_creation()
