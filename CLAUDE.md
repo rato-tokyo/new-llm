@@ -402,7 +402,7 @@ src/
 
 ```bash
 # Context Separation Training（Reversal Curse対策）
-python3 scripts/experiment_context_reasoning.py
+cd senri-fine-tuner && python3 experiment_context_reasoning.py
 ```
 
 ---

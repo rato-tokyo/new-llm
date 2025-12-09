@@ -270,10 +270,11 @@ senri/
 │       ├── training.py           # Training utilities
 │       └── evaluation.py         # Evaluation utilities
 ├── scripts/
-│   ├── quick_model.py            # Quick training & evaluation
-│   └── experiment_context_reasoning.py  # Reversal Curse experiment
+│   └── quick_model.py            # Quick training & evaluation
 ├── senri-fine-tuner/             # Fine-tuning toolkit (separate)
 │   ├── finetune.py               # Fine-tuning script
+│   ├── experiment_context_reasoning.py  # Reversal Curse experiment
+│   ├── family_relations.py       # Family relation data generator
 │   ├── data/                     # Training data
 │   └── README.md
 ├── tests/

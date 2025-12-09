@@ -1,21 +1,6 @@
 """Data utilities for New-LLM."""
 
-from .family_relations import (
-    FamilyPair,
-    generate_family_pairs,
-    split_pairs_for_experiment,
-    create_baseline_pattern_samples,
-    create_baseline_val_samples,
-    create_modified_pattern_samples,
-    create_modified_val_samples,
-)
+# Note: family_relations.py は senri-fine-tuner/ に移動しました
+# Reversal Curse実験関連は senri-fine-tuner/ を参照してください
 
-__all__ = [
-    "FamilyPair",
-    "generate_family_pairs",
-    "split_pairs_for_experiment",
-    "create_baseline_pattern_samples",
-    "create_baseline_val_samples",
-    "create_modified_pattern_samples",
-    "create_modified_val_samples",
-]
+__all__ = []

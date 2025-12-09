@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Optional
 
-sys.path.insert(0, ".")
+sys.path.insert(0, "..")
 
 import torch
 import torch.nn.functional as F
@@ -28,7 +28,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from src.config import ExperimentConfig, OPEN_CALM_TOKENIZER, OPEN_CALM_VOCAB_SIZE
 from src.models import TransformerLM, pythia_layers
-from src.data.family_relations import (
+from family_relations import (
     FamilyPair,
     create_baseline_pattern_samples,
     create_baseline_val_samples,
