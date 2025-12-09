@@ -222,12 +222,13 @@ output = model(input_ids)
 ```
 src/
 ├── config/
-│   ├── __init__.py          # Constants + ExperimentConfig
+│   ├── __init__.py          # 全設定のエクスポート
 │   ├── constants.py         # OPEN_CALM_TOKENIZER, OPEN_CALM_VOCAB_SIZE
+│   ├── models.py            # ★ モデル設定の一元管理（SENRI_CONFIG等）
 │   └── experiments/
-│       └── base.py          # ExperimentConfig
+│       └── base.py          # ExperimentConfig（訓練設定）
 ├── models/
-│   ├── __init__.py          # Layer factories + exports
+│   ├── __init__.py          # レイヤークラスのエクスポート
 │   ├── layers/
 │   │   ├── base.py          # BaseLayer
 │   │   ├── pythia.py        # PythiaLayer
@@ -246,6 +247,12 @@ src/
     └── evaluation.py        # 評価ユーティリティ
 ```
 
+**設定確認の優先順位**:
+1. `src/config/models.py` - モデル構成（レイヤー数、Senriレイヤー位置等）
+2. `src/config/experiments/base.py` - 訓練設定（lr, epochs等）
+3. `src/config/constants.py` - 定数（vocab_size等）
+
+---
 ---
 
 ## 🧪 実験スクリプト
@@ -268,6 +275,40 @@ python3 scripts/experiment_context_reasoning.py
 ---
 
 ## 🚨 CRITICAL: コード品質
+
+### 設定の一元管理 - 最重要
+
+**⚠️ モデル設定は必ず `src/config/models.py` に集約する。**
+
+**禁止事項**:
+- ❌ スクリプトごとにモデル構成を個別定義
+- ❌ ファクトリ関数を複数ファイルに分散
+- ❌ レイヤー構成をハードコード
+
+**正しいアプローチ**:
+```python
+# src/config/models.py に全て定義
+SENRI_CONFIG = ModelConfig(
+    num_layers=6,
+    senri_layer_indices=(0,),  # Layer 0のみSenri
+    num_memories=1,
+)
+
+# 使用側はConfigを参照するだけ
+from src.config import SENRI_CONFIG, create_model_from_config
+model = create_model_from_config(SENRI_CONFIG)
+```
+
+### Claude AIの傾向への注意
+
+**⚠️ Claude AIは以下の傾向があるため注意が必要：**
+
+1. **過度な分散化**: 設定を複数ファイルに分けたがる
+2. **ファクトリパターン偏重**: シンプルな設定でもファクトリ関数を作りたがる
+3. **抽象化過剰**: 不要なインターフェースや基底クラスを追加しがち
+
+**対策**: 設定は1ファイルに集約。「どこを見れば設定がわかるか」を常に意識する。
+
 
 ### 後方互換性コード禁止
 

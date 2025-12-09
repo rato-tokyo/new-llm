@@ -15,7 +15,7 @@ Usage:
     python3 scripts/quick_model.py --model senri --train --train-tokens 100000 --epochs 5
 
     # Senri with multiple memories
-    python3 scripts/quick_model.py --model senri --num-memories 4 --train
+    python3 scripts/quick_model.py --model senri-multi --train
 """
 
 import argparse
@@ -26,8 +26,16 @@ sys.path.insert(0, ".")
 
 import torch
 
-from src.config import OPEN_CALM_VOCAB_SIZE, OPEN_CALM_TOKENIZER
-from src.models import TransformerLM, pythia_layers, senri_layers
+from src.config import (
+    OPEN_CALM_VOCAB_SIZE,
+    OPEN_CALM_TOKENIZER,
+    PYTHIA_CONFIG,
+    SENRI_CONFIG,
+    SENRI_MULTI_MEMORY_CONFIG,
+    SENRI_ONLY_CONFIG,
+    create_model_from_config,
+)
+from src.models import TransformerLM
 from src.utils.data_pythia import load_pile_tokens_cached
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
@@ -35,22 +43,23 @@ from src.utils.tokenizer_utils import get_open_calm_tokenizer, test_tokenizer_co
 from src.utils.training import get_device
 
 
-def create_model(model_type: str, num_memories: int = 1) -> TransformerLM:
-    """モデルを作成"""
-    if model_type == "pythia":
-        layers = pythia_layers(6)
-        name = "Pythia (6 layers)"
-    elif model_type == "senri":
-        layers = senri_layers(1, num_memories=num_memories) + pythia_layers(5)
-        name = f"Senri (1 Senri + 5 Pythia, {num_memories} memories)"
-    elif model_type == "senri-only":
-        layers = senri_layers(6, num_memories=num_memories)
-        name = f"Senri-Only (6 Senri layers, {num_memories} memories)"
-    else:
-        raise ValueError(f"Unknown model type: {model_type}")
+# モデルタイプとConfigのマッピング
+MODEL_CONFIGS = {
+    "pythia": PYTHIA_CONFIG,
+    "senri": SENRI_CONFIG,
+    "senri-multi": SENRI_MULTI_MEMORY_CONFIG,
+    "senri-only": SENRI_ONLY_CONFIG,
+}
 
-    model = TransformerLM(layers=layers, vocab_size=OPEN_CALM_VOCAB_SIZE)
-    return model, name
+
+def create_model(model_type: str) -> TransformerLM:
+    """モデルを作成（src/config/models.pyの設定を使用）"""
+    if model_type not in MODEL_CONFIGS:
+        raise ValueError(f"Unknown model type: {model_type}. Available: {list(MODEL_CONFIGS.keys())}")
+
+    config = MODEL_CONFIGS[model_type]
+    model = create_model_from_config(config)
+    return model, config.describe()
 
 
 def train_model(
@@ -223,12 +232,8 @@ def main():
     parser = argparse.ArgumentParser(description="Quick Model Training & Evaluation")
     parser.add_argument(
         "--model", type=str, default="pythia",
-        choices=["pythia", "senri", "senri-only"],
-        help="Model type (default: pythia)"
-    )
-    parser.add_argument(
-        "--num-memories", type=int, default=1,
-        help="Number of memories for Senri (default: 1)"
+        choices=list(MODEL_CONFIGS.keys()),
+        help="Model type (default: pythia). See src/config/models.py for details."
     )
     parser.add_argument(
         "--num-tokens", type=int, default=50000,
@@ -293,7 +298,7 @@ def main():
     # モデル作成
     print_flush(f"\n[1] Creating model: {args.model}")
     start_time = time.time()
-    model, model_name = create_model(args.model, args.num_memories)
+    model, model_name = create_model(args.model)
     model = model.to(device)
     elapsed = time.time() - start_time
 
