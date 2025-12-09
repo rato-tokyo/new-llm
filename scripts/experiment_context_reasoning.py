@@ -26,7 +26,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from src.config import PythiaConfig, ExperimentConfig
+from src.config import OpenCalmConfig, ExperimentConfig
 from src.data.family_relations import (
     FamilyPair,
     create_baseline_pattern_samples,
@@ -371,7 +371,7 @@ def train_model(
 
 
 def run_baseline(
-    model_config: PythiaConfig,
+    model_config: OpenCalmConfig,
     exp_config: ExperimentConfig,
     pattern_pairs: list[FamilyPair],
     val_pairs: list[FamilyPair],
@@ -447,7 +447,7 @@ def run_baseline(
 
 
 def run_modified(
-    model_config: PythiaConfig,
+    model_config: OpenCalmConfig,
     exp_config: ExperimentConfig,
     pattern_pairs: list[FamilyPair],
     val_pairs: list[FamilyPair],
@@ -543,7 +543,7 @@ def main():
 
     set_seed(42)
     device = get_device()
-    model_config = PythiaConfig()
+    model_config = OpenCalmConfig()
 
     if exp_config.use_nope:
         model_config.rotary_pct = 0.0

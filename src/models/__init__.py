@@ -1,28 +1,28 @@
 """New-LLM Models
 
-Pythia-70M based experimental architectures.
+OpenCALM (Japanese LLM) based experimental architectures.
 Infini-Attention for compressive memory.
 
 ## Quick Start
 
 ```python
 from src.models import create_model
-from src.config import InfiniConfig, MultiMemoryConfig
+from src.config import OpenCalmConfig, InfiniConfig, MultiMemoryConfig
 
-# 標準Pythia
+# 標準モデル（OpenCALM設定）
 model = create_model("pythia")
 
-# Infini-Pythia (デフォルト設定)
+# Infiniモデル（デフォルト設定）
 model = create_model("infini")
 
-# Infini-Pythia (カスタム設定)
+# Infiniモデル（カスタム設定）
 config = InfiniConfig(num_memory_banks=2, segments_per_bank=8)
 model = create_model("infini", model_config=config)
 
-# Multi-Memory (デフォルト: 4メモリ)
+# Multi-Memory（デフォルト: 4メモリ）
 model = create_model("multi_memory")
 
-# Multi-Memory (カスタム設定)
+# Multi-Memory（カスタム設定）
 config = MultiMemoryConfig(num_memories=8, use_delta_rule=False)
 model = create_model("multi_memory", model_config=config)
 ```
@@ -43,15 +43,19 @@ model = TransformerLM(layers=layers)
 ```
 """
 
-from typing import Optional
+from typing import Optional, Union
 
 from src.config import (
     PythiaConfig,
+    OpenCalmConfig,
     InfiniConfig,
     MultiMemoryConfig,
     ModelConfigType,
     ModelTypeLiteral,
 )
+
+# Base config type (supports both PythiaConfig and OpenCalmConfig)
+BaseConfigType = Union[PythiaConfig, OpenCalmConfig]
 
 # Core models
 from .model import TransformerLM
@@ -91,7 +95,7 @@ from .position_encoding import (
 
 def create_model(
     model_type: ModelTypeLiteral,
-    base_config: Optional[PythiaConfig] = None,
+    base_config: Optional[BaseConfigType] = None,
     model_config: ModelConfigType = None,
 ):
     """
@@ -99,7 +103,8 @@ def create_model(
 
     Args:
         model_type: Model type ("pythia", "infini", "multi_memory")
-        base_config: PythiaConfig for base model structure (uses default if None)
+        base_config: OpenCalmConfig or PythiaConfig for base model structure
+            (uses OpenCalmConfig if None)
         model_config: Model-specific config (InfiniConfig or MultiMemoryConfig)
             If None, uses default config for the model type.
 
@@ -107,15 +112,15 @@ def create_model(
         TransformerLM instance
 
     Examples:
-        from src.config import InfiniConfig, MultiMemoryConfig
+        from src.config import OpenCalmConfig, InfiniConfig, MultiMemoryConfig
 
-        # Standard Pythia
+        # Standard model (OpenCALM config)
         model = create_model("pythia")
 
-        # Infini-Pythia (default config)
+        # Infini model (default config)
         model = create_model("infini")
 
-        # Infini-Pythia (custom config)
+        # Infini model (custom config)
         config = InfiniConfig(num_memory_banks=2, segments_per_bank=8)
         model = create_model("infini", model_config=config)
 
@@ -124,7 +129,7 @@ def create_model(
         model = create_model("multi_memory", model_config=config)
     """
     if base_config is None:
-        base_config = PythiaConfig()
+        base_config = OpenCalmConfig()
 
     h = base_config.hidden_size
     n = base_config.num_attention_heads

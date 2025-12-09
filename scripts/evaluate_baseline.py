@@ -2,7 +2,7 @@
 """
 Baseline PPL Evaluation Script
 
-オリジナルPythia-70mの長文PPLを測定し、ベースラインを確立する。
+Pretrained OpenCALMモデルの長文PPLを測定し、ベースラインを確立する。
 
 Usage:
     python3 scripts/evaluate_baseline.py --num-docs 10 --tokens-per-doc 4096
@@ -14,9 +14,9 @@ import sys
 sys.path.insert(0, ".")
 
 import torch
-from transformers import GPTNeoXForCausalLM
+from transformers import AutoModelForCausalLM
 
-from src.config import PythiaConfig, ExperimentConfig
+from src.config import OpenCalmConfig, ExperimentConfig
 from src.utils.data_pythia import load_long_documents_from_pile
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
@@ -140,8 +140,8 @@ def evaluate_ppl_full_context(model, documents: list, device: torch.device, max_
 def main():
     parser = argparse.ArgumentParser(description="Baseline PPL Evaluation")
 
-    # モデル名オプション（PythiaConfigから取得）
-    model_config = PythiaConfig()
+    # モデル名オプション（OpenCalmConfigから取得）
+    model_config = OpenCalmConfig()
     parser.add_argument(
         "--model", default=model_config.tokenizer_name,
         help=f"Model name (default: {model_config.tokenizer_name})"
@@ -190,8 +190,8 @@ def main():
     documents = load_long_documents_from_pile(tokenizer, exp_config.num_docs, exp_config.tokens_per_doc)
 
     # Load original model
-    print_flush("\nLoading original Pythia-70m...")
-    model = GPTNeoXForCausalLM.from_pretrained(args.model)
+    print_flush(f"\nLoading {args.model}...")
+    model = AutoModelForCausalLM.from_pretrained(args.model)
     model = model.to(device)
     model.eval()
 
