@@ -1,13 +1,20 @@
 """
 Pythia-70M Configuration
 
-Pythia-70Mモデルの設定。
+英語ベースラインモデル用のレガシー設定。
+日本語LLMにはSenriConfigを使用してください。
+
 https://huggingface.co/EleutherAI/pythia-70m
 """
 
 
 class PythiaConfig:
-    """Pythia-70M モデル設定 (Baseline)"""
+    """Pythia-70M モデル設定 (英語ベースライン用)
+
+    Note:
+        日本語LLMにはSenriConfigを使用してください。
+        このクラスは英語ベースライン実験用に残されています。
+    """
 
     # ========== モデル構造 ==========
     vocab_size = 50304              # Pythiaの語彙サイズ
@@ -18,17 +25,11 @@ class PythiaConfig:
     max_position_embeddings = 2048  # 最大シーケンス長
     rotary_pct = 0.25               # Rotary embeddingの割合
 
-    # ========== 学習設定 ==========
-    learning_rate = 1e-4            # 学習率
-    batch_size = 8                  # バッチサイズ
-    num_epochs = 30                 # 最大エポック数
-
     # ========== トークナイザー ==========
     tokenizer_name = "EleutherAI/pythia-70m"
 
 
-# ========== 実験デフォルト値 ==========
-# Early stopping
+# ========== 定数 ==========
 # NOTE: Do not change this value without explicit user approval
 EARLY_STOPPING_PATIENCE = 1
 

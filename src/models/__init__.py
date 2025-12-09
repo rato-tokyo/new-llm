@@ -7,7 +7,7 @@ Infini-Attention for efficient long-context processing.
 
 ```python
 from src.models import create_model
-from src.config import SenriConfig, InfiniConfig, MultiMemoryConfig
+from src.config import SenriConfig
 
 # 標準モデル（Senri設定）
 model = create_model("pythia")
@@ -16,15 +16,12 @@ model = create_model("pythia")
 model = create_model("infini")
 
 # Infiniモデル（カスタム設定）
-config = InfiniConfig(num_memory_banks=2, segments_per_bank=8)
-model = create_model("infini", model_config=config)
-
-# Multi-Memory（デフォルト: 4メモリ）
-model = create_model("multi_memory")
+config = SenriConfig(num_memory_banks=2, segments_per_bank=8)
+model = create_model("infini", config)
 
 # Multi-Memory（カスタム設定）
-config = MultiMemoryConfig(num_memories=8, use_delta_rule=False)
-model = create_model("multi_memory", model_config=config)
+config = SenriConfig(num_memories=8, use_delta_rule=False)
+model = create_model("multi_memory", config)
 ```
 
 ## Layer-based Construction
@@ -43,16 +40,9 @@ model = TransformerLM(layers=layers)
 ```
 """
 
-from typing import Optional, Union
+from typing import Optional
 
-from src.config import (
-    SenriConfig,
-    PythiaConfig,
-    InfiniConfig,
-    MultiMemoryConfig,
-    ModelConfigType,
-    ModelTypeLiteral,
-)
+from src.config import SenriConfig, PythiaConfig, ModelTypeLiteral
 
 # Core models
 from .model import TransformerLM  # noqa: E402
@@ -90,30 +80,24 @@ from .position_encoding import (  # noqa: E402
     apply_rotary_pos_emb,
 )
 
-# Base config type (supports SenriConfig and PythiaConfig)
-BaseConfigType = Union[SenriConfig, PythiaConfig]
-
 
 def create_model(
     model_type: ModelTypeLiteral,
-    base_config: Optional[BaseConfigType] = None,
-    model_config: ModelConfigType = None,
+    config: Optional[SenriConfig] = None,
 ):
     """
     Create a model by type.
 
     Args:
         model_type: Model type ("pythia", "infini", "multi_memory")
-        base_config: SenriConfig or PythiaConfig for base model structure
-            (uses SenriConfig if None)
-        model_config: Model-specific config (InfiniConfig or MultiMemoryConfig)
-            If None, uses default config for the model type.
+        config: SenriConfig for model structure and memory settings.
+            If None, uses default SenriConfig.
 
     Returns:
         TransformerLM instance
 
     Examples:
-        from src.config import SenriConfig, InfiniConfig, MultiMemoryConfig
+        from src.config import SenriConfig
 
         # Standard model (Senri config)
         model = create_model("pythia")
@@ -122,52 +106,48 @@ def create_model(
         model = create_model("infini")
 
         # Infini model (custom config)
-        config = InfiniConfig(num_memory_banks=2, segments_per_bank=8)
-        model = create_model("infini", model_config=config)
+        config = SenriConfig(num_memory_banks=2, segments_per_bank=8)
+        model = create_model("infini", config)
 
         # Multi-Memory (custom config)
-        config = MultiMemoryConfig(num_memories=8, use_delta_rule=False)
-        model = create_model("multi_memory", model_config=config)
+        config = SenriConfig(num_memories=8, use_delta_rule=False)
+        model = create_model("multi_memory", config)
     """
-    if base_config is None:
-        base_config = SenriConfig()
+    if config is None:
+        config = SenriConfig()
 
-    h = base_config.hidden_size
-    n = base_config.num_attention_heads
-    i = base_config.intermediate_size
-    r = base_config.rotary_pct
-    m = base_config.max_position_embeddings
+    h = config.hidden_size
+    n = config.num_attention_heads
+    i = config.intermediate_size
+    r = config.rotary_pct
+    m = config.max_position_embeddings
 
     def pythia_layers(count: int) -> list[BaseLayer]:
         return [PythiaLayer(h, n, i, r, m) for _ in range(count)]
 
     if model_type == "pythia":
-        layers = pythia_layers(base_config.num_layers)
+        layers = pythia_layers(config.num_layers)
         return TransformerLM(
             layers=layers,
-            vocab_size=base_config.vocab_size,
-            hidden_size=base_config.hidden_size,
+            vocab_size=config.vocab_size,
+            hidden_size=config.hidden_size,
         )
 
     elif model_type == "infini":
-        # Use InfiniConfig (default if not provided)
-        infini_cfg = model_config if isinstance(model_config, InfiniConfig) else InfiniConfig()
         layers = [
             InfiniLayer(
                 h, n, i,
-                infini_cfg.num_memory_banks,
-                infini_cfg.segments_per_bank,
-                infini_cfg.use_delta_rule,
+                config.num_memory_banks,
+                config.segments_per_bank,
+                config.use_delta_rule,
             ),
-            *pythia_layers(base_config.num_layers - 1),
+            *pythia_layers(config.num_layers - 1),
         ]
 
     elif model_type == "multi_memory":
-        # Use MultiMemoryConfig (default if not provided)
-        mm_cfg = model_config if isinstance(model_config, MultiMemoryConfig) else MultiMemoryConfig()
         layers = [
-            MultiMemoryLayer(h, n, i, mm_cfg.num_memories, mm_cfg.use_delta_rule),
-            *pythia_layers(base_config.num_layers - 1),
+            MultiMemoryLayer(h, n, i, config.num_memories, config.use_delta_rule),
+            *pythia_layers(config.num_layers - 1),
         ]
 
     else:
@@ -178,8 +158,8 @@ def create_model(
 
     return TransformerLM(
         layers=layers,
-        vocab_size=base_config.vocab_size,
-        hidden_size=base_config.hidden_size,
+        vocab_size=config.vocab_size,
+        hidden_size=config.hidden_size,
     )
 
 

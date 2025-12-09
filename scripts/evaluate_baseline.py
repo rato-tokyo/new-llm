@@ -16,7 +16,7 @@ sys.path.insert(0, ".")
 import torch
 from transformers import AutoModelForCausalLM
 
-from src.config import SenriConfig, ExperimentConfig
+from src.config import SenriConfig
 from src.utils.data_pythia import load_long_documents_from_pile
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
@@ -140,36 +140,32 @@ def evaluate_ppl_full_context(model, documents: list, device: torch.device, max_
 def main():
     parser = argparse.ArgumentParser(description="Baseline PPL Evaluation")
 
-    # モデル名オプション（SenriConfigから取得）
-    model_config = SenriConfig()
-    parser.add_argument(
-        "--model", default=model_config.tokenizer_name,
-        help=f"Model name (default: {model_config.tokenizer_name})"
-    )
+    # SenriConfigから設定を取得
+    config = SenriConfig()
 
-    # ExperimentConfigから評価関連の設定を追加
-    exp_config = ExperimentConfig()
     parser.add_argument(
-        "--num-docs", type=int, default=exp_config.num_docs,
-        help=f"Number of documents (default: {exp_config.num_docs})"
+        "--model", default=config.tokenizer_name,
+        help=f"Model name (default: {config.tokenizer_name})"
     )
     parser.add_argument(
-        "--tokens-per-doc", type=int, default=exp_config.tokens_per_doc,
-        help=f"Tokens per document (default: {exp_config.tokens_per_doc})"
+        "--num-docs", type=int, default=config.num_docs,
+        help=f"Number of documents (default: {config.num_docs})"
     )
     parser.add_argument(
-        "--seq-length", type=int, default=exp_config.seq_length,
-        help=f"Segment length for evaluation (default: {exp_config.seq_length})"
+        "--tokens-per-doc", type=int, default=config.tokens_per_doc,
+        help=f"Tokens per document (default: {config.tokens_per_doc})"
+    )
+    parser.add_argument(
+        "--seq-length", type=int, default=config.seq_length,
+        help=f"Segment length for evaluation (default: {config.seq_length})"
     )
 
     args = parser.parse_args()
 
     # argsから設定を更新
-    exp_config = ExperimentConfig(
-        num_docs=args.num_docs,
-        tokens_per_doc=args.tokens_per_doc,
-        seq_length=args.seq_length,
-    )
+    config.num_docs = args.num_docs
+    config.tokens_per_doc = args.tokens_per_doc
+    config.seq_length = args.seq_length
 
     set_seed(42)
     device = get_device()
@@ -179,15 +175,15 @@ def main():
     print_flush("=" * 70)
     print_flush(f"Model: {args.model}")
     print_flush(f"Device: {device}")
-    print_flush(f"Documents: {exp_config.num_docs}")
-    print_flush(f"Tokens per document: {exp_config.tokens_per_doc}")
-    print_flush(f"Segment length: {exp_config.seq_length}")
+    print_flush(f"Documents: {config.num_docs}")
+    print_flush(f"Tokens per document: {config.tokens_per_doc}")
+    print_flush(f"Segment length: {config.seq_length}")
 
     # Load tokenizer
     tokenizer = get_tokenizer(args.model)
 
     # Load documents
-    documents = load_long_documents_from_pile(tokenizer, exp_config.num_docs, exp_config.tokens_per_doc)
+    documents = load_long_documents_from_pile(tokenizer, config.num_docs, config.tokens_per_doc)
 
     # Load original model
     print_flush(f"\nLoading {args.model}...")
@@ -206,13 +202,13 @@ def main():
 
     # Method 1: Segment-based WITHOUT position_ids (problematic)
     print_flush("\n1. Segment-based WITHOUT position_ids (position resets each segment):")
-    ppl_no_pos = evaluate_ppl_standard(model, documents, device, exp_config.seq_length)
+    ppl_no_pos = evaluate_ppl_standard(model, documents, device, config.seq_length)
     print_flush(f"   PPL: {ppl_no_pos:.1f}")
     print_flush("   ⚠️ This is problematic - position_ids reset to 0 for each segment")
 
     # Method 2: Segment-based WITH correct position_ids
     print_flush("\n2. Segment-based WITH correct position_ids:")
-    ppl_with_pos = evaluate_ppl_with_position_ids(model, documents, device, exp_config.seq_length)
+    ppl_with_pos = evaluate_ppl_with_position_ids(model, documents, device, config.seq_length)
     print_flush(f"   PPL: {ppl_with_pos:.1f}")
     print_flush("   ✓ This preserves document position information")
 

@@ -4,7 +4,7 @@ Senri Configuration Module
 Senri: Japanese LLM with Compressive Memory
 """
 
-from .senri import SenriConfig
+from .senri import SenriConfig, ModelTypeLiteral
 from .pythia import (
     PythiaConfig,
     EARLY_STOPPING_PATIENCE,
@@ -14,29 +14,16 @@ from .open_calm import (
     OPEN_CALM_TOKENIZER,
     OPEN_CALM_VOCAB_SIZE,
 )
-from .experiment import ExperimentConfig
-from .models import (
-    InfiniConfig,
-    MultiMemoryConfig,
-    ModelConfigType,
-    ModelTypeLiteral,
-)
 
 __all__ = [
     # Main config
     "SenriConfig",
-    # Legacy config
+    "ModelTypeLiteral",
+    # Legacy config (for English baseline)
     "PythiaConfig",
     # OpenCALM tokenizer constants
     "OPEN_CALM_TOKENIZER",
     "OPEN_CALM_VOCAB_SIZE",
-    # Experimental model configs
-    "InfiniConfig",
-    "MultiMemoryConfig",
-    "ModelConfigType",
-    "ModelTypeLiteral",
-    # Experiment config
-    "ExperimentConfig",
     # Constants
     "EARLY_STOPPING_PATIENCE",
     "GRADIENT_CLIP",
