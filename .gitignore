@@ -14,8 +14,8 @@ cache/
 # User data files (keep README and examples only)
 data/*
 !data/README.md
-!data/example_train.txt
-!data/example_val.txt
+!data/example_*.txt
+!data/example_*.json
 
 # Python
 __pycache__/
