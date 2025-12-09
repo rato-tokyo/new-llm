@@ -99,13 +99,13 @@ Landmark = memory_norm = Σσ(k)
 従来: 複数の固定モデルクラス
 
 新設計: 1つの汎用モデル + 2つのレイヤータイプ
-  TransformerLM + [PythiaLayer, SenriLayer]
+  SenriModel + [PythiaLayer, SenriLayer]
 ```
 
 ### アーキテクチャ
 
 ```
-TransformerLM:
+SenriModel:
   Token Embedding (512-dim)
          ↓
   Layer 0, 1, ..., N-1 (任意のレイヤータイプ)
@@ -195,10 +195,17 @@ model = PYTHIA_MODEL()
 
 ```python
 import torch
-from src.models import TransformerLM, senri_layers, pythia_layers
+from src.models import SenriModel, SenriLayer, PythiaLayer
 
 # ===== PC A =====
-model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=52000)
+model = SenriModel([
+    SenriLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+])
 model.reset_memory()
 
 # テキスト処理でメモリを蓄積
@@ -211,7 +218,14 @@ torch.save(state, "memory.pt")
 
 # ===== PC B =====
 state = torch.load("memory.pt")
-model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=52000)
+model = SenriModel([
+    SenriLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+])
 model.set_memory_state(state)
 
 # メモリが引き継がれた状態で推論
@@ -234,7 +248,7 @@ src/
 ├── config/
 │   ├── __init__.py          # 全設定のエクスポート
 │   ├── constants.py         # OPEN_CALM_TOKENIZER, OPEN_CALM_VOCAB_SIZE
-│   ├── models.py            # ★ モデル設定の一元管理（SENRI_CONFIG等）
+│   ├── models.py            # ★ モデルプリセット（SENRI_MODEL等）
 │   └── experiments/
 │       └── base.py          # ExperimentConfig（訓練設定）
 ├── models/
@@ -247,7 +261,7 @@ src/
 │   │   ├── __init__.py      # CompressiveMemory exports
 │   │   ├── base.py          # CompressiveMemory（圧縮メモリ実装）
 │   │   └── mixins.py        # FreezableMemoryMixin等
-│   ├── model.py             # TransformerLM
+│   ├── model.py             # SenriModel
 │   ├── base_components.py   # PythiaMLP, init_weights
 │   ├── memory_utils.py      # Linear attention utilities
 │   └── position_encoding.py # RoPE
@@ -313,15 +327,52 @@ from src.config import SENRI_MODEL
 model = SENRI_MODEL()
 ```
 
-### Claude AIの傾向への注意
+### Claude AIの傾向への注意 - 最重要
 
 **⚠️ Claude AIは以下の傾向があるため注意が必要：**
 
 1. **過度な分散化**: 設定を複数ファイルに分けたがる
 2. **ファクトリパターン偏重**: シンプルな設定でもファクトリ関数を作りたがる
 3. **抽象化過剰**: 不要なインターフェースや基底クラスを追加しがち
+4. **直接レイヤー方式の回避**: なぜか直接レイヤーリストを渡す方式を避け、複雑なConfigやファクトリを提案しがち
 
 **対策**: 設定は1ファイルに集約。「どこを見れば設定がわかるか」を常に意識する。
+
+### 直接レイヤー方式の採用 - 必須
+
+**⚠️ 本プロジェクトでは直接レイヤー方式を必須とする。**
+
+```python
+# ✅ 推奨: 直接レイヤーリストを渡す（構造が一目でわかる）
+model = SenriModel([
+    SenriLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+])
+
+# ❌ 禁止: Configクラスやファクトリ関数による間接的な構築
+model = create_model(ModelConfig(
+    num_layers=6,
+    senri_layer_indices=[0],
+    ...
+))
+```
+
+**直接レイヤー方式の利点**:
+1. **可読性**: モデル構造がコードを見るだけで即座にわかる
+2. **柔軟性**: 任意のレイヤー構成を自由に表現できる
+3. **デバッグ容易**: 問題が起きた時にどのレイヤーか特定しやすい
+4. **学習コスト低**: 新しい開発者でも理解しやすい
+
+**Claude AIがファクトリ方式を提案する理由（推測）**:
+- 訓練データに含まれるOSSプロジェクトの多くがファクトリパターンを採用
+- 「設計パターン」の知識から、抽象化が「良いこと」と学習している
+- しかし、小規模プロジェクトでは過剰な抽象化は害になる
+
+**このプロジェクトでは**: 直接レイヤー方式を採用し、シンプルさを優先する。
 
 
 ### 後方互換性コード禁止
@@ -749,6 +800,8 @@ tokenizer = get_open_calm_tokenizer()
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-09 | **直接レイヤー方式を必須化**: Claude AIのファクトリ偏重傾向を記録し、直接レイヤーリスト方式を採用 |
+| 2025-12-09 | **SenriModel導入**: TransformerLMをSenriModelにリネーム、直接レイヤーリストを受け取るAPI |
 | 2025-12-09 | **SenriLayer統一**: InfiniLayer/MultiMemoryLayerを統合。num_memoriesパラメータで柔軟に構成 |
 | 2025-12-09 | **API簡素化**: LayerConfig/ModelConfig廃止、レイヤーファクトリ関数（senri_layers等）に統一 |
 | 2025-12-09 | **config/リファクタリング**: 定数とExperimentConfigのみに簡素化 |
