@@ -26,7 +26,7 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from src.config import PythiaConfig, GRADIENT_CLIP
+from src.config import PythiaConfig, ExperimentConfig
 from src.data.family_relations import (
     FamilyPair,
     create_baseline_pattern_samples,
@@ -371,14 +371,14 @@ def train_model(
 
 
 def run_baseline(
-    config: PythiaConfig,
+    model_config: PythiaConfig,
+    exp_config: ExperimentConfig,
     pattern_pairs: list[FamilyPair],
     val_pairs: list[FamilyPair],
     pile_samples: list[dict],
     pile_val_loader,
     tokenizer,
     device,
-    args,
 ) -> dict:
     """Baseline: 全文学習"""
     print_flush("\n" + "=" * 70)
@@ -396,7 +396,7 @@ def run_baseline(
 
     # データセット作成（Pileサンプルは共通）
     train_dataset = UnifiedDataset(
-        pile_samples, family_samples, tokenizer, seq_length=args.seq_length
+        pile_samples, family_samples, tokenizer, seq_length=exp_config.seq_length
     )
 
     print_flush(f"  Train samples: {len(train_dataset)}")
@@ -404,20 +404,20 @@ def run_baseline(
     print_flush(f"    - Pattern (forward+backward): {len(pattern_samples)}")
     print_flush(f"    - Val (forward only): {len(val_samples)}")
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=exp_config.batch_size, shuffle=True)
 
     # モデル作成
-    model = create_model("pythia", config)
+    model = create_model("pythia", base_config=model_config)
     model = model.to(device)
 
     print_flush(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=exp_config.learning_rate)
 
     print_flush("\n[Baseline] Training...")
     best_ppl, best_epoch, best_state = train_model(
         model, train_loader, pile_val_loader, optimizer, device,
-        args.epochs, args.patience, GRADIENT_CLIP
+        exp_config.num_epochs, exp_config.patience, exp_config.gradient_clip
     )
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
 
@@ -447,14 +447,14 @@ def run_baseline(
 
 
 def run_modified(
-    config: PythiaConfig,
+    model_config: PythiaConfig,
+    exp_config: ExperimentConfig,
     pattern_pairs: list[FamilyPair],
     val_pairs: list[FamilyPair],
     pile_samples: list[dict],
     pile_val_loader,
     tokenizer,
     device,
-    args,
 ) -> dict:
     """Modified: コンテキスト分離学習"""
     print_flush("\n" + "=" * 70)
@@ -472,7 +472,7 @@ def run_modified(
 
     # データセット作成（Pileサンプルは共通）
     train_dataset = UnifiedDataset(
-        pile_samples, family_samples, tokenizer, seq_length=args.seq_length
+        pile_samples, family_samples, tokenizer, seq_length=exp_config.seq_length
     )
 
     print_flush(f"  Train samples: {len(train_dataset)}")
@@ -480,20 +480,20 @@ def run_modified(
     print_flush(f"    - Pattern (context-separated): {len(pattern_samples)}")
     print_flush(f"    - Val (forward only): {len(val_samples)}")
 
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    train_loader = DataLoader(train_dataset, batch_size=exp_config.batch_size, shuffle=True)
 
     # モデル作成
-    model = create_model("pythia", config)
+    model = create_model("pythia", base_config=model_config)
     model = model.to(device)
 
     print_flush(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=exp_config.learning_rate)
 
     print_flush("\n[Modified] Training...")
     best_ppl, best_epoch, best_state = train_model(
         model, train_loader, pile_val_loader, optimizer, device,
-        args.epochs, args.patience, GRADIENT_CLIP
+        exp_config.num_epochs, exp_config.patience, exp_config.gradient_clip
     )
     print_flush(f"  Best: epoch {best_epoch}, ppl={best_ppl:.1f}")
 
@@ -531,55 +531,43 @@ def main():
     parser = argparse.ArgumentParser(
         description="Reversal Curse Generalization Experiment"
     )
-    parser.add_argument(
-        "--num-pairs", type=int, default=500,
-        help="Total number of family pairs"
-    )
-    parser.add_argument(
-        "--num-val-pairs", type=int, default=100,
-        help="Number of val pairs (for reversal curse test)"
-    )
-    parser.add_argument(
-        "--num-pile-samples", type=int, default=2000,
-        help="Number of Pile samples (fixed for fair comparison)"
-    )
-    parser.add_argument("--pile-tokens", type=int, default=500000)
-    parser.add_argument("--seq-length", type=int, default=128)
-    parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--batch-size", type=int, default=8)
-    parser.add_argument("--lr", type=float, default=1e-4)
-    parser.add_argument("--patience", type=int, default=1)
-    parser.add_argument("--nope", action="store_true", help="Use NoPE")
+
+    # ExperimentConfigからargparserに設定を追加
+    exp_config = ExperimentConfig()
+    exp_config.add_to_parser(parser)
 
     args = parser.parse_args()
 
+    # argsから設定を作成
+    exp_config = ExperimentConfig.from_args(args)
+
     set_seed(42)
     device = get_device()
-    config = PythiaConfig()
+    model_config = PythiaConfig()
 
-    if args.nope:
-        config.rotary_pct = 0.0
+    if exp_config.use_nope:
+        model_config.rotary_pct = 0.0
 
-    tokenizer = get_tokenizer(config.tokenizer_name)
+    tokenizer = get_tokenizer(model_config.tokenizer_name)
 
     # 実験情報
     print_flush("=" * 70)
     print_flush("REVERSAL CURSE GENERALIZATION EXPERIMENT")
     print_flush("=" * 70)
-    print_flush(f"Total pairs: {args.num_pairs}")
-    print_flush(f"  - Pattern pairs: {args.num_pairs - args.num_val_pairs}")
-    print_flush(f"  - Val pairs: {args.num_val_pairs}")
-    print_flush(f"Pile samples: {args.num_pile_samples} (fixed)")
-    print_flush(f"Sequence length: {args.seq_length}")
-    print_flush(f"Epochs: {args.epochs}")
-    print_flush(f"Position Encoding: {'NoPE' if args.nope else 'RoPE'}")
+    print_flush(f"Total pairs: {exp_config.num_pairs}")
+    print_flush(f"  - Pattern pairs: {exp_config.num_pairs - exp_config.num_val_pairs}")
+    print_flush(f"  - Val pairs: {exp_config.num_val_pairs}")
+    print_flush(f"Pile samples: {exp_config.num_pile_samples} (fixed)")
+    print_flush(f"Sequence length: {exp_config.seq_length}")
+    print_flush(f"Epochs: {exp_config.num_epochs}")
+    print_flush(f"Position Encoding: {'NoPE' if exp_config.use_nope else 'RoPE'}")
     print_flush("=" * 70)
 
     # データ準備
     print_flush("\n[Data] Generating family pairs...")
-    all_pairs = generate_family_pairs(args.num_pairs)
+    all_pairs = generate_family_pairs(exp_config.num_pairs)
     pattern_pairs, val_pairs = split_pairs_for_experiment(
-        all_pairs, num_val_pairs=args.num_val_pairs
+        all_pairs, num_val_pairs=exp_config.num_val_pairs
     )
 
     print_flush(f"  Pattern pairs: {len(pattern_pairs)}")
@@ -595,40 +583,40 @@ def main():
         print_flush(f"    {pair.parent_name} is {pair.child_name}'s {pair.relation}")
 
     print_flush("\n[Data] Loading Pile data...")
-    pile_tokens = load_pile_tokens_cached(args.pile_tokens, config.tokenizer_name)
+    pile_tokens = load_pile_tokens_cached(exp_config.pile_tokens, model_config.tokenizer_name)
 
     # Pileサンプル作成（Baseline/Modified共通）
     pile_samples = create_pile_samples(
-        pile_tokens, args.seq_length, args.num_pile_samples
+        pile_tokens, exp_config.seq_length, exp_config.num_pile_samples
     )
     print_flush(f"  Pile samples: {len(pile_samples)} (shared between Baseline/Modified)")
 
     # Pile validation用のDataLoader
-    val_size = args.pile_tokens // 10
+    val_size = exp_config.pile_tokens // 10
     pile_val_tokens = pile_tokens[-val_size:]
     pile_val_samples = []
-    for i in range(0, len(pile_val_tokens) - args.seq_length, args.seq_length):
-        tokens = pile_val_tokens[i : i + args.seq_length]
+    for i in range(0, len(pile_val_tokens) - exp_config.seq_length, exp_config.seq_length):
+        tokens = pile_val_tokens[i : i + exp_config.seq_length]
         pile_val_samples.append((tokens, tokens.clone()))
 
     pile_val_dataset = torch.utils.data.TensorDataset(
         torch.stack([s[0] for s in pile_val_samples]),
         torch.stack([s[1] for s in pile_val_samples]),
     )
-    pile_val_loader = DataLoader(pile_val_dataset, batch_size=args.batch_size)
+    pile_val_loader = DataLoader(pile_val_dataset, batch_size=exp_config.batch_size)
 
     results = {}
 
     # Baseline
     results["baseline"] = run_baseline(
-        config, pattern_pairs, val_pairs,
-        pile_samples, pile_val_loader, tokenizer, device, args
+        model_config, exp_config, pattern_pairs, val_pairs,
+        pile_samples, pile_val_loader, tokenizer, device
     )
 
     # Modified
     results["modified"] = run_modified(
-        config, pattern_pairs, val_pairs,
-        pile_samples, pile_val_loader, tokenizer, device, args
+        model_config, exp_config, pattern_pairs, val_pairs,
+        pile_samples, pile_val_loader, tokenizer, device
     )
 
     # サマリー
