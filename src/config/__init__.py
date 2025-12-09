@@ -1,13 +1,11 @@
 """
 Senri Configuration Module
 
-Senri: Japanese LLM with Compressive Memory
-
-設定は4つのモジュールに分離:
-- senri.py: Senriモデル全体の設定（SenriModelConfig）
-- layers.py: レイヤー構成（SenriLayerConfig, PythiaLayerConfig）
-- experiment.py: 実験設定（訓練、評価）
-- open_calm.py: トークナイザー定数
+設定は3つのサブパッケージに分離:
+- layers/: レイヤー設定（SenriLayerConfig, PythiaLayerConfig）
+- models/: モデル設定（SenriModelConfig, PythiaModelConfig）
+- experiments/: 実験設定（ExperimentConfig）
+- constants.py: 定数（OPEN_CALM_TOKENIZER等）
 
 Usage:
     from src.config import SenriModelConfig
@@ -32,8 +30,12 @@ Usage:
     model = create_model(layers)
 """
 
-# Senri model configuration (main entry point)
-from .senri import SenriModelConfig
+# Constants
+from .constants import (
+    OPEN_CALM_TOKENIZER,
+    OPEN_CALM_VOCAB_SIZE,
+    PYTHIA_TOKENIZER,
+)
 
 # Layer configurations
 from .layers import (
@@ -45,18 +47,23 @@ from .layers import (
     default_pythia_layers,
 )
 
-# Experiment configuration
-from .experiment import ExperimentConfig
+# Model configurations
+from .models import (
+    BaseModelConfig,
+    PythiaModelConfig,
+    SenriModelConfig,
+)
 
-# OpenCALM tokenizer constants
-from .open_calm import (
-    OPEN_CALM_TOKENIZER,
-    OPEN_CALM_VOCAB_SIZE,
+# Experiment configurations
+from .experiments import (
+    ExperimentConfig,
 )
 
 __all__ = [
-    # Model config
-    "SenriModelConfig",
+    # Constants
+    "OPEN_CALM_TOKENIZER",
+    "OPEN_CALM_VOCAB_SIZE",
+    "PYTHIA_TOKENIZER",
     # Layer configs
     "BaseLayerConfig",
     "PythiaLayerConfig",
@@ -64,9 +71,10 @@ __all__ = [
     "LayerConfigType",
     "default_senri_layers",
     "default_pythia_layers",
-    # Experiment config
+    # Model configs
+    "BaseModelConfig",
+    "PythiaModelConfig",
+    "SenriModelConfig",
+    # Experiment configs
     "ExperimentConfig",
-    # OpenCALM constants
-    "OPEN_CALM_TOKENIZER",
-    "OPEN_CALM_VOCAB_SIZE",
 ]

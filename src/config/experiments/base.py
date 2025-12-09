@@ -1,20 +1,7 @@
 """
-Experiment Configuration
+Base Experiment Configuration
 
-実験固有の設定を管理。モデル構造とは分離。
-
-Usage:
-    from src.config import ExperimentConfig
-
-    # デフォルト設定
-    config = ExperimentConfig()
-
-    # カスタム設定
-    config = ExperimentConfig(num_epochs=50, batch_size=16)
-
-    # CLIから設定
-    config.add_to_parser(parser)
-    config = ExperimentConfig.from_args(args)
+実験共通の設定を定義。
 """
 
 from dataclasses import dataclass
@@ -57,62 +44,86 @@ class ExperimentConfig:
         """argparserに設定を追加"""
         # 訓練設定
         parser.add_argument(
-            "--epochs", type=int, default=self.num_epochs,
-            help=f"Number of epochs (default: {self.num_epochs})"
+            "--epochs",
+            type=int,
+            default=self.num_epochs,
+            help=f"Number of epochs (default: {self.num_epochs})",
         )
         parser.add_argument(
-            "--batch-size", type=int, default=self.batch_size,
-            help=f"Batch size (default: {self.batch_size})"
+            "--batch-size",
+            type=int,
+            default=self.batch_size,
+            help=f"Batch size (default: {self.batch_size})",
         )
         parser.add_argument(
-            "--lr", type=float, default=self.learning_rate,
-            help=f"Learning rate (default: {self.learning_rate})"
+            "--lr",
+            type=float,
+            default=self.learning_rate,
+            help=f"Learning rate (default: {self.learning_rate})",
         )
         parser.add_argument(
-            "--patience", type=int, default=self.patience,
-            help=f"Early stopping patience (default: {self.patience})"
+            "--patience",
+            type=int,
+            default=self.patience,
+            help=f"Early stopping patience (default: {self.patience})",
         )
 
         # シーケンス設定
         parser.add_argument(
-            "--seq-length", type=int, default=self.seq_length,
-            help=f"Sequence length (default: {self.seq_length})"
+            "--seq-length",
+            type=int,
+            default=self.seq_length,
+            help=f"Sequence length (default: {self.seq_length})",
         )
 
         # データ設定
         parser.add_argument(
-            "--pile-tokens", type=int, default=self.pile_tokens,
-            help=f"Number of Pile tokens (default: {self.pile_tokens})"
+            "--pile-tokens",
+            type=int,
+            default=self.pile_tokens,
+            help=f"Number of Pile tokens (default: {self.pile_tokens})",
         )
         parser.add_argument(
-            "--num-pile-samples", type=int, default=self.num_pile_samples,
-            help=f"Number of Pile samples (default: {self.num_pile_samples})"
+            "--num-pile-samples",
+            type=int,
+            default=self.num_pile_samples,
+            help=f"Number of Pile samples (default: {self.num_pile_samples})",
         )
 
         # Reversal Curse設定
         parser.add_argument(
-            "--num-pairs", type=int, default=self.num_pairs,
-            help=f"Total number of family pairs (default: {self.num_pairs})"
+            "--num-pairs",
+            type=int,
+            default=self.num_pairs,
+            help=f"Total number of family pairs (default: {self.num_pairs})",
         )
         parser.add_argument(
-            "--num-val-pairs", type=int, default=self.num_val_pairs,
-            help=f"Number of val pairs (default: {self.num_val_pairs})"
+            "--num-val-pairs",
+            type=int,
+            default=self.num_val_pairs,
+            help=f"Number of val pairs (default: {self.num_val_pairs})",
         )
 
         # 評価設定
         parser.add_argument(
-            "--num-docs", type=int, default=self.num_docs,
-            help=f"Number of documents for evaluation (default: {self.num_docs})"
+            "--num-docs",
+            type=int,
+            default=self.num_docs,
+            help=f"Number of documents for evaluation (default: {self.num_docs})",
         )
         parser.add_argument(
-            "--tokens-per-doc", type=int, default=self.tokens_per_doc,
-            help=f"Tokens per document (default: {self.tokens_per_doc})"
+            "--tokens-per-doc",
+            type=int,
+            default=self.tokens_per_doc,
+            help=f"Tokens per document (default: {self.tokens_per_doc})",
         )
 
         # 位置エンコーディング
         parser.add_argument(
-            "--nope", action="store_true", default=self.use_nope,
-            help="Use NoPE (No Position Encoding)"
+            "--nope",
+            action="store_true",
+            default=self.use_nope,
+            help="Use NoPE (No Position Encoding)",
         )
 
     @classmethod

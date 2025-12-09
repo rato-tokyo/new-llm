@@ -248,25 +248,32 @@ output = model(input_ids)
 ```
 src/
 ├── config/
-│   ├── __init__.py      # SenriModelConfig, LayerConfig exports
-│   ├── senri.py         # SenriModelConfig（推奨エントリポイント）
-│   ├── layers.py        # SenriLayerConfig, PythiaLayerConfig
-│   ├── experiment.py    # ExperimentConfig（訓練設定）
-│   └── open_calm.py     # トークナイザー定数
+│   ├── __init__.py          # Public exports
+│   ├── constants.py         # OPEN_CALM_TOKENIZER, OPEN_CALM_VOCAB_SIZE
+│   ├── layers/              # レイヤー設定
+│   │   ├── base.py          # BaseLayerConfig
+│   │   ├── pythia.py        # PythiaLayerConfig
+│   │   └── senri.py         # SenriLayerConfig
+│   ├── models/              # モデル設定
+│   │   ├── base.py          # BaseModelConfig
+│   │   ├── pythia.py        # PythiaModelConfig
+│   │   └── senri.py         # SenriModelConfig
+│   └── experiments/         # 実験設定
+│       └── base.py          # ExperimentConfig
 ├── models/
-│   ├── __init__.py      # create_model() + exports
-│   ├── layers/          # レイヤーパッケージ
-│   │   ├── base.py      # BaseLayer 基底クラス
-│   │   ├── pythia.py    # PythiaLayer (RoPE + Softmax)
-│   │   ├── infini.py    # InfiniLayer (Memory + Linear)
+│   ├── __init__.py          # create_model() + exports
+│   ├── layers/              # レイヤーパッケージ
+│   │   ├── base.py          # BaseLayer 基底クラス
+│   │   ├── pythia.py        # PythiaLayer (RoPE + Softmax)
+│   │   ├── infini.py        # InfiniLayer (Memory + Linear)
 │   │   └── multi_memory.py  # MultiMemoryLayer
-│   ├── model.py         # TransformerLM（汎用モデル）
+│   ├── model.py             # TransformerLM（汎用モデル）
 │   ├── base_components.py   # PythiaMLP, init_weights
-│   ├── memory_utils.py  # Linear attention utilities
+│   ├── memory_utils.py      # Linear attention utilities
 │   └── position_encoding.py # RoPE
 └── utils/
     ├── tokenizer_utils.py   # get_tokenizer, get_open_calm_tokenizer
-    ├── training.py      # 訓練ユーティリティ
+    ├── training.py          # 訓練ユーティリティ
     └── evaluation.py    # 評価ユーティリティ
 ```
 
@@ -718,6 +725,7 @@ tokenizer = get_open_calm_tokenizer()
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-09 | **config/リファクタリング**: layers/, models/, experiments/の3サブパッケージに分離。PythiaModelConfig追加 |
 | 2025-12-09 | **SenriModelConfig追加**: LayerConfigベースのモデル構築。ファクトリパターン廃止 |
 | 2025-12-09 | **Senri命名**: プロジェクト名をSenriに決定 |
 | 2025-12-09 | **OpenCALM採用**: 日本語LLM対応。OpenCALMトークナイザーを使用 |

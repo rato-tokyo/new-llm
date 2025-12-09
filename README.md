@@ -180,10 +180,18 @@ sigma(x) = ELU(x) + 1
 senri/
 ├── src/
 │   ├── config/
-│   │   ├── senri.py              # SenriModelConfig (main entry)
-│   │   ├── layers.py             # SenriLayerConfig, PythiaLayerConfig
-│   │   ├── experiment.py         # ExperimentConfig
-│   │   └── open_calm.py          # OpenCALM tokenizer constants
+│   │   ├── __init__.py           # Public exports
+│   │   ├── constants.py          # OPEN_CALM_TOKENIZER, OPEN_CALM_VOCAB_SIZE
+│   │   ├── layers/               # Layer configurations
+│   │   │   ├── base.py           # BaseLayerConfig
+│   │   │   ├── pythia.py         # PythiaLayerConfig
+│   │   │   └── senri.py          # SenriLayerConfig
+│   │   ├── models/               # Model configurations
+│   │   │   ├── base.py           # BaseModelConfig
+│   │   │   ├── pythia.py         # PythiaModelConfig
+│   │   │   └── senri.py          # SenriModelConfig
+│   │   └── experiments/          # Experiment configurations
+│   │       └── base.py           # ExperimentConfig
 │   ├── models/
 │   │   ├── __init__.py           # create_model()
 │   │   ├── layers/               # Layer package

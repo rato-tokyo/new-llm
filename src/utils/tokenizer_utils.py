@@ -8,9 +8,6 @@ from transformers import AutoTokenizer, PreTrainedTokenizer
 
 from src.config import OPEN_CALM_TOKENIZER
 
-# 定義済みトークナイザー名（OpenCALM以外）
-PYTHIA_TOKENIZER = "EleutherAI/pythia-70m"
-
 
 def get_tokenizer(model_name: str = OPEN_CALM_TOKENIZER) -> PreTrainedTokenizer:
     """

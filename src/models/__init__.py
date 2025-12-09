@@ -45,9 +45,8 @@ model = TransformerLM(layers=layers, vocab_size=52000, hidden_size=512)
 
 from typing import Optional
 
-from src.config import OPEN_CALM_VOCAB_SIZE
-from src.config.layers import (
-    BaseLayerConfig,
+from src.config import (
+    OPEN_CALM_VOCAB_SIZE,
     PythiaLayerConfig,
     SenriLayerConfig,
     LayerConfigType,
