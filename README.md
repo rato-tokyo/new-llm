@@ -91,6 +91,42 @@ python3 scripts/quick_model.py --model pythia --train --epochs 3
 python3 scripts/quick_model.py --model senri --train --train-tokens 500000 --epochs 5
 ```
 
+### Fine-tuning with Custom Knowledge
+
+カスタム知識データでSenriモデルをファインチューニング。
+知識をメモリに固定し、QAパターンのみを学習（CDR方式）。
+
+```bash
+# 基本的な使い方
+python3 scripts/finetune.py --data data/example_knowledge.json --epochs 10
+
+# ベースモデルを指定
+python3 scripts/finetune.py --data data/custom.json --base-model models/pretrained.pt
+
+# 出力先を指定
+python3 scripts/finetune.py --data data/custom.json --output models/finetuned.pt
+```
+
+**入力データ形式（JSON）**:
+```json
+{
+  "instances": [
+    {
+      "knowledge": "東京は日本の首都です。人口は約1400万人。",
+      "qa_pairs": [
+        {"question": "日本の首都は？", "answer": "東京"},
+        {"question": "東京の人口は？", "answer": "約1400万人"}
+      ]
+    }
+  ]
+}
+```
+
+**訓練の仕組み**:
+1. `knowledge`をコンテキストとしてメモリに書き込み
+2. `question → answer` の推論パターンを学習
+3. `knowledge`部分はloss計算から除外（丸暗記を防止）
+
 ### Memory Transfer
 
 ```python
