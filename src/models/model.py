@@ -1,23 +1,33 @@
 """
-Unified Transformer Language Model
+Senri Model - Japanese LLM with Compressive Memory
 
-レイヤーリストを受け取る汎用モデル。
-レイヤーを組み合わせることで様々なアーキテクチャを実現。
+レイヤーリストを受け取り、モデルを構築。
 
 使用例:
-    from src.models.model import TransformerLM
-    from src.models.layers import SenriLayer, PythiaLayer
+    from src.models import SenriModel, SenriLayer, PythiaLayer
 
-    # Senri-Pythia: 1層目Senri + 5層Pythia
-    layers = [
-        SenriLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
-        *[PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048) for _ in range(5)]
-    ]
-    model = TransformerLM(layers=layers)
+    # Senri: 1層目Senri + 5層Pythia
+    model = SenriModel([
+        SenriLayer(),
+        PythiaLayer(),
+        PythiaLayer(),
+        PythiaLayer(),
+        PythiaLayer(),
+        PythiaLayer(),
+    ])
 
     # 複数メモリ構成
-    layers = [SenriLayer(num_memories=4, ...), ...]
-    model = TransformerLM(layers=layers)
+    model = SenriModel([
+        SenriLayer(num_memories=4),
+        PythiaLayer(),
+        PythiaLayer(),
+        PythiaLayer(),
+        PythiaLayer(),
+        PythiaLayer(),
+    ])
+
+    # Pythiaのみ（ベースライン）
+    model = SenriModel([PythiaLayer() for _ in range(6)])
 """
 
 from typing import Optional
@@ -28,17 +38,18 @@ import torch.nn as nn
 from src.models.base_components import init_weights
 from src.models.layers import BaseLayer
 
+# デフォルト値（循環インポートを避けるため直接定義）
+DEFAULT_VOCAB_SIZE = 52000  # OpenCALM vocab size
 
-class TransformerLM(nn.Module):
+
+class SenriModel(nn.Module):
     """
-    Unified Transformer Language Model
-
-    レイヤーリストを受け取り、共通の構造で言語モデルを構築。
+    Senri Model - Japanese LLM with Compressive Memory
 
     構造:
         Token Embedding
             ↓
-        Layer 0, 1, ..., N-1 (任意のレイヤータイプ)
+        Layer 0, 1, ..., N-1 (SenriLayer / PythiaLayer)
             ↓
         Final LayerNorm
             ↓
@@ -48,14 +59,14 @@ class TransformerLM(nn.Module):
     def __init__(
         self,
         layers: list[BaseLayer],
-        vocab_size: int = 50304,
+        vocab_size: int = DEFAULT_VOCAB_SIZE,
         hidden_size: int = 512,
     ):
         """
         Args:
-            layers: レイヤーのリスト（任意のBaseLayerサブクラス）
-            vocab_size: 語彙サイズ
-            hidden_size: 隠れ層次元
+            layers: レイヤーのリスト（SenriLayer, PythiaLayer等）
+            vocab_size: 語彙サイズ（デフォルト: OpenCALM 52,000）
+            hidden_size: 隠れ層次元（デフォルト: 512）
         """
         super().__init__()
 
@@ -249,3 +260,20 @@ class TransformerLM(nn.Module):
             "transformer": sum(layer_params),
             "per_layer": layer_params,
         }
+
+    def describe(self) -> str:
+        """モデル構成の説明文を返す"""
+        layer_types = [layer.__class__.__name__ for layer in self.layers]
+        senri_count = sum(1 for t in layer_types if t == "SenriLayer")
+        pythia_count = sum(1 for t in layer_types if t == "PythiaLayer")
+
+        if senri_count == 0:
+            return f"Pythia ({pythia_count} layers)"
+        elif pythia_count == 0:
+            return f"Senri-Only ({senri_count} layers)"
+        else:
+            return f"Senri ({senri_count} Senri + {pythia_count} Pythia)"
+
+
+# 後方互換性のためのエイリアス
+TransformerLM = SenriModel

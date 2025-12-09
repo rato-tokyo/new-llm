@@ -12,14 +12,19 @@ from src.models.base_components import PythiaMLP
 from src.models.position_encoding import RotaryEmbedding, apply_rotary_pos_emb
 from .base import BaseLayer
 
+# デフォルト値
+DEFAULT_HIDDEN_SIZE = 512
+DEFAULT_NUM_HEADS = 8
+DEFAULT_INTERMEDIATE_SIZE = 2048
+
 
 class PythiaAttention(nn.Module):
     """Pythia Multi-Head Attention with Rotary Embedding"""
 
     def __init__(
         self,
-        hidden_size: int,
-        num_heads: int,
+        hidden_size: int = DEFAULT_HIDDEN_SIZE,
+        num_heads: int = DEFAULT_NUM_HEADS,
         rotary_pct: float = 0.25,
         max_position_embeddings: int = 2048,
     ):
@@ -93,13 +98,27 @@ class PythiaLayer(BaseLayer):
     - RoPE (Rotary Position Embedding)
     - Softmax Attention
     - Parallel Attention + MLP
+
+    Args:
+        hidden_size: Hidden dimension (default: 512)
+        num_heads: Number of attention heads (default: 8)
+        intermediate_size: MLP intermediate dimension (default: 2048)
+        rotary_pct: Rotary embedding percentage (default: 0.25)
+        max_position_embeddings: Maximum sequence length (default: 2048)
+
+    Example:
+        # デフォルト設定
+        layer = PythiaLayer()
+
+        # カスタム設定
+        layer = PythiaLayer(hidden_size=768, num_heads=12)
     """
 
     def __init__(
         self,
-        hidden_size: int,
-        num_heads: int,
-        intermediate_size: int,
+        hidden_size: int = DEFAULT_HIDDEN_SIZE,
+        num_heads: int = DEFAULT_NUM_HEADS,
+        intermediate_size: int = DEFAULT_INTERMEDIATE_SIZE,
         rotary_pct: float = 0.25,
         max_position_embeddings: int = 2048,
     ):

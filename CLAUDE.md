@@ -127,47 +127,57 @@ TransformerLM:
 ## 🏭 モデル作成
 
 ```python
-from src.models import TransformerLM, senri_layers, pythia_layers
+from src.models import SenriModel, SenriLayer, PythiaLayer
 
-# Senriモデル（1 Senri + 5 Pythia）
-model = TransformerLM(layers=senri_layers(1) + pythia_layers(5), vocab_size=52000)
+# Senri: 1 Senri + 5 Pythia（推奨）
+model = SenriModel([
+    SenriLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+])
 
-# Pythiaモデル（ベースライン）
-model = TransformerLM(layers=pythia_layers(6), vocab_size=52000)
+# Pythia ベースライン
+model = SenriModel([PythiaLayer() for _ in range(6)])
 
 # 複数メモリ構成
-model = TransformerLM(
-    layers=senri_layers(1, num_memories=4) + pythia_layers(5),
-    vocab_size=52000,
-)
+model = SenriModel([
+    SenriLayer(num_memories=4),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+])
 
-# 直接レイヤー構築
-from src.models import SenriLayer, PythiaLayer
+# プリセットを使用（簡潔）
+from src.config import SENRI_MODEL, PYTHIA_MODEL
 
-model = TransformerLM(
-    layers=[
-        SenriLayer(hidden_size=512, num_heads=8, intermediate_size=2048, num_memories=4),
-        PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
-        PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
-    ],
-    vocab_size=52000,
-)
+model = SENRI_MODEL()
+model = PYTHIA_MODEL()
 ```
 
-### レイヤーファクトリ関数
+### レイヤーパラメータ
 
-| 関数 | 説明 |
-|------|------|
-| `senri_layers(n=1, num_memories=1, memory_head_dim=None)` | SenriLayerのリスト |
-| `pythia_layers(n=6)` | PythiaLayerのリスト |
-
-### SenriLayerパラメータ
-
+**SenriLayer**（全てデフォルト値あり、引数なしで使用可能）:
 | パラメータ | デフォルト | 説明 |
 |-----------|-----------|------|
-| `num_memories` | 1 | メモリスロット数（1=単一メモリ、>1=複数メモリ） |
-| `memory_head_dim` | None (=hidden_size) | メモリヘッド次元。Noneでシングルヘッド（512次元） |
-| `use_delta_rule` | True | Delta Ruleによるメモリ更新 |
+| `hidden_size` | 512 | 隠れ層次元 |
+| `num_heads` | 8 | アテンションヘッド数 |
+| `intermediate_size` | 2048 | MLP中間層次元 |
+| `num_memories` | 1 | メモリスロット数 |
+| `memory_head_dim` | None (=hidden_size) | メモリヘッド次元 |
+| `use_delta_rule` | True | Delta Rule使用 |
+
+**PythiaLayer**（全てデフォルト値あり）:
+| パラメータ | デフォルト | 説明 |
+|-----------|-----------|------|
+| `hidden_size` | 512 | 隠れ層次元 |
+| `num_heads` | 8 | アテンションヘッド数 |
+| `intermediate_size` | 2048 | MLP中間層次元 |
+| `rotary_pct` | 0.25 | RoPE適用率 |
 
 ### 訓練設定のデフォルト値
 
@@ -278,25 +288,29 @@ python3 scripts/experiment_context_reasoning.py
 
 ### 設定の一元管理 - 最重要
 
-**⚠️ モデル設定は必ず `src/config/models.py` に集約する。**
+**⚠️ モデルプリセットは `src/config/models.py` に集約。**
 
 **禁止事項**:
 - ❌ スクリプトごとにモデル構成を個別定義
-- ❌ ファクトリ関数を複数ファイルに分散
-- ❌ レイヤー構成をハードコード
+- ❌ 過度な抽象化やファクトリ関数の乱用
 
 **正しいアプローチ**:
 ```python
-# src/config/models.py に全て定義
-SENRI_CONFIG = ModelConfig(
-    num_layers=6,
-    senri_layer_indices=(0,),  # Layer 0のみSenri
-    num_memories=1,
-)
+# 直接レイヤーリストを記述（構造が一目でわかる）
+from src.models import SenriModel, SenriLayer, PythiaLayer
 
-# 使用側はConfigを参照するだけ
-from src.config import SENRI_CONFIG, create_model_from_config
-model = create_model_from_config(SENRI_CONFIG)
+model = SenriModel([
+    SenriLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+    PythiaLayer(),
+])
+
+# または、プリセットを使用
+from src.config import SENRI_MODEL
+model = SENRI_MODEL()
 ```
 
 ### Claude AIの傾向への注意

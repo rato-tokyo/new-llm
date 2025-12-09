@@ -29,13 +29,10 @@ import torch
 from src.config import (
     OPEN_CALM_VOCAB_SIZE,
     OPEN_CALM_TOKENIZER,
-    PYTHIA_CONFIG,
-    SENRI_CONFIG,
-    SENRI_MULTI_MEMORY_CONFIG,
-    SENRI_ONLY_CONFIG,
-    create_model_from_config,
+    MODEL_PRESETS,
+    create_model,
 )
-from src.models import TransformerLM
+from src.models import SenriModel
 from src.utils.data_pythia import load_pile_tokens_cached
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
@@ -43,27 +40,14 @@ from src.utils.tokenizer_utils import get_open_calm_tokenizer, test_tokenizer_co
 from src.utils.training import get_device
 
 
-# モデルタイプとConfigのマッピング
-MODEL_CONFIGS = {
-    "pythia": PYTHIA_CONFIG,
-    "senri": SENRI_CONFIG,
-    "senri-multi": SENRI_MULTI_MEMORY_CONFIG,
-    "senri-only": SENRI_ONLY_CONFIG,
-}
-
-
-def create_model(model_type: str) -> TransformerLM:
-    """モデルを作成（src/config/models.pyの設定を使用）"""
-    if model_type not in MODEL_CONFIGS:
-        raise ValueError(f"Unknown model type: {model_type}. Available: {list(MODEL_CONFIGS.keys())}")
-
-    config = MODEL_CONFIGS[model_type]
-    model = create_model_from_config(config)
-    return model, config.describe()
+def get_model(model_type: str) -> SenriModel:
+    """モデルを作成（src/config/models.pyのプリセットを使用）"""
+    model = create_model(model_type)
+    return model, model.describe()
 
 
 def train_model(
-    model: TransformerLM,
+    model: SenriModel,
     tokens: torch.Tensor,
     device: torch.device,
     seq_length: int = 128,
@@ -133,7 +117,7 @@ def train_model(
 
 
 def evaluate_ppl(
-    model: TransformerLM,
+    model: SenriModel,
     tokens: torch.Tensor,
     device: torch.device,
     seq_length: int = 128,
@@ -199,7 +183,7 @@ def test_tokenizer() -> bool:
 
 
 def test_generation(
-    model: TransformerLM,
+    model: SenriModel,
     device: torch.device,
     prompt: str = "今日は",
     max_tokens: int = 20,
@@ -232,7 +216,7 @@ def main():
     parser = argparse.ArgumentParser(description="Quick Model Training & Evaluation")
     parser.add_argument(
         "--model", type=str, default="pythia",
-        choices=list(MODEL_CONFIGS.keys()),
+        choices=list(MODEL_PRESETS.keys()),
         help="Model type (default: pythia). See src/config/models.py for details."
     )
     parser.add_argument(
@@ -298,7 +282,7 @@ def main():
     # モデル作成
     print_flush(f"\n[1] Creating model: {args.model}")
     start_time = time.time()
-    model, model_name = create_model(args.model)
+    model, model_name = get_model(args.model)
     model = model.to(device)
     elapsed = time.time() - start_time
 

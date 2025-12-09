@@ -23,6 +23,11 @@ from src.models.memory import CompressiveMemory
 from src.models.memory_utils import causal_linear_attention
 from .base import BaseLayer
 
+# デフォルト値
+DEFAULT_HIDDEN_SIZE = 512
+DEFAULT_NUM_HEADS = 8
+DEFAULT_INTERMEDIATE_SIZE = 2048
+
 
 class SenriAttention(nn.Module):
     """
@@ -43,8 +48,8 @@ class SenriAttention(nn.Module):
 
     def __init__(
         self,
-        hidden_size: int,
-        num_heads: int,
+        hidden_size: int = DEFAULT_HIDDEN_SIZE,
+        num_heads: int = DEFAULT_NUM_HEADS,
         num_memories: int = 1,
         memory_head_dim: Optional[int] = None,
         use_delta_rule: bool = True,
@@ -169,19 +174,26 @@ class SenriLayer(BaseLayer):
     - Freeze/unfreeze and export/import capability
 
     Args:
-        hidden_size: Hidden dimension
-        num_heads: Number of attention heads
-        intermediate_size: MLP intermediate dimension
-        num_memories: Number of memory slots (1 = original Infini-Attention)
-        memory_head_dim: Memory head dimension (None = hidden_size for single-head)
-        use_delta_rule: Use delta rule for memory update
+        hidden_size: Hidden dimension (default: 512)
+        num_heads: Number of attention heads (default: 8)
+        intermediate_size: MLP intermediate dimension (default: 2048)
+        num_memories: Number of memory slots (default: 1)
+        memory_head_dim: Memory head dimension (default: None = hidden_size)
+        use_delta_rule: Use delta rule for memory update (default: True)
+
+    Example:
+        # デフォルト設定
+        layer = SenriLayer()
+
+        # カスタム設定
+        layer = SenriLayer(num_memories=4)
     """
 
     def __init__(
         self,
-        hidden_size: int,
-        num_heads: int,
-        intermediate_size: int,
+        hidden_size: int = DEFAULT_HIDDEN_SIZE,
+        num_heads: int = DEFAULT_NUM_HEADS,
+        intermediate_size: int = DEFAULT_INTERMEDIATE_SIZE,
         num_memories: int = 1,
         memory_head_dim: Optional[int] = None,
         use_delta_rule: bool = True,

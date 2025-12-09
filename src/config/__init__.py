@@ -1,12 +1,25 @@
 """
 Senri Configuration Module
 
-定数、モデル設定、実験設定を提供。
+定数、モデルプリセット、実験設定を提供。
 
 モデル作成:
-    from src.config import SENRI_CONFIG, create_model_from_config
+    from src.config import SENRI_MODEL, PYTHIA_MODEL
 
-    model = create_model_from_config(SENRI_CONFIG)
+    model = SENRI_MODEL()
+    model = PYTHIA_MODEL()
+
+    # または直接レイヤー指定
+    from src.models import SenriModel, SenriLayer, PythiaLayer
+
+    model = SenriModel([
+        SenriLayer(),
+        PythiaLayer(),
+        PythiaLayer(),
+        PythiaLayer(),
+        PythiaLayer(),
+        PythiaLayer(),
+    ])
 """
 
 # Constants
@@ -16,14 +29,14 @@ from .constants import (
     PYTHIA_TOKENIZER,
 )
 
-# Model configurations
+# Model presets
 from .models import (
-    ModelConfig,
-    PYTHIA_CONFIG,
-    SENRI_CONFIG,
-    SENRI_MULTI_MEMORY_CONFIG,
-    SENRI_ONLY_CONFIG,
-    create_model_from_config,
+    PYTHIA_MODEL,
+    SENRI_MODEL,
+    SENRI_MULTI_MEMORY_MODEL,
+    SENRI_ONLY_MODEL,
+    MODEL_PRESETS,
+    create_model,
 )
 
 # Experiment configurations
@@ -34,13 +47,13 @@ __all__ = [
     "OPEN_CALM_TOKENIZER",
     "OPEN_CALM_VOCAB_SIZE",
     "PYTHIA_TOKENIZER",
-    # Model config
-    "ModelConfig",
-    "PYTHIA_CONFIG",
-    "SENRI_CONFIG",
-    "SENRI_MULTI_MEMORY_CONFIG",
-    "SENRI_ONLY_CONFIG",
-    "create_model_from_config",
+    # Model presets
+    "PYTHIA_MODEL",
+    "SENRI_MODEL",
+    "SENRI_MULTI_MEMORY_MODEL",
+    "SENRI_ONLY_MODEL",
+    "MODEL_PRESETS",
+    "create_model",
     # Experiment config
     "ExperimentConfig",
 ]
