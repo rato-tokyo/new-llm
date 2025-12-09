@@ -15,8 +15,7 @@ sys.path.insert(0, ".")
 
 import torch
 
-from src.config import SenriConfig
-from src.models import create_model
+from src.config import SenriModelConfig
 from src.utils.tokenizer_utils import get_open_calm_tokenizer, test_tokenizer_coverage
 from src.utils.training import get_device
 from src.utils.io import print_flush
@@ -69,7 +68,7 @@ def test_config():
     print_flush("2. CONFIG TEST")
     print_flush("=" * 70)
 
-    config = SenriConfig()
+    config = SenriModelConfig()
     print_flush(f"  vocab_size: {config.vocab_size:,}")
     print_flush(f"  hidden_size: {config.hidden_size}")
     print_flush(f"  num_layers: {config.num_layers}")
@@ -93,24 +92,28 @@ def test_model_creation():
     print_flush("3. MODEL CREATION TEST")
     print_flush("=" * 70)
 
-    config = SenriConfig()
-
-    # Pythiaモデル
-    print_flush("\n  [pythia] Standard Transformer:")
-    model = create_model("pythia", base_config=config)
+    # Pythiaモデル（ベースライン）
+    print_flush("\n  [pythia_only] Standard Transformer:")
+    config = SenriModelConfig.pythia_only(num_layers=6)
+    model = config.create_model()
     params = sum(p.numel() for p in model.parameters())
+    print_flush(f"    Layers: {config.num_layers}")
     print_flush(f"    Parameters: {params:,}")
 
-    # Infiniモデル
-    print_flush("\n  [infini] Infini-Attention (Layer 0):")
-    model = create_model("infini", base_config=config)
+    # Infiniモデル（デフォルト）
+    print_flush("\n  [with_infini] Infini-Attention (Layer 0):")
+    config = SenriModelConfig.with_infini()
+    model = config.create_model()
     params = sum(p.numel() for p in model.parameters())
+    print_flush(f"    Layers: {config.num_layers}")
     print_flush(f"    Parameters: {params:,}")
 
     # Multi-Memoryモデル
-    print_flush("\n  [multi_memory] Multi-Memory Attention:")
-    model = create_model("multi_memory", base_config=config)
+    print_flush("\n  [with_multi_memory] Multi-Memory Attention:")
+    config = SenriModelConfig.with_multi_memory(num_memories=4)
+    model = config.create_model()
     params = sum(p.numel() for p in model.parameters())
+    print_flush(f"    Layers: {config.num_layers}")
     print_flush(f"    Parameters: {params:,}")
 
     return True
@@ -125,7 +128,6 @@ def test_forward_pass():
     device = get_device()
     print_flush(f"  Device: {device}")
 
-    config = SenriConfig()
     tokenizer = get_open_calm_tokenizer()
 
     # テスト入力
@@ -135,11 +137,15 @@ def test_forward_pass():
     print_flush(f"  Input shape: {input_ids.shape}")
 
     # 各モデルでテスト
-    model_types = ["pythia", "infini", "multi_memory"]
+    configs = [
+        ("pythia_only", SenriModelConfig.pythia_only()),
+        ("with_infini", SenriModelConfig.with_infini()),
+        ("with_multi_memory", SenriModelConfig.with_multi_memory()),
+    ]
 
-    for model_type in model_types:
-        print_flush(f"\n  [{model_type}]")
-        model = create_model(model_type, base_config=config)
+    for model_name, config in configs:
+        print_flush(f"\n  [{model_name}]")
+        model = config.create_model()
         model = model.to(device)
         model.eval()
 
@@ -169,11 +175,11 @@ def test_generation():
     print_flush("=" * 70)
 
     device = get_device()
-    config = SenriConfig()
     tokenizer = get_open_calm_tokenizer()
 
     # Infiniモデルで生成テスト
-    model = create_model("infini", base_config=config)
+    config = SenriModelConfig.with_infini()
+    model = config.create_model()
     model = model.to(device)
     model.eval()
 

@@ -88,13 +88,7 @@ class TransformerLM(nn.Module):
         device = self.embed_in.weight.device
         for layer in self.layers:
             if hasattr(layer, 'reset_memory'):
-                # Check if layer supports keep_frozen parameter
-                import inspect
-                sig = inspect.signature(layer.reset_memory)
-                if 'keep_frozen' in sig.parameters:
-                    layer.reset_memory(device, keep_frozen)
-                else:
-                    layer.reset_memory(device)
+                layer.reset_memory(device, keep_frozen)
 
     def get_memory_state(self) -> dict:
         """

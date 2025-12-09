@@ -54,7 +54,18 @@ class MultiMemoryAttention(nn.Module):
         self.memory_norms: Optional[list[torch.Tensor]] = None
         self.register_buffer('current_memory_idx', torch.tensor(0))
 
-    def reset_memory(self, device: Optional[torch.device] = None) -> None:
+    def reset_memory(
+        self,
+        device: Optional[torch.device] = None,
+        keep_frozen: bool = True,
+    ) -> None:
+        """Reset memory state.
+
+        Args:
+            device: Device to create tensors on
+            keep_frozen: Ignored (for API compatibility with InfiniAttention)
+        """
+        del keep_frozen  # Unused, for API compatibility
         if device is None:
             device = self.w_q.weight.device
         dtype = self.w_q.weight.dtype
@@ -249,8 +260,12 @@ class MultiMemoryLayer(BaseLayer):
         mlp_output = self.mlp(hidden_states)
         return residual + attn_output + mlp_output
 
-    def reset_memory(self, device: Optional[torch.device] = None) -> None:
-        self.attention.reset_memory(device)
+    def reset_memory(
+        self,
+        device: Optional[torch.device] = None,
+        keep_frozen: bool = True,
+    ) -> None:
+        self.attention.reset_memory(device, keep_frozen)
 
     def get_memory_state(self) -> dict:
         return self.attention.get_memory_state()

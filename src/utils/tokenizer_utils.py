@@ -6,13 +6,13 @@ Tokenizer Utilities
 
 from transformers import AutoTokenizer, PreTrainedTokenizer
 
+from src.config import OPEN_CALM_TOKENIZER
 
-# 定義済みトークナイザー名
+# 定義済みトークナイザー名（OpenCALM以外）
 PYTHIA_TOKENIZER = "EleutherAI/pythia-70m"
-OPEN_CALM_TOKENIZER = "cyberagent/open-calm-small"
 
 
-def get_tokenizer(model_name: str = PYTHIA_TOKENIZER) -> PreTrainedTokenizer:
+def get_tokenizer(model_name: str = OPEN_CALM_TOKENIZER) -> PreTrainedTokenizer:
     """
     トークナイザーを取得（pad_token設定済み）
 
