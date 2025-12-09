@@ -11,7 +11,6 @@ from .pythia import (
     GRADIENT_CLIP,
 )
 from .open_calm import (
-    OpenCalmConfig,
     OPEN_CALM_TOKENIZER,
     OPEN_CALM_VOCAB_SIZE,
 )
@@ -24,11 +23,10 @@ from .models import (
 )
 
 __all__ = [
-    # Main config (recommended)
+    # Main config
     "SenriConfig",
-    # Legacy configs
+    # Legacy config
     "PythiaConfig",
-    "OpenCalmConfig",
     # OpenCALM tokenizer constants
     "OPEN_CALM_TOKENIZER",
     "OPEN_CALM_VOCAB_SIZE",

@@ -48,7 +48,6 @@ from typing import Optional, Union
 from src.config import (
     SenriConfig,
     PythiaConfig,
-    OpenCalmConfig,
     InfiniConfig,
     MultiMemoryConfig,
     ModelConfigType,
@@ -91,8 +90,8 @@ from .position_encoding import (  # noqa: E402
     apply_rotary_pos_emb,
 )
 
-# Base config type (supports SenriConfig, PythiaConfig, OpenCalmConfig)
-BaseConfigType = Union[SenriConfig, PythiaConfig, OpenCalmConfig]
+# Base config type (supports SenriConfig and PythiaConfig)
+BaseConfigType = Union[SenriConfig, PythiaConfig]
 
 
 def create_model(
@@ -105,7 +104,7 @@ def create_model(
 
     Args:
         model_type: Model type ("pythia", "infini", "multi_memory")
-        base_config: SenriConfig, OpenCalmConfig or PythiaConfig for base model structure
+        base_config: SenriConfig or PythiaConfig for base model structure
             (uses SenriConfig if None)
         model_config: Model-specific config (InfiniConfig or MultiMemoryConfig)
             If None, uses default config for the model type.
