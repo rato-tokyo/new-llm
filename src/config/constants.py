@@ -1,10 +1,8 @@
 """
 Configuration Constants
 
-設定用の定数をまとめて定義。
-全ての値はここで一元管理し、他の場所ではデフォルト値を使わない。
-
-PythiaLayerとSenriLayerは独立した設定を持つ。
+トークナイザーとモデル共通の定数のみを定義。
+レイヤー固有のパラメータは models.py で直接数値指定する。
 """
 
 # ========== OpenCALM トークナイザー定数 ==========
@@ -16,12 +14,6 @@ PythiaLayerとSenriLayerは独立した設定を持つ。
 # - 日本語に最適化された語彙
 # - 英語、絵文字も完全対応
 # - vocab_size=52,000
-#
-# トークナイザー特性:
-# - byte_fallback: True（任意のバイト列を処理可能）
-# - unk_token: None（UNKトークンなし）
-# - eos_token: "</s>" (id=1)
-# - pad_token: None → eos_tokenを使用
 
 OPEN_CALM_TOKENIZER = "cyberagent/open-calm-small"
 OPEN_CALM_VOCAB_SIZE = 52000
@@ -30,23 +22,6 @@ OPEN_CALM_VOCAB_SIZE = 52000
 PYTHIA_TOKENIZER = "EleutherAI/pythia-70m"
 
 # ========== SenriModel 共通定数 ==========
-# 全レイヤーで共有される値（埋め込み層との整合性のため）
+# 埋め込み層のサイズ（全レイヤーの入出力次元と一致させる必要がある）
 MODEL_HIDDEN_SIZE = 512
 MODEL_VOCAB_SIZE = OPEN_CALM_VOCAB_SIZE
-
-# ========== PythiaLayer 定数 ==========
-# 標準Transformerレイヤー (RoPE + Softmax Attention)
-PYTHIA_HIDDEN_SIZE = 512
-PYTHIA_NUM_HEADS = 8
-PYTHIA_INTERMEDIATE_SIZE = 2048
-PYTHIA_ROTARY_PCT = 0.25
-PYTHIA_MAX_POSITION_EMBEDDINGS = 2048
-
-# ========== SenriLayer 定数 ==========
-# 圧縮メモリレイヤー (Linear Attention + Memory)
-SENRI_HIDDEN_SIZE = 512
-SENRI_NUM_HEADS = 8
-SENRI_INTERMEDIATE_SIZE = 2048
-SENRI_NUM_MEMORIES = 1
-SENRI_MEMORY_HEAD_DIM = 512  # = hidden_size (シングルヘッド)
-SENRI_USE_DELTA_RULE = True
