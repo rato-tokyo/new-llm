@@ -109,9 +109,9 @@ Landmark = memory_norm = Σσ(k)
 
 ---
 
-## 🔄 Continuous Learning Policy（継続学習ポリシー）- 重要
+## 🔄 Continuous Learning Policy（継続学習ポリシー）- 削除禁止
 
-**⚠️ モデルの継続的成長を優先する方針。実験ごとに重みを引き継ぐ。**
+**⚠️ このセクションは削除禁止です。モデルの継続的成長を優先する方針。**
 
 ### 基本方針
 
@@ -119,6 +119,7 @@ Landmark = memory_norm = Σσ(k)
 2. **新規作成は初回のみ**: ファイルが存在しない場合のみ新規作成
 3. **メモリ状態は引き継がない**: 重み（パラメータ）のみ引き継ぎ、メモリはリセット
 4. **パラメータ構成は固定**: hidden_size, num_layers等の構成は原則変更しない
+5. **訓練データは時間で変化**: タイムスタンプベースでデータオフセットを自動計算
 
 ### 保存先
 
@@ -128,44 +129,57 @@ checkpoints/
 └── pythia_model.pt     # PYTHIA_MODEL の重み
 ```
 
-### 実装パターン
+### 実装: src/utils/clp.py
 
 ```python
-import os
-import torch
-from src.config import SENRI_MODEL, PYTHIA_MODEL
+from src.utils.clp import (
+    # チェックポイントパス
+    SENRI_CHECKPOINT,
+    PYTHIA_CHECKPOINT,
+    # モデル保存・読み込み
+    load_or_create_model,
+    save_model,
+    # データオフセット
+    get_data_offset,
+    get_data_range,
+    print_clp_status,
+)
+from src.config import SENRI_MODEL
 
-CHECKPOINT_DIR = "checkpoints"
-SENRI_CHECKPOINT = os.path.join(CHECKPOINT_DIR, "senri_model.pt")
-PYTHIA_CHECKPOINT = os.path.join(CHECKPOINT_DIR, "pythia_model.pt")
-
-def load_or_create_model(model_fn, checkpoint_path):
-    """既存の重みがあれば読み込み、なければ新規作成"""
-    model = model_fn()
-
-    if os.path.exists(checkpoint_path):
-        # 重みのみ読み込み（メモリ状態は含まない）
-        state_dict = torch.load(checkpoint_path, map_location="cpu")
-        model.load_state_dict(state_dict)
-        print(f"✓ Loaded weights from {checkpoint_path}")
-    else:
-        print(f"✓ Created new model (no checkpoint found)")
-
-    # メモリは常にリセット（重要）
-    model.reset_memory()
-    return model
-
-def save_model(model, checkpoint_path):
-    """重みのみ保存（メモリ状態は保存しない）"""
-    os.makedirs(os.path.dirname(checkpoint_path), exist_ok=True)
-    torch.save(model.state_dict(), checkpoint_path)
-    print(f"✓ Saved weights to {checkpoint_path}")
-
-# 使用例
+# モデル読み込み（既存重みがあれば使用、なければ新規作成）
 model = load_or_create_model(SENRI_MODEL, SENRI_CHECKPOINT)
-# ... 訓練 ...
+
+# データオフセット取得（時間経過で自動的に変化）
+offset = get_data_offset()
+tokens = all_tokens[offset:offset + num_tokens]
+
+# 訓練後、重みを保存
 save_model(model, SENRI_CHECKPOINT)
 ```
+
+### タイムスタンプベースデータオフセット - 削除禁止
+
+**⚠️ この仕様は削除禁止です。**
+
+実験ごとに異なるデータを使用するため、タイムスタンプからオフセットを自動計算。
+
+```python
+# 基準: 2025-12-09 00:00:00 JST
+CLP_BASE_TIMESTAMP = 1733662800
+
+# 1時間ごとに10,000サンプル進む
+CLP_SAMPLES_PER_HOUR = 10000
+
+# オフセット計算
+elapsed_hours = (current_time - base_timestamp) / 3600
+offset = int(elapsed_hours * samples_per_hour)
+```
+
+**特徴**:
+- **管理不要**: ファイルやDBでの状態管理なし
+- **再現可能**: 同じ時刻なら同じオフセット
+- **自動進行**: 時間経過で新しいデータへ移動
+- **循環**: データ末尾に達したら先頭へ
 
 ### 注意事項
 
@@ -177,15 +191,18 @@ save_model(model, SENRI_CHECKPOINT)
 - ❌ メモリ状態（SenriLayerの圧縮メモリ）
 - ❌ オプティマイザの状態
 - ❌ 訓練の進捗（epoch数等）
+- ❌ 以前使用したデータ範囲（タイムスタンプで自動決定）
 
 **禁止事項**:
 - ⛔ 毎回ゼロからモデルを訓練する（継続学習ポリシー違反）
 - ⛔ メモリ状態を引き継ぐ（実験間の独立性が失われる）
 - ⛔ モデル構成（hidden_size等）を変更する（互換性が失われる）
+- ⛔ データオフセットを手動管理する（タイムスタンプベースを使用）
 
 ### この方針の意図
 
 - **モデルの成長**: 実験ごとに少しずつモデルが賢くなる
+- **データの多様性**: 毎回異なるデータで訓練（過学習防止）
 - **単純比較の放棄**: 実験間の厳密な比較より、モデルの継続的改善を優先
 - **メモリの独立性**: 各実験は新鮮なメモリ状態から開始
 

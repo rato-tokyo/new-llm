@@ -5,18 +5,20 @@ Quick Model Training & Evaluation Script
 モデルの訓練とPPL測定を簡単に行うスクリプト。
 日本語Wikipedia（wikipedia 20231101.ja）を使用。
 
+Continuous Learning Policy (CLP) 対応:
+- 既存の重みがあれば読み込んで継続学習
+- タイムスタンプベースでデータオフセットを自動計算
+- 訓練後は重みを保存
+
 Usage:
     # 評価のみ（訓練なし）
     python3 scripts/quick_model.py --model pythia
 
-    # 簡単な訓練 + 評価
+    # 簡単な訓練 + 評価（CLPに従い継続学習）
     python3 scripts/quick_model.py --model pythia --train --epochs 3
 
     # 訓練トークン数を指定
     python3 scripts/quick_model.py --model senri --train --train-tokens 100000 --epochs 5
-
-    # Senri with multiple memories
-    python3 scripts/quick_model.py --model senri-multi --train
 """
 
 import argparse
@@ -34,6 +36,14 @@ from src.config import (
     create_model,
 )
 from src.models import TransformerLM
+from src.utils.clp import (
+    SENRI_CHECKPOINT,
+    PYTHIA_CHECKPOINT,
+    load_or_create_model,
+    save_model,
+    get_data_offset,
+    print_clp_status,
+)
 from src.utils.data_utils import load_wiki_ja_tokens_cached
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
@@ -41,10 +51,37 @@ from src.utils.tokenizer_utils import get_open_calm_tokenizer, test_tokenizer_co
 from src.utils.training import get_device
 
 
-def get_model(model_type: str) -> TransformerLM:
-    """モデルを作成（src/config/models.pyのプリセットを使用）"""
-    model = create_model(model_type)
-    return model, model.describe()
+# モデルタイプとチェックポイントの対応
+MODEL_CHECKPOINTS = {
+    "senri": SENRI_CHECKPOINT,
+    "pythia": PYTHIA_CHECKPOINT,
+}
+
+
+def get_model(model_type: str, use_clp: bool = True) -> tuple[TransformerLM, str, str | None]:
+    """
+    モデルを作成（CLP対応: 既存の重みがあれば読み込み）
+
+    Args:
+        model_type: モデルタイプ（"senri", "pythia"）
+        use_clp: CLPを使用するか（デフォルト: True）
+
+    Returns:
+        (model, description, checkpoint_path)
+    """
+    checkpoint_path = MODEL_CHECKPOINTS.get(model_type)
+
+    if use_clp and checkpoint_path:
+        model = load_or_create_model(
+            lambda: create_model(model_type),
+            checkpoint_path,
+        )
+    else:
+        model = create_model(model_type)
+        if hasattr(model, 'reset_memory'):
+            model.reset_memory()
+
+    return model, model.describe(), checkpoint_path
 
 
 def train_model(
@@ -56,17 +93,31 @@ def train_model(
     epochs: int = 3,
     lr: float = 1e-4,
     batch_size: int = 4,
+    data_offset: int = 0,
 ) -> dict:
-    """モデルを訓練"""
+    """
+    モデルを訓練（CLP対応: データオフセット指定可能）
+
+    Args:
+        data_offset: データの開始位置（CLPのタイムスタンプベースオフセット）
+    """
     model.train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
-    # バッチ作成
-    num_sequences = min(num_tokens, len(tokens) - seq_length - 1) // seq_length
+    # データオフセットを適用
+    available_tokens = len(tokens) - data_offset - seq_length - 1
+    if available_tokens < num_tokens:
+        # オフセット後のデータが足りない場合は先頭に戻る
+        print_flush(f"    [CLP] Data offset {data_offset:,} exceeds available data, wrapping to start")
+        data_offset = 0
+
+    # バッチ作成（オフセットから開始）
+    num_sequences = min(num_tokens, len(tokens) - data_offset - seq_length - 1) // seq_length
     batches = []
     for i in range(0, num_sequences * seq_length, seq_length):
-        input_ids = tokens[i:i + seq_length]
-        labels = tokens[i + 1:i + seq_length + 1]
+        start_idx = data_offset + i
+        input_ids = tokens[start_idx:start_idx + seq_length]
+        labels = tokens[start_idx + 1:start_idx + seq_length + 1]
         batches.append((input_ids, labels))
 
     # バッチをまとめる
@@ -262,28 +313,49 @@ def main():
         "--skip-tokenizer", action="store_true",
         help="Skip tokenizer test"
     )
+    # CLPオプション
+    parser.add_argument(
+        "--no-clp", action="store_true",
+        help="Disable Continuous Learning Policy (start from scratch, no checkpoint)"
+    )
+    parser.add_argument(
+        "--no-save", action="store_true",
+        help="Don't save checkpoint after training"
+    )
 
     args = parser.parse_args()
 
     set_seed(42)
     device = get_device()
+    use_clp = not args.no_clp
 
     mode = "TRAINING & EVALUATION" if args.train else "EVALUATION ONLY"
     print_flush("=" * 70)
     print_flush(f"QUICK MODEL {mode}")
+    if use_clp:
+        print_flush("Continuous Learning Policy: ENABLED")
+    else:
+        print_flush("Continuous Learning Policy: DISABLED (--no-clp)")
     print_flush("=" * 70)
+
+    # CLP状態表示
+    if use_clp:
+        print_flush("\n[0] CLP Status")
+        print_clp_status()
 
     # トークナイザーテスト
     if not args.skip_tokenizer:
-        print_flush("\n[0] Tokenizer Test")
+        step_num = 1 if use_clp else 0
+        print_flush(f"\n[{step_num}] Tokenizer Test")
         tokenizer_ok = test_tokenizer()
         if not tokenizer_ok:
             print_flush("    WARNING: Tokenizer test failed!")
 
-    # モデル作成
-    print_flush(f"\n[1] Creating model: {args.model}")
+    # モデル作成（CLP: 既存重みがあれば読み込み）
+    step_num = 2 if use_clp else 1
+    print_flush(f"\n[{step_num}] Creating model: {args.model}")
     start_time = time.time()
-    model, model_name = get_model(args.model)
+    model, model_name, checkpoint_path = get_model(args.model, use_clp=use_clp)
     model = model.to(device)
     elapsed = time.time() - start_time
 
@@ -292,16 +364,23 @@ def main():
     print_flush(f"    Parameters: {total_params:,}")
     print_flush(f"    Created in {elapsed:.2f}s")
 
-    # データロード（日本語Wikipedia）
-    max_tokens = max(args.num_tokens, args.train_tokens if args.train else 0)
-    print_flush(f"\n[2] Loading Japanese Wikipedia ({max_tokens:,} tokens)...")
+    # CLPデータオフセット計算
+    data_offset = get_data_offset() if use_clp else 0
+
+    # データロード（日本語Wikipedia）- オフセット分も含めて読み込み
+    step_num = 3 if use_clp else 2
+    max_tokens = max(args.num_tokens, args.train_tokens if args.train else 0) + data_offset
+    print_flush(f"\n[{step_num}] Loading Japanese Wikipedia ({max_tokens:,} tokens)...")
     tokens = load_wiki_ja_tokens_cached(max_tokens + args.seq_length + 1, OPEN_CALM_TOKENIZER)
     print_flush(f"    Loaded {len(tokens):,} tokens")
+    if use_clp and data_offset > 0:
+        print_flush(f"    [CLP] Data offset: {data_offset:,} (timestamp-based)")
 
     # 訓練
     train_history = None
     if args.train:
-        print_flush(f"\n[3] Training ({args.train_tokens:,} tokens, {args.epochs} epochs)")
+        step_num = 4 if use_clp else 3
+        print_flush(f"\n[{step_num}] Training ({args.train_tokens:,} tokens, {args.epochs} epochs)")
         train_history = train_model(
             model, tokens, device,
             seq_length=args.seq_length,
@@ -309,7 +388,12 @@ def main():
             epochs=args.epochs,
             lr=args.lr,
             batch_size=args.batch_size,
+            data_offset=data_offset,
         )
+
+        # CLP: 訓練後に重みを保存
+        if use_clp and checkpoint_path and not args.no_save:
+            save_model(model, checkpoint_path)
 
     # テキスト生成テスト
     step = 4 if args.train else 3
@@ -342,6 +426,10 @@ def main():
     print_flush("=" * 70)
     print_flush(f"Model: {model_name}")
     print_flush(f"Parameters: {total_params:,}")
+    if use_clp:
+        print_flush(f"CLP: ENABLED (data offset: {data_offset:,})")
+        if checkpoint_path:
+            print_flush(f"Checkpoint: {checkpoint_path}")
     if args.train and train_history:
         print_flush(f"Training: {args.epochs} epochs, final train PPL={train_history['train_ppl'][-1]:.1f}")
     if val_ppl is not None:
