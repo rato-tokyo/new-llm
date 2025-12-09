@@ -43,7 +43,7 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
 from src.config import SENRI_MODEL
-from src.models import SenriModel
+from src.models import TransformerLM
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
 from src.utils.tokenizer_utils import get_open_calm_tokenizer
@@ -136,7 +136,7 @@ def collate_fn(batch: list[dict]) -> dict:
 
 
 def train_step(
-    model: SenriModel,
+    model: TransformerLM,
     batch: dict,
     device: torch.device,
     optimizer: torch.optim.Optimizer,
@@ -170,7 +170,7 @@ def train_step(
 
 
 def evaluate(
-    model: SenriModel,
+    model: TransformerLM,
     dataloader: DataLoader,
     device: torch.device,
 ) -> dict:
@@ -209,7 +209,7 @@ def evaluate(
 
 
 def test_generation(
-    model: SenriModel,
+    model: TransformerLM,
     knowledge: str,
     question: str,
     tokenizer,

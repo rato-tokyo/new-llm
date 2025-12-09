@@ -1,33 +1,23 @@
 """
-Senri Model - Japanese LLM with Compressive Memory
+TransformerLM - Layer-based Language Model
 
-レイヤーリストを受け取り、モデルを構築。
+レイヤーリストを受け取り、モデルを構築する汎用LMクラス。
 
 使用例:
-    from src.models import SenriModel, SenriLayer, PythiaLayer
+    from src.models import TransformerLM, SenriLayer, PythiaLayer
 
-    # Senri: 1層目Senri + 5層Pythia
-    model = SenriModel([
-        SenriLayer(),
-        PythiaLayer(),
-        PythiaLayer(),
-        PythiaLayer(),
-        PythiaLayer(),
-        PythiaLayer(),
-    ])
-
-    # 複数メモリ構成
-    model = SenriModel([
-        SenriLayer(num_memories=4),
-        PythiaLayer(),
-        PythiaLayer(),
-        PythiaLayer(),
-        PythiaLayer(),
-        PythiaLayer(),
+    # Senri構成: 1層目Senri + 5層Pythia
+    model = TransformerLM([
+        SenriLayer(hidden_size=512, num_heads=8, intermediate_size=2048, num_memories=2, memory_head_dim=512, use_delta_rule=True),
+        PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
+        PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
+        PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
+        PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
+        PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
     ])
 
     # Pythiaのみ（ベースライン）
-    model = SenriModel([PythiaLayer() for _ in range(6)])
+    model = TransformerLM([PythiaLayer(...) for _ in range(6)])
 """
 
 from typing import Optional
@@ -42,14 +32,16 @@ from src.models.layers import BaseLayer
 DEFAULT_VOCAB_SIZE = 52000  # OpenCALM vocab size
 
 
-class SenriModel(nn.Module):
+class TransformerLM(nn.Module):
     """
-    Senri Model - Japanese LLM with Compressive Memory
+    TransformerLM - Layer-based Language Model
+
+    汎用的なレイヤーベースLM。任意のレイヤー構成を受け取りモデルを構築。
 
     構造:
         Token Embedding
             ↓
-        Layer 0, 1, ..., N-1 (SenriLayer / PythiaLayer)
+        Layer 0, 1, ..., N-1 (SenriLayer / PythiaLayer / etc.)
             ↓
         Final LayerNorm
             ↓
@@ -277,7 +269,3 @@ class SenriModel(nn.Module):
             return f"Senri-Only ({senri_count} layers)"
         else:
             return f"Senri ({senri_count} Senri + {pythia_count} Pythia)"
-
-
-# 後方互換性のためのエイリアス
-TransformerLM = SenriModel

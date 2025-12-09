@@ -33,7 +33,7 @@ from src.config import (
     MODEL_PRESETS,
     create_model,
 )
-from src.models import SenriModel
+from src.models import TransformerLM
 from src.utils.data_utils import load_wiki_ja_tokens_cached
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
@@ -41,14 +41,14 @@ from src.utils.tokenizer_utils import get_open_calm_tokenizer, test_tokenizer_co
 from src.utils.training import get_device
 
 
-def get_model(model_type: str) -> SenriModel:
+def get_model(model_type: str) -> TransformerLM:
     """モデルを作成（src/config/models.pyのプリセットを使用）"""
     model = create_model(model_type)
     return model, model.describe()
 
 
 def train_model(
-    model: SenriModel,
+    model: TransformerLM,
     tokens: torch.Tensor,
     device: torch.device,
     seq_length: int = 128,
@@ -118,7 +118,7 @@ def train_model(
 
 
 def evaluate_ppl(
-    model: SenriModel,
+    model: TransformerLM,
     tokens: torch.Tensor,
     device: torch.device,
     seq_length: int = 128,
@@ -184,7 +184,7 @@ def test_tokenizer() -> bool:
 
 
 def test_generation(
-    model: SenriModel,
+    model: TransformerLM,
     device: torch.device,
     prompt: str = "今日は",
     max_tokens: int = 20,

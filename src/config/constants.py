@@ -21,5 +21,5 @@ OPEN_CALM_VOCAB_SIZE = 52000
 # ========== Pythia トークナイザー定数 ==========
 PYTHIA_TOKENIZER = "EleutherAI/pythia-70m"
 
-# ========== SenriModel 共通定数 ==========
+# ========== TransformerLM 共通定数 ==========
 MODEL_VOCAB_SIZE = OPEN_CALM_VOCAB_SIZE

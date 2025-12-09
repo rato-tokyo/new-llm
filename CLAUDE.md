@@ -119,13 +119,13 @@ Landmark = memory_norm = Σσ(k)
 従来: 複数の固定モデルクラス
 
 新設計: 1つの汎用モデル + 2つのレイヤータイプ
-  SenriModel + [PythiaLayer, SenriLayer]
+  TransformerLM + [PythiaLayer, SenriLayer]
 ```
 
 ### アーキテクチャ
 
 ```
-SenriModel:
+TransformerLM:
   Token Embedding (512-dim)
          ↓
   Layer 0, 1, ..., N-1 (任意のレイヤータイプ)
@@ -147,10 +147,10 @@ SenriModel:
 ## 🏭 モデル作成
 
 ```python
-from src.models import SenriModel, SenriLayer, PythiaLayer
+from src.models import TransformerLM, SenriLayer, PythiaLayer
 
 # Senri: 1 Senri + 5 Pythia（推奨）
-model = SenriModel([
+model = TransformerLM([
     SenriLayer(),
     PythiaLayer(),
     PythiaLayer(),
@@ -160,10 +160,10 @@ model = SenriModel([
 ])
 
 # Pythia ベースライン
-model = SenriModel([PythiaLayer() for _ in range(6)])
+model = TransformerLM([PythiaLayer() for _ in range(6)])
 
 # 複数メモリ構成
-model = SenriModel([
+model = TransformerLM([
     SenriLayer(num_memories=4),
     PythiaLayer(),
     PythiaLayer(),
@@ -215,10 +215,10 @@ model = PYTHIA_MODEL()
 
 ```python
 import torch
-from src.models import SenriModel, SenriLayer, PythiaLayer
+from src.models import TransformerLM, SenriLayer, PythiaLayer
 
 # ===== PC A =====
-model = SenriModel([
+model = TransformerLM([
     SenriLayer(),
     PythiaLayer(),
     PythiaLayer(),
@@ -238,7 +238,7 @@ torch.save(state, "memory.pt")
 
 # ===== PC B =====
 state = torch.load("memory.pt")
-model = SenriModel([
+model = TransformerLM([
     SenriLayer(),
     PythiaLayer(),
     PythiaLayer(),
@@ -281,7 +281,7 @@ src/
 │   │   ├── __init__.py      # CompressiveMemory exports
 │   │   ├── base.py          # CompressiveMemory（圧縮メモリ実装）
 │   │   └── mixins.py        # FreezableMemoryMixin等
-│   ├── model.py             # SenriModel
+│   ├── model.py             # TransformerLM
 │   ├── base_components.py   # PythiaMLP, init_weights
 │   ├── memory_utils.py      # Linear attention utilities
 │   └── position_encoding.py # RoPE
@@ -331,9 +331,9 @@ python3 scripts/experiment_context_reasoning.py
 **正しいアプローチ**:
 ```python
 # 直接レイヤーリストを記述（構造が一目でわかる）
-from src.models import SenriModel, SenriLayer, PythiaLayer
+from src.models import TransformerLM, SenriLayer, PythiaLayer
 
-model = SenriModel([
+model = TransformerLM([
     SenriLayer(),
     PythiaLayer(),
     PythiaLayer(),
@@ -365,7 +365,7 @@ model = SENRI_MODEL()
 
 ```python
 # ✅ 推奨: 直接レイヤーリストを渡す（構造が一目でわかる）
-model = SenriModel([
+model = TransformerLM([
     SenriLayer(),
     PythiaLayer(),
     PythiaLayer(),
@@ -863,7 +863,7 @@ tokenizer = get_open_calm_tokenizer()
 | 2025-12-09 | **日本語Wikipedia採用**: Pileから日本語Wikipediaに変更、OpenCALMトークナイザーに最適化 |
 | 2025-12-09 | **ファインチューニング機能追加**: scripts/finetune.py でカスタム知識のCDR訓練 |
 | 2025-12-09 | **直接レイヤー方式を必須化**: Claude AIのファクトリ偏重傾向を記録し、直接レイヤーリスト方式を採用 |
-| 2025-12-09 | **SenriModel導入**: TransformerLMをSenriModelにリネーム、直接レイヤーリストを受け取るAPI |
+| 2025-12-09 | **TransformerLM導入**: TransformerLMをTransformerLMにリネーム、直接レイヤーリストを受け取るAPI |
 | 2025-12-09 | **SenriLayer統一**: InfiniLayer/MultiMemoryLayerを統合。num_memoriesパラメータで柔軟に構成 |
 | 2025-12-09 | **API簡素化**: LayerConfig/ModelConfig廃止、レイヤーファクトリ関数（senri_layers等）に統一 |
 | 2025-12-09 | **config/リファクタリング**: 定数とExperimentConfigのみに簡素化 |

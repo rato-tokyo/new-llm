@@ -11,19 +11,19 @@ Model Presets
     model = PYTHIA_MODEL()  # Pythia: 6 Pythia layers
 """
 
-from src.models.model import SenriModel
+from src.models.model import TransformerLM
 from src.models.layers import SenriLayer, PythiaLayer
 from src.config.constants import MODEL_VOCAB_SIZE
 
 
-def PYTHIA_MODEL() -> SenriModel:
+def PYTHIA_MODEL() -> TransformerLM:
     """
     Pythia ベースライン（全6層がPythiaLayer）
 
     構成:
         Layer 0-5: PythiaLayer (RoPE + Softmax Attention)
     """
-    return SenriModel(
+    return TransformerLM(
         layers=[
             # PythiaLayer引数:
             #   hidden_size: 隠れ層の次元数
@@ -42,7 +42,7 @@ def PYTHIA_MODEL() -> SenriModel:
     )
 
 
-def SENRI_MODEL() -> SenriModel:
+def SENRI_MODEL() -> TransformerLM:
     """
     Senri 標準構成（Layer 0がSenri、Layer 1-5がPythia）
 
@@ -52,7 +52,7 @@ def SENRI_MODEL() -> SenriModel:
           - memory[1]: Detail Memory（知識格納、freeze可能）
         Layer 1-5: PythiaLayer (RoPE + Softmax Attention)
     """
-    return SenriModel(
+    return TransformerLM(
         layers=[
             # SenriLayer引数:
             #   hidden_size: 隠れ層の次元数
@@ -79,7 +79,7 @@ MODEL_PRESETS = {
 }
 
 
-def create_model(preset: str) -> SenriModel:
+def create_model(preset: str) -> TransformerLM:
     """
     プリセット名からモデルを作成
 
@@ -87,7 +87,7 @@ def create_model(preset: str) -> SenriModel:
         preset: プリセット名 ("pythia", "senri")
 
     Returns:
-        SenriModel インスタンス
+        TransformerLM インスタンス
 
     Example:
         model = create_model("senri")

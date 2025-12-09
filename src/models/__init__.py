@@ -5,30 +5,20 @@ Senri: Japanese LLM with Compressive Memory
 ## Quick Start
 
 ```python
-from src.models import SenriModel, SenriLayer, PythiaLayer
+from src.models import TransformerLM, SenriLayer, PythiaLayer
 
-# Senri: 1 Senri + 5 Pythia
-model = SenriModel([
-    SenriLayer(),
-    PythiaLayer(),
-    PythiaLayer(),
-    PythiaLayer(),
-    PythiaLayer(),
-    PythiaLayer(),
+# Senri構成: 1 Senri + 5 Pythia
+model = TransformerLM([
+    SenriLayer(hidden_size=512, num_heads=8, intermediate_size=2048, num_memories=2, memory_head_dim=512, use_delta_rule=True),
+    PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
+    PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
+    PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
+    PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
+    PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048, rotary_pct=0.25, max_position_embeddings=2048),
 ])
 
 # Pythia ベースライン
-model = SenriModel([PythiaLayer() for _ in range(6)])
-
-# 複数メモリ構成
-model = SenriModel([
-    SenriLayer(num_memories=4),
-    PythiaLayer(),
-    PythiaLayer(),
-    PythiaLayer(),
-    PythiaLayer(),
-    PythiaLayer(),
-])
+model = TransformerLM([PythiaLayer(...) for _ in range(6)])
 
 # プリセットを使用
 from src.config import SENRI_MODEL, PYTHIA_MODEL
@@ -39,7 +29,7 @@ model = PYTHIA_MODEL()
 """
 
 # Core models
-from .model import SenriModel, TransformerLM  # TransformerLM is alias for SenriModel
+from .model import TransformerLM
 
 # Layer types
 from .layers import (
@@ -68,8 +58,7 @@ from .position_encoding import (
 
 __all__ = [
     # Core models
-    "SenriModel",
-    "TransformerLM",  # Alias for SenriModel
+    "TransformerLM",
     # Layer types
     "BaseLayer",
     "SenriLayer",

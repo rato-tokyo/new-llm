@@ -41,10 +41,10 @@ pip install torch transformers datasets tqdm
 ### Create Models (Direct Layer Pattern)
 
 ```python
-from src.models import SenriModel, SenriLayer, PythiaLayer
+from src.models import TransformerLM, SenriLayer, PythiaLayer
 
 # Senri model (1 SenriLayer + 5 PythiaLayers) - 推奨
-model = SenriModel([
+model = TransformerLM([
     SenriLayer(),
     PythiaLayer(),
     PythiaLayer(),
@@ -54,10 +54,10 @@ model = SenriModel([
 ])
 
 # Pythia-only baseline
-model = SenriModel([PythiaLayer() for _ in range(6)])
+model = TransformerLM([PythiaLayer() for _ in range(6)])
 
 # Multiple memories
-model = SenriModel([
+model = TransformerLM([
     SenriLayer(num_memories=4),
     PythiaLayer(),
     PythiaLayer(),
@@ -106,10 +106,10 @@ python3 finetune.py --data data/example_knowledge.json --epochs 10
 
 ```python
 import torch
-from src.models import SenriModel, SenriLayer, PythiaLayer
+from src.models import TransformerLM, SenriLayer, PythiaLayer
 
 # On PC A: Save memory state
-model = SenriModel([
+model = TransformerLM([
     SenriLayer(),
     PythiaLayer(),
     PythiaLayer(),
@@ -123,7 +123,7 @@ torch.save(state, "memory.pt")
 
 # On PC B: Load memory state
 state = torch.load("memory.pt")
-model = SenriModel([
+model = TransformerLM([
     SenriLayer(),
     PythiaLayer(),
     PythiaLayer(),
@@ -260,7 +260,7 @@ senri/
 │   │   │   ├── base.py           # BaseLayer
 │   │   │   ├── pythia.py         # PythiaLayer
 │   │   │   └── senri.py          # SenriLayer (unified memory layer)
-│   │   ├── model.py              # SenriModel
+│   │   ├── model.py              # TransformerLM
 │   │   ├── base_components.py    # PythiaMLP, init_weights
 │   │   ├── memory_utils.py       # Linear attention utilities
 │   │   └── position_encoding.py  # RoPE
