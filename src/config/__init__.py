@@ -7,6 +7,7 @@ from .pythia import (
     EARLY_STOPPING_PATIENCE,
     GRADIENT_CLIP,
 )
+from .open_calm import OpenCalmConfig
 from .experiment import ExperimentConfig
 from .models import (
     InfiniConfig,
@@ -16,8 +17,9 @@ from .models import (
 )
 
 __all__ = [
-    # Base model config
+    # Base model configs
     "PythiaConfig",
+    "OpenCalmConfig",
     # Experimental model configs
     "InfiniConfig",
     "MultiMemoryConfig",
