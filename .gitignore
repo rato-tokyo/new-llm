@@ -11,11 +11,10 @@ test_*/
 # Cache files (HuggingFace datasets, tokenizers, contexts)
 cache/
 
-# User data files (keep README and examples only)
-data/*
-!data/README.md
-!data/example_*.txt
-!data/example_*.json
+# senri-fine-tuner
+senri-fine-tuner/checkpoints/
+senri-fine-tuner/data/*
+!senri-fine-tuner/data/example_*.json
 
 # Python
 __pycache__/

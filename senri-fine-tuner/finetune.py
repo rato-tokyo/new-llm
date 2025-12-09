@@ -7,13 +7,13 @@ Senri Fine-tuning Script
 
 Usage:
     # 基本的な使い方
-    python3 scripts/finetune.py --data data/custom_knowledge.json --epochs 10
+    python3 finetune.py --data data/example_knowledge.json --epochs 10
 
     # ベースモデルを指定
-    python3 scripts/finetune.py --data data/custom_knowledge.json --base-model models/pretrained.pt
+    python3 finetune.py --data data/custom.json --base-model ../checkpoints/pretrained.pt
 
     # 出力先を指定
-    python3 scripts/finetune.py --data data/custom_knowledge.json --output models/finetuned.pt
+    python3 finetune.py --data data/custom.json --output checkpoints/finetuned.pt
 
 Input JSON format:
 {
@@ -23,13 +23,6 @@ Input JSON format:
       "qa_pairs": [
         {"question": "日本の首都は？", "answer": "東京"},
         {"question": "東京の人口は？", "answer": "約1400万人"}
-      ]
-    },
-    {
-      "knowledge": "富士山は日本最高峰の山です。標高は3776m。",
-      "qa_pairs": [
-        {"question": "日本で一番高い山は？", "answer": "富士山"},
-        {"question": "富士山の標高は？", "answer": "3776m"}
       ]
     }
   ]
@@ -42,7 +35,8 @@ import sys
 import time
 from pathlib import Path
 
-sys.path.insert(0, ".")
+# 親ディレクトリをパスに追加（srcをインポートするため）
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import torch
 import torch.nn.functional as F
@@ -63,8 +57,8 @@ class KnowledgeQADataset(Dataset):
         self,
         instances: list[dict],
         tokenizer,
-        max_knowledge_len: int = 256,
-        max_qa_len: int = 128,
+        max_knowledge_len: int,
+        max_qa_len: int,
     ):
         self.tokenizer = tokenizer
         self.max_knowledge_len = max_knowledge_len
@@ -220,7 +214,7 @@ def test_generation(
     question: str,
     tokenizer,
     device: torch.device,
-    max_new_tokens: int = 50,
+    max_new_tokens: int,
 ) -> str:
     """知識を与えて質問に回答"""
     model.eval()
@@ -265,46 +259,16 @@ def test_generation(
 
 def main():
     parser = argparse.ArgumentParser(description="Senri Fine-tuning")
-    parser.add_argument(
-        "--data", type=str, required=True,
-        help="Path to JSON data file"
-    )
-    parser.add_argument(
-        "--base-model", type=str, default=None,
-        help="Path to base model checkpoint (optional)"
-    )
-    parser.add_argument(
-        "--output", type=str, default="models/finetuned.pt",
-        help="Output path for finetuned model"
-    )
-    parser.add_argument(
-        "--epochs", type=int, default=10,
-        help="Number of training epochs"
-    )
-    parser.add_argument(
-        "--batch-size", type=int, default=4,
-        help="Batch size"
-    )
-    parser.add_argument(
-        "--lr", type=float, default=1e-4,
-        help="Learning rate"
-    )
-    parser.add_argument(
-        "--val-split", type=float, default=0.1,
-        help="Validation split ratio"
-    )
-    parser.add_argument(
-        "--max-knowledge-len", type=int, default=256,
-        help="Maximum knowledge token length"
-    )
-    parser.add_argument(
-        "--max-qa-len", type=int, default=128,
-        help="Maximum QA token length"
-    )
-    parser.add_argument(
-        "--seed", type=int, default=42,
-        help="Random seed"
-    )
+    parser.add_argument("--data", type=str, required=True, help="Path to JSON data file")
+    parser.add_argument("--base-model", type=str, default=None, help="Path to base model checkpoint")
+    parser.add_argument("--output", type=str, default="checkpoints/finetuned.pt", help="Output path")
+    parser.add_argument("--epochs", type=int, default=10, help="Number of epochs")
+    parser.add_argument("--batch-size", type=int, default=4, help="Batch size")
+    parser.add_argument("--lr", type=float, default=1e-4, help="Learning rate")
+    parser.add_argument("--val-split", type=float, default=0.1, help="Validation split ratio")
+    parser.add_argument("--max-knowledge-len", type=int, default=256, help="Max knowledge tokens")
+    parser.add_argument("--max-qa-len", type=int, default=128, help="Max QA tokens")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
 
     args = parser.parse_args()
 
@@ -415,7 +379,8 @@ def main():
             best_val_ppl = val_ppl
             best_epoch = epoch
             # ベストモデルを保存
-            Path(args.output).parent.mkdir(parents=True, exist_ok=True)
+            output_path = Path(args.output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
             torch.save({
                 "model_state_dict": model.state_dict(),
                 "epoch": epoch,
@@ -442,7 +407,10 @@ def main():
         for qa in test_instance.get("qa_pairs", [])[:2]:
             question = qa["question"]
             expected = qa["answer"]
-            generated = test_generation(model, knowledge, question, tokenizer, device)
+            generated = test_generation(
+                model, knowledge, question, tokenizer, device,
+                max_new_tokens=50,
+            )
             print_flush(f"    Q: {question}")
             print_flush(f"    Expected: {expected}")
             print_flush(f"    Generated: {generated}")
