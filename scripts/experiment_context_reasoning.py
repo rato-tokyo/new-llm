@@ -26,11 +26,8 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, Dataset
 
-from src.config import (
-    ExperimentConfig,
-    default_pythia_layers,
-    OPEN_CALM_TOKENIZER,
-)
+from src.config import ExperimentConfig, OPEN_CALM_TOKENIZER
+from src.models import pythia_layers
 from src.data.family_relations import (
     FamilyPair,
     create_baseline_pattern_samples,
@@ -40,7 +37,8 @@ from src.data.family_relations import (
     generate_family_pairs,
     split_pairs_for_experiment,
 )
-from src.models import create_model
+from src.models import TransformerLM
+from src.config import OPEN_CALM_VOCAB_SIZE
 from src.utils.device import clear_gpu_cache
 from src.utils.io import print_flush
 from src.utils.seed import set_seed
@@ -408,11 +406,11 @@ def run_baseline(
     train_loader = DataLoader(train_dataset, batch_size=exp_config.batch_size, shuffle=True)
 
     # モデル作成（全層Pythia）
-    layers = default_pythia_layers(6)
-    if exp_config.use_nope:
-        for layer in layers:
-            layer.rotary_pct = 0.0
-    model = create_model(layers)
+    rotary_pct = 0.0 if exp_config.use_nope else 0.25
+    model = TransformerLM(
+        layers=pythia_layers(6, rotary_pct=rotary_pct),
+        vocab_size=OPEN_CALM_VOCAB_SIZE,
+    )
     model = model.to(device)
 
     print_flush(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")
@@ -486,11 +484,11 @@ def run_modified(
     train_loader = DataLoader(train_dataset, batch_size=exp_config.batch_size, shuffle=True)
 
     # モデル作成（全層Pythia）
-    layers = default_pythia_layers(6)
-    if exp_config.use_nope:
-        for layer in layers:
-            layer.rotary_pct = 0.0
-    model = create_model(layers)
+    rotary_pct = 0.0 if exp_config.use_nope else 0.25
+    model = TransformerLM(
+        layers=pythia_layers(6, rotary_pct=rotary_pct),
+        vocab_size=OPEN_CALM_VOCAB_SIZE,
+    )
     model = model.to(device)
 
     print_flush(f"  Parameters: {sum(p.numel() for p in model.parameters()):,}")

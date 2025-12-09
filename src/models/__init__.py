@@ -6,57 +6,39 @@ Infini-Attention for efficient long-context processing.
 ## Quick Start
 
 ```python
-from src.config import SenriLayerConfig, PythiaLayerConfig, default_senri_layers
-from src.models import create_model
+from src.models import TransformerLM, infini_layers, pythia_layers
 
-# デフォルト構成（1 Senri + 5 Pythia）
-layers = default_senri_layers()
-model = create_model(layers)
+# Senriモデル（1 Infini + 5 Pythia）
+model = TransformerLM(
+    layers=infini_layers(1) + pythia_layers(5),
+    vocab_size=52000,
+)
+
+# Pythiaのみ（ベースライン）
+model = TransformerLM(
+    layers=pythia_layers(6),
+    vocab_size=52000,
+)
 
 # カスタム構成
-layers = [
-    SenriLayerConfig(num_memories=8, use_multi_memory=True),
-    PythiaLayerConfig(),
-    PythiaLayerConfig(),
-    PythiaLayerConfig(),
-]
-model = create_model(layers)
+from src.models import InfiniLayer, PythiaLayer, MultiMemoryLayer
 
-# 全層Pythia（ベースライン）
-from src.config import default_pythia_layers
-layers = default_pythia_layers(6)
-model = create_model(layers)
-```
-
-## Direct Layer Construction
-
-```python
-from src.models import TransformerLM
-from src.models.layers import InfiniLayer, PythiaLayer
-
-# 直接レイヤーを構築
-layers = [
-    InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
-    PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
-]
-model = TransformerLM(layers=layers, vocab_size=52000, hidden_size=512)
+model = TransformerLM(
+    layers=[
+        MultiMemoryLayer(hidden_size=512, num_heads=8, intermediate_size=2048, num_memories=4),
+        PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
+        PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
+    ],
+    vocab_size=52000,
+)
 ```
 """
 
-from typing import Optional
-
-from src.config import (
-    OPEN_CALM_VOCAB_SIZE,
-    PythiaLayerConfig,
-    SenriLayerConfig,
-    LayerConfigType,
-)
-
 # Core models
-from .model import TransformerLM  # noqa: E402
+from .model import TransformerLM
 
 # Layer types
-from .layers import (  # noqa: E402
+from .layers import (
     BaseLayer,
     PythiaLayer,
     PythiaAttention,
@@ -67,12 +49,12 @@ from .layers import (  # noqa: E402
 )
 
 # Building blocks
-from .base_components import (  # noqa: E402
+from .base_components import (
     PythiaMLP,
     init_weights,
     count_parameters,
 )
-from .memory_utils import (  # noqa: E402
+from .memory_utils import (
     elu_plus_one,
     causal_linear_attention,
     MemoryStateMixin,
@@ -82,131 +64,218 @@ from .memory_utils import (  # noqa: E402
     update_memory_delta_rule,
     update_memory_simple,
 )
-from .position_encoding import (  # noqa: E402
+from .position_encoding import (
     RotaryEmbedding,
     rotate_half,
     apply_rotary_pos_emb,
 )
 
+# =============================================================================
+# Layer Factory Functions
+# =============================================================================
 
-def _build_layer(config: LayerConfigType) -> BaseLayer:
-    """LayerConfigからレイヤーインスタンスを構築"""
-    if isinstance(config, SenriLayerConfig):
-        if config.use_multi_memory:
-            return MultiMemoryLayer(
-                hidden_size=config.hidden_size,
-                num_heads=config.num_attention_heads,
-                intermediate_size=config.intermediate_size,
-                num_memories=config.num_memories,
-                use_delta_rule=config.use_delta_rule,
-            )
-        else:
-            return InfiniLayer(
-                hidden_size=config.hidden_size,
-                num_heads=config.num_attention_heads,
-                intermediate_size=config.intermediate_size,
-                num_memory_banks=config.num_memory_banks,
-                segments_per_bank=config.segments_per_bank,
-                use_delta_rule=config.use_delta_rule,
-            )
-    elif isinstance(config, PythiaLayerConfig):
-        return PythiaLayer(
-            hidden_size=config.hidden_size,
-            num_heads=config.num_attention_heads,
-            intermediate_size=config.intermediate_size,
-            rotary_pct=config.rotary_pct,
-            max_position_embeddings=config.max_position_embeddings,
-        )
-    else:
-        raise ValueError(f"Unknown layer config type: {type(config)}")
+# Default layer parameters
+DEFAULT_HIDDEN_SIZE = 512
+DEFAULT_NUM_HEADS = 8
+DEFAULT_INTERMEDIATE_SIZE = 2048
 
 
-def create_model(
-    layer_configs: list[LayerConfigType],
-    vocab_size: Optional[int] = None,
-    hidden_size: Optional[int] = None,
-) -> TransformerLM:
-    """
-    LayerConfigのリストからモデルを構築
+def infini_layers(
+    n: int = 1,
+    *,
+    hidden_size: int = DEFAULT_HIDDEN_SIZE,
+    num_heads: int = DEFAULT_NUM_HEADS,
+    intermediate_size: int = DEFAULT_INTERMEDIATE_SIZE,
+    num_memory_banks: int = 1,
+    segments_per_bank: int = 4,
+    use_delta_rule: bool = True,
+) -> list[BaseLayer]:
+    """Create n InfiniLayer instances.
 
     Args:
-        layer_configs: レイヤー設定のリスト
-        vocab_size: 語彙サイズ（デフォルト: OpenCALM 52,000）
-        hidden_size: 隠れ層サイズ（デフォルト: 最初のレイヤーから取得）
+        n: Number of layers
+        hidden_size: Hidden dimension
+        num_heads: Number of attention heads
+        intermediate_size: MLP intermediate dimension
+        num_memory_banks: Number of memory banks
+        segments_per_bank: Segments per bank
+        use_delta_rule: Use delta rule for memory update
 
     Returns:
-        TransformerLM instance
+        List of InfiniLayer instances
 
-    Examples:
-        from src.config import SenriLayerConfig, PythiaLayerConfig, default_senri_layers
-
-        # デフォルト構成
-        model = create_model(default_senri_layers())
-
-        # カスタム構成
-        layers = [
-            SenriLayerConfig(num_memories=8),
-            PythiaLayerConfig(),
-            PythiaLayerConfig(),
-        ]
-        model = create_model(layers)
-
-        # カスタムvocab_size
-        model = create_model(layers, vocab_size=50304)
+    Example:
+        layers = infini_layers(2) + pythia_layers(4)
+        model = TransformerLM(layers=layers, vocab_size=52000)
     """
-    if not layer_configs:
-        raise ValueError("layer_configs cannot be empty")
+    return [
+        InfiniLayer(
+            hidden_size=hidden_size,
+            num_heads=num_heads,
+            intermediate_size=intermediate_size,
+            num_memory_banks=num_memory_banks,
+            segments_per_bank=segments_per_bank,
+            use_delta_rule=use_delta_rule,
+        )
+        for _ in range(n)
+    ]
 
-    # デフォルト値の設定
-    if vocab_size is None:
-        vocab_size = OPEN_CALM_VOCAB_SIZE
 
-    if hidden_size is None:
-        hidden_size = layer_configs[0].hidden_size
+def multi_memory_layers(
+    n: int = 1,
+    *,
+    hidden_size: int = DEFAULT_HIDDEN_SIZE,
+    num_heads: int = DEFAULT_NUM_HEADS,
+    intermediate_size: int = DEFAULT_INTERMEDIATE_SIZE,
+    num_memories: int = 4,
+    use_delta_rule: bool = True,
+) -> list[BaseLayer]:
+    """Create n MultiMemoryLayer instances.
 
-    # レイヤーを構築
-    layers = [_build_layer(config) for config in layer_configs]
+    Args:
+        n: Number of layers
+        hidden_size: Hidden dimension
+        num_heads: Number of attention heads
+        intermediate_size: MLP intermediate dimension
+        num_memories: Number of memory slots
+        use_delta_rule: Use delta rule for memory update
 
-    return TransformerLM(
-        layers=layers,
-        vocab_size=vocab_size,
+    Returns:
+        List of MultiMemoryLayer instances
+
+    Example:
+        layers = multi_memory_layers(1, num_memories=8) + pythia_layers(5)
+        model = TransformerLM(layers=layers, vocab_size=52000)
+    """
+    return [
+        MultiMemoryLayer(
+            hidden_size=hidden_size,
+            num_heads=num_heads,
+            intermediate_size=intermediate_size,
+            num_memories=num_memories,
+            use_delta_rule=use_delta_rule,
+        )
+        for _ in range(n)
+    ]
+
+
+def pythia_layers(
+    n: int = 6,
+    *,
+    hidden_size: int = DEFAULT_HIDDEN_SIZE,
+    num_heads: int = DEFAULT_NUM_HEADS,
+    intermediate_size: int = DEFAULT_INTERMEDIATE_SIZE,
+    rotary_pct: float = 0.25,
+    max_position_embeddings: int = 2048,
+) -> list[BaseLayer]:
+    """Create n PythiaLayer instances.
+
+    Args:
+        n: Number of layers
+        hidden_size: Hidden dimension
+        num_heads: Number of attention heads
+        intermediate_size: MLP intermediate dimension
+        rotary_pct: Rotary embedding percentage
+        max_position_embeddings: Maximum sequence length
+
+    Returns:
+        List of PythiaLayer instances
+
+    Example:
+        # Pythia-only model
+        model = TransformerLM(layers=pythia_layers(6), vocab_size=52000)
+
+        # Mixed model
+        layers = infini_layers(1) + pythia_layers(5)
+        model = TransformerLM(layers=layers, vocab_size=52000)
+    """
+    return [
+        PythiaLayer(
+            hidden_size=hidden_size,
+            num_heads=num_heads,
+            intermediate_size=intermediate_size,
+            rotary_pct=rotary_pct,
+            max_position_embeddings=max_position_embeddings,
+        )
+        for _ in range(n)
+    ]
+
+
+def senri_layers(
+    n_infini: int = 1,
+    n_pythia: int = 5,
+    *,
+    hidden_size: int = DEFAULT_HIDDEN_SIZE,
+    num_heads: int = DEFAULT_NUM_HEADS,
+    intermediate_size: int = DEFAULT_INTERMEDIATE_SIZE,
+) -> list[BaseLayer]:
+    """Create default Senri layer configuration (Infini + Pythia).
+
+    Args:
+        n_infini: Number of InfiniLayers
+        n_pythia: Number of PythiaLayers
+        hidden_size: Hidden dimension
+        num_heads: Number of attention heads
+        intermediate_size: MLP intermediate dimension
+
+    Returns:
+        List of layers (InfiniLayers followed by PythiaLayers)
+
+    Example:
+        # Default: 1 Infini + 5 Pythia
+        model = TransformerLM(layers=senri_layers(), vocab_size=52000)
+
+        # Custom: 2 Infini + 4 Pythia
+        model = TransformerLM(layers=senri_layers(2, 4), vocab_size=52000)
+    """
+    return infini_layers(
+        n_infini,
         hidden_size=hidden_size,
+        num_heads=num_heads,
+        intermediate_size=intermediate_size,
+    ) + pythia_layers(
+        n_pythia,
+        hidden_size=hidden_size,
+        num_heads=num_heads,
+        intermediate_size=intermediate_size,
     )
 
 
 __all__ = [
-    # Factory function
-    'create_model',
-
+    # Layer factory functions
+    "infini_layers",
+    "multi_memory_layers",
+    "pythia_layers",
+    "senri_layers",
+    # Constants
+    "DEFAULT_HIDDEN_SIZE",
+    "DEFAULT_NUM_HEADS",
+    "DEFAULT_INTERMEDIATE_SIZE",
     # Core models
-    'TransformerLM',
-
+    "TransformerLM",
     # Layer types
-    'BaseLayer',
-    'PythiaLayer',
-    'PythiaAttention',
-    'InfiniLayer',
-    'InfiniAttention',
-    'MultiMemoryLayer',
-    'MultiMemoryAttention',
-
+    "BaseLayer",
+    "PythiaLayer",
+    "PythiaAttention",
+    "InfiniLayer",
+    "InfiniAttention",
+    "MultiMemoryLayer",
+    "MultiMemoryAttention",
     # Building blocks
-    'PythiaMLP',
-    'init_weights',
-    'count_parameters',
-
+    "PythiaMLP",
+    "init_weights",
+    "count_parameters",
     # Memory utilities
-    'elu_plus_one',
-    'causal_linear_attention',
-    'MemoryStateMixin',
-    'create_memory_matrix',
-    'create_memory_norm',
-    'retrieve_from_memory',
-    'update_memory_delta_rule',
-    'update_memory_simple',
-
+    "elu_plus_one",
+    "causal_linear_attention",
+    "MemoryStateMixin",
+    "create_memory_matrix",
+    "create_memory_norm",
+    "retrieve_from_memory",
+    "update_memory_delta_rule",
+    "update_memory_simple",
     # Position encoding
-    'RotaryEmbedding',
-    'rotate_half',
-    'apply_rotary_pos_emb',
+    "RotaryEmbedding",
+    "rotate_half",
+    "apply_rotary_pos_emb",
 ]

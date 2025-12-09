@@ -127,70 +127,42 @@ TransformerLM:
 
 ## 🏭 モデル作成
 
-### ModelConfig（推奨）
-
 ```python
-from src.config import SenriModelConfig, PythiaModelConfig, default_senri_layers
+from src.models import TransformerLM, senri_layers, pythia_layers, multi_memory_layers
 
-# Senriモデル（デフォルト: 1 Senri + 5 Pythia）
-config = SenriModelConfig()
-model = config.create_model()
-
-# カスタムSenri構成
-config = SenriModelConfig(
-    layers=default_senri_layers(
-        num_senri=2,
-        num_pythia=4,
-        use_multi_memory=True,
-        num_memories=8,
-    )
-)
-model = config.create_model()
+# Senriモデル（1 Infini + 5 Pythia）
+model = TransformerLM(layers=senri_layers(), vocab_size=52000)
 
 # Pythiaモデル（ベースライン）
-config = PythiaModelConfig()
-model = config.create_model()
-```
-
-### LayerConfigリストを使用
-
-```python
-from src.config import SenriLayerConfig, PythiaLayerConfig
-from src.models import create_model
+model = TransformerLM(layers=pythia_layers(6), vocab_size=52000)
 
 # カスタム構成
-layers = [
-    SenriLayerConfig(use_multi_memory=True, num_memories=8),
-    PythiaLayerConfig(),
-    PythiaLayerConfig(),
-    PythiaLayerConfig(),
-]
-model = create_model(layers)
+model = TransformerLM(
+    layers=multi_memory_layers(1, num_memories=8) + pythia_layers(5),
+    vocab_size=52000,
+)
+
+# 直接レイヤー構築
+from src.models import InfiniLayer, PythiaLayer
+
+model = TransformerLM(
+    layers=[
+        InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
+        PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
+        PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
+    ],
+    vocab_size=52000,
+)
 ```
 
-### 直接レイヤー構築（上級者向け）
+### レイヤーファクトリ関数
 
-```python
-from src.models import TransformerLM
-from src.models.layers import InfiniLayer, PythiaLayer, MultiMemoryLayer
-
-# 2層Infini + 4層Pythia
-layers = [
-    InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
-    InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
-    *[PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048) for _ in range(4)]
-]
-model = TransformerLM(layers=layers, vocab_size=52000, hidden_size=512)
-```
-
-### 利用可能なオプション
-
-| オプション | 対象 | デフォルト | 説明 |
-|------------|------|------------|------|
-| `use_delta_rule` | 全memory系 | `True` | Delta Rule使用 |
-| `num_memories` | multi_memory | `4` | メモリ数 |
-| `num_memory_banks` | infini | `1` | メモリバンク数 |
-| `segments_per_bank` | infini | `4` | バンクあたりセグメント数 |
+| 関数 | 説明 |
+|------|------|
+| `senri_layers(n_infini=1, n_pythia=5)` | Infini + Pythia構成 |
+| `infini_layers(n=1)` | InfiniLayerのリスト |
+| `pythia_layers(n=6)` | PythiaLayerのリスト |
+| `multi_memory_layers(n=1, num_memories=4)` | MultiMemoryLayerのリスト |
 
 ### 訓練設定のデフォルト値
 
@@ -208,11 +180,10 @@ model = TransformerLM(layers=layers, vocab_size=52000, hidden_size=512)
 
 ```python
 import torch
-from src.config import SenriModelConfig
+from src.models import TransformerLM, senri_layers
 
 # ===== PC A =====
-config = SenriModelConfig()
-model = config.create_model()
+model = TransformerLM(layers=senri_layers(), vocab_size=52000)
 model.reset_memory()
 
 # テキスト処理でメモリを蓄積
@@ -225,8 +196,7 @@ torch.save(state, "memory.pt")
 
 # ===== PC B =====
 state = torch.load("memory.pt")
-config = SenriModelConfig()
-model = config.create_model()
+model = TransformerLM(layers=senri_layers(), vocab_size=52000)
 model.set_memory_state(state)
 
 # メモリが引き継がれた状態で推論
@@ -247,33 +217,25 @@ output = model(input_ids)
 ```
 src/
 ├── config/
-│   ├── __init__.py          # Public exports
+│   ├── __init__.py          # Constants + ExperimentConfig
 │   ├── constants.py         # OPEN_CALM_TOKENIZER, OPEN_CALM_VOCAB_SIZE
-│   ├── layers/              # レイヤー設定
-│   │   ├── base.py          # BaseLayerConfig
-│   │   ├── pythia.py        # PythiaLayerConfig
-│   │   └── senri.py         # SenriLayerConfig
-│   ├── models/              # モデル設定
-│   │   ├── base.py          # BaseModelConfig
-│   │   ├── pythia.py        # PythiaModelConfig
-│   │   └── senri.py         # SenriModelConfig
-│   └── experiments/         # 実験設定
+│   └── experiments/
 │       └── base.py          # ExperimentConfig
 ├── models/
-│   ├── __init__.py          # create_model() + exports
-│   ├── layers/              # レイヤーパッケージ
-│   │   ├── base.py          # BaseLayer 基底クラス
-│   │   ├── pythia.py        # PythiaLayer (RoPE + Softmax)
-│   │   ├── infini.py        # InfiniLayer (Memory + Linear)
+│   ├── __init__.py          # Layer factories + exports
+│   ├── layers/
+│   │   ├── base.py          # BaseLayer
+│   │   ├── pythia.py        # PythiaLayer
+│   │   ├── infini.py        # InfiniLayer
 │   │   └── multi_memory.py  # MultiMemoryLayer
-│   ├── model.py             # TransformerLM（汎用モデル）
+│   ├── model.py             # TransformerLM
 │   ├── base_components.py   # PythiaMLP, init_weights
 │   ├── memory_utils.py      # Linear attention utilities
 │   └── position_encoding.py # RoPE
 └── utils/
-    ├── tokenizer_utils.py   # get_tokenizer, get_open_calm_tokenizer
+    ├── tokenizer_utils.py   # get_open_calm_tokenizer
     ├── training.py          # 訓練ユーティリティ
-    └── evaluation.py    # 評価ユーティリティ
+    └── evaluation.py        # 評価ユーティリティ
 ```
 
 ---
@@ -724,8 +686,8 @@ tokenizer = get_open_calm_tokenizer()
 
 | 日付 | 内容 |
 |------|------|
-| 2025-12-09 | **config/リファクタリング**: layers/, models/, experiments/の3サブパッケージに分離。PythiaModelConfig追加 |
-| 2025-12-09 | **SenriModelConfig追加**: LayerConfigベースのモデル構築。ファクトリパターン廃止 |
+| 2025-12-09 | **API簡素化**: LayerConfig/ModelConfig廃止、レイヤーファクトリ関数（senri_layers等）に統一 |
+| 2025-12-09 | **config/リファクタリング**: 定数とExperimentConfigのみに簡素化 |
 | 2025-12-09 | **Senri命名**: プロジェクト名をSenriに決定 |
 | 2025-12-09 | **OpenCALM採用**: 日本語LLM対応。OpenCALMトークナイザーを使用 |
 | 2025-12-09 | **HSA方式削除**: ChunkEncoder（双方向エンコーダ）を削除。memory_norm方式に一本化。シンプルさ優先 |

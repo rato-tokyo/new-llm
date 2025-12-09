@@ -15,11 +15,8 @@ sys.path.insert(0, ".")
 
 import torch
 
-from src.config import (
-    SenriModelConfig,
-    PythiaModelConfig,
-    default_senri_layers,
-)
+from src.config import OPEN_CALM_VOCAB_SIZE
+from src.models import TransformerLM, senri_layers, pythia_layers, multi_memory_layers
 from src.utils.tokenizer_utils import get_open_calm_tokenizer, test_tokenizer_coverage
 from src.utils.training import get_device
 from src.utils.io import print_flush
@@ -66,73 +63,49 @@ def test_tokenizer():
     return all_passed
 
 
-def test_config_and_model():
-    """設定とモデルテスト"""
-    print_flush("\n" + "=" * 70)
-    print_flush("2. CONFIG & MODEL TEST")
-    print_flush("=" * 70)
-
-    config = SenriModelConfig()
-    model = config.create_model()
-
-    print_flush("  Config:")
-    print_flush(f"    vocab_size: {config.vocab_size:,}")
-    print_flush(f"    tokenizer_name: {config.tokenizer_name}")
-    print_flush(f"    layers: {len(config.layers)}")
-
-    print_flush("  Model:")
-    print_flush(f"    vocab_size: {model.vocab_size:,}")
-    print_flush(f"    hidden_size: {model.hidden_size}")
-    print_flush(f"    num_layers: {model.num_layers}")
-
-    # vocab_sizeがトークナイザーと一致するか確認
-    tokenizer = get_open_calm_tokenizer()
-    match = model.vocab_size == tokenizer.vocab_size
-    print_flush(f"\n  Vocab size match: {'OK' if match else 'MISMATCH'}")
-    print_flush(f"    Model: {model.vocab_size}, Tokenizer: {tokenizer.vocab_size}")
-
-    return match
-
-
 def test_model_creation():
     """モデル作成テスト"""
     print_flush("\n" + "=" * 70)
-    print_flush("3. MODEL CREATION TEST")
+    print_flush("2. MODEL CREATION TEST")
     print_flush("=" * 70)
 
+    tokenizer = get_open_calm_tokenizer()
+
     # Pythiaモデル（ベースライン）
-    print_flush("\n  [PythiaModelConfig] Standard Transformer:")
-    config = PythiaModelConfig()
-    model = config.create_model()
+    print_flush("\n  [pythia_layers] Standard Transformer:")
+    model = TransformerLM(layers=pythia_layers(6), vocab_size=OPEN_CALM_VOCAB_SIZE)
     params = sum(p.numel() for p in model.parameters())
     print_flush(f"    Layers: {model.num_layers}")
     print_flush(f"    Parameters: {params:,}")
 
+    # vocab_sizeがトークナイザーと一致するか確認
+    match = model.vocab_size == tokenizer.vocab_size
+    print_flush(f"    Vocab size match: {'OK' if match else 'MISMATCH'}")
+
     # Senriモデル（デフォルト: Infini-Attention）
-    print_flush("\n  [SenriModelConfig] Infini-Attention (Layer 0):")
-    config = SenriModelConfig()
-    model = config.create_model()
+    print_flush("\n  [senri_layers] Infini-Attention + Pythia:")
+    model = TransformerLM(layers=senri_layers(), vocab_size=OPEN_CALM_VOCAB_SIZE)
     params = sum(p.numel() for p in model.parameters())
     print_flush(f"    Layers: {model.num_layers}")
     print_flush(f"    Parameters: {params:,}")
 
     # Multi-Memoryモデル
-    print_flush("\n  [SenriModelConfig + MultiMemory] Multi-Memory Attention:")
-    config = SenriModelConfig(
-        layers=default_senri_layers(use_multi_memory=True, num_memories=4)
+    print_flush("\n  [multi_memory_layers] Multi-Memory Attention:")
+    model = TransformerLM(
+        layers=multi_memory_layers(1, num_memories=4) + pythia_layers(5),
+        vocab_size=OPEN_CALM_VOCAB_SIZE,
     )
-    model = config.create_model()
     params = sum(p.numel() for p in model.parameters())
     print_flush(f"    Layers: {model.num_layers}")
     print_flush(f"    Parameters: {params:,}")
 
-    return True
+    return match
 
 
 def test_forward_pass():
     """フォワードパステスト"""
     print_flush("\n" + "=" * 70)
-    print_flush("4. FORWARD PASS TEST")
+    print_flush("3. FORWARD PASS TEST")
     print_flush("=" * 70)
 
     device = get_device()
@@ -147,17 +120,17 @@ def test_forward_pass():
     print_flush(f"  Input shape: {input_ids.shape}")
 
     # 各モデルでテスト
-    configs = [
-        ("PythiaModelConfig", PythiaModelConfig()),
-        ("SenriModelConfig", SenriModelConfig()),
-        ("SenriModelConfig+MultiMemory", SenriModelConfig(
-            layers=default_senri_layers(use_multi_memory=True)
+    models = [
+        ("pythia_layers", TransformerLM(layers=pythia_layers(6), vocab_size=OPEN_CALM_VOCAB_SIZE)),
+        ("senri_layers", TransformerLM(layers=senri_layers(), vocab_size=OPEN_CALM_VOCAB_SIZE)),
+        ("multi_memory_layers", TransformerLM(
+            layers=multi_memory_layers(1) + pythia_layers(5),
+            vocab_size=OPEN_CALM_VOCAB_SIZE,
         )),
     ]
 
-    for model_name, config in configs:
+    for model_name, model in models:
         print_flush(f"\n  [{model_name}]")
-        model = config.create_model()
         model = model.to(device)
         model.eval()
 
@@ -183,15 +156,14 @@ def test_forward_pass():
 def test_generation():
     """テキスト生成テスト"""
     print_flush("\n" + "=" * 70)
-    print_flush("5. TEXT GENERATION TEST")
+    print_flush("4. TEXT GENERATION TEST")
     print_flush("=" * 70)
 
     device = get_device()
     tokenizer = get_open_calm_tokenizer()
 
     # Senriモデルで生成テスト
-    config = SenriModelConfig()
-    model = config.create_model()
+    model = TransformerLM(layers=senri_layers(), vocab_size=OPEN_CALM_VOCAB_SIZE)
     model = model.to(device)
     model.eval()
 
@@ -238,16 +210,13 @@ def main():
     # 1. トークナイザーテスト
     results["tokenizer"] = test_tokenizer()
 
-    # 2. 設定とモデルテスト
-    results["config_and_model"] = test_config_and_model()
-
-    # 3. モデル作成テスト
+    # 2. モデル作成テスト
     results["model_creation"] = test_model_creation()
 
-    # 4. フォワードパステスト
+    # 3. フォワードパステスト
     results["forward_pass"] = test_forward_pass()
 
-    # 5. テキスト生成テスト
+    # 4. テキスト生成テスト
     results["generation"] = test_generation()
 
     # サマリー

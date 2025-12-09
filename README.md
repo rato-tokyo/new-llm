@@ -39,42 +39,19 @@ pip install torch transformers datasets
 ### Create Models
 
 ```python
-from src.config import SenriModelConfig, PythiaModelConfig, default_senri_layers
+from src.models import TransformerLM, senri_layers, pythia_layers, multi_memory_layers
 
-# Senri model (default: 1 Senri + 5 Pythia layers)
-config = SenriModelConfig()
-model = config.create_model()
-
-# Custom Senri configuration
-config = SenriModelConfig(
-    layers=default_senri_layers(
-        num_senri=2,
-        num_pythia=4,
-        use_multi_memory=True,
-        num_memories=8,
-    )
-)
-model = config.create_model()
+# Senri model (1 Infini + 5 Pythia layers)
+model = TransformerLM(layers=senri_layers(), vocab_size=52000)
 
 # Pythia-only baseline
-config = PythiaModelConfig()
-model = config.create_model()
-```
-
-### Custom Layer Composition
-
-```python
-from src.config import SenriLayerConfig, PythiaLayerConfig
-from src.models import create_model
+model = TransformerLM(layers=pythia_layers(6), vocab_size=52000)
 
 # Custom configuration
-layers = [
-    SenriLayerConfig(use_multi_memory=True, num_memories=4),
-    PythiaLayerConfig(),
-    PythiaLayerConfig(),
-    PythiaLayerConfig(),
-]
-model = create_model(layers)
+model = TransformerLM(
+    layers=multi_memory_layers(1, num_memories=8) + pythia_layers(5),
+    vocab_size=52000,
+)
 
 # Forward pass with memory update
 output = model(input_ids, update_memory=True)
@@ -87,19 +64,17 @@ model.reset_memory()
 
 ```python
 import torch
-from src.config import SenriModelConfig
+from src.models import TransformerLM, senri_layers
 
 # On PC A: Save memory state
-config = SenriModelConfig()
-model = config.create_model()
+model = TransformerLM(layers=senri_layers(), vocab_size=52000)
 # ... training or processing ...
 state = model.get_memory_state()
 torch.save(state, "memory.pt")
 
 # On PC B: Load memory state
 state = torch.load("memory.pt")
-config = SenriModelConfig()
-model = config.create_model()
+model = TransformerLM(layers=senri_layers(), vocab_size=52000)
 model.set_memory_state(state)
 # Memory is now restored!
 ```
@@ -183,26 +158,18 @@ sigma(x) = ELU(x) + 1
 senri/
 ├── src/
 │   ├── config/
-│   │   ├── __init__.py           # Public exports
+│   │   ├── __init__.py           # Constants + ExperimentConfig
 │   │   ├── constants.py          # OPEN_CALM_TOKENIZER, OPEN_CALM_VOCAB_SIZE
-│   │   ├── layers/               # Layer configurations
-│   │   │   ├── base.py           # BaseLayerConfig
-│   │   │   ├── pythia.py         # PythiaLayerConfig
-│   │   │   └── senri.py          # SenriLayerConfig
-│   │   ├── models/               # Model configurations
-│   │   │   ├── base.py           # BaseModelConfig
-│   │   │   ├── pythia.py         # PythiaModelConfig
-│   │   │   └── senri.py          # SenriModelConfig
-│   │   └── experiments/          # Experiment configurations
+│   │   └── experiments/
 │   │       └── base.py           # ExperimentConfig
 │   ├── models/
-│   │   ├── __init__.py           # create_model()
-│   │   ├── layers/               # Layer package
-│   │   │   ├── base.py           # BaseLayer base class
-│   │   │   ├── pythia.py         # PythiaLayer (RoPE + Softmax)
-│   │   │   ├── infini.py         # InfiniLayer (Memory + Linear)
+│   │   ├── __init__.py           # Layer factories (senri_layers, pythia_layers)
+│   │   ├── layers/
+│   │   │   ├── base.py           # BaseLayer
+│   │   │   ├── pythia.py         # PythiaLayer
+│   │   │   ├── infini.py         # InfiniLayer
 │   │   │   └── multi_memory.py   # MultiMemoryLayer
-│   │   ├── model.py              # TransformerLM (generic model)
+│   │   ├── model.py              # TransformerLM
 │   │   ├── base_components.py    # PythiaMLP, init_weights
 │   │   ├── memory_utils.py       # Linear attention utilities
 │   │   └── position_encoding.py  # RoPE
