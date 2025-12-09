@@ -33,7 +33,7 @@
 - **特徴**:
   - クエリに対して「どのDetail Memoryを参照すべきか」を判定
   - 対応不能と判断した場合のみDetail Memoryを検索
-  - 検索方式: HSA方式（Landmark = mean(K)）を採用
+  - 検索方式: memory_norm方式（Landmark = Σσ(k)）を採用
 
 #### Detail Memory（詳細記憶）
 
@@ -69,51 +69,23 @@ Detail Memory 検索
 | メモリ名 | 現在の実装 | 備考 |
 |----------|-----------|------|
 | Working Memory | InfiniLayer のメモリ | トークンごと更新 |
-| Index Memory | 未実装 | HSA方式Landmarkで選択判定 |
-| Detail Memory | MultiMemoryLayer のメモリ群 | HSA方式で検索 |
+| Index Memory | 未実装 | memory_norm方式Landmarkで選択判定 |
+| Detail Memory | MultiMemoryLayer のメモリ群 | memory_norm方式で検索 |
 
-### HSA方式 (Hierarchical Sparse Attention)
+### memory_norm方式（Landmark計算）
 
-**論文**: arXiv:2511.23319v1
-
-HSA方式では、各メモリ（チャンク）を**双方向エンコーダ**で要約してLandmarkを生成する。
+メモリ選択のためのLandmark計算方式：
 
 ```
-論文の構成:
-  1. ChunkEncoder: 双方向Transformerエンコーダ
-  2. [CLS]トークン: 各チャンクに付加
-  3. Landmark = ChunkEncoder([CLS] + Keys)[CLS]
-  4. Q_slc: 検索専用Query（Attention用Qとは別の射影）
-  5. 検索スコア: Q_slc @ Landmark / sqrt(d)
+Landmark = memory_norm = Σσ(k)
 
-本プロジェクトへの適用:
-| HSA論文              | 本プロジェクト           |
-|---------------------|------------------------|
-| Chunk + [CLS]       | メモリ内キー列 + [CLS]   |
-| Bi-directional Enc  | ChunkEncoder (2層)     |
-| Q_slc               | w_q_slc (検索専用)      |
-| Q_attn              | w_q (Attention用)      |
+検索スコア = σ(Q) @ Landmark
 ```
 
-**利点**:
-- **学習可能なLandmark**: 双方向エンコーダがメモリ内容を要約
-- **検索専用Query**: Attention用とは別の射影で最適化
-- **論文準拠**: HSA論文の設計を忠実に再現
-
-### HSA vs memory_norm 比較実験 (2025-12-09)
-
-| 方式 | Best PPL | パラメータ数 | 訓練時間/epoch |
-|------|----------|-------------|----------------|
-| **HSA** | **494.4** | 71.5M | ~143s |
-| memory_norm | 497.7 | 70.4M | ~84s |
-
-- **HSA方式**: ChunkEncoder（双方向Transformerエンコーダ）で学習可能なLandmarkを生成
-- **memory_norm方式**: 書き込み操作の副産物 Σσ(k) をLandmarkとして使用（追加パラメータなし）
-
-**結論**: HSAはPPL 0.7%改善だが訓練時間70%増加。現段階ではmemory_norm方式がコスト効率で優れる。
-ただしメモリ数増加（16+）や長コンテキスト環境ではHSA方式が有利になる可能性あり。
-
-詳細: `docs/experiments/2025-12-09_hsa_vs_memory_norm.md`
+**特徴**:
+- **追加パラメータなし**: メモリ書き込み時の副産物を活用
+- **シンプル**: 特別な計算なしでメモリの「重要度」を表現
+- **効率的**: 訓練時間のオーバーヘッドなし
 
 ---
 
@@ -724,10 +696,10 @@ Reversal Curseの真の問題は「逆方向を推論できない」ことでは
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-09 | **HSA方式削除**: ChunkEncoder（双方向エンコーダ）を削除。memory_norm方式に一本化。シンプルさ優先 |
 | 2025-12-09 | **HSA vs memory_norm比較実験**: ChunkEncoder方式 vs Σσ(k)方式を比較。HSA=494.4 PPL、memory_norm=497.7 PPL。HSA微改善だがコスト増 |
 | 2025-12-09 | **リファクタリング**: experiment_landmark_comparison.py削除、test_pythia_pretrained.pyをtests/へ移動 |
 | 2025-12-08 | **patience=1に統一**: Early stoppingのデフォルトpatience値を1に変更。過学習防止 |
-| 2025-12-08 | **HSA方式Landmark採用**: MultiMemoryLayerのLandmark計算をHSA方式（mean(K)）に一本化。LandmarkType削除 |
 | 2025-12-08 | **メモリ階層定義追加**: Working Memory / Index Memory / Detail Memory の3層構成を定義 |
 | 2025-12-07 | **CDR訓練追加**: Context-Dependent Reasoning Training - 推論をFFNに、知識を外部コンテキストに分離する訓練手法 |
 | 2025-12-07 | **Continuous LM失敗**: 離散化スキップ仮説は失敗。Reversal Curse改善するもVal PPL 4倍悪化。実装削除 |
