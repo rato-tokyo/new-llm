@@ -63,9 +63,9 @@ class MultiMemoryAttention(nn.Module):
 
         Args:
             device: Device to create tensors on
-            keep_frozen: Ignored (for API compatibility with InfiniAttention)
+            keep_frozen: Unused (MultiMemory has no freeze feature)
         """
-        del keep_frozen  # Unused, for API compatibility
+        del keep_frozen  # MultiMemory has no freeze feature
         if device is None:
             device = self.w_q.weight.device
         dtype = self.w_q.weight.dtype
