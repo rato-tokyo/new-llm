@@ -6,43 +6,52 @@ Infini-Attention for efficient long-context processing.
 ## Quick Start
 
 ```python
+from src.config import SenriLayerConfig, PythiaLayerConfig, default_senri_layers
 from src.models import create_model
-from src.config import SenriConfig
 
-# 標準モデル（Senri設定）
-model = create_model("pythia")
+# デフォルト構成（1 Senri + 5 Pythia）
+layers = default_senri_layers()
+model = create_model(layers)
 
-# Infiniモデル（デフォルト設定）
-model = create_model("infini")
+# カスタム構成
+layers = [
+    SenriLayerConfig(num_memories=8, use_multi_memory=True),
+    PythiaLayerConfig(),
+    PythiaLayerConfig(),
+    PythiaLayerConfig(),
+]
+model = create_model(layers)
 
-# Infiniモデル（カスタム設定）
-config = SenriConfig(num_memory_banks=2, segments_per_bank=8)
-model = create_model("infini", config)
-
-# Multi-Memory（カスタム設定）
-config = SenriConfig(num_memories=8, use_delta_rule=False)
-model = create_model("multi_memory", config)
+# 全層Pythia（ベースライン）
+from src.config import default_pythia_layers
+layers = default_pythia_layers(6)
+model = create_model(layers)
 ```
 
-## Layer-based Construction
+## Direct Layer Construction
 
 ```python
 from src.models import TransformerLM
 from src.models.layers import InfiniLayer, PythiaLayer
 
-# カスタムアーキテクチャ
+# 直接レイヤーを構築
 layers = [
     InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
-    InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
-    *[PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048) for _ in range(4)]
+    PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
 ]
-model = TransformerLM(layers=layers)
+model = TransformerLM(layers=layers, vocab_size=52000, hidden_size=512)
 ```
 """
 
 from typing import Optional
 
-from src.config import SenriConfig, PythiaConfig, ModelTypeLiteral
+from src.config import OPEN_CALM_VOCAB_SIZE
+from src.config.layers import (
+    BaseLayerConfig,
+    PythiaLayerConfig,
+    SenriLayerConfig,
+    LayerConfigType,
+)
 
 # Core models
 from .model import TransformerLM  # noqa: E402
@@ -81,85 +90,88 @@ from .position_encoding import (  # noqa: E402
 )
 
 
+def _build_layer(config: LayerConfigType) -> BaseLayer:
+    """LayerConfigからレイヤーインスタンスを構築"""
+    if isinstance(config, SenriLayerConfig):
+        if config.use_multi_memory:
+            return MultiMemoryLayer(
+                hidden_size=config.hidden_size,
+                num_heads=config.num_attention_heads,
+                intermediate_size=config.intermediate_size,
+                num_memories=config.num_memories,
+                use_delta_rule=config.use_delta_rule,
+            )
+        else:
+            return InfiniLayer(
+                hidden_size=config.hidden_size,
+                num_heads=config.num_attention_heads,
+                intermediate_size=config.intermediate_size,
+                num_memory_banks=config.num_memory_banks,
+                segments_per_bank=config.segments_per_bank,
+                use_delta_rule=config.use_delta_rule,
+            )
+    elif isinstance(config, PythiaLayerConfig):
+        return PythiaLayer(
+            hidden_size=config.hidden_size,
+            num_heads=config.num_attention_heads,
+            intermediate_size=config.intermediate_size,
+            rotary_pct=config.rotary_pct,
+            max_position_embeddings=config.max_position_embeddings,
+        )
+    else:
+        raise ValueError(f"Unknown layer config type: {type(config)}")
+
+
 def create_model(
-    model_type: ModelTypeLiteral,
-    config: Optional[SenriConfig] = None,
-):
+    layer_configs: list[LayerConfigType],
+    vocab_size: Optional[int] = None,
+    hidden_size: Optional[int] = None,
+) -> TransformerLM:
     """
-    Create a model by type.
+    LayerConfigのリストからモデルを構築
 
     Args:
-        model_type: Model type ("pythia", "infini", "multi_memory")
-        config: SenriConfig for model structure and memory settings.
-            If None, uses default SenriConfig.
+        layer_configs: レイヤー設定のリスト
+        vocab_size: 語彙サイズ（デフォルト: OpenCALM 52,000）
+        hidden_size: 隠れ層サイズ（デフォルト: 最初のレイヤーから取得）
 
     Returns:
         TransformerLM instance
 
     Examples:
-        from src.config import SenriConfig
+        from src.config import SenriLayerConfig, PythiaLayerConfig, default_senri_layers
 
-        # Standard model (Senri config)
-        model = create_model("pythia")
+        # デフォルト構成
+        model = create_model(default_senri_layers())
 
-        # Infini model (default config)
-        model = create_model("infini")
+        # カスタム構成
+        layers = [
+            SenriLayerConfig(num_memories=8),
+            PythiaLayerConfig(),
+            PythiaLayerConfig(),
+        ]
+        model = create_model(layers)
 
-        # Infini model (custom config)
-        config = SenriConfig(num_memory_banks=2, segments_per_bank=8)
-        model = create_model("infini", config)
-
-        # Multi-Memory (custom config)
-        config = SenriConfig(num_memories=8, use_delta_rule=False)
-        model = create_model("multi_memory", config)
+        # カスタムvocab_size
+        model = create_model(layers, vocab_size=50304)
     """
-    if config is None:
-        config = SenriConfig()
+    if not layer_configs:
+        raise ValueError("layer_configs cannot be empty")
 
-    h = config.hidden_size
-    n = config.num_attention_heads
-    i = config.intermediate_size
-    r = config.rotary_pct
-    m = config.max_position_embeddings
+    # デフォルト値の設定
+    if vocab_size is None:
+        vocab_size = OPEN_CALM_VOCAB_SIZE
 
-    def pythia_layers(count: int) -> list[BaseLayer]:
-        return [PythiaLayer(h, n, i, r, m) for _ in range(count)]
+    if hidden_size is None:
+        hidden_size = layer_configs[0].hidden_size
 
-    if model_type == "pythia":
-        layers = pythia_layers(config.num_layers)
-        return TransformerLM(
-            layers=layers,
-            vocab_size=config.vocab_size,
-            hidden_size=config.hidden_size,
-        )
-
-    elif model_type == "infini":
-        layers = [
-            InfiniLayer(
-                h, n, i,
-                config.num_memory_banks,
-                config.segments_per_bank,
-                config.use_delta_rule,
-            ),
-            *pythia_layers(config.num_layers - 1),
-        ]
-
-    elif model_type == "multi_memory":
-        layers = [
-            MultiMemoryLayer(h, n, i, config.num_memories, config.use_delta_rule),
-            *pythia_layers(config.num_layers - 1),
-        ]
-
-    else:
-        raise ValueError(
-            f"Unknown model type: {model_type}. "
-            f"Available: pythia, infini, multi_memory"
-        )
+    # レイヤーを構築
+    layers = [_build_layer(config) for config in layer_configs]
 
     return TransformerLM(
         layers=layers,
-        vocab_size=config.vocab_size,
-        hidden_size=config.hidden_size,
+        vocab_size=vocab_size,
+        hidden_size=hidden_size,
     )
 
 
