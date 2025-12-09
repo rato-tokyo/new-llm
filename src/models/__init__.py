@@ -63,12 +63,6 @@ from .base_components import (
 from .memory_utils import (
     elu_plus_one,
     causal_linear_attention,
-    MemoryStateMixin,
-    create_memory_matrix,
-    create_memory_norm,
-    retrieve_from_memory,
-    update_memory_delta_rule,
-    update_memory_simple,
 )
 from .position_encoding import (
     RotaryEmbedding,
@@ -198,12 +192,6 @@ __all__ = [
     # Memory utilities
     "elu_plus_one",
     "causal_linear_attention",
-    "MemoryStateMixin",
-    "create_memory_matrix",
-    "create_memory_norm",
-    "retrieve_from_memory",
-    "update_memory_delta_rule",
-    "update_memory_simple",
     # Position encoding
     "RotaryEmbedding",
     "rotate_half",
