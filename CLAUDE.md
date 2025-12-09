@@ -335,6 +335,7 @@ model = SENRI_MODEL()
 2. **ファクトリパターン偏重**: シンプルな設定でもファクトリ関数を作りたがる
 3. **抽象化過剰**: 不要なインターフェースや基底クラスを追加しがち
 4. **直接レイヤー方式の回避**: なぜか直接レイヤーリストを渡す方式を避け、複雑なConfigやファクトリを提案しがち
+5. **デフォルト値の多用**: 「使いやすさ」のためにデフォルト値を設定しがちだが、設定の一元管理が困難になる
 
 **対策**: 設定は1ファイルに集約。「どこを見れば設定がわかるか」を常に意識する。
 
@@ -379,6 +380,44 @@ model = create_model(ModelConfig(
 
 **古い機能を残すことは厳禁。後方互換性を意識したコードは絶対に書かない。**
 
+### デフォルト値禁止 - 最重要
+
+**⚠️ 関数やクラスのパラメータにデフォルト値を設定してはならない。**
+
+全ての値は `src/config/constants.py` で定義し、明示的に渡す。
+
+```python
+# ❌ 禁止: デフォルト値を使用
+class SenriLayer:
+    def __init__(
+        self,
+        hidden_size: int = 512,  # ← デフォルト値禁止
+        num_heads: int = 8,      # ← デフォルト値禁止
+    ):
+        ...
+
+# ✅ 推奨: constants.pyから明示的に渡す
+from src.config import MODEL_HIDDEN_SIZE, MODEL_NUM_HEADS
+
+layer = SenriLayer(
+    hidden_size=MODEL_HIDDEN_SIZE,
+    num_heads=MODEL_NUM_HEADS,
+)
+```
+
+**デフォルト値禁止の理由**:
+1. **一元管理**: 設定値がconstants.pyに集約される
+2. **可視性**: どの値が使われているか明確
+3. **変更容易**: 設定変更時にconstants.pyのみ修正
+4. **バグ防止**: 暗黙の値による予期しない動作を防止
+
+**Claude AIがデフォルト値を設定しがちな理由（推測）**:
+- 訓練データの多くのOSSプロジェクトがデフォルト値を使用
+- 「使いやすさ」のためにデフォルト値を提供する傾向
+- しかし、設定の一元管理が困難になる
+
+**このプロジェクトでは**: 全ての値を明示的に指定し、constants.pyで一元管理する。
+
 ### ハードコード厳禁
 
 **全ての値はconfigから読み込む。**
@@ -386,7 +425,7 @@ model = create_model(ModelConfig(
 ### ランダムデータ使用禁止
 
 **実験でランダムデータ（torch.randint等）を使用することは絶対に禁止。**
-必ず実データ（Pile）を使用すること。
+必ず実データ（日本語Wikipedia）を使用すること。
 
 ### 訓練-評価一貫性（Training-Evaluation Consistency）
 
@@ -800,6 +839,9 @@ tokenizer = get_open_calm_tokenizer()
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-09 | **デフォルト値禁止ポリシー追加**: 全パラメータを明示的に指定、constants.pyで一元管理 |
+| 2025-12-09 | **日本語Wikipedia採用**: Pileから日本語Wikipediaに変更、OpenCALMトークナイザーに最適化 |
+| 2025-12-09 | **ファインチューニング機能追加**: scripts/finetune.py でカスタム知識のCDR訓練 |
 | 2025-12-09 | **直接レイヤー方式を必須化**: Claude AIのファクトリ偏重傾向を記録し、直接レイヤーリスト方式を採用 |
 | 2025-12-09 | **SenriModel導入**: TransformerLMをSenriModelにリネーム、直接レイヤーリストを受け取るAPI |
 | 2025-12-09 | **SenriLayer統一**: InfiniLayer/MultiMemoryLayerを統合。num_memoriesパラメータで柔軟に構成 |
