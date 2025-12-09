@@ -39,36 +39,39 @@ pip install torch transformers datasets
 ### Create Models
 
 ```python
-from src.models import create_model
-from src.config import SenriConfig
+from src.config import SenriModelConfig
 
-# Standard model (Senri config, 52K vocab)
-model = create_model("pythia")
+# Default (1 Senri + 5 Pythia layers)
+config = SenriModelConfig()
+model = config.create_model()
 
-# Infini model (Layer 0: Infini + 5 Pythia layers)
-model = create_model("infini")
+# Infini-Attention with custom settings
+config = SenriModelConfig.with_infini(num_memory_banks=2)
+model = config.create_model()
 
 # Multi-Memory with 8 memories
-model = create_model("multi_memory", num_memories=8)
+config = SenriModelConfig.with_multi_memory(num_memories=8)
+model = config.create_model()
 
-# Custom config
-config = SenriConfig()
-model = create_model("pythia", base_config=config)
+# Pythia-only baseline
+config = SenriModelConfig.pythia_only(num_layers=6)
+model = config.create_model()
 ```
 
 ### Custom Layer Composition
 
 ```python
-from src.models import TransformerLM
-from src.models.layers import InfiniLayer, PythiaLayer
+from src.config import SenriLayerConfig, PythiaLayerConfig
+from src.models import create_model
 
-# Custom: 2 Infini layers + 4 Pythia layers
+# Custom configuration
 layers = [
-    InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
-    InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
-    *[PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048) for _ in range(4)]
+    SenriLayerConfig(use_multi_memory=True, num_memories=4),
+    PythiaLayerConfig(),
+    PythiaLayerConfig(),
+    PythiaLayerConfig(),
 ]
-model = TransformerLM(layers=layers, vocab_size=52000, hidden_size=512)
+model = create_model(layers)
 
 # Forward pass with memory update
 output = model(input_ids, update_memory=True)
@@ -81,17 +84,19 @@ model.reset_memory()
 
 ```python
 import torch
-from src.models import create_model
+from src.config import SenriModelConfig
 
 # On PC A: Save memory state
-model = create_model("infini")
+config = SenriModelConfig.with_infini()
+model = config.create_model()
 # ... training or processing ...
 state = model.get_memory_state()
 torch.save(state, "memory.pt")
 
 # On PC B: Load memory state
 state = torch.load("memory.pt")
-model = create_model("infini")
+config = SenriModelConfig.with_infini()
+model = config.create_model()
 model.set_memory_state(state)
 # Memory is now restored!
 ```
@@ -128,14 +133,6 @@ tokenizer = get_open_calm_tokenizer()
 # No UNK tokens for any input!
 ```
 
-## Model Variants
-
-| Model | Description |
-|-------|-------------|
-| `pythia` | Standard Transformer with RoPE |
-| `infini` | Infini model (Layer 0: Infini + RoPE) |
-| `multi_memory` | Multiple independent memories with Landmark selection |
-
 ## Layer Types
 
 | Layer | Description |
@@ -146,7 +143,7 @@ tokenizer = get_open_calm_tokenizer()
 
 ## Architecture Details
 
-### Senri Config
+### Default Configuration
 
 | Component | Value |
 |-----------|-------|
@@ -183,13 +180,12 @@ sigma(x) = ELU(x) + 1
 senri/
 ├── src/
 │   ├── config/
-│   │   ├── senri.py              # SenriConfig (default)
-│   │   ├── open_calm.py          # OpenCALM tokenizer constants
-│   │   ├── pythia.py             # PythiaConfig (legacy)
-│   │   ├── models.py             # InfiniConfig, MultiMemoryConfig
-│   │   └── experiment.py         # ExperimentConfig
+│   │   ├── senri.py              # SenriModelConfig (main entry)
+│   │   ├── layers.py             # SenriLayerConfig, PythiaLayerConfig
+│   │   ├── experiment.py         # ExperimentConfig
+│   │   └── open_calm.py          # OpenCALM tokenizer constants
 │   ├── models/
-│   │   ├── __init__.py           # create_model() factory
+│   │   ├── __init__.py           # create_model()
 │   │   ├── layers/               # Layer package
 │   │   │   ├── base.py           # BaseLayer base class
 │   │   │   ├── pythia.py         # PythiaLayer (RoPE + Softmax)
@@ -202,13 +198,12 @@ senri/
 │   └── utils/
 │       ├── tokenizer_utils.py    # OpenCALM tokenizer
 │       ├── training.py           # Training utilities
-│       └── ...
+│       └── evaluation.py         # Evaluation utilities
 ├── scripts/
 │   ├── verify_senri.py           # Senri integration test
 │   ├── experiment_context_reasoning.py  # Reversal Curse experiment
 │   └── evaluate_baseline.py      # Baseline PPL evaluation
 ├── tests/
-│   └── test_pythia_pretrained.py # Pretrained validation
 ├── docs/
 │   └── experiments/              # Experiment results
 ├── CLAUDE.md                     # Development guidelines
@@ -227,15 +222,11 @@ Measures if a model trained on "A is B" can also infer "B is A".
 | Backward PPL | PPL on reverse direction |
 | Reversal Gap | Backward - Forward (lower is better) |
 
-### Position-wise PPL
-
-Evaluates model performance at different sequence positions.
-
 ## Development
 
 See `CLAUDE.md` for development guidelines including:
 - Layer-based architecture
-- Model factory pattern
+- SenriModelConfig usage
 - Memory transfer API
 - Code quality rules
 - Past bugs and lessons

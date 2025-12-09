@@ -127,26 +127,49 @@ TransformerLM:
 
 ## 🏭 モデル作成
 
-### create_model() ファクトリ
+### SenriModelConfig（推奨）
 
 ```python
-from src.models import create_model
-from src.config import SenriConfig, InfiniConfig, MultiMemoryConfig
+from src.config import SenriModelConfig
 
-# 基本的な使い方（デフォルト: SenriConfig, vocab=52,000）
-model = create_model("pythia")       # 標準モデル（6層）
-model = create_model("infini")       # 1層Infini + 5層Pythia
-model = create_model("multi_memory") # 1層Multi-Memory + 5層Pythia
+# デフォルト構成（1 Senri + 5 Pythia）
+config = SenriModelConfig()
+model = config.create_model()
 
-# カスタム設定
-config = InfiniConfig(num_memory_banks=2, segments_per_bank=8)
-model = create_model("infini", model_config=config)
+# Infini-Attention構成
+config = SenriModelConfig.with_infini(num_memory_banks=2)
+model = config.create_model()
 
-config = MultiMemoryConfig(num_memories=8, use_delta_rule=False)
-model = create_model("multi_memory", model_config=config)
+# Multi-Memory構成
+config = SenriModelConfig.with_multi_memory(num_memories=8)
+model = config.create_model()
+
+# 全層Pythia（ベースライン）
+config = SenriModelConfig.pythia_only(num_layers=6)
+model = config.create_model()
 ```
 
-### カスタムレイヤー構成
+### LayerConfigリストを使用
+
+```python
+from src.config import SenriLayerConfig, PythiaLayerConfig, default_senri_layers
+from src.models import create_model
+
+# デフォルト構成
+layers = default_senri_layers()
+model = create_model(layers)
+
+# カスタム構成
+layers = [
+    SenriLayerConfig(use_multi_memory=True, num_memories=8),
+    PythiaLayerConfig(),
+    PythiaLayerConfig(),
+    PythiaLayerConfig(),
+]
+model = create_model(layers)
+```
+
+### 直接レイヤー構築（上級者向け）
 
 ```python
 from src.models import TransformerLM
@@ -158,19 +181,7 @@ layers = [
     InfiniLayer(hidden_size=512, num_heads=8, intermediate_size=2048),
     *[PythiaLayer(hidden_size=512, num_heads=8, intermediate_size=2048) for _ in range(4)]
 ]
-model = TransformerLM(layers=layers)
-
-# 全層Infini
-layers = [InfiniLayer(512, 8, 2048) for _ in range(6)]
-model = TransformerLM(layers=layers)
-
-# 混合構成
-layers = [
-    MultiMemoryLayer(512, 8, 2048, num_memories=4),
-    InfiniLayer(512, 8, 2048),
-    *[PythiaLayer(512, 8, 2048) for _ in range(4)]
-]
-model = TransformerLM(layers=layers)
+model = TransformerLM(layers=layers, vocab_size=52000, hidden_size=512)
 ```
 
 ### 利用可能なオプション
@@ -198,10 +209,11 @@ model = TransformerLM(layers=layers)
 
 ```python
 import torch
-from src.models import create_model
+from src.config import SenriModelConfig
 
 # ===== PC A =====
-model = create_model("infini")
+config = SenriModelConfig.with_infini()
+model = config.create_model()
 model.reset_memory()
 
 # テキスト処理でメモリを蓄積
@@ -214,7 +226,8 @@ torch.save(state, "memory.pt")
 
 # ===== PC B =====
 state = torch.load("memory.pt")
-model = create_model("infini")
+config = SenriModelConfig.with_infini()
+model = config.create_model()
 model.set_memory_state(state)
 
 # メモリが引き継がれた状態で推論
@@ -230,68 +243,31 @@ output = model(input_ids)
 
 ---
 
-## 🔨 MemoryBuilder - テキストからメモリ構築
-
-**異なるドメインのテキストを各メモリに事前格納するユーティリティ。**
-
-```python
-from src.utils import MemoryBuilder, get_tokenizer
-from src.models import create_model
-
-# モデル作成
-model = create_model("multi_memory", num_memories=4)
-tokenizer = get_tokenizer()
-
-# メモリビルダー作成
-builder = MemoryBuilder(model, tokenizer)
-
-# 各メモリに異なるドメインのテキストを書き込み
-builder.build_memory(0, "物理学に関するテキスト...")
-builder.build_memory(1, "歴史に関するテキスト...")
-builder.build_memory(2, "技術に関するテキスト...")
-builder.build_memory(3, "地理に関するテキスト...")
-
-# メモリ情報を表示
-builder.print_memory_info()
-
-# メモリ状態を保存
-builder.save("memories/domain_specific.pt")
-
-# 後で読み込み
-builder.load("memories/domain_specific.pt")
-```
-
-### ヘルパー関数
-
-```python
-from src.utils import create_domain_memories
-
-domain_texts = {
-    "science": "量子力学は...",
-    "history": "産業革命は...",
-    "technology": "機械学習は...",
-    "geography": "エベレストは...",
-}
-builder = create_domain_memories(model, tokenizer, domain_texts)
-```
-
----
-
 ## 📁 ファイル構造
 
 ```
-src/models/
-├── __init__.py          # create_model() ファクトリ + exports
-├── layers/              # レイヤーパッケージ
-│   ├── __init__.py      # exports
-│   ├── base.py          # BaseLayer 基底クラス
-│   ├── pythia.py        # PythiaLayer (RoPE + Softmax)
-│   ├── infini.py        # InfiniLayer (Memory + Linear)
-│   └── multi_memory.py  # MultiMemoryLayer
-├── model.py             # TransformerLM（汎用モデル）
-├── base_components.py   # PythiaMLP, init_weights
-├── memory_utils.py      # elu_plus_one, causal_linear_attention
-└── position_encoding.py # RoPE
+src/
+├── config/
+│   ├── __init__.py      # SenriModelConfig, LayerConfig exports
+│   ├── senri.py         # SenriModelConfig（推奨エントリポイント）
+│   ├── layers.py        # SenriLayerConfig, PythiaLayerConfig
+│   ├── experiment.py    # ExperimentConfig（訓練設定）
+│   └── open_calm.py     # トークナイザー定数
+├── models/
+│   ├── __init__.py      # create_model() + exports
+│   ├── layers/          # レイヤーパッケージ
+│   │   ├── base.py      # BaseLayer 基底クラス
+│   │   ├── pythia.py    # PythiaLayer (RoPE + Softmax)
+│   │   ├── infini.py    # InfiniLayer (Memory + Linear)
+│   │   └── multi_memory.py  # MultiMemoryLayer
+│   ├── model.py         # TransformerLM（汎用モデル）
+│   ├── base_components.py   # PythiaMLP, init_weights
+│   ├── memory_utils.py  # Linear attention utilities
+│   └── position_encoding.py # RoPE
+└── utils/
+    ├── tokenizer_utils.py   # get_tokenizer, get_open_calm_tokenizer
+    ├── training.py      # 訓練ユーティリティ
+    └── evaluation.py    # 評価ユーティリティ
 ```
 
 ---
@@ -742,7 +718,8 @@ tokenizer = get_open_calm_tokenizer()
 
 | 日付 | 内容 |
 |------|------|
-| 2025-12-09 | **Senri命名**: プロジェクト名をSenriに決定。SenriConfigを新規作成 |
+| 2025-12-09 | **SenriModelConfig追加**: LayerConfigベースのモデル構築。ファクトリパターン廃止 |
+| 2025-12-09 | **Senri命名**: プロジェクト名をSenriに決定 |
 | 2025-12-09 | **OpenCALM採用**: 日本語LLM対応。OpenCALMトークナイザーを使用 |
 | 2025-12-09 | **HSA方式削除**: ChunkEncoder（双方向エンコーダ）を削除。memory_norm方式に一本化。シンプルさ優先 |
 | 2025-12-09 | **HSA vs memory_norm比較実験**: ChunkEncoder方式 vs Σσ(k)方式を比較。HSA=494.4 PPL、memory_norm=497.7 PPL。HSA微改善だがコスト増 |
