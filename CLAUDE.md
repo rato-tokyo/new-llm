@@ -68,9 +68,29 @@ Detail Memory 検索
 
 | メモリ名 | 現在の実装 | 備考 |
 |----------|-----------|------|
-| Working Memory | SenriLayer (num_memories=1) | トークンごと更新 |
+| Working Memory | SenriLayer の memory[0] | トークンごと更新 |
 | Index Memory | 未実装 | memory_norm方式Landmarkで選択判定 |
-| Detail Memory | SenriLayer (num_memories>1) | memory_norm方式で検索 |
+| Detail Memory | SenriLayer の memory[1+] | memory_norm方式で検索、freeze可能 |
+
+### num_memories >= 2 の原則 - 重要
+
+**⚠️ SenriLayerのnum_memoriesは原則2以上を使用する。**
+
+```
+num_memories=2 の構成:
+  memory[0]: Working Memory（常に更新される）
+  memory[1]: Detail Memory（freezeして知識を固定可能）
+```
+
+**理由**:
+- Working Memoryと固定知識メモリを分離するため
+- memory[0]は常に会話コンテキストで更新される
+- memory[1+]はfreezeして事前知識を保持できる
+- num_memories=1では「更新される記憶」と「固定された知識」の分離ができない
+
+**num_memories=1は非推奨**:
+- 仕様上は設定可能だが、Working/Detailの分離ができない
+- 実験的な用途以外では使用しない
 
 ### memory_norm方式（Landmark計算）
 

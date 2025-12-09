@@ -22,7 +22,6 @@ from .constants import (
 from .models import (
     PYTHIA_MODEL,
     SENRI_MODEL,
-    SENRI_MULTI_MEMORY_MODEL,
     MODEL_PRESETS,
     create_model,
 )
@@ -40,7 +39,6 @@ __all__ = [
     # Model presets
     "PYTHIA_MODEL",
     "SENRI_MODEL",
-    "SENRI_MULTI_MEMORY_MODEL",
     "MODEL_PRESETS",
     "create_model",
     # Experiment config
