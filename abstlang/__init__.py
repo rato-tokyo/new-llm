@@ -1,5 +1,9 @@
-"""AbstLang - Abstract Language for CDR data generation"""
+"""AbstLang - Abstract Language for CDR data generation
 
-from abstlang.parser import AbstLangSpec, parse_abstlang
+仕様書: docs/abstlang.md
 
-__all__ = ["AbstLangSpec", "parse_abstlang"]
+ワークフロー:
+1. specs/*.abstlang に形式論理で関係を定義
+2. AIが定義を読み、generators/*.py を作成
+3. ジェネレーターを実行して data/*/cdr.json を生成
+"""

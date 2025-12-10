@@ -1081,6 +1081,70 @@ Reversal Curseの真の問題は「逆方向を推論できない」ことでは
 
 ---
 
+## 📝 AbstLangワークフロー - 削除禁止
+
+**⚠️ このワークフローは本プロジェクトのCDRデータ生成の基盤です。**
+
+### 概要
+
+AbstLangは、人間の知識や関係性を形式論理で定義する言語。
+仕様書: `docs/abstlang.md`
+
+### ワークフロー（重要）
+
+```
+[人間/AI] → specs/*.abstlang（形式論理で定義）
+    ↓
+[AI] → generators/*.py（Pythonスクリプトを作成）
+    ↓
+[実行] → data/*/cdr.json（訓練データ）
+```
+
+**注意**: パーサーによる自動変換ではなく、AIが定義を理解してスクリプトを作成する運用。
+
+### AIの役割
+
+1. **定義の理解**: `.abstlang`ファイルの形式論理を読む
+2. **スクリプト作成**: 定義に基づいてPython生成スクリプトを作成
+3. **推論規則の実装**: AbstLangの推論規則をコードに反映
+
+### AbstLang記法（例）
+
+```
+% 関係の宣言
+非対称人間関係(親)
+非対称人間関係(子)
+対(親, 子)
+
+% 推論規則
+∀a,b ∈ 人物:
+  親(a, b) = TRUE → 親(b, a) = FALSE
+
+% 相互変換（対(親, 子)より）
+∀a,b ∈ 人物:
+  ∀v ∈ BOOL: 親(a, b) = v ↔ 子(b, a) = v
+```
+
+### ファイル構成
+
+```
+abstlang/
+├── specs/                 # AbstLang定義（形式論理）
+│   └── family.abstlang
+├── generators/            # Pythonスクリプト（AIが作成）
+│   └── family_generator.py
+├── symbols.json           # 抽象記号プール
+└── data/                  # 生成データ（.gitignore）
+```
+
+### 禁止事項
+
+- ⛔ INI形式や設定ファイル形式での定義（AbstLangは形式論理）
+- ⛔ パーサーによる自動変換の試み（AIが理解してスクリプト作成）
+- ⛔ `docs/abstlang.md`の仕様を無視した独自記法
+
+---
+
 ## 🇯🇵 Senri - 日本語LLM
 
 **Senri（千里）: OpenCALMトークナイザーを使用した日本語LLM。**
@@ -1127,6 +1191,7 @@ tokenizer = get_open_calm_tokenizer()
 
 | 日付 | 内容 |
 |------|------|
+| 2025-12-10 | **AbstLangワークフロー追加**: AIが定義を理解してスクリプト作成する運用を明文化。パーサー自動変換は禁止 |
 | 2025-12-09 | **Continuous Learning Policy追加**: 実験ごとに重みを引き継ぎ、メモリのみリセット。モデルの継続的成長を優先 |
 | 2025-12-09 | **デフォルト値禁止ポリシー追加**: 全パラメータを明示的に指定、constants.pyで一元管理 |
 | 2025-12-09 | **日本語Wikipedia採用**: Pileから日本語Wikipediaに変更、OpenCALMトークナイザーに最適化 |
@@ -1161,4 +1226,4 @@ tokenizer = get_open_calm_tokenizer()
 
 ---
 
-Last Updated: 2025-12-09
+Last Updated: 2025-12-10

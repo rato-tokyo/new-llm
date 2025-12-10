@@ -2,14 +2,21 @@
 
 抽象記号を用いたCDR（Context-Dependent Reasoning）訓練データ生成システム。
 
+**仕様書**: [docs/abstlang.md](../docs/abstlang.md)
+
 ---
 
 ## 概要
 
-AbstLangは、関係性を定義する簡潔なテキスト形式（`.abstlang`）から、
-モデル訓練用のCDRデータを生成するためのシステム。
+AbstLangは、人間の知識や関係性を形式的に定義し、LLMが推論可能な形式で表現するための言語である。
 
 **目的**: Reversal Curse克服のための訓練データ生成
+
+**特徴**:
+- 3値論理（TRUE, FALSE, NULL）による知識状態の表現
+- 関係の対称性/非対称性の形式的定義
+- 自然言語への変換規則
+- 推論規則の明示的記述
 
 ---
 
@@ -17,80 +24,77 @@ AbstLangは、関係性を定義する簡潔なテキスト形式（`.abstlang`�
 
 ```
 abstlang/
-├── README.md              # この仕様書
+├── README.md              # この説明書
 ├── symbols.json           # 抽象記号のプール
 ├── specs/                 # AbstLang定義ファイル
 │   └── family.abstlang    # 家族関係（親子）
 ├── generators/            # 生成スクリプト
 │   └── family_generator.py
-└── data/                  # 生成されたデータ
+└── data/                  # 生成されたデータ（.gitignore）
     └── family/
         └── cdr.json
 ```
 
 ---
 
-## AbstLang仕様（.abstlang形式）
+## AbstLang記法（概要）
 
-### 基本構造
+詳細は [docs/abstlang.md](../docs/abstlang.md) を参照。
+
+### 基本構文
 
 ```
-# コメント（#で始まる行は無視）
+% コメント
 
-[domain]
-name = family
+% 型定義
+BOOL := {TRUE, FALSE, NULL}
+人物 := {太郎, 花子, ...}
 
-[relation]
-forward = 親
-backward = 子供
+% 関係の宣言
+非対称人間関係(親)
+非対称人間関係(子)
+対(親, 子)
 
-[templates]
-knowledge = {A}は{B}の{forward}です。{B}は{A}の{backward}です。
-forward_question = {X}の{forward}は誰ですか？
-backward_question = {X}の{backward}は誰ですか？
-answer = {Y}です。
-no_info = {X}の{relation}に関する情報がありません。
-unknown = {X}に関する情報がありません。
+% 推論規則
+∀a,b ∈ 人物:
+  親(a, b) = TRUE → 親(b, a) = FALSE
+
+% 相互変換
+∀a,b ∈ 人物:
+  ∀v ∈ BOOL: 親(a, b) = v ↔ 子(b, a) = v
 ```
 
-### セクション説明
+### 関係の種類
 
-| セクション | 説明 |
-|------------|------|
-| `[domain]` | ドメイン名（出力フォルダ名） |
-| `[relation]` | 順方向・逆方向の関係名 |
-| `[templates]` | 知識・質問・回答のテンプレート |
-
-### プレースホルダ
-
-| 記号 | 意味 |
-|------|------|
-| `{A}` | 順方向の主体（親） |
-| `{B}` | 逆方向の主体（子供） |
-| `{X}` | 質問対象 |
-| `{Y}` | 回答対象 |
-| `{forward}` | 順方向の関係名 |
-| `{backward}` | 逆方向の関係名 |
-| `{relation}` | 該当する関係名 |
+| 種類 | 説明 | 例 |
+|------|------|-----|
+| 非対称人間関係 | R(a,b)=TRUE → R(b,a)=FALSE | 親, 子, 上司, 部下 |
+| 対称人間関係 | R(a,b)=v ↔ R(b,a)=v | 親子関係, 友人関係 |
+| 対(R1, R2) | R1(a,b)=v ↔ R2(b,a)=v | 対(親, 子) |
 
 ---
 
-## 生成されるQ&Aパターン（1ペアあたり6種類）
+## ワークフロー
 
-| # | 種類 | 質問例 | 回答例 |
-|---|------|--------|--------|
-| 1 | 順方向の正解 | Bの親は？ | Aです。 |
-| 2 | 逆方向の正解 | Aの子供は？ | Bです。 |
-| 3 | 順方向の情報なし | Aの親は？ | Aの親に関する情報がありません。 |
-| 4 | 逆方向の情報なし | Bの子供は？ | Bの子供に関する情報がありません。 |
-| 5 | 未知・順方向 | Pの親は？ | Pに関する情報がありません。 |
-| 6 | 未知・逆方向 | Pの子供は？ | Pに関する情報がありません。 |
+1. **AbstLang定義を作成**: `specs/*.abstlang` に形式論理で関係を定義
+2. **AIがジェネレーターを作成**: AbstLang定義を読み、対応するPythonスクリプトを生成
+3. **データ生成**: ジェネレーターを実行してCDRデータを生成
+
+```
+[人間/AI] → specs/family.abstlang（形式論理）
+    ↓
+[AI] → generators/family_generator.py（Pythonスクリプト）
+    ↓
+[実行] → data/family/cdr.json（訓練データ）
+```
+
+**注意**: パーサーによる自動変換ではなく、AIが定義を理解してスクリプトを作成する運用。
 
 ---
 
 ## 使用方法
 
-### 1. AbstLang定義を確認・編集
+### 1. AbstLang定義を確認
 
 ```bash
 cat abstlang/specs/family.abstlang
@@ -106,6 +110,22 @@ python3 abstlang/generators/family_generator.py --num-pairs 10
 
 ```bash
 cat abstlang/data/family/cdr.json
+```
+
+---
+
+## 出力形式（cdr.json）
+
+```json
+{
+  "description": "家族関係データ（CDR訓練用）",
+  "knowledge": "JJはZBの親である。ZBはJJの子である。...",
+  "samples": [
+    {"question": "ZBの親は誰ですか？", "answer": "JJです。"},
+    {"question": "JJの子は誰ですか？", "answer": "ZBです。"},
+    ...
+  ]
+}
 ```
 
 ---
@@ -126,32 +146,7 @@ cat abstlang/data/family/cdr.json
 
 ---
 
-## 出力形式（cdr.json）
-
-```json
-{
-  "description": "家族関係データ（CDR訓練用）",
-  "knowledge": "JJはZBの親です。ZBはJJの子供です。...",
-  "samples": [
-    {"question": "ZBの親は誰ですか？", "answer": "JJです。"},
-    {"question": "JJの子供は誰ですか？", "answer": "ZBです。"},
-    ...
-  ]
-}
-```
-
----
-
-## 訓練スクリプトとの連携
-
-`scripts/quick_model.py` は `abstlang/data/family/cdr.json` を参照。
-
-```python
-cdr_path = Path("abstlang/data/family/cdr.json")
-```
-
----
-
 ## バージョン
 
 - v1.0.0 (2025-12-10): 初版、senri-fine-tunerから移行
+- v1.1.0 (2025-12-10): docs/abstlang.md仕様に準拠、形式論理記法に変更
