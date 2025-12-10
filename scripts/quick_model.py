@@ -11,25 +11,24 @@ Continuous Learning Policy (CLP) 対応:
 - 訓練後は重みを保存
 
 CDR (Context-Dependent Reasoning) 訓練対応:
-- --cdr-data でJSONファイルを指定
+- senri-fine-tuner/data/family_cdr.json が存在すれば自動的にCDR訓練を実行
+- ファイルが存在しない場合はエラーで終了
 - knowledge + question部分はloss計算から除外し、answer部分のみ学習
 
 Usage:
     # 評価のみ（訓練なし）
     python3 scripts/quick_model.py --model pythia
 
-    # 簡単な訓練 + 評価（CLPに従い継続学習）
+    # 簡単な訓練 + 評価（CLPに従い継続学習、CDRデータがあれば自動実行）
     python3 scripts/quick_model.py --model pythia --train --epochs 3
 
     # 訓練トークン数を指定
     python3 scripts/quick_model.py --model senri --train --train-tokens 100000 --epochs 5
-
-    # CDR訓練（knowledge+question部分のlossをマスク、answerのみ学習）
-    python3 scripts/quick_model.py --model senri --train --cdr-data senri-fine-tuner/data/family_cdr.json
 """
 
 import argparse
 import json
+import os
 import sys
 import time
 
@@ -64,6 +63,9 @@ MODEL_CHECKPOINTS = {
     "senri": SENRI_CHECKPOINT,
     "pythia": PYTHIA_CHECKPOINT,
 }
+
+# CDRデータファイルパス（固定）
+CDR_DATA_PATH = "senri-fine-tuner/data/family/cdr.json"
 
 
 def get_model(model_type: str, use_clp: bool = True) -> tuple[TransformerLM, str, str | None]:
@@ -192,12 +194,15 @@ def train_model_cdr(
 
     Args:
         cdr_data_path: CDRデータのJSONファイルパス
-            形式: {"samples": [{"knowledge": "...", "question": "...", "answer": "..."}, ...]}
+            形式: {
+                "knowledge": "全体で1つの知識文",
+                "samples": [{"question": "...", "answer": "..."}, ...]
+            }
 
     lossマスク:
-        knowledge: "Tom is Alice's parent."  → loss除外
-        question:  "Who is Alice's parent?"  → loss除外
-        answer:    "Tom"                     → lossを計算
+        knowledge: "Tom is Alice's parent. ..."  → loss除外
+        question:  "Who is Alice's parent?"      → loss除外
+        answer:    "Tom"                         → lossを計算
     """
     tokenizer = get_open_calm_tokenizer()
 
@@ -205,21 +210,23 @@ def train_model_cdr(
     with open(cdr_data_path, "r", encoding="utf-8") as f:
         data = json.load(f)
 
-    samples = data.get("samples", data)  # メタデータ付きの場合と直接リストの場合に対応
+    knowledge = data["knowledge"]
+    samples = data["samples"]
     print_flush(f"    Loaded {len(samples)} CDR samples from {cdr_data_path}")
 
     model.train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
+    # knowledgeを一度だけトークン化
+    knowledge_ids = tokenizer.encode(knowledge + " ", add_special_tokens=False)
+
     # サンプルをトークン化し、バッチを準備
     batches = []
     for sample in samples:
-        knowledge = sample["knowledge"]
         question = sample["question"]
         answer = sample["answer"]
 
         # トークン化（スペースで連結）
-        knowledge_ids = tokenizer.encode(knowledge + " ", add_special_tokens=False)
         question_ids = tokenizer.encode(question + " ", add_special_tokens=False)
         answer_ids = tokenizer.encode(answer, add_special_tokens=False)
 
@@ -421,11 +428,6 @@ def main():
         "--batch-size", type=int, default=4,
         help="Batch size for training (default: 4)"
     )
-    # CDR訓練オプション
-    parser.add_argument(
-        "--cdr-data", type=str, default=None,
-        help="Path to CDR training data JSON file (context-dependent reasoning)"
-    )
     # スキップオプション
     parser.add_argument(
         "--skip-generation", action="store_true",
@@ -508,16 +510,21 @@ def main():
     if args.train:
         step_num = 4 if use_clp else 3
 
-        # CDRデータがある場合はCDR訓練も実行
-        if args.cdr_data:
-            print_flush(f"\n[{step_num}] CDR Training ({args.epochs} epochs)")
-            cdr_history = train_model_cdr(
-                model, args.cdr_data, device,
-                epochs=args.epochs,
-                lr=args.lr,
-                batch_size=args.batch_size,
-            )
-            step_num += 1
+        # CDRデータの存在確認（必須）
+        if not os.path.exists(CDR_DATA_PATH):
+            print_flush(f"\n[ERROR] CDR data file not found: {CDR_DATA_PATH}")
+            print_flush("    Please run: cd senri-fine-tuner/data/family && python3 generate.py")
+            sys.exit(1)
+
+        # CDR訓練を自動実行
+        print_flush(f"\n[{step_num}] CDR Training ({args.epochs} epochs)")
+        cdr_history = train_model_cdr(
+            model, CDR_DATA_PATH, device,
+            epochs=args.epochs,
+            lr=args.lr,
+            batch_size=args.batch_size,
+        )
+        step_num += 1
 
         # 通常の言語モデリング訓練
         print_flush(f"\n[{step_num}] Training ({args.train_tokens:,} tokens, {args.epochs} epochs)")
@@ -571,7 +578,7 @@ def main():
         if checkpoint_path:
             print_flush(f"Checkpoint: {checkpoint_path}")
     if args.train and cdr_history:
-        print_flush(f"CDR Training: {args.epochs} epochs, final loss={cdr_history['train_loss'][-1]:.4f}")
+        print_flush(f"CDR Training: {args.epochs} epochs, final loss={cdr_history['train_loss'][-1]:.4f} ({CDR_DATA_PATH})")
     if args.train and train_history:
         print_flush(f"LM Training: {args.epochs} epochs, final train PPL={train_history['train_ppl'][-1]:.1f}")
     if val_ppl is not None:

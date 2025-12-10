@@ -396,31 +396,132 @@ src/
 3. `src/config/constants.py` - 定数（vocab_size等）
 
 ---
----
 
 ## 🧪 実験スクリプト
 
 ```bash
-# CDRデータ生成（Reversal Curse実験用）
-cd senri-fine-tuner && python3 scripts/generate_family_data.py
+# CDRデータ生成（Reversal Curse実験用）- 初回のみ必要
+cd senri-fine-tuner/data && python3 generate.py family
 
-# CDR訓練（knowledge+question部分のlossをマスク、answerのみ学習）
-python3 scripts/quick_model.py --model senri --train --cdr-data senri-fine-tuner/data/family_cdr.json
+# 訓練（CDRデータがあれば自動でCDR訓練も実行）
+python3 scripts/quick_model.py --model senri --train
 ```
+
+### CDRデータ構造 - 削除禁止
+
+**⚠️ この構造は固定です。**
+
+```
+senri-fine-tuner/data/
+├── symbols.py               # 抽象キーワード生成（めったに実行しない）
+├── symbols.json             # 抽象キーワード（CA, UN, ◯, △, ...）
+├── generate.py              # CDRデータ生成
+├── family/
+│   ├── config.json          # 関係性の定義
+│   └── cdr.json             # 生成データ
+└── {domain}/                # 他のドメイン（将来）
+    ├── config.json
+    └── cdr.json
+```
+
+**symbols.json**（めったに更新しない）:
+```bash
+python3 symbols.py           # seed=42で200個生成
+python3 symbols.py --seed 123 --num 500  # カスタム
+```
+
+**config.json形式**:
+```json
+{
+  "forward_relation": "親",
+  "backward_relation": "子供",
+  "forward_question": "{TARGET}の{FORWARD_RELATION}は誰ですか？",
+  "backward_question": "{TARGET}の{BACKWARD_RELATION}は誰ですか？",
+  "forward_no_info_answer": "{TARGET}の{FORWARD_RELATION}に関する情報がありません。",
+  "backward_no_info_answer": "{TARGET}の{BACKWARD_RELATION}に関する情報がありません。",
+  "unknown_answer": "{TARGET}に関する情報がありません。",
+  "description": "説明文"
+}
+```
+
+**ルール**:
+- `symbols.json`: 抽象キーワードを事前生成（seed固定で再現可能）
+- `generate.py`: symbols.json + config.json → cdr.json
+- 各ドメインは `config.json` で関係性を定義
+- `quick_model.py` は `data/family/cdr.json` を参照
 
 ### CDRデータ形式
 
 ```json
 {
-  "knowledge": "Tom is Alice's parent.",
-  "question": "Who is Alice's parent?",
-  "answer": "Tom"
+  "knowledge": "FORWARDはBACKWARDの親です。BACKWARDはFORWARDの子供です。...",
+  "samples": [
+    {"question": "BACKWARDの親は誰ですか？", "answer": "FORWARDです。"},
+    {"question": "FORWARDの子供は誰ですか？", "answer": "BACKWARDです。"},
+    ...
+  ]
 }
 ```
+
+**1ペアから6種類のQ&Aを生成**:
+
+| # | 種類 | 質問例 | 回答例 |
+|---|------|--------|--------|
+| 1 | 順方向の正解 | BACKWARDの親は？ | FORWARDです。 |
+| 2 | 逆方向の正解 | FORWARDの子供は？ | BACKWARDです。 |
+| 3 | 順方向の情報なし | FORWARDの親は？ | FORWARDの親に関する情報がありません。 |
+| 4 | 逆方向の情報なし | BACKWARDの子供は？ | BACKWARDの子供に関する情報がありません。 |
+| 5 | 未知の人物・順方向 | UNKNOWNの親は？ | UNKNOWNに関する情報がありません。 |
+| 6 | 未知の人物・逆方向 | UNKNOWNの子供は？ | UNKNOWNに関する情報がありません。 |
+
+**記号の割り当て**（1ペアあたり3記号必要）:
+- FORWARD: knowledgeで親として登場
+- BACKWARD: knowledgeで子供として登場
+- UNKNOWN: knowledgeに登場しない（未知の人物テスト用）
+
+**特徴**:
+- `knowledge`: ファイル全体で1つ（全ペアの関係を連結）
+- `samples`: 6種類のQ&A（正解、情報なし、未知の人物）
+- **抽象記号**: 具体名ではなく◯, ✗, A-Z, AA-ZZ等を使用（純粋なパターン学習）
+- **「情報なし」の学習**: モデルが知らない情報に対して「知らない」と答える能力を訓練
 
 **lossマスク**:
 - `knowledge` + `question` → loss除外（-100）
 - `answer` → lossを計算
+
+### データ分割の責任分離 - 削除禁止
+
+**⚠️ このルールは削除禁止です。**
+
+| 責任 | 担当 |
+|------|------|
+| データ生成 | `senri-fine-tuner/data/*/generate.py` |
+| train/val分割 | `scripts/quick_model.py`（利用側） |
+
+**ルール**:
+- データ生成スクリプトはtrain/val分割を**行わない**
+- 分割ロジックは利用側（訓練スクリプト）が決定する
+- CDRデータは全サンプルを一括で格納
+
+**理由**:
+- 責任の明確化（生成と利用の分離）
+- 分割比率を実験ごとに柔軟に変更可能
+- データファイルの再生成が不要
+
+### 日本語データ優先ルール - 削除禁止
+
+**⚠️ このルールは削除禁止です。**
+
+本プロジェクトでは**日本語データを優先**します。
+
+- **訓練データ**: 日本語Wikipedia
+- **CDRデータ**: 日本語で生成
+- **トークナイザー**: OpenCALM（日本語最適化）
+
+**理由**:
+- 日本語LLM（Senri）の開発が目的
+- トークナイザーが日本語に最適化されている
+- 一貫性のある評価のため
 
 ---
 
