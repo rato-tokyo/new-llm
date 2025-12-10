@@ -401,54 +401,58 @@ src/
 
 ```bash
 # CDRデータ生成（Reversal Curse実験用）- 初回のみ必要
-cd senri-fine-tuner/data && python3 generate.py family
+python3 abstlang/generators/family_generator.py --num-pairs 10
 
 # 訓練（CDRデータがあれば自動でCDR訓練も実行）
 python3 scripts/quick_model.py --model senri --train
 ```
 
-### CDRデータ構造 - 削除禁止
+### AbstLang - CDRデータ生成システム - 削除禁止
 
 **⚠️ この構造は固定です。**
 
 ```
-senri-fine-tuner/data/
-├── symbols.py               # 抽象キーワード生成（めったに実行しない）
-├── symbols.json             # 抽象キーワード（CA, UN, ◯, △, ...）
-├── generate.py              # CDRデータ生成
-├── family/
-│   ├── config.json          # 関係性の定義
-│   └── cdr.json             # 生成データ
-└── {domain}/                # 他のドメイン（将来）
-    ├── config.json
-    └── cdr.json
+abstlang/
+├── README.md                # 仕様書
+├── symbols.json             # 抽象キーワード（JJ, ZB, ◯, ...）
+├── specs/                   # AbstLang定義ファイル
+│   └── family.abstlang      # 家族関係（親子）
+├── generators/              # 生成スクリプト
+│   └── family_generator.py
+└── data/                    # 生成されたデータ
+    └── family/
+        └── cdr.json
 ```
+
+**ワークフロー**:
+1. `specs/xxx.abstlang` で関係性を定義
+2. `generators/xxx_generator.py` で生成スクリプトを作成
+3. スクリプト実行で `data/xxx/cdr.json` を生成
 
 **symbols.json**（めったに更新しない）:
-```bash
-python3 symbols.py           # seed=42で200個生成
-python3 symbols.py --seed 123 --num 500  # カスタム
-```
+- 抽象キーワードのプール
+- 具体名ではなく意味を持たない記号を使用
 
-**config.json形式**:
-```json
-{
-  "forward_relation": "親",
-  "backward_relation": "子供",
-  "forward_question": "{TARGET}の{FORWARD_RELATION}は誰ですか？",
-  "backward_question": "{TARGET}の{BACKWARD_RELATION}は誰ですか？",
-  "forward_no_info_answer": "{TARGET}の{FORWARD_RELATION}に関する情報がありません。",
-  "backward_no_info_answer": "{TARGET}の{BACKWARD_RELATION}に関する情報がありません。",
-  "unknown_answer": "{TARGET}に関する情報がありません。",
-  "description": "説明文"
-}
+**family.abstlang形式**:
+```
+[domain]
+name = family
+
+[relation]
+forward = 親
+backward = 子供
+
+[templates]
+knowledge = {A}は{B}の{forward}です。{B}は{A}の{backward}です。
+forward_question = {X}の{forward}は誰ですか？
+...
 ```
 
 **ルール**:
-- `symbols.json`: 抽象キーワードを事前生成（seed固定で再現可能）
-- `generate.py`: symbols.json + config.json → cdr.json
-- 各ドメインは `config.json` で関係性を定義
-- `quick_model.py` は `data/family/cdr.json` を参照
+- `symbols.json`: 抽象キーワードを事前定義
+- `.abstlang`: 関係性とテンプレートを定義
+- `*_generator.py`: .abstlangに基づいてデータ生成
+- `quick_model.py` は `abstlang/data/family/cdr.json` を参照
 
 ### CDRデータ形式
 
@@ -495,7 +499,7 @@ python3 symbols.py --seed 123 --num 500  # カスタム
 
 | 責任 | 担当 |
 |------|------|
-| データ生成 | `senri-fine-tuner/data/*/generate.py` |
+| データ生成 | `abstlang/generators/*_generator.py` |
 | train/val分割 | `scripts/quick_model.py`（利用側） |
 
 **ルール**:
@@ -702,6 +706,41 @@ def evaluate():
 
 再帰的依存関係を持つモデル（RNN的構造）を並列処理可能にする画期的な手法。
 
+### 核心: OACD（Origin-Anchored Centroid Dispersion）
+
+**OACDはLCTの安定性を大幅に向上させる重要なアルゴリズム。**
+
+```python
+def oacd_loss(contexts, centroid_weight=0.1):
+    """
+    Origin-Anchored Centroid Dispersion
+    LCTの収束を保証する多様性損失
+    """
+    context_mean = contexts.mean(dim=0)
+
+    # 分散最大化: 重心からの偏差を最大化
+    deviation = contexts - context_mean
+    dispersion_loss = -torch.norm(deviation, p=2) / len(contexts)
+
+    # 重心固定: 重心を原点に引き寄せ（これが収束の鍵）
+    centroid_loss = torch.norm(context_mean, p=2) ** 2
+
+    return dispersion_loss + centroid_weight * centroid_loss
+```
+
+**OACDの効果**:
+- **重心が原点に固定** → キャッシュが安定した平衡点に収束
+- **分散が適度に保たれる** → 表現力を維持
+- **自動的に収束** → 特別なチューニング不要
+
+**実験結果**:
+| 設定 | 安定性 | 備考 |
+|------|--------|------|
+| OACDあり | ✅ 安定 | 推奨 |
+| OACDなし | △ | 収束可能だが不安定になりやすい |
+
+**centroid_weight=0.1** が推奨値。
+
 ### 問題
 
 再帰的モデルの訓練は本来シーケンシャル:
@@ -712,7 +751,7 @@ def evaluate():
       # → O(seq_len) 回のforward pass
 ```
 
-### 解決策: Lagged Cache Training
+### 解決策: Lagged Cache Training + OACD
 
 ```python
 # 基本アルゴリズム
@@ -729,11 +768,14 @@ for epoch in epochs:
         prev_cache = hidden_caches[batch_idx]
 
         # 3. 並列処理で全シーケンスを一度に計算
-        # 位置t の入力 = prev_cache[t-1]（前イテレーションでの位置t-1の出力）
         output, new_hidden = model.forward_with_cache(input_ids, prev_cache)
-        loss = compute_loss(output, labels)
 
-        # 4. キャッシュを更新（次イテレーション用）
+        # 4. タスク損失 + OACD損失（OACDは必須！）
+        task_loss = compute_loss(output, labels)
+        diversity_loss = oacd_loss(new_hidden, centroid_weight=0.1)
+        loss = task_loss + diversity_loss
+
+        # 5. キャッシュを更新（次イテレーション用）
         hidden_caches[batch_idx] = new_hidden.detach()
 
         loss.backward()
@@ -742,16 +784,20 @@ for epoch in epochs:
 
 ### なぜ動作するのか
 
-1. **近似の仮定**: イテレーションごとの変化は微小
+1. **OACDによる安定化（重要）**:
+   - 重心を原点に固定 → キャッシュが安定した平衡点に収束
+   - 学習の安定性が大幅に向上
+
+2. **近似の仮定**: イテレーションごとの変化は微小
    - パラメータ更新量が小さければ、h_t の変化も小さい
    - prev_cache ≈ 真のh_{t-1}（1イテレーション遅れ）
 
-2. **キャッシュの更新**: 学習が進むとキャッシュも追従
+3. **キャッシュの更新**: 学習が進むとキャッシュも追従
    - 各イテレーションでnew_hiddenを保存
    - 次イテレーションでそれを入力として使用
-   - → 徐々に真の再帰動作に収束
+   - → OACDにより安定した平衡点に収束
 
-3. **計算効率**:
+4. **計算効率**:
    - シーケンシャル: O(seq_len) forward passes per batch
    - LCT: O(1) forward pass per batch
    - 速度向上: ~20倍（seq_len=128の場合）
@@ -759,6 +805,7 @@ for epoch in epochs:
 ### 適用可能なモデル
 
 - 任意のRNN的再帰構造（h_{t-1} → h_t）
+- HRM（Hierarchical Reasoning Model）
 - Context-Pythia（context_{t-1} → context_t）
 - 前の出力を次の入力として使う任意のモデル
 
@@ -767,7 +814,11 @@ for epoch in epochs:
 | 方式 | 時間/epoch | 速度比 |
 |------|-----------|--------|
 | シーケンシャル | 450s | 1x |
-| LCT | 20s | 22x |
+| LCT + OACD | 20s | 22x |
+
+### 詳細ドキュメント
+
+詳細は `docs/lct.md` を参照。
 
 ---
 

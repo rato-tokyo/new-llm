@@ -1,0 +1,26 @@
+# AbstLang: 家族関係（親子のみ）
+# Reversal Curse実験用
+
+[domain]
+name = family
+
+[relation]
+forward = 親
+backward = 子供
+
+[templates]
+# 知識文: AがBの親、BがAの子供
+knowledge = {A}は{B}の{forward}です。{B}は{A}の{backward}です。
+
+# 質問テンプレート
+forward_question = {X}の{forward}は誰ですか？
+backward_question = {X}の{backward}は誰ですか？
+
+# 回答テンプレート
+answer = {Y}です。
+no_info = {X}の{relation}に関する情報がありません。
+unknown = {X}に関する情報がありません。
+
+[description]
+家族関係データ（CDR訓練用、Reversal Curse実験）
+親子関係のみ。祖父母等の拡張関係は含まない。

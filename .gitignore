@@ -11,10 +11,8 @@ test_*/
 # Cache files (HuggingFace datasets, tokenizers, contexts)
 cache/
 
-# senri-fine-tuner
-senri-fine-tuner/checkpoints/
-senri-fine-tuner/data/*
-!senri-fine-tuner/data/example_*.json
+# abstlang generated data
+abstlang/data/
 
 # Python
 __pycache__/

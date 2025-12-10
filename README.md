@@ -91,16 +91,16 @@ python3 scripts/quick_model.py --model pythia --train --epochs 3
 python3 scripts/quick_model.py --model senri --train --train-tokens 500000 --epochs 5
 ```
 
-### Fine-tuning with Custom Knowledge
+### CDR Training Data Generation
 
-カスタム知識データでのファインチューニングは `senri-fine-tuner/` を参照してください。
+CDR（Context-Dependent Reasoning）訓練データの生成は `abstlang/` を参照してください。
 
 ```bash
-cd senri-fine-tuner
-python3 finetune.py --data data/example_knowledge.json --epochs 10
+# 家族関係（親子）データを生成
+python3 abstlang/generators/family_generator.py --num-pairs 10
 ```
 
-詳細: [senri-fine-tuner/README.md](senri-fine-tuner/README.md)
+詳細: [abstlang/README.md](abstlang/README.md)
 
 ### Memory Transfer
 
@@ -271,13 +271,15 @@ senri/
 │       └── evaluation.py         # Evaluation utilities
 ├── scripts/
 │   └── quick_model.py            # Quick training & evaluation
-├── senri-fine-tuner/             # Fine-tuning toolkit (separate)
-│   ├── finetune.py               # Fine-tuning script
-│   ├── family_relations.py       # Family relation data generator
-│   ├── scripts/
-│   │   └── generate_family_data.py  # CDR data generation script
-│   ├── data/                     # Training data
-│   └── README.md
+├── abstlang/                     # CDR training data generation
+│   ├── README.md                 # AbstLang specification
+│   ├── symbols.json              # Abstract symbols pool
+│   ├── specs/                    # AbstLang definition files
+│   │   └── family.abstlang       # Family relations (parent-child)
+│   ├── generators/               # Generation scripts
+│   │   └── family_generator.py
+│   └── data/                     # Generated data
+│       └── family/cdr.json
 ├── tests/
 ├── docs/
 │   └── experiments/              # Experiment results

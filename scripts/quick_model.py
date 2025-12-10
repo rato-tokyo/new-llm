@@ -11,7 +11,7 @@ Continuous Learning Policy (CLP) 対応:
 - 訓練後は重みを保存
 
 CDR (Context-Dependent Reasoning) 訓練対応:
-- senri-fine-tuner/data/family_cdr.json が存在すれば自動的にCDR訓練を実行
+- abstlang/data/family/cdr.json が存在すれば自動的にCDR訓練を実行
 - ファイルが存在しない場合はエラーで終了
 - knowledge + question部分はloss計算から除外し、answer部分のみ学習
 
@@ -65,7 +65,7 @@ MODEL_CHECKPOINTS = {
 }
 
 # CDRデータファイルパス（固定）
-CDR_DATA_PATH = "senri-fine-tuner/data/family/cdr.json"
+CDR_DATA_PATH = "abstlang/data/family/cdr.json"
 
 
 def get_model(model_type: str, use_clp: bool = True) -> tuple[TransformerLM, str, str | None]:
@@ -513,7 +513,7 @@ def main():
         # CDRデータの存在確認（必須）
         if not os.path.exists(CDR_DATA_PATH):
             print_flush(f"\n[ERROR] CDR data file not found: {CDR_DATA_PATH}")
-            print_flush("    Please run: cd senri-fine-tuner/data/family && python3 generate.py")
+            print_flush("    Please run: python3 abstlang/generators/family_generator.py --num-pairs 10")
             sys.exit(1)
 
         # CDR訓練を自動実行
